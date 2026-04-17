@@ -733,9 +733,9 @@ const BackBtn = ({ onBack }) => (
 // ─── SCREENS ──────────────────────────────────
 
 function WelcomeScreen({ state, onStart }) {
-  const [name, setName] = useState(state.name);
-  const [city, setCity] = useState(state.city);
-  const [bill, setBill] = useState(state.initialBill);
+  const [name,    setName]    = useState(state.name);
+  const [bill,    setBill]    = useState(state.initialBill);
+  const [address, setAddress] = useState(state.address);
   return (
     <div className="screen fade-in">
       <div className="welcome-header">
@@ -744,17 +744,13 @@ function WelcomeScreen({ state, onStart }) {
           Combien pouvez-vous<br/>économiser avec<br/>
           <span className="accent">Starvolt</span> ?
         </h1>
-        <p className="welcome-sub">Répondez à quelques questions et regardez votre facture fondre.</p>
+        <p className="welcome-sub">Renseignez vos informations pour calculer vos économies.</p>
       </div>
 
       <div className="form-card">
         <div className="inp-group">
           <label className="inp-label">Votre nom</label>
           <input className="inp" value={name} onChange={e=>setName(e.target.value)} placeholder="Marie Dupont"/>
-        </div>
-        <div className="inp-group">
-          <label className="inp-label">Votre ville</label>
-          <input className="inp" value={city} onChange={e=>setCity(e.target.value)} placeholder="Lyon"/>
         </div>
         <div className="inp-group">
           <label className="inp-label">Facture électricité (€/an)</label>
@@ -764,65 +760,43 @@ function WelcomeScreen({ state, onStart }) {
             <span className="bill-sfx">€/an</span>
           </div>
         </div>
+        <div className="inp-group">
+          <label className="inp-label">Adresse</label>
+          <input className="inp" value={address}
+            onChange={e=>setAddress(e.target.value)}
+            placeholder="74 rue Gabriel Péri, Montrouge"/>
+        </div>
       </div>
 
       <button className="btn btn-primary"
-        onClick={()=>onStart({ name:name||'Marie Dupont', city:city||'Lyon', bill:bill||2000 })}>
-        Calculer mes économies →
+        onClick={()=>onStart({ name:name||'Marie Dupont', bill:bill||2000, address:address||'74 rue Gabriel Péri, Montrouge' })}>
+        📍 Vérifier si cette adresse est dans une boucle d'autoconsommation collective
       </button>
     </div>
   );
 }
 
 function AddressScreen({ state, onHasACC, onNoACC, onBack }) {
-  const [phase,   setPhase]   = useState('input');   // 'input' | 'checking' | 'result'
-  const [address, setAddress] = useState('74 rue Gabriel Péri, Montrouge');
-
-  const handleCheck = () => {
-    setPhase('checking');
-    setTimeout(() => setPhase('result'), 2000);
-  };
+  const [ready, setReady] = useState(false);
+  useEffect(()=>{ const t=setTimeout(()=>setReady(true), 2000); return()=>clearTimeout(t); },[]);
 
   return (
     <div className="screen fade-in">
       <BackBtn onBack={onBack}/>
       <BillMeter bill={state.bill} initialBill={state.initialBill}/>
 
-      {phase === 'input' && (
-        <div className="card fade-in">
-          <h2 className="screen-title">Votre adresse</h2>
-          <p className="screen-sub">
-            Renseignez votre adresse pour savoir si votre logement se trouve dans une boucle d'autoconsommation collective (ACC).
-          </p>
-          <div className="inp-group" style={{marginBottom:16}}>
-            <label className="inp-label">Adresse</label>
-            <input
-              className="inp"
-              value={address}
-              onChange={e => setAddress(e.target.value)}
-              placeholder="74 rue Gabriel Péri, Montrouge"
-            />
-          </div>
-          <button className="btn btn-primary" onClick={handleCheck}>
-            📍 Vérifier si cette adresse est dans une boucle ACC
-          </button>
-        </div>
-      )}
-
-      {phase === 'checking' && (
+      {!ready ? (
         <div className="loading-card fade-in">
           <div className="spinner"/>
           <p>Analyse en cours…</p>
-          <p className="sub">📍 {address}</p>
+          <p className="sub">📍 {state.address}</p>
         </div>
-      )}
-
-      {phase === 'result' && (
+      ) : (
         <div className="card fade-in">
           <div className="addr-found">
             <div className="addr-icon">🏠</div>
             <div className="addr-text">
-              <strong>{address}</strong>
+              <strong>{state.address}</strong>
               <span>{state.name}</span>
             </div>
           </div>
@@ -863,7 +837,7 @@ function ACCMapScreen({ state, onContinue, onBack }) {
   );
 }
 
-function ACCTariffScreen({ state, onYes, onNo, onBack }) {
+function ACCTariffScreen({ state, saving, onYes, onNo, onBack }) {
   return (
     <div className="screen fade-in">
       <BackBtn onBack={onBack}/>
@@ -879,12 +853,12 @@ function ACCTariffScreen({ state, onYes, onNo, onBack }) {
           <div className="tariff-arrow">↓</div>
           <div className="tariff-row">
             <span className="tariff-lbl">Tarif ACC disponible</span>
-            <span className="tariff-val grn">~0,16 €/kWh</span>
+            <span className="tariff-val grn">~0,21 €/kWh</span>
           </div>
         </div>
         <div className="saving-est">
-          <div className="sav-lbl">Économie estimée</div>
-          <div className="sav-amt">185 €<span style={{fontSize:18,fontWeight:600}}>/an</span></div>
+          <div className="sav-lbl">Économie estimée (−15%)</div>
+          <div className="sav-amt">{saving.toLocaleString('fr-FR')} €<span style={{fontSize:18,fontWeight:600}}>/an</span></div>
           <div className="sav-note">Sans aucun investissement</div>
         </div>
         <h3 className="q-title">Le tarif ACC vous intéresse-t-il ?</h3>
@@ -932,19 +906,22 @@ function NoACCScreen({ state, onContinue, onBack }) {
   );
 }
 
-function ComwattScreen({ state, onYes, onNo, onBack }) {
+function ComwattScreen({ state, saving, onYes, onNo, onBack }) {
   return (
     <div className="screen fade-in">
       <BackBtn onBack={onBack}/>
       <BillMeter bill={state.bill} initialBill={state.initialBill}/>
       <div className="card">
-        <div className="dev-icon">📦</div>
+        <div style={{textAlign:'center', margin:'0 auto 12px', background:'white', borderRadius:14, padding:'10px 16px', maxWidth:240, display:'block'}}>
+          <img src="data:image/png;base64,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"
+            alt="Comwatt" style={{width:'100%', maxHeight:70, objectFit:'contain'}}/>
+        </div>
         <h2 className="screen-title">Box Comwatt</h2>
         <p className="screen-sub">La box Comwatt maximise l'énergie ACC consommée et alimente votre cagnotte flexibilité.</p>
         <div className="offer-box">
           <div className="offer-row">
             <span className="offer-lbl">Gain annuel supplémentaire</span>
-            <span className="offer-val grn">+ 200 €/an</span>
+            <span className="offer-val grn">+ {saving.toLocaleString('fr-FR')} €/an</span>
           </div>
           <div className="offer-div"/>
           <div className="offer-row">
@@ -963,7 +940,7 @@ function ComwattScreen({ state, onYes, onNo, onBack }) {
   );
 }
 
-function SolarScreen({ state, onYes, onNo, onBack }) {
+function SolarScreen({ state, saving, onYes, onNo, onBack }) {
   return (
     <div className="screen fade-in">
       <BackBtn onBack={onBack}/>
@@ -974,8 +951,8 @@ function SolarScreen({ state, onYes, onNo, onBack }) {
         <p className="screen-sub">Produisez votre propre électricité et stockez l'excédent. La solution la plus ambitieuse.</p>
         <div className="offer-box">
           <div className="offer-row">
-            <span className="offer-lbl">Réduction de facture</span>
-            <span className="offer-val grn">− 1 000 €/an</span>
+            <span className="offer-lbl">Réduction de facture (−50%)</span>
+            <span className="offer-val grn">− {saving.toLocaleString('fr-FR')} €/an</span>
           </div>
           <div className="offer-div"/>
           <div className="offer-row">
@@ -1075,7 +1052,7 @@ function FinalScreen({ state, onRestart }) {
 const INIT = {
   screen:      'WELCOME',
   name:        'Marie Dupont',
-  city:        'Lyon',
+  address:     '74 rue Gabriel Péri, Montrouge',
   initialBill: 2000,
   bill:        2000,
   bravoItems:  [],
@@ -1104,7 +1081,7 @@ function App() {
 
       case 'WELCOME':
         return <WelcomeScreen state={state}
-          onStart={({name,city,bill})=>goTo('ADDRESS',{name,city,initialBill:bill,bill,bravoItems:[]})} />;
+          onStart={({name,bill,address})=>goTo('ADDRESS',{name,address,initialBill:bill,bill,bravoItems:[]})} />;
 
       case 'ADDRESS':
         return <AddressScreen state={state}
@@ -1115,11 +1092,13 @@ function App() {
       case 'ACC_MAP':
         return <ACCMapScreen state={state} onContinue={()=>goTo('ACC_TARIFF')} onBack={goBack}/>;
 
-      case 'ACC_TARIFF':
-        return <ACCTariffScreen state={state}
-          onYes={()=>goTo('BRAVO_1',{ bill:state.bill-185, bravoItems:[...state.bravoItems,'Tarif ACC : −185 €/an'] })}
+      case 'ACC_TARIFF': {
+        const accSaving = Math.round(state.initialBill * 0.15);
+        return <ACCTariffScreen state={state} saving={accSaving}
+          onYes={()=>goTo('BRAVO_1',{ bill:state.bill-accSaving, bravoItems:[...state.bravoItems,`Tarif ACC : −${accSaving.toLocaleString('fr-FR')} €/an`] })}
           onNo={()=>goTo('NOT_INTERESTED')}
           onBack={goBack}/>;
+      }
 
       case 'NOT_INTERESTED':
         return <NotInterestedScreen state={state} onContinue={()=>goTo('COMWATT')} onBack={goBack}/>;
@@ -1127,29 +1106,39 @@ function App() {
       case 'NO_ACC':
         return <NoACCScreen state={state} onContinue={()=>goTo('SOLAR')} onBack={goBack}/>;
 
-      case 'BRAVO_1':
-        return <BravoScreen state={state} stepNumber={1} saving={185} label="Grâce au tarif ACC"
+      case 'BRAVO_1': {
+        const accSaving = Math.round(state.initialBill * 0.15);
+        return <BravoScreen state={state} stepNumber={1} saving={accSaving} label="Grâce au tarif ACC"
           onContinue={()=>goTo('COMWATT')} onBack={goBack}/>;
+      }
 
-      case 'COMWATT':
-        return <ComwattScreen state={state}
-          onYes={()=>goTo('BRAVO_2',{ bill:state.bill-200, bravoItems:[...state.bravoItems,'Box Comwatt : −200 €/an'] })}
+      case 'COMWATT': {
+        const cwSaving = Math.round(state.initialBill * 0.22);
+        return <ComwattScreen state={state} saving={cwSaving}
+          onYes={()=>goTo('BRAVO_2',{ bill:state.bill-cwSaving, bravoItems:[...state.bravoItems,`Box Comwatt : −${cwSaving.toLocaleString('fr-FR')} €/an`] })}
           onNo={()=>goTo('SOLAR')}
           onBack={goBack}/>;
+      }
 
-      case 'BRAVO_2':
-        return <BravoScreen state={state} stepNumber={2} saving={200} label="Grâce à la box Comwatt"
+      case 'BRAVO_2': {
+        const cwSaving = Math.round(state.initialBill * 0.22);
+        return <BravoScreen state={state} stepNumber={2} saving={cwSaving} label="Grâce à la box Comwatt"
           onContinue={()=>goTo('SOLAR')} onBack={goBack}/>;
+      }
 
-      case 'SOLAR':
-        return <SolarScreen state={state}
-          onYes={()=>goTo('BRAVO_3',{ bill:state.bill-1000, bravoItems:[...state.bravoItems,'Solaire + batterie : −1 000 €/an'] })}
+      case 'SOLAR': {
+        const solSaving = Math.round(state.initialBill * 0.50);
+        return <SolarScreen state={state} saving={solSaving}
+          onYes={()=>goTo('BRAVO_3',{ bill:state.bill-solSaving, bravoItems:[...state.bravoItems,`Solaire + batterie : −${solSaving.toLocaleString('fr-FR')} €/an`] })}
           onNo={()=>goTo('FINAL')}
           onBack={goBack}/>;
+      }
 
-      case 'BRAVO_3':
-        return <BravoScreen state={state} stepNumber={3} saving={1000} label="Grâce aux panneaux solaires"
+      case 'BRAVO_3': {
+        const solSaving = Math.round(state.initialBill * 0.50);
+        return <BravoScreen state={state} stepNumber={3} saving={solSaving} label="Grâce aux panneaux solaires"
           onContinue={()=>goTo('FINAL')} onBack={goBack}/>;
+      }
 
       case 'FINAL':
         return <FinalScreen state={state} onRestart={()=>{ setHistory([]); setState(INIT); }}/>;
