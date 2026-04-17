@@ -873,7 +873,7 @@ function WelcomeScreen({ state, onStart }) {
             <label className="inp-label">Adresse</label>
             <input className="inp" value={address}
               onChange={e=>setAddress(e.target.value)}
-              placeholder="74 rue Gabriel Péri, Montrouge"/>
+              placeholder="72 rue Gabriel Péri 92120 Montrouge"/>
           </div>
         </div>
       </div>
@@ -1061,6 +1061,23 @@ function FinalScreen({ state, onRestart }) {
   const roi        = state.investment > 0 && savings > 0
     ? Math.round((state.investment / savings) * 10) / 10
     : null;
+  if (savings === 0) return (
+    <>
+      <div className="screen fade-in">
+        <div className="card" style={{textAlign:'center', padding:'40px 24px'}}>
+          <div style={{fontSize:48, marginBottom:16}}>🙏</div>
+          <h2 className="screen-title">Merci pour votre temps</h2>
+          <p className="screen-sub" style={{marginTop:10}}>
+            Nous vous invitons à refaire une simulation dans quelques temps pour vérifier si nos prochaines offres répondent davantage à vos attentes.
+          </p>
+        </div>
+      </div>
+      <StickyFooter>
+        <button className="btn btn-sec" onClick={onRestart}>🔄 Recommencer la simulation</button>
+      </StickyFooter>
+    </>
+  );
+
   return (
     <>
       <div className="screen fade-in">
@@ -1139,7 +1156,7 @@ function FinalScreen({ state, onRestart }) {
 const INIT = {
   screen:      'WELCOME',
   name:        'Marie Dupont',
-  address:     '74 rue Gabriel Péri, Montrouge',
+  address:     '72 rue Gabriel Péri 92120 Montrouge',
   initialBill: 2000,
   bill:        2000,
   bravoItems:  [],
