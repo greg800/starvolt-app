@@ -776,9 +776,11 @@ function WelcomeScreen({ state, onStart }) {
   );
 }
 
-function AddressScreen({ state, onHasACC, onNoACC, onBack }) {
+// Écran unique : éligibilité + carte + économies + CTA
+function EligibleScreen({ state, saving, onYes, onNo, onBack }) {
   const [ready, setReady] = useState(false);
-  useEffect(()=>{ const t=setTimeout(()=>setReady(true), 2000); return()=>clearTimeout(t); },[]);
+  useEffect(()=>{ const t=setTimeout(()=>setReady(true), 1800); return()=>clearTimeout(t); },[]);
+  const firstName = state.name.split(' ')[0];
 
   return (
     <div className="screen fade-in">
@@ -788,100 +790,47 @@ function AddressScreen({ state, onHasACC, onNoACC, onBack }) {
       {!ready ? (
         <div className="loading-card fade-in">
           <div className="spinner"/>
-          <p>Analyse en cours…</p>
+          <p>Vérification en cours…</p>
           <p className="sub">📍 {state.address}</p>
         </div>
       ) : (
         <div className="card fade-in">
-          <div className="addr-found">
-            <div className="addr-icon">🏠</div>
+
+          {/* ── 1. Message éligibilité ── */}
+          <div className="badge success">✨ Bonne nouvelle !</div>
+          <h2 className="screen-title" style={{marginBottom:4}}>
+            Cette adresse est éligible à l'autoconsommation collective
+          </h2>
+          <div className="addr-found" style={{marginBottom:0, marginTop:12}}>
+            <div className="addr-icon">📍</div>
             <div className="addr-text">
               <strong>{state.address}</strong>
               <span>{state.name}</span>
             </div>
           </div>
-          <div className="badge success" style={{marginTop:4}}>✨ Bonne nouvelle !</div>
-          <h2 className="screen-title">Vous êtes bien dans une boucle ACC</h2>
-          <p className="screen-sub">
-            Votre adresse est éligible à l'autoconsommation collective. Vous pouvez accéder à de l'énergie locale produite à moins de 2 km.
-          </p>
-          <div className="btn-group">
-            <button className="btn btn-yes" onClick={onHasACC}>✅ Super, je veux en profiter !</button>
-            <button className="btn btn-no"  onClick={onNoACC}>❌ Non merci, pas maintenant</button>
+
+          {/* ── 2. Carte ACC ── */}
+          <MapACC/>
+          <div className="map-legend" style={{marginBottom:16}}>
+            <div className="leg-item"><div className="leg-dot house">🏠</div><span>Logement de {firstName}</span></div>
+            <div className="leg-item"><div className="leg-dot pv">☀️</div><span>Site de production photovoltaïque</span></div>
+            <div className="leg-item"><div className="leg-dot zone">⬤</div><span>Zone ACC — rayon de 2 km</span></div>
+          </div>
+
+          {/* ── 3. Économies attendues ── */}
+          <div className="saving-est">
+            <div className="sav-lbl">Économies attendues grâce à l'ACC (−15%)</div>
+            <div className="sav-amt">{saving.toLocaleString('fr-FR')} €<span style={{fontSize:18,fontWeight:600}}>/an</span></div>
+            <div className="sav-note">Sans aucun investissement · tarif local préférentiel</div>
+          </div>
+
+          {/* ── 4. CTA ── */}
+          <div className="btn-group" style={{marginTop:8}}>
+            <button className="btn btn-yes" onClick={onYes}>✅ Je rejoins la boucle ACC !</button>
+            <button className="btn btn-no"  onClick={onNo}>❌ Non merci, pas maintenant</button>
           </div>
         </div>
       )}
-    </div>
-  );
-}
-
-function ACCMapScreen({ state, onContinue, onBack }) {
-  const firstName = state.name.split(' ')[0];
-  return (
-    <div className="screen fade-in">
-      <BackBtn onBack={onBack}/>
-      <BillMeter bill={state.bill} initialBill={state.initialBill}/>
-      <div className="card">
-        <div className="badge success">✨ Excellente nouvelle !</div>
-        <h2 className="screen-title">Votre logement est dans une boucle ACC</h2>
-        <p className="screen-sub">Vous partagez de l'énergie locale avec des producteurs à moins de 2 km de chez vous.</p>
-        <MapACC/>
-        <div className="map-legend">
-          <div className="leg-item"><div className="leg-dot house">🏠</div><span>Logement de {firstName}</span></div>
-          <div className="leg-item"><div className="leg-dot pv">☀️</div><span>Site de production photovoltaïque</span></div>
-          <div className="leg-item"><div className="leg-dot zone">⬤</div><span>Zone ACC — rayon de 2 km</span></div>
-        </div>
-        <button className="btn btn-primary" onClick={onContinue}>Voir mon tarif ACC →</button>
-      </div>
-    </div>
-  );
-}
-
-function ACCTariffScreen({ state, saving, onYes, onNo, onBack }) {
-  return (
-    <div className="screen fade-in">
-      <BackBtn onBack={onBack}/>
-      <BillMeter bill={state.bill} initialBill={state.initialBill}/>
-      <div className="card">
-        <h2 className="screen-title">Votre tarif ACC</h2>
-        <p className="screen-sub">En rejoignant la boucle ACC, vous accédez à un tarif préférentiel fourni par le producteur local.</p>
-        <div className="tariff-box">
-          <div className="tariff-row">
-            <span className="tariff-lbl">Tarif actuel (fournisseur)</span>
-            <span className="tariff-val old">~0,25 €/kWh</span>
-          </div>
-          <div className="tariff-arrow">↓</div>
-          <div className="tariff-row">
-            <span className="tariff-lbl">Tarif ACC disponible</span>
-            <span className="tariff-val grn">~0,21 €/kWh</span>
-          </div>
-        </div>
-        <div className="saving-est">
-          <div className="sav-lbl">Économie estimée (−15%)</div>
-          <div className="sav-amt">{saving.toLocaleString('fr-FR')} €<span style={{fontSize:18,fontWeight:600}}>/an</span></div>
-          <div className="sav-note">Sans aucun investissement</div>
-        </div>
-        <h3 className="q-title">Le tarif ACC vous intéresse-t-il ?</h3>
-        <div className="btn-group">
-          <button className="btn btn-yes" onClick={onYes}>✅ Oui, c'est intéressant !</button>
-          <button className="btn btn-no"  onClick={onNo}>❌ Non, pas pour moi</button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function NotInterestedScreen({ state, onContinue, onBack }) {
-  return (
-    <div className="screen fade-in">
-      <BackBtn onBack={onBack}/>
-      <BillMeter bill={state.bill} initialBill={state.initialBill}/>
-      <div className="card">
-        <div className="badge info">👀 Pas de problème</div>
-        <h2 className="screen-title">Nous restons attentifs</h2>
-        <p className="screen-sub">Nous suivons l'évolution des tarifs ACC et vous recontacterons dès qu'une offre mieux adaptée sera disponible.</p>
-        <button className="btn btn-primary" onClick={onContinue}>Voir d'autres options →</button>
-      </div>
     </div>
   );
 }
@@ -1083,25 +1032,13 @@ function App() {
         return <WelcomeScreen state={state}
           onStart={({name,bill,address})=>goTo('ADDRESS',{name,address,initialBill:bill,bill,bravoItems:[]})} />;
 
-      case 'ADDRESS':
-        return <AddressScreen state={state}
-          onHasACC={()=>goTo('ACC_MAP',{hasACC:true})}
-          onNoACC={()=>goTo('NO_ACC',{hasACC:false})}
-          onBack={goBack} />;
-
-      case 'ACC_MAP':
-        return <ACCMapScreen state={state} onContinue={()=>goTo('ACC_TARIFF')} onBack={goBack}/>;
-
-      case 'ACC_TARIFF': {
+      case 'ADDRESS': {
         const accSaving = Math.round(state.initialBill * 0.15);
-        return <ACCTariffScreen state={state} saving={accSaving}
+        return <EligibleScreen state={state} saving={accSaving}
           onYes={()=>goTo('BRAVO_1',{ bill:state.bill-accSaving, bravoItems:[...state.bravoItems,`Tarif ACC : −${accSaving.toLocaleString('fr-FR')} €/an`] })}
-          onNo={()=>goTo('NOT_INTERESTED')}
+          onNo={()=>goTo('NO_ACC')}
           onBack={goBack}/>;
       }
-
-      case 'NOT_INTERESTED':
-        return <NotInterestedScreen state={state} onContinue={()=>goTo('COMWATT')} onBack={goBack}/>;
 
       case 'NO_ACC':
         return <NoACCScreen state={state} onContinue={()=>goTo('SOLAR')} onBack={goBack}/>;
