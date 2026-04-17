@@ -207,7 +207,7 @@ function ACCMapScreen({ state, onContinue, onBack }) {
           Vous partagez de l'énergie locale avec des producteurs situés à moins de 2 km de chez vous.
         </p>
 
-        <MapACC />
+        <MapACC name={state.name.split(' ')[0]} />
 
         <div className="map-legend">
           <div className="legend-item">
@@ -236,6 +236,7 @@ function ACCMapScreen({ state, onContinue, onBack }) {
 // SCREEN — ACC Tariff question
 // ─────────────────────────────────────────────
 function ACCTariffScreen({ state, onYes, onNo, onBack }) {
+  const accSaving = Math.round(state.initialBill * 0.15);
   return (
     <div className="screen fade-in">
       <BackButton onBack={onBack} />
@@ -261,7 +262,7 @@ function ACCTariffScreen({ state, onYes, onNo, onBack }) {
 
         <div className="saving-estimate">
           <div className="saving-label">Économie estimée</div>
-          <div className="saving-amount">185 €<span style={{ fontSize: 20, fontWeight: 600 }}>/an</span></div>
+          <div className="saving-amount">{accSaving.toLocaleString('fr-FR')} €<span style={{ fontSize: 20, fontWeight: 600 }}>/an</span></div>
           <div className="saving-note">Sans aucun investissement</div>
         </div>
 
@@ -349,13 +350,14 @@ function NoACCScreen({ state, onContinue, onBack }) {
 // SCREEN — Comwatt Box
 // ─────────────────────────────────────────────
 function ComwattScreen({ state, onYes, onNo, onBack }) {
+  const boxSaving = Math.round(state.initialBill * 0.10);
   return (
     <div className="screen fade-in">
       <BackButton onBack={onBack} />
       <BillMeter bill={state.bill} initialBill={state.initialBill} />
 
       <div className="card">
-        <div className="device-icon">📦</div>
+        <img src="/comwatt-box.png" alt="Box Comwatt" style={{ width: '100%', maxWidth: 220, display: 'block', margin: '0 auto 12px', borderRadius: 12 }} />
         <h2 className="screen-title">Box Comwatt</h2>
         <p className="screen-subtitle">
           La box Comwatt maximise l'énergie ACC que vous consommez et alimente votre cagnotte flexibilité.
@@ -364,7 +366,7 @@ function ComwattScreen({ state, onYes, onNo, onBack }) {
         <div className="offer-card">
           <div className="offer-row">
             <span className="offer-label">Gain annuel supplémentaire</span>
-            <span className="offer-value green">+ 200 €/an</span>
+            <span className="offer-value green">+ {boxSaving.toLocaleString('fr-FR')} €/an</span>
           </div>
           <div className="offer-divider" />
           <div className="offer-row">
@@ -395,6 +397,7 @@ function ComwattScreen({ state, onYes, onNo, onBack }) {
 // SCREEN — Solar panels
 // ─────────────────────────────────────────────
 function SolarScreen({ state, onYes, onNo, onBack }) {
+  const solarSaving = Math.round(state.initialBill * 0.45);
   return (
     <div className="screen fade-in">
       <BackButton onBack={onBack} />
@@ -410,7 +413,7 @@ function SolarScreen({ state, onYes, onNo, onBack }) {
         <div className="offer-card">
           <div className="offer-row">
             <span className="offer-label">Réduction de facture</span>
-            <span className="offer-value green">− 1 000 €/an</span>
+            <span className="offer-value green">− {solarSaving.toLocaleString('fr-FR')} €/an</span>
           </div>
           <div className="offer-divider" />
           <div className="offer-row">
@@ -557,6 +560,10 @@ export default function App() {
   const { screen } = appState;
 
   const renderScreen = () => {
+    const accSaving    = Math.round(appState.initialBill * 0.15);
+    const boxSaving    = Math.round(appState.initialBill * 0.10);
+    const solarSaving  = Math.round(appState.initialBill * 0.45);
+
     switch (screen) {
 
       case 'WELCOME':
@@ -593,8 +600,9 @@ export default function App() {
           <ACCTariffScreen
             state={appState}
             onYes={() => goTo('BRAVO_1', {
-              bill: appState.bill - 185,
-              bravoItems: [...appState.bravoItems, 'Tarif ACC : −185 €/an'],
+              bill: appState.bill - accSaving,
+              bravoItems: [...appState.bravoItems, `Tarif ACC : −${accSaving.toLocaleString('fr-FR')} €/an`],
+              lastSaving: accSaving,
             })}
             onNo={() => goTo('NOT_INTERESTED')}
             onBack={goBack}
@@ -624,7 +632,7 @@ export default function App() {
           <BravoScreen
             state={appState}
             stepNumber={1}
-            saving={185}
+            saving={appState.lastSaving || accSaving}
             label="Grâce au tarif ACC"
             onContinue={() => goTo('COMWATT')}
             onBack={goBack}
@@ -636,8 +644,9 @@ export default function App() {
           <ComwattScreen
             state={appState}
             onYes={() => goTo('BRAVO_2', {
-              bill: appState.bill - 200,
-              bravoItems: [...appState.bravoItems, 'Box Comwatt : −200 €/an'],
+              bill: appState.bill - boxSaving,
+              bravoItems: [...appState.bravoItems, `Box Comwatt : −${boxSaving.toLocaleString('fr-FR')} €/an`],
+              lastSaving: boxSaving,
             })}
             onNo={() => goTo('SOLAR')}
             onBack={goBack}
@@ -649,7 +658,7 @@ export default function App() {
           <BravoScreen
             state={appState}
             stepNumber={2}
-            saving={200}
+            saving={appState.lastSaving || boxSaving}
             label="Grâce à la box Comwatt"
             onContinue={() => goTo('SOLAR')}
             onBack={goBack}
@@ -661,8 +670,9 @@ export default function App() {
           <SolarScreen
             state={appState}
             onYes={() => goTo('BRAVO_3', {
-              bill: appState.bill - 1000,
-              bravoItems: [...appState.bravoItems, 'Solaire + batterie : −1 000 €/an'],
+              bill: appState.bill - solarSaving,
+              bravoItems: [...appState.bravoItems, `Solaire + batterie : −${solarSaving.toLocaleString('fr-FR')} €/an`],
+              lastSaving: solarSaving,
             })}
             onNo={() => goTo('FINAL')}
             onBack={goBack}
@@ -674,7 +684,7 @@ export default function App() {
           <BravoScreen
             state={appState}
             stepNumber={3}
-            saving={1000}
+            saving={appState.lastSaving || solarSaving}
             label="Grâce aux panneaux solaires"
             onContinue={() => goTo('FINAL')}
             onBack={goBack}

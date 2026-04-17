@@ -1,10 +1,10 @@
-export default function MapACC() {
+export default function MapACC({ name = 'Marie' }) {
   return (
     <div className="map-container">
       <svg
         viewBox="0 0 320 210"
         style={{ width: '100%', display: 'block' }}
-        aria-label="Carte ACC Lyon — logement de Marie et site photovoltaïque dans un rayon de 2km"
+        aria-label={`Carte ACC Lyon — logement de ${name} et site photovoltaïque dans un rayon de 2km`}
       >
         <defs>
           {/* Map gradient background */}
@@ -140,7 +140,7 @@ export default function MapACC() {
             fontWeight="600"
             opacity="0.9"
           >
-            Chez Marie
+            Chez {name}
           </text>
 
           {/* ─── SITE PV ─── */}

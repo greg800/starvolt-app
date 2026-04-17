@@ -59,7 +59,7 @@
       flex-direction: column;
       align-items: center;
       justify-content: center;
-      padding: 24px 16px 90px;
+      padding: 76px 16px 150px;
       position: relative;
       overflow: hidden;
     }
@@ -97,12 +97,60 @@
       line-height: 1; font-weight: 900;
     }
 
-    /* Logo */
-    .logo-fixed {
+    /* =============================================
+       TOP BAR
+       ============================================= */
+    .top-bar {
       position: fixed;
-      bottom: 20px; left: 20px;
-      z-index: 100;
+      top: 0; left: 0; right: 0;
+      height: 56px;
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 0 18px;
+      background: rgba(5,65,78,.85);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border-bottom: 1px solid rgba(255,255,255,.1);
+      z-index: 300;
     }
+
+    .user-chip {
+      display: flex; align-items: center; gap: 7px;
+      background: rgba(255,255,255,.13);
+      border: 1px solid rgba(255,255,255,.22);
+      border-radius: 20px;
+      padding: 4px 12px 4px 5px;
+      max-width: 160px;
+      overflow: hidden;
+    }
+    .user-chip-av {
+      width: 26px; height: 26px; border-radius: 50%;
+      background: var(--green);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 10px; font-weight: 900; color: #1a4500;
+      flex-shrink: 0;
+    }
+    .user-chip span {
+      font-size: 12px; font-weight: 700; color: white;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+
+    /* =============================================
+       STICKY FOOTER
+       ============================================= */
+    .sticky-footer {
+      position: fixed;
+      bottom: 0; left: 0; right: 0;
+      padding: 24px 16px 22px;
+      background: linear-gradient(to top, rgba(5,65,78,1) 65%, rgba(5,65,78,.92) 85%, transparent);
+      z-index: 200;
+    }
+    .sticky-footer-inner {
+      max-width: 520px;
+      margin: 0 auto;
+      display: flex; flex-direction: column; gap: 9px;
+    }
+    .sticky-footer-inner.row { flex-direction: row; gap: 10px; }
+    .sticky-footer-inner.row .btn { flex: 1; }
 
     /* =============================================
        SCREEN
@@ -531,7 +579,7 @@
        RESPONSIVE
        ============================================= */
     @media (min-width: 768px) {
-      .app { padding: 32px 24px 100px; }
+      .app { padding: 80px 24px 120px; }
       .screen { max-width: 560px; }
       .welcome-title { font-size: 42px; }
       .bill-num { font-size: 96px; }
@@ -620,8 +668,35 @@ function Logo({ width = 135 }) {
   );
 }
 
+// ─── Top Bar ──────────────────────────────────
+function TopBar({ name, showName }) {
+  const initials = name
+    ? name.trim().split(/\s+/).map(w => w[0]?.toUpperCase() || '').join('').slice(0, 2)
+    : '';
+  return (
+    <div className="top-bar">
+      <Logo width={110}/>
+      {showName && name && (
+        <div className="user-chip">
+          <div className="user-chip-av">{initials}</div>
+          <span>{name}</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Sticky Footer ────────────────────────────
+function StickyFooter({ row = false, children }) {
+  return (
+    <div className="sticky-footer">
+      <div className={`sticky-footer-inner${row ? ' row' : ''}`}>{children}</div>
+    </div>
+  );
+}
+
 // ─── Map ACC (SVG stylisée Lyon) ──────────────
-function MapACC() {
+function MapACC({ name = 'Marie' }) {
   return (
     <div className="map-container">
       <svg viewBox="0 0 320 210" style={{ width:'100%', display:'block' }}>
@@ -679,7 +754,7 @@ function MapACC() {
             <rect x="10" y="19" width="8" height="8" rx="1" fill="#0a9b8c"/>
             <rect x="4"  y="15" width="5" height="5" rx="1" fill="#0a9b8c" opacity=".7"/>
           </g>
-          <text x="140" y="137" textAnchor="middle" fill="white" fontSize="9" fontFamily="Poppins,sans-serif" fontWeight="600" opacity=".88">Chez Marie</text>
+          <text x="140" y="137" textAnchor="middle" fill="white" fontSize="9" fontFamily="Poppins,sans-serif" fontWeight="600" opacity=".88">Chez {name}</text>
 
           {/* PV Site */}
           <g transform="translate(191,63)" filter="url(#glow)">
@@ -768,10 +843,12 @@ function WelcomeScreen({ state, onStart }) {
         </div>
       </div>
 
-      <button className="btn btn-primary"
-        onClick={()=>onStart({ name:name||'Marie Dupont', bill:bill||2000, address:address||'74 rue Gabriel Péri, Montrouge' })}>
-        📍 Vérifier si cette adresse est dans une boucle d'autoconsommation collective
-      </button>
+      <StickyFooter>
+        <button className="btn btn-primary"
+          onClick={()=>onStart({ name:name||'Marie Dupont', bill:bill||2000, address:address||'74 rue Gabriel Péri, Montrouge' })}>
+          📍 Vérifier si cette adresse est dans une boucle d'autoconsommation collective
+        </button>
+      </StickyFooter>
     </div>
   );
 }
@@ -810,7 +887,7 @@ function EligibleScreen({ state, saving, onYes, onNo, onBack }) {
           </div>
 
           {/* ── 2. Carte ACC ── */}
-          <MapACC/>
+          <MapACC name={firstName}/>
           <div className="map-legend" style={{marginBottom:16}}>
             <div className="leg-item"><div className="leg-dot house">🏠</div><span>Logement de {firstName}</span></div>
             <div className="leg-item"><div className="leg-dot pv">☀️</div><span>Site de production photovoltaïque</span></div>
@@ -824,12 +901,13 @@ function EligibleScreen({ state, saving, onYes, onNo, onBack }) {
             <div className="sav-note">Sans aucun investissement · tarif local préférentiel</div>
           </div>
 
-          {/* ── 4. CTA ── */}
-          <div className="btn-group" style={{marginTop:8}}>
-            <button className="btn btn-yes" onClick={onYes}>✅ Je rejoins la boucle ACC !</button>
-            <button className="btn btn-no"  onClick={onNo}>❌ Non merci, pas maintenant</button>
-          </div>
         </div>
+      )}
+      {ready && (
+        <StickyFooter row>
+          <button className="btn btn-no"  onClick={onNo}>❌ Non merci</button>
+          <button className="btn btn-yes" onClick={onYes}>✅ Je rejoins !</button>
+        </StickyFooter>
       )}
     </div>
   );
@@ -849,8 +927,10 @@ function NoACCScreen({ state, onContinue, onBack }) {
           <div className="step-item"><div className="step-num">2</div><div className="step-txt">D'autres citoyens et collectivités rejoignent la boucle</div></div>
           <div className="step-item"><div className="step-num">3</div><div className="step-txt">Vous commencez à économiser dès que la boucle est active</div></div>
         </div>
-        <button className="btn btn-primary" onClick={onContinue}>Continuer la simulation →</button>
       </div>
+      <StickyFooter>
+        <button className="btn btn-primary" onClick={onContinue}>Continuer la simulation →</button>
+      </StickyFooter>
     </div>
   );
 }
@@ -861,10 +941,7 @@ function ComwattScreen({ state, saving, onYes, onNo, onBack }) {
       <BackBtn onBack={onBack}/>
       <BillMeter bill={state.bill} initialBill={state.initialBill}/>
       <div className="card">
-        <div style={{textAlign:'center', margin:'0 auto 12px', background:'white', borderRadius:14, padding:'10px 16px', maxWidth:240, display:'block'}}>
-          <img src="data:image/png;base64,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"
-            alt="Comwatt" style={{width:'100%', maxHeight:70, objectFit:'contain'}}/>
-        </div>
+        <img src="comwatt-box.png" alt="Box Comwatt" style={{width:"100%", maxWidth:220, display:"block", margin:"0 auto 12px", borderRadius:12}}/>
         <h2 className="screen-title">Box Comwatt</h2>
         <p className="screen-sub">La box Comwatt maximise l'énergie ACC consommée et alimente votre cagnotte flexibilité.</p>
         <div className="offer-box">
@@ -880,11 +957,11 @@ function ComwattScreen({ state, saving, onYes, onNo, onBack }) {
           <div className="offer-promo">🎁 Ou <strong>gratuit</strong> si vous renoncez à votre cagnotte Flex pendant 3 ans</div>
         </div>
         <h3 className="q-title">Souhaitez-vous installer une box Comwatt ?</h3>
-        <div className="btn-group">
-          <button className="btn btn-yes" onClick={onYes}>✅ Oui, je veux la box !</button>
-          <button className="btn btn-no"  onClick={onNo}>❌ Non merci</button>
-        </div>
       </div>
+      <StickyFooter row>
+        <button className="btn btn-no"  onClick={onNo}>❌ Non merci</button>
+        <button className="btn btn-yes" onClick={onYes}>✅ Oui, je veux la box !</button>
+      </StickyFooter>
     </div>
   );
 }
@@ -900,7 +977,7 @@ function SolarScreen({ state, saving, onYes, onNo, onBack }) {
         <p className="screen-sub">Produisez votre propre électricité et stockez l'excédent. La solution la plus ambitieuse.</p>
         <div className="offer-box">
           <div className="offer-row">
-            <span className="offer-lbl">Réduction de facture (−50%)</span>
+            <span className="offer-lbl">Réduction de facture (−45%)</span>
             <span className="offer-val grn">− {saving.toLocaleString('fr-FR')} €/an</span>
           </div>
           <div className="offer-div"/>
@@ -910,11 +987,11 @@ function SolarScreen({ state, saving, onYes, onNo, onBack }) {
           </div>
         </div>
         <h3 className="q-title">Souhaitez-vous investir dans le solaire ?</h3>
-        <div className="btn-group">
-          <button className="btn btn-yes" onClick={onYes}>✅ Oui, je veux le solaire !</button>
-          <button className="btn btn-no"  onClick={onNo}>❌ Non, peut-être plus tard</button>
-        </div>
       </div>
+      <StickyFooter row>
+        <button className="btn btn-no"  onClick={onNo}>❌ Plus tard</button>
+        <button className="btn btn-yes" onClick={onYes}>✅ Oui, le solaire !</button>
+      </StickyFooter>
     </div>
   );
 }
@@ -934,8 +1011,10 @@ function BravoScreen({ state, stepNumber, saving, label, onContinue, onBack }) {
           <span className="bravo-sav-per">par an</span>
         </div>
         <p className="bravo-lbl">{label}</p>
-        <button className="btn btn-primary" onClick={onContinue}>Continuer →</button>
       </div>
+      <StickyFooter>
+        <button className="btn btn-primary" onClick={onContinue}>Continuer →</button>
+      </StickyFooter>
     </div>
   );
 }
@@ -987,11 +1066,10 @@ function FinalScreen({ state, onRestart }) {
         <div className="final-msg">
           "Ceci n'est qu'une simulation, mais bientôt, tout sera réel."
         </div>
-
-        <div style={{marginTop:18}}>
-          <button className="btn btn-sec" onClick={onRestart}>🔄 Recommencer la simulation</button>
-        </div>
       </div>
+      <StickyFooter>
+        <button className="btn btn-sec" onClick={onRestart}>🔄 Recommencer la simulation</button>
+      </StickyFooter>
     </div>
   );
 }
@@ -1050,7 +1128,7 @@ function App() {
       }
 
       case 'COMWATT': {
-        const cwSaving = Math.round(state.initialBill * 0.22);
+        const cwSaving = Math.round(state.initialBill * 0.10);
         return <ComwattScreen state={state} saving={cwSaving}
           onYes={()=>goTo('BRAVO_2',{ bill:state.bill-cwSaving, bravoItems:[...state.bravoItems,`Box Comwatt : −${cwSaving.toLocaleString('fr-FR')} €/an`] })}
           onNo={()=>goTo('SOLAR')}
@@ -1058,13 +1136,13 @@ function App() {
       }
 
       case 'BRAVO_2': {
-        const cwSaving = Math.round(state.initialBill * 0.22);
+        const cwSaving = Math.round(state.initialBill * 0.10);
         return <BravoScreen state={state} stepNumber={2} saving={cwSaving} label="Grâce à la box Comwatt"
           onContinue={()=>goTo('SOLAR')} onBack={goBack}/>;
       }
 
       case 'SOLAR': {
-        const solSaving = Math.round(state.initialBill * 0.50);
+        const solSaving = Math.round(state.initialBill * 0.45);
         return <SolarScreen state={state} saving={solSaving}
           onYes={()=>goTo('BRAVO_3',{ bill:state.bill-solSaving, bravoItems:[...state.bravoItems,`Solaire + batterie : −${solSaving.toLocaleString('fr-FR')} €/an`] })}
           onNo={()=>goTo('FINAL')}
@@ -1072,7 +1150,7 @@ function App() {
       }
 
       case 'BRAVO_3': {
-        const solSaving = Math.round(state.initialBill * 0.50);
+        const solSaving = Math.round(state.initialBill * 0.45);
         return <BravoScreen state={state} stepNumber={3} saving={solSaving} label="Grâce aux panneaux solaires"
           onContinue={()=>goTo('FINAL')} onBack={goBack}/>;
       }
@@ -1086,15 +1164,11 @@ function App() {
 
   return (
     <div className="app">
+      <TopBar name={state.name} showName={state.screen !== 'WELCOME'}/>
       <div className="chevrons-deco" aria-hidden="true">
         {['»','»','»','»'].map((c,i)=><span key={i}>{c}</span>)}
       </div>
-
       {render()}
-
-      <div className="logo-fixed">
-        <Logo width={130}/>
-      </div>
     </div>
   );
 }
