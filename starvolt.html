@@ -842,8 +842,9 @@ const BackBtn = ({ onBack }) => (
 
 function WelcomeScreen({ state, onStart }) {
   const [name,    setName]    = useState(state.name);
-  const [bill,    setBill]    = useState(state.initialBill);
+  const [billStr, setBillStr] = useState(String(state.initialBill));
   const [address, setAddress] = useState(state.address);
+  const bill = Math.max(0, Number(billStr) || 0);
   return (
     <>
       <div className="screen fade-in">
@@ -864,8 +865,10 @@ function WelcomeScreen({ state, onStart }) {
           <div className="inp-group">
             <label className="inp-label">Facture électricité (€/an)</label>
             <div className="bill-wrap">
-              <input className="inp" type="number" value={bill}
-                onChange={e=>setBill(Math.max(0,Number(e.target.value)||0))} min="0" max="20000"/>
+              <input className="inp" type="number" value={billStr}
+                onChange={e=>setBillStr(e.target.value)}
+                onBlur={e=>setBillStr(String(Math.max(0, Number(e.target.value) || 0)))}
+                min="0" max="20000"/>
               <span className="bill-sfx">€/an</span>
             </div>
           </div>
