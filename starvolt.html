@@ -567,6 +567,39 @@
     }
     .fi-check { color: var(--green); font-weight: 800; font-size: 15px; }
 
+    .roi-block {
+      background: rgba(255,255,255,.07);
+      border: 1px solid rgba(255,255,255,.15);
+      border-radius: 14px; padding: 14px 12px;
+      margin: 10px 0;
+    }
+    .roi-label {
+      font-size: 10px; font-weight: 700;
+      text-transform: uppercase; letter-spacing: 1.5px;
+      color: rgba(255,255,255,.5); text-align: center;
+      margin-bottom: 10px;
+    }
+    .roi-row {
+      display: flex; align-items: center; justify-content: center; gap: 6px;
+    }
+    .roi-item {
+      display: flex; flex-direction: column; align-items: center; gap: 2px; flex: 1;
+    }
+    .roi-val {
+      font-size: 14px; font-weight: 800; color: white; text-align: center;
+    }
+    .roi-val.roi-years {
+      color: var(--green); font-size: 22px;
+    }
+    .roi-sub {
+      font-size: 9px; color: rgba(255,255,255,.42);
+      text-transform: uppercase; letter-spacing: .8px; text-align: center;
+    }
+    .roi-divider {
+      font-size: 18px; font-weight: 700; color: rgba(255,255,255,.3);
+      flex-shrink: 0;
+    }
+
     .final-msg {
       margin-top: 18px; padding-top: 18px;
       border-top: 1px solid rgba(255,255,255,.1);
@@ -1024,7 +1057,10 @@ function BravoScreen({ state, stepNumber, saving, label, onContinue, onBack }) {
 }
 
 function FinalScreen({ state, onRestart }) {
-  const savings = state.initialBill - state.bill;
+  const savings    = state.initialBill - state.bill;
+  const roi        = state.investment > 0 && savings > 0
+    ? Math.round((state.investment / savings) * 10) / 10
+    : null;
   return (
     <>
       <div className="screen fade-in">
@@ -1064,6 +1100,28 @@ function FinalScreen({ state, onRestart }) {
               ))}
             </div>
           )}
+          {roi !== null && (
+            <div className="roi-block">
+              <div className="roi-label">Retour sur investissement</div>
+              <div className="roi-row">
+                <div className="roi-item">
+                  <span className="roi-val">{state.investment.toLocaleString('fr-FR')} €</span>
+                  <span className="roi-sub">Investissement total</span>
+                </div>
+                <div className="roi-divider">÷</div>
+                <div className="roi-item">
+                  <span className="roi-val">{savings.toLocaleString('fr-FR')} €/an</span>
+                  <span className="roi-sub">Économies annuelles</span>
+                </div>
+                <div className="roi-divider">=</div>
+                <div className="roi-item">
+                  <span className="roi-val roi-years">{roi} ans</span>
+                  <span className="roi-sub">ROI</span>
+                </div>
+              </div>
+            </div>
+          )}
+
           <div className="final-msg">
             "Ceci n'est qu'une simulation, mais bientôt, tout sera réel."
           </div>
@@ -1085,6 +1143,7 @@ const INIT = {
   initialBill: 2000,
   bill:        2000,
   bravoItems:  [],
+  investment:  0,
 };
 
 function App() {
@@ -1132,7 +1191,7 @@ function App() {
       case 'COMWATT': {
         const cwSaving = Math.round(state.initialBill * 0.10);
         return <ComwattScreen state={state} saving={cwSaving}
-          onYes={()=>goTo('BRAVO_2',{ bill:state.bill-cwSaving, bravoItems:[...state.bravoItems,`Box Comwatt : −${cwSaving.toLocaleString('fr-FR')} €/an`] })}
+          onYes={()=>goTo('BRAVO_2',{ bill:state.bill-cwSaving, bravoItems:[...state.bravoItems,`Box Comwatt : −${cwSaving.toLocaleString('fr-FR')} €/an`], investment:state.investment+550 })}
           onNo={()=>goTo('SOLAR')}
           onBack={goBack}/>;
       }
@@ -1146,7 +1205,7 @@ function App() {
       case 'SOLAR': {
         const solSaving = Math.round(state.initialBill * 0.45);
         return <SolarScreen state={state} saving={solSaving}
-          onYes={()=>goTo('BRAVO_3',{ bill:state.bill-solSaving, bravoItems:[...state.bravoItems,`Solaire + batterie : −${solSaving.toLocaleString('fr-FR')} €/an`] })}
+          onYes={()=>goTo('BRAVO_3',{ bill:state.bill-solSaving, bravoItems:[...state.bravoItems,`Solaire + batterie : −${solSaving.toLocaleString('fr-FR')} €/an`], investment:state.investment+10000 })}
           onNo={()=>goTo('FINAL')}
           onBack={goBack}/>;
       }
