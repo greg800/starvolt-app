@@ -1,1 +1,1 @@
-web: python3 server.py
+web: npx serve . -l $PORT
