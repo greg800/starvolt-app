@@ -1,7 +1,9 @@
-const http = require('http');
-const fs   = require('fs');
-const path = require('path');
+import http from 'http';
+import fs   from 'fs';
+import path  from 'path';
+import { fileURLToPath } from 'url';
 
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = process.env.PORT || 8080;
 
 const mime = {
@@ -14,14 +16,11 @@ const mime = {
 };
 
 http.createServer((req, res) => {
-  let url = req.url === '/' ? '/starvolt.html' : req.url;
+  const url  = req.url === '/' ? '/starvolt.html' : req.url;
   const file = path.join(__dirname, url);
 
   fs.readFile(file, (err, data) => {
-    if (err) {
-      res.writeHead(404);
-      return res.end('Not found');
-    }
+    if (err) { res.writeHead(404); return res.end('Not found'); }
     const ext = path.extname(file);
     res.writeHead(200, { 'Content-Type': mime[ext] || 'text/plain' });
     res.end(data);
