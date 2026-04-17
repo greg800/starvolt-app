@@ -1,0 +1,1179 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Starvolt — Calculateur d'économies</title>
+
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800;900&display=swap" rel="stylesheet" />
+
+  <!-- React + ReactDOM + Babel (CDN) -->
+  <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <!-- Canvas Confetti (fireworks) -->
+  <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.3/dist/confetti.browser.min.js"></script>
+
+  <style>
+    /* =============================================
+       RESET & ROOT
+       ============================================= */
+    *, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
+
+    :root {
+      --teal-deep:   #065060;
+      --teal:        #0891b2;
+      --teal-light:  #0da890;
+      --green:       #7dd940;
+      --green-light: #a3ed6a;
+      --white:       #ffffff;
+      --font:        'Poppins', sans-serif;
+      --r-card:      22px;
+      --r-btn:       14px;
+      --shadow:      0 20px 60px rgba(0,0,0,0.25);
+    }
+
+    html, body {
+      min-height: 100%;
+      font-family: var(--font);
+      -webkit-font-smoothing: antialiased;
+    }
+
+    body {
+      background: linear-gradient(145deg, #065060 0%, #0a9b8c 50%, #0b8264 100%);
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+
+    /* =============================================
+       APP SHELL
+       ============================================= */
+
+    .app {
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 24px 16px 90px;
+      position: relative;
+      overflow: hidden;
+    }
+
+    /* Blob decorations */
+    .app::before {
+      content: '';
+      position: fixed;
+      top: -180px; right: -180px;
+      width: 520px; height: 520px;
+      border-radius: 50%;
+      background: radial-gradient(circle, rgba(125,217,64,.1) 0%, transparent 70%);
+      pointer-events: none;
+    }
+    .app::after {
+      content: '';
+      position: fixed;
+      bottom: -220px; left: -220px;
+      width: 600px; height: 600px;
+      border-radius: 50%;
+      background: radial-gradient(circle, rgba(8,145,178,.12) 0%, transparent 70%);
+      pointer-events: none;
+    }
+
+    /* Chevrons */
+    .chevrons-deco {
+      position: fixed;
+      right: -8px; top: 50%;
+      transform: translateY(-50%);
+      display: flex; flex-direction: column; gap: 2px;
+      opacity: .07; pointer-events: none;
+    }
+    .chevrons-deco span {
+      font-size: 72px; color: var(--green);
+      line-height: 1; font-weight: 900;
+    }
+
+    /* Logo */
+    .logo-fixed {
+      position: fixed;
+      bottom: 20px; left: 20px;
+      z-index: 100;
+    }
+
+    /* =============================================
+       SCREEN
+       ============================================= */
+    .screen {
+      width: 100%; max-width: 520px;
+      display: flex; flex-direction: column;
+      gap: 0;
+    }
+
+    @keyframes fadeUp {
+      from { opacity:0; transform:translateY(22px); }
+      to   { opacity:1; transform:translateY(0); }
+    }
+    .fade-in { animation: fadeUp .4s cubic-bezier(.22,1,.36,1) both; }
+
+    /* =============================================
+       BILL METER
+       ============================================= */
+    .bill-meter {
+      text-align: center;
+      padding: 18px 0 14px;
+    }
+    .bill-label {
+      font-size: 11px; font-weight: 600;
+      letter-spacing: 2.5px; text-transform: uppercase;
+      color: rgba(255,255,255,.6);
+      margin-bottom: 2px;
+    }
+    .bill-amount-row {
+      display: flex; align-items: baseline;
+      justify-content: center; gap: 4px; line-height: 1;
+    }
+    .bill-num {
+      font-size: 80px; font-weight: 900; color: white;
+      transition: color .6s ease;
+      font-variant-numeric: tabular-nums;
+    }
+    .bill-num.saving {
+      color: var(--green);
+      text-shadow: 0 0 40px rgba(125,217,64,.45);
+    }
+    .bill-cur {
+      font-size: 30px; font-weight: 700;
+      color: rgba(255,255,255,.75);
+    }
+    .bill-period {
+      font-size: 12px; color: rgba(255,255,255,.45);
+      margin-top: 2px;
+    }
+    .savings-badge {
+      display: inline-flex; align-items: center; gap: 6px;
+      margin-top: 10px;
+      background: rgba(125,217,64,.16);
+      border: 1px solid rgba(125,217,64,.32);
+      border-radius: 20px; padding: 5px 14px;
+      font-size: 12px; font-weight: 700; color: var(--green);
+      animation: fadeUp .5s ease both;
+    }
+
+    /* =============================================
+       CARD
+       ============================================= */
+    .card {
+      background: rgba(255,255,255,.10);
+      backdrop-filter: blur(24px);
+      -webkit-backdrop-filter: blur(24px);
+      border: 1px solid rgba(255,255,255,.16);
+      border-radius: var(--r-card);
+      padding: 26px 22px;
+      color: white;
+      box-shadow: var(--shadow);
+    }
+
+    /* =============================================
+       TYPOGRAPHY
+       ============================================= */
+    .screen-title {
+      font-size: 23px; font-weight: 800;
+      line-height: 1.22; margin-bottom: 8px;
+    }
+    .screen-sub {
+      font-size: 13.5px; line-height: 1.6;
+      color: rgba(255,255,255,.75);
+      margin-bottom: 18px;
+    }
+    .q-title {
+      font-size: 15px; font-weight: 700;
+      margin: 18px 0 12px; line-height: 1.4;
+    }
+    .badge {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 5px 13px; border-radius: 20px;
+      font-size: 11.5px; font-weight: 700;
+      margin-bottom: 12px;
+    }
+    .badge.success {
+      background: rgba(125,217,64,.18);
+      border: 1px solid rgba(125,217,64,.35);
+      color: var(--green);
+    }
+    .badge.info {
+      background: rgba(255,255,255,.14);
+      border: 1px solid rgba(255,255,255,.25);
+      color: rgba(255,255,255,.88);
+    }
+
+    /* =============================================
+       BUTTONS
+       ============================================= */
+    .btn {
+      display: flex; align-items: center; justify-content: center;
+      gap: 8px; width: 100%;
+      padding: 14px 18px;
+      border-radius: var(--r-btn); border: none;
+      font-family: var(--font); font-size: 15px; font-weight: 700;
+      cursor: pointer;
+      transition: transform .15s ease, box-shadow .15s ease;
+      line-height: 1.2;
+    }
+    .btn:hover  { transform: translateY(-2px); }
+    .btn:active { transform: translateY(0); }
+
+    .btn-primary { background: white; color: var(--teal-deep); }
+    .btn-primary:hover { box-shadow: 0 8px 28px rgba(0,0,0,.22); }
+
+    .btn-yes { background: var(--green); color: #1a4500; }
+    .btn-yes:hover {
+      background: var(--green-light);
+      box-shadow: 0 8px 28px rgba(125,217,64,.32);
+    }
+
+    .btn-no {
+      background: rgba(255,255,255,.10); color: rgba(255,255,255,.85);
+      border: 1.5px solid rgba(255,255,255,.22);
+    }
+    .btn-no:hover { background: rgba(255,255,255,.18); }
+
+    .btn-sec {
+      background: rgba(255,255,255,.12); color: white;
+      border: 1.5px solid rgba(255,255,255,.25);
+      font-size: 13px;
+    }
+    .btn-sec:hover { background: rgba(255,255,255,.2); }
+
+    .btn-group { display: flex; flex-direction: column; gap: 9px; margin-top: 4px; }
+
+    /* =============================================
+       BACK BUTTON
+       ============================================= */
+    .back-btn {
+      display: inline-flex; align-items: center; gap: 5px;
+      background: none; border: none;
+      color: rgba(255,255,255,.55);
+      font-family: var(--font); font-size: 12.5px; font-weight: 600;
+      cursor: pointer; padding: 0; margin-bottom: 10px;
+      transition: color .2s;
+    }
+    .back-btn:hover { color: white; }
+
+    /* =============================================
+       WELCOME
+       ============================================= */
+    .welcome-header { text-align: center; margin-bottom: 22px; }
+    .welcome-tag {
+      font-size: 11px; font-weight: 600;
+      letter-spacing: 2.5px; text-transform: uppercase;
+      color: var(--green); margin-bottom: 10px;
+    }
+    .welcome-title {
+      font-size: 34px; font-weight: 900;
+      color: white; line-height: 1.15; margin-bottom: 8px;
+    }
+    .welcome-title .accent { color: var(--green); }
+    .welcome-sub { font-size: 14px; color: rgba(255,255,255,.6); }
+
+    .form-card {
+      background: rgba(255,255,255,.10);
+      backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px);
+      border: 1px solid rgba(255,255,255,.16);
+      border-radius: var(--r-card);
+      padding: 22px; margin-bottom: 12px;
+      display: flex; flex-direction: column; gap: 14px;
+    }
+    .inp-group { display: flex; flex-direction: column; gap: 5px; }
+    .inp-label {
+      font-size: 11px; font-weight: 600;
+      color: rgba(255,255,255,.65);
+      letter-spacing: .5px; text-transform: uppercase;
+    }
+    .inp {
+      width: 100%; padding: 12px 15px;
+      border-radius: 12px;
+      border: 1.5px solid rgba(255,255,255,.22);
+      background: rgba(255,255,255,.11);
+      color: white; font-family: var(--font);
+      font-size: 15px; font-weight: 600;
+      outline: none;
+      transition: border-color .2s, background .2s;
+      -webkit-appearance: none;
+    }
+    .inp::placeholder { color: rgba(255,255,255,.38); }
+    .inp:focus { border-color: var(--green); background: rgba(255,255,255,.16); }
+    .inp[type=number]::-webkit-inner-spin-button,
+    .inp[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; }
+
+    .bill-wrap { position: relative; }
+    .bill-sfx {
+      position: absolute; right: 15px; top: 50%;
+      transform: translateY(-50%);
+      color: rgba(255,255,255,.45);
+      font-size: 13px; font-weight: 600;
+      pointer-events: none;
+    }
+
+    /* =============================================
+       ADDRESS / LOADING
+       ============================================= */
+    .loading-card {
+      background: rgba(255,255,255,.10);
+      backdrop-filter: blur(24px);
+      border: 1px solid rgba(255,255,255,.16);
+      border-radius: var(--r-card);
+      padding: 48px 22px;
+      display: flex; flex-direction: column;
+      align-items: center; gap: 14px;
+      text-align: center; color: white;
+    }
+    .loading-card p { font-size: 14.5px; font-weight: 600; }
+    .loading-card .sub { font-size: 12.5px; color: rgba(255,255,255,.55); }
+
+    .spinner {
+      width: 42px; height: 42px;
+      border: 3px solid rgba(255,255,255,.18);
+      border-top-color: var(--green);
+      border-radius: 50%;
+      animation: spin .8s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .addr-found {
+      display: flex; align-items: center; gap: 12px;
+      background: rgba(255,255,255,.09);
+      border-radius: 14px; padding: 12px 15px;
+      margin-bottom: 18px;
+      border: 1px solid rgba(255,255,255,.13);
+    }
+    .addr-icon { font-size: 26px; }
+    .addr-text { display: flex; flex-direction: column; gap: 2px; }
+    .addr-text strong { font-size: 14.5px; font-weight: 700; color: white; }
+    .addr-text span { font-size: 12px; color: rgba(255,255,255,.55); }
+
+    /* =============================================
+       MAP ACC
+       ============================================= */
+    .map-container {
+      border-radius: 14px; overflow: hidden;
+      margin: 14px 0;
+      border: 1px solid rgba(255,255,255,.13);
+      box-shadow: 0 6px 20px rgba(0,0,0,.18);
+    }
+    .map-legend {
+      display: flex; flex-direction: column; gap: 7px;
+      margin: 10px 0 18px;
+    }
+    .leg-item {
+      display: flex; align-items: center; gap: 10px;
+      font-size: 12.5px; color: rgba(255,255,255,.82);
+    }
+    .leg-dot {
+      width: 26px; height: 26px; border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 14px; flex-shrink: 0;
+    }
+    .leg-dot.house { background: rgba(255,255,255,.18); }
+    .leg-dot.pv    { background: rgba(255,220,0,.18); }
+    .leg-dot.zone  {
+      background: rgba(125,217,64,.12);
+      border: 1.5px dashed var(--green);
+    }
+
+    /* =============================================
+       TARIFF
+       ============================================= */
+    .tariff-box {
+      background: rgba(0,0,0,.14);
+      border-radius: 14px; padding: 14px; margin: 14px 0;
+    }
+    .tariff-row { display: flex; justify-content: space-between; align-items: center; padding: 7px 0; }
+    .tariff-lbl { font-size: 12.5px; color: rgba(255,255,255,.68); }
+    .tariff-val { font-size: 17px; font-weight: 800; }
+    .tariff-val.old { text-decoration: line-through; color: rgba(255,255,255,.42); font-size: 14px; }
+    .tariff-val.grn { color: var(--green); }
+    .tariff-arrow { text-align: center; color: var(--green); font-size: 18px; padding: 4px 0; }
+
+    .saving-est {
+      background: rgba(125,217,64,.11);
+      border: 1.5px solid rgba(125,217,64,.28);
+      border-radius: 14px; padding: 14px;
+      text-align: center; margin: 14px 0;
+    }
+    .sav-lbl {
+      font-size: 11px; font-weight: 600;
+      text-transform: uppercase; letter-spacing: 1.5px;
+      color: rgba(255,255,255,.55); margin-bottom: 3px;
+    }
+    .sav-amt { font-size: 40px; font-weight: 900; color: var(--green); line-height: 1; }
+    .sav-note { font-size: 11.5px; color: rgba(255,255,255,.48); margin-top: 3px; }
+
+    /* =============================================
+       OFFER CARD
+       ============================================= */
+    .offer-box {
+      background: rgba(0,0,0,.14);
+      border-radius: 14px; padding: 14px; margin: 14px 0;
+    }
+    .offer-row { display: flex; justify-content: space-between; align-items: center; padding: 7px 0; }
+    .offer-lbl { font-size: 12.5px; color: rgba(255,255,255,.68); }
+    .offer-val { font-size: 17px; font-weight: 800; color: white; }
+    .offer-val.grn { color: var(--green); }
+    .offer-div { height: 1px; background: rgba(255,255,255,.09); margin: 3px 0; }
+    .offer-promo {
+      font-size: 11.5px; color: rgba(255,255,255,.65);
+      margin-top: 9px; padding-top: 9px;
+      border-top: 1px solid rgba(255,255,255,.09);
+      line-height: 1.55;
+    }
+    .offer-promo strong { color: var(--green); }
+
+    .dev-icon { font-size: 38px; text-align: center; margin-bottom: 10px; }
+
+    /* =============================================
+       NO ACC STEPS
+       ============================================= */
+    .steps-list { display: flex; flex-direction: column; gap: 11px; margin: 14px 0 18px; }
+    .step-item  { display: flex; align-items: flex-start; gap: 11px; }
+    .step-num {
+      width: 26px; height: 26px; border-radius: 50%;
+      background: var(--green); color: #1a4500;
+      font-size: 12px; font-weight: 800;
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0; margin-top: 1px;
+    }
+    .step-txt { font-size: 13.5px; color: rgba(255,255,255,.82); line-height: 1.5; }
+
+    /* =============================================
+       BRAVO
+       ============================================= */
+    .bravo-card { text-align: center; padding: 30px 22px; }
+
+    .bravo-num {
+      font-size: 86px; font-weight: 900; color: var(--green); line-height: 1;
+      text-shadow: 0 0 60px rgba(125,217,64,.45);
+      animation: popIn .5s cubic-bezier(.34,1.56,.64,1) both;
+    }
+    .bravo-title {
+      font-size: 44px; font-weight: 900; color: white;
+      letter-spacing: 3px;
+      animation: popIn .5s .1s cubic-bezier(.34,1.56,.64,1) both;
+    }
+    .bravo-sub { font-size: 13px; color: rgba(255,255,255,.65); margin: 8px 0 4px; }
+    .bravo-sav-row {
+      display: flex; align-items: baseline; justify-content: center;
+      gap: 5px; margin: 4px 0 6px;
+      animation: popIn .5s .2s cubic-bezier(.34,1.56,.64,1) both;
+    }
+    .bravo-sav-amt { font-size: 50px; font-weight: 900; color: var(--green); line-height: 1; }
+    .bravo-sav-per { font-size: 17px; font-weight: 600; color: rgba(255,255,255,.65); }
+    .bravo-lbl { font-size: 12.5px; color: rgba(255,255,255,.48); margin-bottom: 22px; }
+
+    @keyframes popIn {
+      0%   { transform: scale(.4); opacity: 0; }
+      100% { transform: scale(1); opacity: 1; }
+    }
+
+    /* =============================================
+       FINAL
+       ============================================= */
+    .final-cmp {
+      display: flex; flex-direction: column; align-items: center; gap: 7px;
+      background: rgba(0,0,0,.12);
+      border-radius: 14px; padding: 14px; margin: 14px 0;
+    }
+    .cmp-item { width: 100%; text-align: center; }
+    .cmp-lbl {
+      font-size: 10px; font-weight: 600;
+      text-transform: uppercase; letter-spacing: 1.5px;
+      color: rgba(255,255,255,.45); margin-bottom: 3px;
+    }
+    .cmp-amt { font-size: 26px; font-weight: 800; }
+    .cmp-amt.old { color: rgba(255,255,255,.4); text-decoration: line-through; }
+    .cmp-amt.new { color: var(--green); }
+    .cmp-arrow { font-size: 20px; color: var(--green); }
+
+    .final-total {
+      background: rgba(125,217,64,.11);
+      border: 1.5px solid rgba(125,217,64,.28);
+      border-radius: 14px; padding: 16px;
+      text-align: center; margin: 10px 0;
+    }
+    .tot-lbl {
+      font-size: 10px; font-weight: 600;
+      text-transform: uppercase; letter-spacing: 1.5px;
+      color: rgba(255,255,255,.55); margin-bottom: 3px;
+    }
+    .tot-amt { font-size: 50px; font-weight: 900; color: var(--green); line-height: 1; }
+
+    .final-items { display: flex; flex-direction: column; gap: 7px; margin: 10px 0; }
+    .final-item {
+      display: flex; align-items: center; gap: 9px;
+      font-size: 13.5px; color: rgba(255,255,255,.8);
+      background: rgba(255,255,255,.07);
+      border-radius: 10px; padding: 9px 13px;
+    }
+    .fi-check { color: var(--green); font-weight: 800; font-size: 15px; }
+
+    .final-msg {
+      margin-top: 18px; padding-top: 18px;
+      border-top: 1px solid rgba(255,255,255,.1);
+      font-size: 13.5px; font-style: italic;
+      color: rgba(255,255,255,.5);
+      line-height: 1.6; text-align: center;
+    }
+
+    /* =============================================
+       RESPONSIVE
+       ============================================= */
+    @media (min-width: 768px) {
+      .app { padding: 32px 24px 100px; }
+      .screen { max-width: 560px; }
+      .welcome-title { font-size: 42px; }
+      .bill-num { font-size: 96px; }
+      .card { padding: 30px 26px; }
+      .bravo-title { font-size: 52px; }
+      .bravo-num { font-size: 100px; }
+    }
+    @media (max-width: 400px) {
+      .bill-num { font-size: 64px; }
+      .welcome-title { font-size: 27px; }
+    }
+  </style>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel">
+const { useState, useEffect, useRef, useCallback } = React;
+
+// ─── Animated bill counter ─────────────────────
+function useAnimatedBill(target) {
+  const [cur, setCur]     = useState(target);
+  const fromRef           = useRef(target);
+  const rafRef            = useRef(null);
+
+  useEffect(() => {
+    if (fromRef.current === target) return;
+    const from     = fromRef.current;
+    const duration = 1400;
+    const t0       = performance.now();
+
+    const animate = (now) => {
+      const p = Math.min((now - t0) / duration, 1);
+      const e = 1 - Math.pow(1 - p, 4);
+      setCur(Math.round(from + (target - from) * e));
+      if (p < 1) { rafRef.current = requestAnimationFrame(animate); }
+      else        { fromRef.current = target; }
+    };
+
+    if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    rafRef.current = requestAnimationFrame(animate);
+    return () => rafRef.current && cancelAnimationFrame(rafRef.current);
+  }, [target]);
+
+  return cur;
+}
+
+// ─── Fireworks ────────────────────────────────
+function Fireworks({ final = false }) {
+  useEffect(() => {
+    const colors  = ['#7dd940','#00c4c4','#ffffff','#ffd700','#a3ed6a','#0891b2'];
+    const dur     = final ? 1000 : 1000;
+    const end     = Date.now() + dur;
+
+    const burst = () => {
+      if (Date.now() > end) return;
+      confetti({ particleCount: final?18:13, angle:60,  spread:55, origin:{x:0, y:.65}, colors, startVelocity:final?45:32, gravity:.85, ticks:180 });
+      confetti({ particleCount: final?18:13, angle:120, spread:55, origin:{x:1, y:.65}, colors, startVelocity:final?45:32, gravity:.85, ticks:180 });
+      if (final) confetti({ particleCount:9, spread:360, origin:{x:Math.random(), y:Math.random()*.4}, colors, startVelocity:20, gravity:.6, ticks:160 });
+      requestAnimationFrame(burst);
+    };
+
+    confetti({ particleCount:final?37:23, spread:80, origin:{x:.5,y:.55}, colors, startVelocity:50, gravity:.9, ticks:220 });
+    const h = setTimeout(burst, 200);
+    return () => clearTimeout(h);
+  }, [final]);
+
+  return null;
+}
+
+// ─── Logo ─────────────────────────────────────
+function Logo({ width = 135 }) {
+  const iw = Math.round(width * .28);
+  const ts = Math.round(width * .165);
+  return (
+    <div style={{ display:'flex', alignItems:'center', gap:9 }}>
+      <svg width={iw} height={iw} viewBox="0 0 48 48" fill="none">
+        <path d="M24,3 C24,3 26.5,13.5 29.5,16.5 C32.5,19.5 45,22 45,22 C45,22 32.5,24.5 29.5,27.5 C26.5,30.5 24,41 24,41 C24,41 21.5,30.5 18.5,27.5 C15.5,24.5 3,22 3,22 C3,22 15.5,19.5 18.5,16.5 C21.5,13.5 24,3 24,3 Z" fill="white"/>
+        <path d="M39,5 C39,5 40.2,9.5 41.8,11.2 C43.5,13 48,14 48,14 C48,14 43.5,15 41.8,16.8 C40.2,18.5 39,23 39,23 C39,23 37.8,18.5 36.2,16.8 C34.5,15 30,14 30,14 C30,14 34.5,13 36.2,11.2 C37.8,9.5 39,5 39,5 Z" fill="white" opacity=".85"/>
+        <path d="M9,31 C9,31 10,34.5 11.2,35.8 C12.5,37 16,37.5 16,37.5 C16,37.5 12.5,38 11.2,39.2 C10,40.5 9,44 9,44 C9,44 8,40.5 6.8,39.2 C5.5,38 2,37.5 2,37.5 C2,37.5 5.5,37 6.8,35.8 C8,34.5 9,31 9,31 Z" fill="white" opacity=".65"/>
+      </svg>
+      <span style={{ fontFamily:"'Poppins',sans-serif", fontWeight:900, fontSize:ts, color:'white', letterSpacing:'.06em', lineHeight:1 }}>
+        STARVOLT
+      </span>
+    </div>
+  );
+}
+
+// ─── Map ACC (SVG stylisée Lyon) ──────────────
+function MapACC() {
+  return (
+    <div className="map-container">
+      <svg viewBox="0 0 320 210" style={{ width:'100%', display:'block' }}>
+        <defs>
+          <linearGradient id="mg" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%"   stopColor="#053f52"/>
+            <stop offset="100%" stopColor="#09705e"/>
+          </linearGradient>
+          <pattern id="grid" width="24" height="24" patternUnits="userSpaceOnUse">
+            <path d="M24 0 L0 0 0 24" fill="none" stroke="rgba(255,255,255,.07)" strokeWidth=".6"/>
+          </pattern>
+          <filter id="glow">
+            <feGaussianBlur stdDeviation="3" result="b"/>
+            <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+          </filter>
+          <clipPath id="mc"><rect width="320" height="210" rx="14"/></clipPath>
+        </defs>
+
+        <g clipPath="url(#mc)">
+          <rect width="320" height="210" fill="url(#mg)"/>
+          <rect width="320" height="210" fill="url(#grid)"/>
+
+          {/* Streets */}
+          <line x1="0" y1="105" x2="320" y2="105" stroke="rgba(255,255,255,.11)" strokeWidth="3"/>
+          <line x1="160" y1="0" x2="160" y2="210" stroke="rgba(255,255,255,.11)" strokeWidth="3"/>
+          <line x1="0" y1="52"  x2="320" y2="52"  stroke="rgba(255,255,255,.06)" strokeWidth="1.5"/>
+          <line x1="0" y1="158" x2="320" y2="158" stroke="rgba(255,255,255,.06)" strokeWidth="1.5"/>
+          <line x1="80"  y1="0" x2="80"  y2="210" stroke="rgba(255,255,255,.06)" strokeWidth="1.5"/>
+          <line x1="240" y1="0" x2="240" y2="210" stroke="rgba(255,255,255,.06)" strokeWidth="1.5"/>
+          <line x1="0"   y1="18"  x2="115" y2="105" stroke="rgba(255,255,255,.04)" strokeWidth="1.5"/>
+          <line x1="205" y1="105" x2="320" y2="188" stroke="rgba(255,255,255,.04)" strokeWidth="1.5"/>
+
+          {/* Zone ACC fill */}
+          <circle cx="155" cy="110" r="82" fill="rgba(125,217,64,.05)"/>
+          {/* Zone ACC circle */}
+          <circle cx="155" cy="110" r="82" fill="none" stroke="#7dd940" strokeWidth="1.8" strokeDasharray="7 4" opacity=".82"/>
+
+          {/* 2km label */}
+          <rect x="128" y="20" width="54" height="17" rx="8.5" fill="rgba(125,217,64,.18)"/>
+          <text x="155" y="31.5" textAnchor="middle" fill="#7dd940" fontSize="10" fontFamily="Poppins,sans-serif" fontWeight="700">⌀ 2 km</text>
+
+          {/* Link house → PV */}
+          <line x1="148" y1="118" x2="205" y2="80" stroke="#7dd940" strokeWidth="1.5" strokeDasharray="5 4" opacity=".5"/>
+
+          {/* Animated energy dot */}
+          <circle r="3" fill="#7dd940" opacity=".9">
+            <animateMotion dur="2.5s" repeatCount="indefinite" path="M205,80 L148,118"/>
+          </circle>
+
+          {/* House */}
+          <g transform="translate(126,98)" filter="url(#glow)">
+            <circle cx="14" cy="14" r="17" fill="rgba(255,255,255,.11)"/>
+            <rect x="4" y="13" width="20" height="14" rx="2" fill="white" opacity=".93"/>
+            <polygon points="14,2 28,13 0,13" fill="white" opacity=".93"/>
+            <rect x="10" y="19" width="8" height="8" rx="1" fill="#0a9b8c"/>
+            <rect x="4"  y="15" width="5" height="5" rx="1" fill="#0a9b8c" opacity=".7"/>
+          </g>
+          <text x="140" y="137" textAnchor="middle" fill="white" fontSize="9" fontFamily="Poppins,sans-serif" fontWeight="600" opacity=".88">Chez Marie</text>
+
+          {/* PV Site */}
+          <g transform="translate(191,63)" filter="url(#glow)">
+            <circle cx="14" cy="14" r="17" fill="rgba(255,220,0,.14)"/>
+            <circle cx="14" cy="14" r="7" fill="#ffd700"/>
+            <line x1="14" y1="2"  x2="14" y2="6"  stroke="#ffd700" strokeWidth="2" strokeLinecap="round"/>
+            <line x1="14" y1="22" x2="14" y2="26" stroke="#ffd700" strokeWidth="2" strokeLinecap="round"/>
+            <line x1="2"  y1="14" x2="6"  y2="14" stroke="#ffd700" strokeWidth="2" strokeLinecap="round"/>
+            <line x1="22" y1="14" x2="26" y2="14" stroke="#ffd700" strokeWidth="2" strokeLinecap="round"/>
+            <line x1="5"  y1="5"  x2="8"  y2="8"  stroke="#ffd700" strokeWidth="1.5" strokeLinecap="round"/>
+            <line x1="20" y1="20" x2="23" y2="23" stroke="#ffd700" strokeWidth="1.5" strokeLinecap="round"/>
+            <line x1="23" y1="5"  x2="20" y2="8"  stroke="#ffd700" strokeWidth="1.5" strokeLinecap="round"/>
+            <line x1="8"  y1="20" x2="5"  y2="23" stroke="#ffd700" strokeWidth="1.5" strokeLinecap="round"/>
+          </g>
+          <text x="205" y="96" textAnchor="middle" fill="white" fontSize="9" fontFamily="Poppins,sans-serif" fontWeight="600" opacity=".88">Site PV</text>
+
+          {/* Lyon label */}
+          <text x="12" y="200" fill="rgba(255,255,255,.22)" fontSize="9" fontFamily="Poppins,sans-serif">Lyon, France</text>
+          {/* North */}
+          <text x="302" y="22" textAnchor="middle" fill="rgba(255,255,255,.3)" fontSize="10" fontFamily="Poppins,sans-serif" fontWeight="700">N</text>
+          <line x1="302" y1="24" x2="302" y2="34" stroke="rgba(255,255,255,.22)" strokeWidth="1"/>
+        </g>
+      </svg>
+    </div>
+  );
+}
+
+// ─── BillMeter ────────────────────────────────
+function BillMeter({ bill, initialBill }) {
+  const d    = useAnimatedBill(bill);
+  const save = bill < initialBill;
+  const eco  = initialBill - bill;
+  return (
+    <div className="bill-meter">
+      <div className="bill-label">Votre facture annuelle</div>
+      <div className="bill-amount-row">
+        <span className={`bill-num ${save ? 'saving' : ''}`}>{d.toLocaleString('fr-FR')}</span>
+        <span className="bill-cur">€</span>
+      </div>
+      <div className="bill-period">par an</div>
+      {save && <div className="savings-badge">🌱 Économies : {eco.toLocaleString('fr-FR')} €/an</div>}
+    </div>
+  );
+}
+
+// ─── BackButton ───────────────────────────────
+const BackBtn = ({ onBack }) => (
+  <button className="back-btn" onClick={onBack}>← Retour</button>
+);
+
+// ─── SCREENS ──────────────────────────────────
+
+function WelcomeScreen({ state, onStart }) {
+  const [name, setName] = useState(state.name);
+  const [city, setCity] = useState(state.city);
+  const [bill, setBill] = useState(state.initialBill);
+  return (
+    <div className="screen fade-in">
+      <div className="welcome-header">
+        <div className="welcome-tag">Simulation personnalisée</div>
+        <h1 className="welcome-title">
+          Combien pouvez-vous<br/>économiser avec<br/>
+          <span className="accent">Starvolt</span> ?
+        </h1>
+        <p className="welcome-sub">Répondez à quelques questions et regardez votre facture fondre.</p>
+      </div>
+
+      <div className="form-card">
+        <div className="inp-group">
+          <label className="inp-label">Votre nom</label>
+          <input className="inp" value={name} onChange={e=>setName(e.target.value)} placeholder="Marie Dupont"/>
+        </div>
+        <div className="inp-group">
+          <label className="inp-label">Votre ville</label>
+          <input className="inp" value={city} onChange={e=>setCity(e.target.value)} placeholder="Lyon"/>
+        </div>
+        <div className="inp-group">
+          <label className="inp-label">Facture électricité (€/an)</label>
+          <div className="bill-wrap">
+            <input className="inp" type="number" value={bill}
+              onChange={e=>setBill(Math.max(0,Number(e.target.value)||0))} min="0" max="20000"/>
+            <span className="bill-sfx">€/an</span>
+          </div>
+        </div>
+      </div>
+
+      <button className="btn btn-primary"
+        onClick={()=>onStart({ name:name||'Marie Dupont', city:city||'Lyon', bill:bill||2000 })}>
+        Calculer mes économies →
+      </button>
+    </div>
+  );
+}
+
+function AddressScreen({ state, onHasACC, onNoACC, onBack }) {
+  const [phase,   setPhase]   = useState('input');   // 'input' | 'checking' | 'result'
+  const [address, setAddress] = useState('74 rue Gabriel Péri, Montrouge');
+
+  const handleCheck = () => {
+    setPhase('checking');
+    setTimeout(() => setPhase('result'), 2000);
+  };
+
+  return (
+    <div className="screen fade-in">
+      <BackBtn onBack={onBack}/>
+      <BillMeter bill={state.bill} initialBill={state.initialBill}/>
+
+      {phase === 'input' && (
+        <div className="card fade-in">
+          <h2 className="screen-title">Votre adresse</h2>
+          <p className="screen-sub">
+            Renseignez votre adresse pour savoir si votre logement se trouve dans une boucle d'autoconsommation collective (ACC).
+          </p>
+          <div className="inp-group" style={{marginBottom:16}}>
+            <label className="inp-label">Adresse</label>
+            <input
+              className="inp"
+              value={address}
+              onChange={e => setAddress(e.target.value)}
+              placeholder="74 rue Gabriel Péri, Montrouge"
+            />
+          </div>
+          <button className="btn btn-primary" onClick={handleCheck}>
+            📍 Vérifier si cette adresse est dans une boucle ACC
+          </button>
+        </div>
+      )}
+
+      {phase === 'checking' && (
+        <div className="loading-card fade-in">
+          <div className="spinner"/>
+          <p>Analyse en cours…</p>
+          <p className="sub">📍 {address}</p>
+        </div>
+      )}
+
+      {phase === 'result' && (
+        <div className="card fade-in">
+          <div className="addr-found">
+            <div className="addr-icon">🏠</div>
+            <div className="addr-text">
+              <strong>{address}</strong>
+              <span>{state.name}</span>
+            </div>
+          </div>
+          <div className="badge success" style={{marginTop:4}}>✨ Bonne nouvelle !</div>
+          <h2 className="screen-title">Vous êtes bien dans une boucle ACC</h2>
+          <p className="screen-sub">
+            Votre adresse est éligible à l'autoconsommation collective. Vous pouvez accéder à de l'énergie locale produite à moins de 2 km.
+          </p>
+          <div className="btn-group">
+            <button className="btn btn-yes" onClick={onHasACC}>✅ Super, je veux en profiter !</button>
+            <button className="btn btn-no"  onClick={onNoACC}>❌ Non merci, pas maintenant</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ACCMapScreen({ state, onContinue, onBack }) {
+  const firstName = state.name.split(' ')[0];
+  return (
+    <div className="screen fade-in">
+      <BackBtn onBack={onBack}/>
+      <BillMeter bill={state.bill} initialBill={state.initialBill}/>
+      <div className="card">
+        <div className="badge success">✨ Excellente nouvelle !</div>
+        <h2 className="screen-title">Votre logement est dans une boucle ACC</h2>
+        <p className="screen-sub">Vous partagez de l'énergie locale avec des producteurs à moins de 2 km de chez vous.</p>
+        <MapACC/>
+        <div className="map-legend">
+          <div className="leg-item"><div className="leg-dot house">🏠</div><span>Logement de {firstName}</span></div>
+          <div className="leg-item"><div className="leg-dot pv">☀️</div><span>Site de production photovoltaïque</span></div>
+          <div className="leg-item"><div className="leg-dot zone">⬤</div><span>Zone ACC — rayon de 2 km</span></div>
+        </div>
+        <button className="btn btn-primary" onClick={onContinue}>Voir mon tarif ACC →</button>
+      </div>
+    </div>
+  );
+}
+
+function ACCTariffScreen({ state, onYes, onNo, onBack }) {
+  return (
+    <div className="screen fade-in">
+      <BackBtn onBack={onBack}/>
+      <BillMeter bill={state.bill} initialBill={state.initialBill}/>
+      <div className="card">
+        <h2 className="screen-title">Votre tarif ACC</h2>
+        <p className="screen-sub">En rejoignant la boucle ACC, vous accédez à un tarif préférentiel fourni par le producteur local.</p>
+        <div className="tariff-box">
+          <div className="tariff-row">
+            <span className="tariff-lbl">Tarif actuel (fournisseur)</span>
+            <span className="tariff-val old">~0,25 €/kWh</span>
+          </div>
+          <div className="tariff-arrow">↓</div>
+          <div className="tariff-row">
+            <span className="tariff-lbl">Tarif ACC disponible</span>
+            <span className="tariff-val grn">~0,16 €/kWh</span>
+          </div>
+        </div>
+        <div className="saving-est">
+          <div className="sav-lbl">Économie estimée</div>
+          <div className="sav-amt">185 €<span style={{fontSize:18,fontWeight:600}}>/an</span></div>
+          <div className="sav-note">Sans aucun investissement</div>
+        </div>
+        <h3 className="q-title">Le tarif ACC vous intéresse-t-il ?</h3>
+        <div className="btn-group">
+          <button className="btn btn-yes" onClick={onYes}>✅ Oui, c'est intéressant !</button>
+          <button className="btn btn-no"  onClick={onNo}>❌ Non, pas pour moi</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function NotInterestedScreen({ state, onContinue, onBack }) {
+  return (
+    <div className="screen fade-in">
+      <BackBtn onBack={onBack}/>
+      <BillMeter bill={state.bill} initialBill={state.initialBill}/>
+      <div className="card">
+        <div className="badge info">👀 Pas de problème</div>
+        <h2 className="screen-title">Nous restons attentifs</h2>
+        <p className="screen-sub">Nous suivons l'évolution des tarifs ACC et vous recontacterons dès qu'une offre mieux adaptée sera disponible.</p>
+        <button className="btn btn-primary" onClick={onContinue}>Voir d'autres options →</button>
+      </div>
+    </div>
+  );
+}
+
+function NoACCScreen({ state, onContinue, onBack }) {
+  return (
+    <div className="screen fade-in">
+      <BackBtn onBack={onBack}/>
+      <BillMeter bill={state.bill} initialBill={state.initialBill}/>
+      <div className="card">
+        <div className="badge info">💡 Pas encore… mais bientôt !</div>
+        <h2 className="screen-title">Créons votre boucle ACC</h2>
+        <p className="screen-sub">Starvolt peut créer une boucle ACC autour de votre logement.</p>
+        <div className="steps-list">
+          <div className="step-item"><div className="step-num">1</div><div className="step-txt">Starvolt référence votre logement comme point de consommation</div></div>
+          <div className="step-item"><div className="step-num">2</div><div className="step-txt">D'autres citoyens et collectivités rejoignent la boucle</div></div>
+          <div className="step-item"><div className="step-num">3</div><div className="step-txt">Vous commencez à économiser dès que la boucle est active</div></div>
+        </div>
+        <button className="btn btn-primary" onClick={onContinue}>Continuer la simulation →</button>
+      </div>
+    </div>
+  );
+}
+
+function ComwattScreen({ state, onYes, onNo, onBack }) {
+  return (
+    <div className="screen fade-in">
+      <BackBtn onBack={onBack}/>
+      <BillMeter bill={state.bill} initialBill={state.initialBill}/>
+      <div className="card">
+        <div className="dev-icon">📦</div>
+        <h2 className="screen-title">Box Comwatt</h2>
+        <p className="screen-sub">La box Comwatt maximise l'énergie ACC consommée et alimente votre cagnotte flexibilité.</p>
+        <div className="offer-box">
+          <div className="offer-row">
+            <span className="offer-lbl">Gain annuel supplémentaire</span>
+            <span className="offer-val grn">+ 200 €/an</span>
+          </div>
+          <div className="offer-div"/>
+          <div className="offer-row">
+            <span className="offer-lbl">Investissement initial</span>
+            <span className="offer-val">550 € TTC</span>
+          </div>
+          <div className="offer-promo">🎁 Ou <strong>gratuit</strong> si vous renoncez à votre cagnotte Flex pendant 3 ans</div>
+        </div>
+        <h3 className="q-title">Souhaitez-vous installer une box Comwatt ?</h3>
+        <div className="btn-group">
+          <button className="btn btn-yes" onClick={onYes}>✅ Oui, je veux la box !</button>
+          <button className="btn btn-no"  onClick={onNo}>❌ Non merci</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SolarScreen({ state, onYes, onNo, onBack }) {
+  return (
+    <div className="screen fade-in">
+      <BackBtn onBack={onBack}/>
+      <BillMeter bill={state.bill} initialBill={state.initialBill}/>
+      <div className="card">
+        <div className="dev-icon">☀️</div>
+        <h2 className="screen-title">Panneaux solaires + Batterie</h2>
+        <p className="screen-sub">Produisez votre propre électricité et stockez l'excédent. La solution la plus ambitieuse.</p>
+        <div className="offer-box">
+          <div className="offer-row">
+            <span className="offer-lbl">Réduction de facture</span>
+            <span className="offer-val grn">− 1 000 €/an</span>
+          </div>
+          <div className="offer-div"/>
+          <div className="offer-row">
+            <span className="offer-lbl">Investissement initial</span>
+            <span className="offer-val">10 000 € TTC</span>
+          </div>
+        </div>
+        <h3 className="q-title">Souhaitez-vous investir dans le solaire ?</h3>
+        <div className="btn-group">
+          <button className="btn btn-yes" onClick={onYes}>✅ Oui, je veux le solaire !</button>
+          <button className="btn btn-no"  onClick={onNo}>❌ Non, peut-être plus tard</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function BravoScreen({ state, stepNumber, saving, label, onContinue, onBack }) {
+  return (
+    <div className="screen fade-in">
+      <Fireworks/>
+      <BackBtn onBack={onBack}/>
+      <BillMeter bill={state.bill} initialBill={state.initialBill}/>
+      <div className="card bravo-card">
+        <div className="bravo-num">{stepNumber}</div>
+        <h1 className="bravo-title">BRAVO !</h1>
+        <p className="bravo-sub">En un seul clic vous venez de gagner</p>
+        <div className="bravo-sav-row">
+          <span className="bravo-sav-amt">+{saving.toLocaleString('fr-FR')} €</span>
+          <span className="bravo-sav-per">par an</span>
+        </div>
+        <p className="bravo-lbl">{label}</p>
+        <button className="btn btn-primary" onClick={onContinue}>Continuer →</button>
+      </div>
+    </div>
+  );
+}
+
+function FinalScreen({ state, onRestart }) {
+  const savings = state.initialBill - state.bill;
+  return (
+    <div className="screen fade-in">
+      <Fireworks final/>
+      <BillMeter bill={state.bill} initialBill={state.initialBill}/>
+      <div className="card">
+        <h2 className="screen-title" style={{marginBottom:2}}>Récapitulatif</h2>
+        <p className="screen-sub" style={{marginBottom:0}}>
+          Voici ce que Starvolt peut faire pour {state.name.split(' ')[0]}
+        </p>
+
+        <div className="final-cmp">
+          <div className="cmp-item">
+            <div className="cmp-lbl">Facture initiale</div>
+            <div className="cmp-amt old">{state.initialBill.toLocaleString('fr-FR')} €/an</div>
+          </div>
+          <div className="cmp-arrow">↓</div>
+          <div className="cmp-item">
+            <div className="cmp-lbl">Avec Starvolt</div>
+            <div className="cmp-amt new">{state.bill.toLocaleString('fr-FR')} €/an</div>
+          </div>
+        </div>
+
+        {savings > 0 && (
+          <div className="final-total">
+            <div className="tot-lbl">Économies totales</div>
+            <div className="tot-amt">
+              {savings.toLocaleString('fr-FR')} €<span style={{fontSize:20,fontWeight:600}}>/an</span>
+            </div>
+          </div>
+        )}
+
+        {state.bravoItems.length > 0 && (
+          <div className="final-items">
+            {state.bravoItems.map((item,i) => (
+              <div key={i} className="final-item">
+                <span className="fi-check">✓</span>
+                <span>{item}</span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <div className="final-msg">
+          "Ceci n'est qu'une simulation, mais bientôt, tout sera réel."
+        </div>
+
+        <div style={{marginTop:18}}>
+          <button className="btn btn-sec" onClick={onRestart}>🔄 Recommencer la simulation</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── MAIN APP — Machine d'états ──────────────
+
+const INIT = {
+  screen:      'WELCOME',
+  name:        'Marie Dupont',
+  city:        'Lyon',
+  initialBill: 2000,
+  bill:        2000,
+  bravoItems:  [],
+};
+
+function App() {
+  const [state,   setState]   = useState(INIT);
+  const [history, setHistory] = useState([]);
+
+  const goTo = useCallback((screen, updates = {}) => {
+    setHistory(h => [...h, state]);
+    setState(s => ({ ...s, screen, ...updates }));
+    window.scrollTo({ top:0, behavior:'smooth' });
+  }, [state]);
+
+  const goBack = useCallback(() => {
+    if (!history.length) return;
+    const prev = history[history.length - 1];
+    setHistory(h => h.slice(0,-1));
+    setState(prev);
+    window.scrollTo({ top:0, behavior:'smooth' });
+  }, [history]);
+
+  const render = () => {
+    switch (state.screen) {
+
+      case 'WELCOME':
+        return <WelcomeScreen state={state}
+          onStart={({name,city,bill})=>goTo('ADDRESS',{name,city,initialBill:bill,bill,bravoItems:[]})} />;
+
+      case 'ADDRESS':
+        return <AddressScreen state={state}
+          onHasACC={()=>goTo('ACC_MAP',{hasACC:true})}
+          onNoACC={()=>goTo('NO_ACC',{hasACC:false})}
+          onBack={goBack} />;
+
+      case 'ACC_MAP':
+        return <ACCMapScreen state={state} onContinue={()=>goTo('ACC_TARIFF')} onBack={goBack}/>;
+
+      case 'ACC_TARIFF':
+        return <ACCTariffScreen state={state}
+          onYes={()=>goTo('BRAVO_1',{ bill:state.bill-185, bravoItems:[...state.bravoItems,'Tarif ACC : −185 €/an'] })}
+          onNo={()=>goTo('NOT_INTERESTED')}
+          onBack={goBack}/>;
+
+      case 'NOT_INTERESTED':
+        return <NotInterestedScreen state={state} onContinue={()=>goTo('COMWATT')} onBack={goBack}/>;
+
+      case 'NO_ACC':
+        return <NoACCScreen state={state} onContinue={()=>goTo('SOLAR')} onBack={goBack}/>;
+
+      case 'BRAVO_1':
+        return <BravoScreen state={state} stepNumber={1} saving={185} label="Grâce au tarif ACC"
+          onContinue={()=>goTo('COMWATT')} onBack={goBack}/>;
+
+      case 'COMWATT':
+        return <ComwattScreen state={state}
+          onYes={()=>goTo('BRAVO_2',{ bill:state.bill-200, bravoItems:[...state.bravoItems,'Box Comwatt : −200 €/an'] })}
+          onNo={()=>goTo('SOLAR')}
+          onBack={goBack}/>;
+
+      case 'BRAVO_2':
+        return <BravoScreen state={state} stepNumber={2} saving={200} label="Grâce à la box Comwatt"
+          onContinue={()=>goTo('SOLAR')} onBack={goBack}/>;
+
+      case 'SOLAR':
+        return <SolarScreen state={state}
+          onYes={()=>goTo('BRAVO_3',{ bill:state.bill-1000, bravoItems:[...state.bravoItems,'Solaire + batterie : −1 000 €/an'] })}
+          onNo={()=>goTo('FINAL')}
+          onBack={goBack}/>;
+
+      case 'BRAVO_3':
+        return <BravoScreen state={state} stepNumber={3} saving={1000} label="Grâce aux panneaux solaires"
+          onContinue={()=>goTo('FINAL')} onBack={goBack}/>;
+
+      case 'FINAL':
+        return <FinalScreen state={state} onRestart={()=>{ setHistory([]); setState(INIT); }}/>;
+
+      default: return null;
+    }
+  };
+
+  return (
+    <div className="app">
+      <div className="chevrons-deco" aria-hidden="true">
+        {['»','»','»','»'].map((c,i)=><span key={i}>{c}</span>)}
+      </div>
+
+      {render()}
+
+      <div className="logo-fixed">
+        <Logo width={130}/>
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+</script>
+</body>
+</html>
