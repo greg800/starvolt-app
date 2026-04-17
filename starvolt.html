@@ -812,44 +812,45 @@ function WelcomeScreen({ state, onStart }) {
   const [bill,    setBill]    = useState(state.initialBill);
   const [address, setAddress] = useState(state.address);
   return (
-    <div className="screen fade-in">
-      <div className="welcome-header">
-        <div className="welcome-tag">Simulation personnalisée</div>
-        <h1 className="welcome-title">
-          Combien pouvez-vous<br/>économiser avec<br/>
-          <span className="accent">Starvolt</span> ?
-        </h1>
-        <p className="welcome-sub">Renseignez vos informations pour calculer vos économies.</p>
-      </div>
-
-      <div className="form-card">
-        <div className="inp-group">
-          <label className="inp-label">Votre nom</label>
-          <input className="inp" value={name} onChange={e=>setName(e.target.value)} placeholder="Marie Dupont"/>
+    <>
+      <div className="screen fade-in">
+        <div className="welcome-header">
+          <div className="welcome-tag">Simulation personnalisée</div>
+          <h1 className="welcome-title">
+            Combien pouvez-vous<br/>économiser avec<br/>
+            <span className="accent">Starvolt</span> ?
+          </h1>
+          <p className="welcome-sub">Renseignez vos informations pour calculer vos économies.</p>
         </div>
-        <div className="inp-group">
-          <label className="inp-label">Facture électricité (€/an)</label>
-          <div className="bill-wrap">
-            <input className="inp" type="number" value={bill}
-              onChange={e=>setBill(Math.max(0,Number(e.target.value)||0))} min="0" max="20000"/>
-            <span className="bill-sfx">€/an</span>
+
+        <div className="form-card">
+          <div className="inp-group">
+            <label className="inp-label">Votre nom</label>
+            <input className="inp" value={name} onChange={e=>setName(e.target.value)} placeholder="Marie Dupont"/>
+          </div>
+          <div className="inp-group">
+            <label className="inp-label">Facture électricité (€/an)</label>
+            <div className="bill-wrap">
+              <input className="inp" type="number" value={bill}
+                onChange={e=>setBill(Math.max(0,Number(e.target.value)||0))} min="0" max="20000"/>
+              <span className="bill-sfx">€/an</span>
+            </div>
+          </div>
+          <div className="inp-group">
+            <label className="inp-label">Adresse</label>
+            <input className="inp" value={address}
+              onChange={e=>setAddress(e.target.value)}
+              placeholder="74 rue Gabriel Péri, Montrouge"/>
           </div>
         </div>
-        <div className="inp-group">
-          <label className="inp-label">Adresse</label>
-          <input className="inp" value={address}
-            onChange={e=>setAddress(e.target.value)}
-            placeholder="74 rue Gabriel Péri, Montrouge"/>
-        </div>
       </div>
-
       <StickyFooter>
         <button className="btn btn-primary"
           onClick={()=>onStart({ name:name||'Marie Dupont', bill:bill||2000, address:address||'74 rue Gabriel Péri, Montrouge' })}>
           📍 Vérifier si cette adresse est dans une boucle d'autoconsommation collective
         </button>
       </StickyFooter>
-    </div>
+    </>
   );
 }
 
@@ -860,217 +861,218 @@ function EligibleScreen({ state, saving, onYes, onNo, onBack }) {
   const firstName = state.name.split(' ')[0];
 
   return (
-    <div className="screen fade-in">
-      <BackBtn onBack={onBack}/>
-      <BillMeter bill={state.bill} initialBill={state.initialBill}/>
+    <>
+      <div className="screen fade-in">
+        <BackBtn onBack={onBack}/>
+        <BillMeter bill={state.bill} initialBill={state.initialBill}/>
 
-      {!ready ? (
-        <div className="loading-card fade-in">
-          <div className="spinner"/>
-          <p>Vérification en cours…</p>
-          <p className="sub">📍 {state.address}</p>
-        </div>
-      ) : (
-        <div className="card fade-in">
-
-          {/* ── 1. Message éligibilité ── */}
-          <div className="badge success">✨ Bonne nouvelle !</div>
-          <h2 className="screen-title" style={{marginBottom:4}}>
-            Cette adresse est éligible à l'autoconsommation collective
-          </h2>
-          <div className="addr-found" style={{marginBottom:0, marginTop:12}}>
-            <div className="addr-icon">📍</div>
-            <div className="addr-text">
-              <strong>{state.address}</strong>
-              <span>{state.name}</span>
+        {!ready ? (
+          <div className="loading-card fade-in">
+            <div className="spinner"/>
+            <p>Vérification en cours…</p>
+            <p className="sub">📍 {state.address}</p>
+          </div>
+        ) : (
+          <div className="card fade-in">
+            <div className="badge success">✨ Bonne nouvelle !</div>
+            <h2 className="screen-title" style={{marginBottom:4}}>
+              Cette adresse est éligible à l'autoconsommation collective
+            </h2>
+            <div className="addr-found" style={{marginBottom:0, marginTop:12}}>
+              <div className="addr-icon">📍</div>
+              <div className="addr-text">
+                <strong>{state.address}</strong>
+                <span>{state.name}</span>
+              </div>
+            </div>
+            <MapACC name={firstName}/>
+            <div className="map-legend" style={{marginBottom:16}}>
+              <div className="leg-item"><div className="leg-dot house">🏠</div><span>Logement de {firstName}</span></div>
+              <div className="leg-item"><div className="leg-dot pv">☀️</div><span>Site de production photovoltaïque</span></div>
+              <div className="leg-item"><div className="leg-dot zone">⬤</div><span>Zone ACC — rayon de 2 km</span></div>
+            </div>
+            <div className="saving-est">
+              <div className="sav-lbl">Économies attendues grâce à l'ACC (−15%)</div>
+              <div className="sav-amt">{saving.toLocaleString('fr-FR')} €<span style={{fontSize:18,fontWeight:600}}>/an</span></div>
+              <div className="sav-note">Sans aucun investissement · tarif local préférentiel</div>
             </div>
           </div>
-
-          {/* ── 2. Carte ACC ── */}
-          <MapACC name={firstName}/>
-          <div className="map-legend" style={{marginBottom:16}}>
-            <div className="leg-item"><div className="leg-dot house">🏠</div><span>Logement de {firstName}</span></div>
-            <div className="leg-item"><div className="leg-dot pv">☀️</div><span>Site de production photovoltaïque</span></div>
-            <div className="leg-item"><div className="leg-dot zone">⬤</div><span>Zone ACC — rayon de 2 km</span></div>
-          </div>
-
-          {/* ── 3. Économies attendues ── */}
-          <div className="saving-est">
-            <div className="sav-lbl">Économies attendues grâce à l'ACC (−15%)</div>
-            <div className="sav-amt">{saving.toLocaleString('fr-FR')} €<span style={{fontSize:18,fontWeight:600}}>/an</span></div>
-            <div className="sav-note">Sans aucun investissement · tarif local préférentiel</div>
-          </div>
-
-        </div>
-      )}
+        )}
+      </div>
       {ready && (
         <StickyFooter row>
           <button className="btn btn-no"  onClick={onNo}>❌ Non merci</button>
           <button className="btn btn-yes" onClick={onYes}>✅ Je rejoins !</button>
         </StickyFooter>
       )}
-    </div>
+    </>
   );
 }
 
 function NoACCScreen({ state, onContinue, onBack }) {
   return (
-    <div className="screen fade-in">
-      <BackBtn onBack={onBack}/>
-      <BillMeter bill={state.bill} initialBill={state.initialBill}/>
-      <div className="card">
-        <div className="badge info">💡 Pas encore… mais bientôt !</div>
-        <h2 className="screen-title">Créons votre boucle ACC</h2>
-        <p className="screen-sub">Starvolt peut créer une boucle ACC autour de votre logement.</p>
-        <div className="steps-list">
-          <div className="step-item"><div className="step-num">1</div><div className="step-txt">Starvolt référence votre logement comme point de consommation</div></div>
-          <div className="step-item"><div className="step-num">2</div><div className="step-txt">D'autres citoyens et collectivités rejoignent la boucle</div></div>
-          <div className="step-item"><div className="step-num">3</div><div className="step-txt">Vous commencez à économiser dès que la boucle est active</div></div>
+    <>
+      <div className="screen fade-in">
+        <BackBtn onBack={onBack}/>
+        <BillMeter bill={state.bill} initialBill={state.initialBill}/>
+        <div className="card">
+          <div className="badge info">💡 Pas encore… mais bientôt !</div>
+          <h2 className="screen-title">Créons votre boucle ACC</h2>
+          <p className="screen-sub">Starvolt peut créer une boucle ACC autour de votre logement.</p>
+          <div className="steps-list">
+            <div className="step-item"><div className="step-num">1</div><div className="step-txt">Starvolt référence votre logement comme point de consommation</div></div>
+            <div className="step-item"><div className="step-num">2</div><div className="step-txt">D'autres citoyens et collectivités rejoignent la boucle</div></div>
+            <div className="step-item"><div className="step-num">3</div><div className="step-txt">Vous commencez à économiser dès que la boucle est active</div></div>
+          </div>
         </div>
       </div>
       <StickyFooter>
         <button className="btn btn-primary" onClick={onContinue}>Continuer la simulation →</button>
       </StickyFooter>
-    </div>
+    </>
   );
 }
 
 function ComwattScreen({ state, saving, onYes, onNo, onBack }) {
   return (
-    <div className="screen fade-in">
-      <BackBtn onBack={onBack}/>
-      <BillMeter bill={state.bill} initialBill={state.initialBill}/>
-      <div className="card">
-        <img src="comwatt-box.png" alt="Box Comwatt" style={{width:"100%", maxWidth:220, display:"block", margin:"0 auto 12px", borderRadius:12}}/>
-        <h2 className="screen-title">Box Comwatt</h2>
-        <p className="screen-sub">La box Comwatt maximise l'énergie ACC consommée et alimente votre cagnotte flexibilité.</p>
-        <div className="offer-box">
-          <div className="offer-row">
-            <span className="offer-lbl">Gain annuel supplémentaire</span>
-            <span className="offer-val grn">+ {saving.toLocaleString('fr-FR')} €/an</span>
+    <>
+      <div className="screen fade-in">
+        <BackBtn onBack={onBack}/>
+        <BillMeter bill={state.bill} initialBill={state.initialBill}/>
+        <div className="card">
+          <img src="comwatt-box.png" alt="Box Comwatt" style={{width:"100%", maxWidth:220, display:"block", margin:"0 auto 12px", borderRadius:12}}/>
+          <h2 className="screen-title">Box Comwatt</h2>
+          <p className="screen-sub">La box Comwatt maximise l'énergie ACC consommée et alimente votre cagnotte flexibilité.</p>
+          <div className="offer-box">
+            <div className="offer-row">
+              <span className="offer-lbl">Gain annuel supplémentaire</span>
+              <span className="offer-val grn">+ {saving.toLocaleString('fr-FR')} €/an</span>
+            </div>
+            <div className="offer-div"/>
+            <div className="offer-row">
+              <span className="offer-lbl">Investissement initial</span>
+              <span className="offer-val">550 € TTC</span>
+            </div>
+            <div className="offer-promo">🎁 Ou <strong>gratuit</strong> si vous renoncez à votre cagnotte Flex pendant 3 ans</div>
           </div>
-          <div className="offer-div"/>
-          <div className="offer-row">
-            <span className="offer-lbl">Investissement initial</span>
-            <span className="offer-val">550 € TTC</span>
-          </div>
-          <div className="offer-promo">🎁 Ou <strong>gratuit</strong> si vous renoncez à votre cagnotte Flex pendant 3 ans</div>
+          <h3 className="q-title">Souhaitez-vous installer une box Comwatt ?</h3>
         </div>
-        <h3 className="q-title">Souhaitez-vous installer une box Comwatt ?</h3>
       </div>
       <StickyFooter row>
         <button className="btn btn-no"  onClick={onNo}>❌ Non merci</button>
         <button className="btn btn-yes" onClick={onYes}>✅ Oui, je veux la box !</button>
       </StickyFooter>
-    </div>
+    </>
   );
 }
 
 function SolarScreen({ state, saving, onYes, onNo, onBack }) {
   return (
-    <div className="screen fade-in">
-      <BackBtn onBack={onBack}/>
-      <BillMeter bill={state.bill} initialBill={state.initialBill}/>
-      <div className="card">
-        <div className="dev-icon">☀️</div>
-        <h2 className="screen-title">Panneaux solaires + Batterie</h2>
-        <p className="screen-sub">Produisez votre propre électricité et stockez l'excédent. La solution la plus ambitieuse.</p>
-        <div className="offer-box">
-          <div className="offer-row">
-            <span className="offer-lbl">Réduction de facture (−45%)</span>
-            <span className="offer-val grn">− {saving.toLocaleString('fr-FR')} €/an</span>
+    <>
+      <div className="screen fade-in">
+        <BackBtn onBack={onBack}/>
+        <BillMeter bill={state.bill} initialBill={state.initialBill}/>
+        <div className="card">
+          <div className="dev-icon">☀️</div>
+          <h2 className="screen-title">Panneaux solaires + Batterie</h2>
+          <p className="screen-sub">Produisez votre propre électricité et stockez l'excédent. La solution la plus ambitieuse.</p>
+          <div className="offer-box">
+            <div className="offer-row">
+              <span className="offer-lbl">Réduction de facture (−45%)</span>
+              <span className="offer-val grn">− {saving.toLocaleString('fr-FR')} €/an</span>
+            </div>
+            <div className="offer-div"/>
+            <div className="offer-row">
+              <span className="offer-lbl">Investissement initial</span>
+              <span className="offer-val">10 000 € TTC</span>
+            </div>
           </div>
-          <div className="offer-div"/>
-          <div className="offer-row">
-            <span className="offer-lbl">Investissement initial</span>
-            <span className="offer-val">10 000 € TTC</span>
-          </div>
+          <h3 className="q-title">Souhaitez-vous investir dans le solaire ?</h3>
         </div>
-        <h3 className="q-title">Souhaitez-vous investir dans le solaire ?</h3>
       </div>
       <StickyFooter row>
         <button className="btn btn-no"  onClick={onNo}>❌ Plus tard</button>
         <button className="btn btn-yes" onClick={onYes}>✅ Oui, le solaire !</button>
       </StickyFooter>
-    </div>
+    </>
   );
 }
 
 function BravoScreen({ state, stepNumber, saving, label, onContinue, onBack }) {
   return (
-    <div className="screen fade-in">
-      <Fireworks/>
-      <BackBtn onBack={onBack}/>
-      <BillMeter bill={state.bill} initialBill={state.initialBill}/>
-      <div className="card bravo-card">
-        <div className="bravo-num">{stepNumber}</div>
-        <h1 className="bravo-title">BRAVO !</h1>
-        <p className="bravo-sub">En un seul clic vous venez de gagner</p>
-        <div className="bravo-sav-row">
-          <span className="bravo-sav-amt">+{saving.toLocaleString('fr-FR')} €</span>
-          <span className="bravo-sav-per">par an</span>
+    <>
+      <div className="screen fade-in">
+        <Fireworks/>
+        <BackBtn onBack={onBack}/>
+        <BillMeter bill={state.bill} initialBill={state.initialBill}/>
+        <div className="card bravo-card">
+          <div className="bravo-num">{stepNumber}</div>
+          <h1 className="bravo-title">BRAVO !</h1>
+          <p className="bravo-sub">En un seul clic vous venez de gagner</p>
+          <div className="bravo-sav-row">
+            <span className="bravo-sav-amt">+{saving.toLocaleString('fr-FR')} €</span>
+            <span className="bravo-sav-per">par an</span>
+          </div>
+          <p className="bravo-lbl">{label}</p>
         </div>
-        <p className="bravo-lbl">{label}</p>
       </div>
       <StickyFooter>
         <button className="btn btn-primary" onClick={onContinue}>Continuer →</button>
       </StickyFooter>
-    </div>
+    </>
   );
 }
 
 function FinalScreen({ state, onRestart }) {
   const savings = state.initialBill - state.bill;
   return (
-    <div className="screen fade-in">
-      <Fireworks final/>
-      <BillMeter bill={state.bill} initialBill={state.initialBill}/>
-      <div className="card">
-        <h2 className="screen-title" style={{marginBottom:2}}>Récapitulatif</h2>
-        <p className="screen-sub" style={{marginBottom:0}}>
-          Voici ce que Starvolt peut faire pour {state.name.split(' ')[0]}
-        </p>
-
-        <div className="final-cmp">
-          <div className="cmp-item">
-            <div className="cmp-lbl">Facture initiale</div>
-            <div className="cmp-amt old">{state.initialBill.toLocaleString('fr-FR')} €/an</div>
-          </div>
-          <div className="cmp-arrow">↓</div>
-          <div className="cmp-item">
-            <div className="cmp-lbl">Avec Starvolt</div>
-            <div className="cmp-amt new">{state.bill.toLocaleString('fr-FR')} €/an</div>
-          </div>
-        </div>
-
-        {savings > 0 && (
-          <div className="final-total">
-            <div className="tot-lbl">Économies totales</div>
-            <div className="tot-amt">
-              {savings.toLocaleString('fr-FR')} €<span style={{fontSize:20,fontWeight:600}}>/an</span>
+    <>
+      <div className="screen fade-in">
+        <Fireworks final/>
+        <BillMeter bill={state.bill} initialBill={state.initialBill}/>
+        <div className="card">
+          <h2 className="screen-title" style={{marginBottom:2}}>Récapitulatif</h2>
+          <p className="screen-sub" style={{marginBottom:0}}>
+            Voici ce que Starvolt peut faire pour {state.name.split(' ')[0]}
+          </p>
+          <div className="final-cmp">
+            <div className="cmp-item">
+              <div className="cmp-lbl">Facture initiale</div>
+              <div className="cmp-amt old">{state.initialBill.toLocaleString('fr-FR')} €/an</div>
+            </div>
+            <div className="cmp-arrow">↓</div>
+            <div className="cmp-item">
+              <div className="cmp-lbl">Avec Starvolt</div>
+              <div className="cmp-amt new">{state.bill.toLocaleString('fr-FR')} €/an</div>
             </div>
           </div>
-        )}
-
-        {state.bravoItems.length > 0 && (
-          <div className="final-items">
-            {state.bravoItems.map((item,i) => (
-              <div key={i} className="final-item">
-                <span className="fi-check">✓</span>
-                <span>{item}</span>
+          {savings > 0 && (
+            <div className="final-total">
+              <div className="tot-lbl">Économies totales</div>
+              <div className="tot-amt">
+                {savings.toLocaleString('fr-FR')} €<span style={{fontSize:20,fontWeight:600}}>/an</span>
               </div>
-            ))}
+            </div>
+          )}
+          {state.bravoItems.length > 0 && (
+            <div className="final-items">
+              {state.bravoItems.map((item,i) => (
+                <div key={i} className="final-item">
+                  <span className="fi-check">✓</span>
+                  <span>{item}</span>
+                </div>
+              ))}
+            </div>
+          )}
+          <div className="final-msg">
+            "Ceci n'est qu'une simulation, mais bientôt, tout sera réel."
           </div>
-        )}
-
-        <div className="final-msg">
-          "Ceci n'est qu'une simulation, mais bientôt, tout sera réel."
         </div>
       </div>
       <StickyFooter>
         <button className="btn btn-sec" onClick={onRestart}>🔄 Recommencer la simulation</button>
       </StickyFooter>
-    </div>
+    </>
   );
 }
 
