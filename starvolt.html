@@ -242,20 +242,25 @@
       margin: 18px 0 12px; line-height: 1.4;
     }
     .badge {
-      display: inline-flex; align-items: center; gap: 6px;
-      padding: 5px 13px; border-radius: 20px;
-      font-size: 11.5px; font-weight: 700;
-      margin-bottom: 12px;
+      display: flex; align-items: center; justify-content: center; gap: 10px;
+      font-size: 23px; font-weight: 800;
+      line-height: 1.22; margin-bottom: 12px;
+      text-align: center;
     }
-    .badge.success {
-      background: rgba(125,217,64,.18);
-      border: 1px solid rgba(125,217,64,.35);
-      color: var(--green);
+    .badge.success { color: var(--green); }
+    .badge.info    { color: white; }
+
+    .star-twinkle {
+      display: inline-block;
+      font-style: normal;
+      animation: twinkle 1.6s ease-in-out infinite;
     }
-    .badge.info {
-      background: rgba(255,255,255,.14);
-      border: 1px solid rgba(255,255,255,.25);
-      color: rgba(255,255,255,.88);
+    .star-twinkle.delay1 { animation-delay: .35s; }
+    .star-twinkle.delay2 { animation-delay: .7s; }
+    .star-twinkle.delay3 { animation-delay: 1.05s; }
+    @keyframes twinkle {
+      0%, 100% { opacity: 1;   transform: scale(1)   rotate(0deg); }
+      50%      { opacity: .2;  transform: scale(.5)  rotate(22deg); }
     }
 
     /* =============================================
@@ -964,7 +969,13 @@ function EligibleScreen({ state, saving, onYes, onNo, onBack }) {
           </div>
         ) : (
           <div className="card fade-in">
-            <div className="badge success">✨ Bonne nouvelle !</div>
+            <div className="badge success">
+              <span className="star-twinkle">✦</span>
+              <span className="star-twinkle delay1">✦</span>
+              Bonne nouvelle !
+              <span className="star-twinkle delay2">✦</span>
+              <span className="star-twinkle delay3">✦</span>
+            </div>
             <h2 className="screen-title" style={{marginBottom:4}}>
               Cette adresse est éligible à l'autoconsommation collective
             </h2>
@@ -1006,7 +1017,11 @@ function NoACCScreen({ state, onContinue, onBack }) {
         <BackBtn onBack={onBack}/>
         <BillMeter bill={state.bill} initialBill={state.initialBill}/>
         <div className="card">
-          <div className="badge info">💡 Pas encore… mais bientôt !</div>
+          <div className="badge info">
+            <span className="star-twinkle">✦</span>
+            Pas encore… mais bientôt !
+            <span className="star-twinkle delay2">✦</span>
+          </div>
           <h2 className="screen-title">Créons votre boucle ACC</h2>
           <p className="screen-sub">Starvolt peut créer une boucle ACC autour de votre logement.</p>
           <div className="steps-list">
