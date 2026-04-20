@@ -366,6 +366,29 @@
       pointer-events: none;
     }
 
+    .acc-map-thumb {
+      width: 100%; border-radius: 12px; overflow: hidden;
+      cursor: zoom-in; margin-top: 16px;
+      border: 1px solid rgba(255,255,255,.15);
+      position: relative;
+    }
+    .acc-map-thumb img { width: 100%; display: block; }
+    .acc-map-hint {
+      text-align: center; font-size: 11px;
+      color: rgba(255,255,255,.45); margin-top: 5px;
+    }
+    .lightbox-overlay {
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,.88); z-index: 1000;
+      display: flex; align-items: center; justify-content: center;
+      cursor: zoom-out;
+    }
+    .lightbox-overlay img {
+      max-width: 96vw; max-height: 92vh;
+      border-radius: 8px;
+      box-shadow: 0 24px 64px rgba(0,0,0,.6);
+    }
+
     /* =============================================
        ADDRESS / LOADING
        ============================================= */
@@ -632,6 +655,18 @@
 <script type="text/babel">
 const { useState, useEffect, useRef, useCallback } = React;
 
+// ─── Eligibility ───────────────────────────────
+const ELIGIBLE_CODES = new Set(["01240","01250","01300","01480","04200","04410","05400","07170","07240","07400","07430","07580","07700","09100","09210","09350","09420","09700","11160","11170","11200","11270","11350","11400","11410","11420","11800","12130","13120","13160","13410","13660","13760","13880","15170","15250","15600","16290","16360","17240","17570","17770","19270","24250","26110","26150","26160","26210","26390","26400","26410","26450","30190","30200","30250","30340","30350","30610","30750","31370","31420","31460","31560","32300","32350","32380","32390","33610","33770","34290","34460","34480","34550","34630","38110","38118","38122","38150","38260","38350","38440","38450","38460","38510","38550","38560","38590","38650","38690","38710","38760","38770","38780","38840","38930","40200","40310","40400","43270","43300","43380","43580","46090","46150","46230","46300","46310","47430","47440","63160","63220","63420","63750","63890","64410","65140","65190","65200","65370","66300","66500","66700","73190","74270","82100","82210","82230","82290","82400","83670","84100","84200","84270","84380","84420","84480"]);
+
+function extractPostalCode(address) {
+  const m = address.match(/\b(\d{5})\b/);
+  return m ? m[1] : null;
+}
+function extractCommune(address) {
+  const m = address.match(/\b\d{5}\b\s+([\w\u00C0-\u017E\s'-]+)/i);
+  return m ? m[1].trim() : '';
+}
+
 // ─── Animated bill counter ─────────────────────
 function useAnimatedBill(target) {
   const [cur, setCur]     = useState(target);
@@ -728,8 +763,9 @@ function StickyFooter({ row = false, children }) {
   );
 }
 
-// ─── Map ACC (SVG stylisée Lyon) ──────────────
-function MapACC({ name = 'Marie' }) {
+// ─── Map ACC (SVG stylisée) ───────────────────
+function MapACC({ firstName = 'Marie', commune = 'Site PV' }) {
+  const name = firstName;
   return (
     <div className="map-container">
       <svg viewBox="0 0 320 210" style={{ width:'100%', display:'block' }}>
@@ -787,7 +823,7 @@ function MapACC({ name = 'Marie' }) {
             <rect x="10" y="19" width="8" height="8" rx="1" fill="#0a9b8c"/>
             <rect x="4"  y="15" width="5" height="5" rx="1" fill="#0a9b8c" opacity=".7"/>
           </g>
-          <text x="140" y="137" textAnchor="middle" fill="white" fontSize="9" fontFamily="Poppins,sans-serif" fontWeight="600" opacity=".88">Chez {name}</text>
+          <text x="140" y="137" textAnchor="middle" fill="white" fontSize="9" fontFamily="Poppins,sans-serif" fontWeight="600" opacity=".88">{name}</text>
 
           {/* PV Site */}
           <g transform="translate(191,63)" filter="url(#glow)">
@@ -802,10 +838,10 @@ function MapACC({ name = 'Marie' }) {
             <line x1="23" y1="5"  x2="20" y2="8"  stroke="#ffd700" strokeWidth="1.5" strokeLinecap="round"/>
             <line x1="8"  y1="20" x2="5"  y2="23" stroke="#ffd700" strokeWidth="1.5" strokeLinecap="round"/>
           </g>
-          <text x="205" y="96" textAnchor="middle" fill="white" fontSize="9" fontFamily="Poppins,sans-serif" fontWeight="600" opacity=".88">Site PV</text>
+          <text x="205" y="96" textAnchor="middle" fill="white" fontSize="9" fontFamily="Poppins,sans-serif" fontWeight="600" opacity=".88">{commune}</text>
 
-          {/* Lyon label */}
-          <text x="12" y="200" fill="rgba(255,255,255,.22)" fontSize="9" fontFamily="Poppins,sans-serif">Lyon, France</text>
+          {/* Commune label bottom-left */}
+          <text x="12" y="200" fill="rgba(255,255,255,.22)" fontSize="9" fontFamily="Poppins,sans-serif">{commune}, France</text>
           {/* North */}
           <text x="302" y="22" textAnchor="middle" fill="rgba(255,255,255,.3)" fontSize="10" fontFamily="Poppins,sans-serif" fontWeight="700">N</text>
           <line x1="302" y1="24" x2="302" y2="34" stroke="rgba(255,255,255,.22)" strokeWidth="1"/>
@@ -841,9 +877,10 @@ const BackBtn = ({ onBack }) => (
 // ─── SCREENS ──────────────────────────────────
 
 function WelcomeScreen({ state, onStart }) {
-  const [name,    setName]    = useState(state.name);
-  const [billStr, setBillStr] = useState(String(state.initialBill));
-  const [address, setAddress] = useState(state.address);
+  const [name,        setName]       = useState(state.name);
+  const [billStr,     setBillStr]    = useState(String(state.initialBill));
+  const [address,     setAddress]    = useState(state.address);
+  const [lightbox,    setLightbox]   = useState(false);
   const bill = Math.max(0, Number(billStr) || 0);
   return (
     <>
@@ -879,7 +916,18 @@ function WelcomeScreen({ state, onStart }) {
               placeholder="72 rue Gabriel Péri 92120 Montrouge"/>
           </div>
         </div>
+
+        <div className="acc-map-thumb" onClick={()=>setLightbox(true)}>
+          <img src="acc-zone-map.png" alt="Zones éligibles ACC tarif discount"/>
+        </div>
+        <p className="acc-map-hint">🔍 Zones éligibles ACC — cliquez pour agrandir</p>
       </div>
+
+      {lightbox && (
+        <div className="lightbox-overlay" onClick={()=>setLightbox(false)}>
+          <img src="acc-zone-map.png" alt="Zones éligibles ACC tarif discount"/>
+        </div>
+      )}
       <StickyFooter>
         <button className="btn btn-primary"
           onClick={()=>onStart({ name:name||'Marie Dupont', bill:bill||2000, address:address||'74 rue Gabriel Péri, Montrouge' })}>
@@ -895,6 +943,7 @@ function EligibleScreen({ state, saving, onYes, onNo, onBack }) {
   const [ready, setReady] = useState(false);
   useEffect(()=>{ const t=setTimeout(()=>setReady(true), 1800); return()=>clearTimeout(t); },[]);
   const firstName = state.name.split(' ')[0];
+  const commune   = extractCommune(state.address) || 'Site PV';
 
   return (
     <>
@@ -921,7 +970,7 @@ function EligibleScreen({ state, saving, onYes, onNo, onBack }) {
                 <span>{state.name}</span>
               </div>
             </div>
-            <MapACC name={firstName}/>
+            <MapACC firstName={firstName} commune={commune}/>
             <div className="map-legend" style={{marginBottom:16}}>
               <div className="leg-item"><div className="leg-dot house">🏠</div><span>Logement de {firstName}</span></div>
               <div className="leg-item"><div className="leg-dot pv">☀️</div><span>Site de production photovoltaïque</span></div>
@@ -1189,10 +1238,17 @@ function App() {
 
       case 'WELCOME':
         return <WelcomeScreen state={state}
-          onStart={({name,bill,address})=>goTo('ADDRESS',{name,address,initialBill:bill,bill,bravoItems:[]})} />;
+          onStart={({name,bill,address})=>{
+            const cp = extractPostalCode(address);
+            const eligible = cp ? ELIGIBLE_CODES.has(cp) : false;
+            goTo('ADDRESS',{name,address,initialBill:bill,bill,bravoItems:[],eligible});
+          }} />;
 
       case 'ADDRESS': {
         const accSaving = Math.round(state.initialBill * 0.15);
+        if (!state.eligible) {
+          return <NoACCScreen state={state} onContinue={()=>goTo('COMWATT')} onBack={goBack}/>;
+        }
         return <EligibleScreen state={state} saving={accSaving}
           onYes={()=>goTo('BRAVO_1',{ bill:state.bill-accSaving, bravoItems:[...state.bravoItems,`Tarif ACC : −${accSaving.toLocaleString('fr-FR')} €/an`] })}
           onNo={()=>goTo('NO_ACC')}
