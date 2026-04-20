@@ -274,8 +274,8 @@
     .btn:hover  { transform: translateY(-2px); }
     .btn:active { transform: translateY(0); }
 
-    .btn-primary { background: white; color: var(--teal-deep); }
-    .btn-primary:hover { box-shadow: 0 8px 28px rgba(0,0,0,.22); }
+    .btn-primary { background: var(--green); color: #1a4500; }
+    .btn-primary:hover { box-shadow: 0 8px 28px rgba(125,217,64,.35); }
 
     .btn-yes { background: var(--green); color: #1a4500; }
     .btn-yes:hover {
@@ -876,12 +876,15 @@ const BackBtn = ({ onBack }) => (
 
 // ─── SCREENS ──────────────────────────────────
 
+const DEMO_VALUES = { name: 'Marie Dupont', bill: '2000', address: '14 Rue du Temple, 30250 Combas' };
+
 function WelcomeScreen({ state, onStart }) {
   const [name,        setName]       = useState(state.name);
-  const [billStr,     setBillStr]    = useState(String(state.initialBill));
+  const [billStr,     setBillStr]    = useState(state.initialBill > 0 ? String(state.initialBill) : '');
   const [address,     setAddress]    = useState(state.address);
   const [lightbox,    setLightbox]   = useState(false);
   const bill = Math.max(0, Number(billStr) || 0);
+  const fillDemo = () => { setName(DEMO_VALUES.name); setBillStr(DEMO_VALUES.bill); setAddress(DEMO_VALUES.address); };
   return (
     <>
       <div className="screen fade-in">
@@ -897,7 +900,7 @@ function WelcomeScreen({ state, onStart }) {
         <div className="form-card">
           <div className="inp-group">
             <label className="inp-label">Votre nom</label>
-            <input className="inp" value={name} onChange={e=>setName(e.target.value)} placeholder="Marie Dupont"/>
+            <input className="inp" value={name} onChange={e=>setName(e.target.value)} onDoubleClick={fillDemo} placeholder="Marie Dupont"/>
           </div>
           <div className="inp-group">
             <label className="inp-label">Facture électricité (€/an)</label>
@@ -905,6 +908,7 @@ function WelcomeScreen({ state, onStart }) {
               <input className="inp" type="number" value={billStr}
                 onChange={e=>setBillStr(e.target.value)}
                 onBlur={e=>setBillStr(String(Math.max(0, Number(e.target.value) || 0)))}
+                onDoubleClick={fillDemo}
                 min="0" max="20000"/>
               <span className="bill-sfx">€/an</span>
             </div>
@@ -913,6 +917,7 @@ function WelcomeScreen({ state, onStart }) {
             <label className="inp-label">Adresse</label>
             <input className="inp" value={address}
               onChange={e=>setAddress(e.target.value)}
+              onDoubleClick={fillDemo}
               placeholder="72 rue Gabriel Péri 92120 Montrouge"/>
           </div>
         </div>
@@ -930,7 +935,7 @@ function WelcomeScreen({ state, onStart }) {
       )}
       <StickyFooter>
         <button className="btn btn-primary"
-          onClick={()=>onStart({ name:name||'Marie Dupont', bill:bill||2000, address:address||'74 rue Gabriel Péri, Montrouge' })}>
+          onClick={()=>onStart({ name:name||DEMO_VALUES.name, bill:bill||Number(DEMO_VALUES.bill), address:address||DEMO_VALUES.address })}>
           📍 Vérifier si cette adresse est dans une boucle d'autoconsommation collective
         </button>
       </StickyFooter>
@@ -1091,7 +1096,6 @@ function BravoScreen({ state, stepNumber, saving, label, onContinue, onBack }) {
         <BackBtn onBack={onBack}/>
         <BillMeter bill={state.bill} initialBill={state.initialBill}/>
         <div className="card bravo-card">
-          <div className="bravo-num">{stepNumber}</div>
           <h1 className="bravo-title">BRAVO !</h1>
           <p className="bravo-sub">En un seul clic vous venez de gagner</p>
           <div className="bravo-sav-row">
@@ -1207,10 +1211,10 @@ function FinalScreen({ state, onRestart }) {
 
 const INIT = {
   screen:      'WELCOME',
-  name:        'Marie Dupont',
-  address:     '72 rue Gabriel Péri 92120 Montrouge',
-  initialBill: 2000,
-  bill:        2000,
+  name:        '',
+  address:     '',
+  initialBill: 0,
+  bill:        0,
   bravoItems:  [],
   investment:  0,
 };
