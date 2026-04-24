@@ -13,6 +13,8 @@ const mime = {
   '.json': 'application/json',
   '.png':  'image/png',
   '.ico':  'image/x-icon',
+  '.svg':  'image/svg+xml',
+  '.webmanifest': 'application/manifest+json',
 };
 
 http.createServer((req, res) => {

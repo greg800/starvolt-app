@@ -5,6 +5,15 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Starvolt — Calculateur d'économies</title>
 
+  <!-- PWA -->
+  <link rel="manifest" href="/manifest.json"/>
+  <meta name="theme-color" content="#065060"/>
+  <meta name="mobile-web-app-capable" content="yes"/>
+  <meta name="apple-mobile-web-app-capable" content="yes"/>
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
+  <meta name="apple-mobile-web-app-title" content="Starvolt"/>
+  <link rel="apple-touch-icon" href="/icon-192.svg"/>
+
   <!-- Google Fonts -->
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -652,6 +661,77 @@
       .bill-num { font-size: 64px; }
       .welcome-title { font-size: 27px; }
     }
+
+    /* =============================================
+       PWA INSTALL BANNER
+       ============================================= */
+    .pwa-banner {
+      position: fixed;
+      bottom: 0; left: 0; right: 0;
+      z-index: 400;
+      padding: 0 12px 12px;
+      animation: slideUp .35s cubic-bezier(.22,1,.36,1) both;
+    }
+    @keyframes slideUp {
+      from { transform: translateY(100%); opacity: 0; }
+      to   { transform: none; opacity: 1; }
+    }
+    .pwa-banner-card {
+      max-width: 520px;
+      margin: 0 auto;
+      background: rgba(6,80,96,.97);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      border: 1px solid rgba(125,217,64,.35);
+      border-radius: 18px;
+      padding: 14px 14px 14px 16px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      box-shadow: 0 -4px 32px rgba(0,0,0,.35), 0 0 0 1px rgba(125,217,64,.12);
+    }
+    .pwa-icon {
+      width: 44px; height: 44px;
+      border-radius: 12px;
+      background: linear-gradient(145deg, #065060, #0a9b8c);
+      border: 1px solid rgba(255,255,255,.18);
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0;
+      font-size: 22px;
+    }
+    .pwa-text {
+      flex: 1;
+      display: flex; flex-direction: column; gap: 2px;
+    }
+    .pwa-text strong {
+      font-size: 13.5px; font-weight: 800; color: white;
+    }
+    .pwa-text span {
+      font-size: 11.5px; color: rgba(255,255,255,.62); line-height: 1.4;
+    }
+    .pwa-text span strong { color: var(--green); font-weight: 700; font-size: 11.5px; }
+    .pwa-actions {
+      display: flex; align-items: center; gap: 6px; flex-shrink: 0;
+    }
+    .pwa-btn-install {
+      background: var(--green); color: #1a4500;
+      font-family: var(--font); font-size: 12.5px; font-weight: 800;
+      border: none; border-radius: 10px;
+      padding: 8px 14px; cursor: pointer;
+      white-space: nowrap;
+      transition: transform .15s, box-shadow .15s;
+    }
+    .pwa-btn-install:hover { transform: translateY(-1px); box-shadow: 0 4px 14px rgba(125,217,64,.4); }
+    .pwa-btn-close {
+      background: rgba(255,255,255,.1); border: 1px solid rgba(255,255,255,.18);
+      color: rgba(255,255,255,.65);
+      font-family: var(--font); font-size: 14px; font-weight: 700;
+      width: 30px; height: 30px; border-radius: 8px;
+      display: flex; align-items: center; justify-content: center;
+      cursor: pointer; padding: 0; flex-shrink: 0;
+      transition: background .15s, color .15s;
+    }
+    .pwa-btn-close:hover { background: rgba(255,255,255,.2); color: white; }
   </style>
 </head>
 <body>
@@ -1222,6 +1302,73 @@ function FinalScreen({ state, onRestart }) {
   );
 }
 
+// ─── PWA Install Banner ───────────────────────
+function InstallBanner() {
+  const [show,    setShow]    = useState(false);
+  const [isIOS,   setIsIOS]   = useState(false);
+  const deferredRef           = useRef(null);
+
+  useEffect(() => {
+    // Already installed → never show
+    if (window.matchMedia('(display-mode: standalone)').matches) return;
+    if (window.navigator.standalone) return;
+    // Dismissed this session → skip
+    if (sessionStorage.getItem('pwa-dismissed')) return;
+
+    const ios = /iPhone|iPad|iPod/.test(navigator.userAgent) && !window.navigator.standalone;
+    setIsIOS(ios);
+
+    if (ios) {
+      const t = setTimeout(() => setShow(true), 6000);
+      return () => clearTimeout(t);
+    }
+
+    const handler = (e) => {
+      e.preventDefault();
+      deferredRef.current = e;
+      // Delay so it doesn't pop immediately on load
+      setTimeout(() => setShow(true), 5000);
+    };
+    window.addEventListener('beforeinstallprompt', handler);
+    return () => window.removeEventListener('beforeinstallprompt', handler);
+  }, []);
+
+  const dismiss = () => {
+    setShow(false);
+    sessionStorage.setItem('pwa-dismissed', '1');
+  };
+
+  const install = async () => {
+    if (!deferredRef.current) return;
+    deferredRef.current.prompt();
+    const { outcome } = await deferredRef.current.userChoice;
+    deferredRef.current = null;
+    setShow(false);
+    if (outcome === 'dismissed') sessionStorage.setItem('pwa-dismissed', '1');
+  };
+
+  if (!show) return null;
+
+  return (
+    <div className="pwa-banner">
+      <div className="pwa-banner-card">
+        <div className="pwa-icon">⚡</div>
+        <div className="pwa-text">
+          <strong>Installer l'app Starvolt</strong>
+          {isIOS
+            ? <span>Appuyez sur <strong>Partager</strong> puis <strong>"Sur l'écran d'accueil"</strong></span>
+            : <span>Accès rapide depuis votre écran d'accueil Android</span>
+          }
+        </div>
+        <div className="pwa-actions">
+          {!isIOS && <button className="pwa-btn-install" onClick={install}>Installer</button>}
+          <button className="pwa-btn-close" onClick={dismiss} aria-label="Fermer">✕</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── MAIN APP — Machine d'états ──────────────
 
 const INIT = {
@@ -1325,11 +1472,20 @@ function App() {
         {['»','»','»','»'].map((c,i)=><span key={i}>{c}</span>)}
       </div>
       {render()}
+      <InstallBanner/>
     </div>
   );
 }
 
 ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+</script>
+
+<script>
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('/sw.js').catch(() => {});
+    });
+  }
 </script>
 </body>
 </html>
