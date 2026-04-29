@@ -1980,28 +1980,21 @@ function SpotPricesScreen({ onBack }) {
 
   const MOIS = ['Jan','Fév','Mar','Avr','Mai','Jui','Jul','Aoû','Sep','Oct','Nov','Déc'];
 
-  useEffect(() => {
-    Promise.all([
+  const loadData = useCallback(async () => {
+    const [{data:m}, {data:rows}] = await Promise.all([
       sb.from('spot_metadata').select('*').eq('id',1).maybeSingle(),
-      sb.from('prix_spot').select('mois,heure,prix'),
-    ]).then(([{data:m},{data:rows}]) => {
-      setMeta(m);
-      if (rows && rows.length > 0) {
-        // avg par mois × heure
-        const acc = {};
-        rows.forEach(r => {
-          const k = `${r.mois}_${r.heure}`;
-          if (!acc[k]) acc[k] = { sum:0, cnt:0 };
-          acc[k].sum += parseFloat(r.prix);
-          acc[k].cnt++;
-        });
-        const avg = {};
-        Object.entries(acc).forEach(([k,{sum,cnt}]) => avg[k] = sum/cnt);
-        setSpotData(avg);
-      }
-      setLoading(false);
-    });
+      sb.rpc('get_spot_averages'),
+    ]);
+    setMeta(m);
+    if (rows && rows.length > 0) {
+      const avg = {};
+      rows.forEach(r => { avg[`${r.mois}_${r.heure}`] = parseFloat(r.avg_prix); });
+      setSpotData(avg);
+    }
+    setLoading(false);
   }, []);
+
+  useEffect(() => { loadData(); }, [loadData]);
 
   const handleImport = (e) => {
     const file = e.target.files?.[0];
@@ -2031,22 +2024,7 @@ function SpotPricesScreen({ onBack }) {
 
         setImportMsg(`✓ ${records.length} lignes importées`);
         setImporting(false);
-        // Reload
-        const {data:m2} = await sb.from('spot_metadata').select('*').eq('id',1).maybeSingle();
-        setMeta(m2);
-        const {data:rows2} = await sb.from('prix_spot').select('mois,heure,prix');
-        if (rows2) {
-          const acc = {};
-          rows2.forEach(r => {
-            const k = `${r.mois}_${r.heure}`;
-            if (!acc[k]) acc[k] = { sum:0, cnt:0 };
-            acc[k].sum += parseFloat(r.prix);
-            acc[k].cnt++;
-          });
-          const avg = {};
-          Object.entries(acc).forEach(([k,{sum,cnt}]) => avg[k] = sum/cnt);
-          setSpotData(avg);
-        }
+        await loadData();
       } catch(err) {
         setImportMsg('Erreur lecture fichier : ' + err.message);
         setImporting(false);
