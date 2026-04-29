@@ -1092,71 +1092,39 @@ const BackBtn = ({ onBack }) => (
 
 const DEMO_VALUES = { name: 'Marie Dupont', bill: '2000', address: '14 Rue du Temple, 30250 Combas' };
 
-function WelcomeScreen({ state, onStart, onCreateAccount }) {
-  const [name,        setName]       = useState(state.name);
-  const [billStr,     setBillStr]    = useState(state.initialBill > 0 ? String(state.initialBill) : '');
-  const [address,     setAddress]    = useState(state.address);
-  const [lightbox,    setLightbox]   = useState(false);
-  const bill = Math.max(0, Number(billStr) || 0);
-  const fillDemo = () => { setName(DEMO_VALUES.name); setBillStr(DEMO_VALUES.bill); setAddress(DEMO_VALUES.address); };
+function WelcomeScreen({ onCreateAccount, onLogin }) {
   return (
     <>
       <div className="screen fade-in">
         <div className="welcome-header">
-          <div className="welcome-tag">Simulation personnalisée</div>
+          <div className="welcome-tag">La première constellation énergétique</div>
           <h1 className="welcome-title">
-            Combien pouvez-vous<br/>économiser avec<br/>
-            <span className="accent">Starvolt</span> ?
+            Ensemble,<br/>on brille<br/><span className="accent">plus fort</span>
           </h1>
-          <p className="welcome-sub">Renseignez vos informations pour calculer vos économies.</p>
+          <p className="welcome-sub">Rejoignez Starvolt et réduisez votre facture d'électricité grâce à l'énergie locale partagée.</p>
         </div>
 
-        <div className="form-card">
-          <div className="inp-group">
-            <label className="inp-label">Votre nom</label>
-            <input className="inp" value={name} onChange={e=>setName(e.target.value)} onDoubleClick={fillDemo} placeholder="Marie Dupont"/>
-          </div>
-          <div className="inp-group">
-            <label className="inp-label">Facture électricité (€/an)</label>
-            <div className="bill-wrap">
-              <input className="inp" type="number" value={billStr}
-                onChange={e=>setBillStr(e.target.value)}
-                onBlur={e=>setBillStr(String(Math.max(0, Number(e.target.value) || 0)))}
-                onDoubleClick={fillDemo}
-                min="0" max="20000"/>
-              <span className="bill-sfx">€/an</span>
+        <div className="card" style={{display:'flex',flexDirection:'column',gap:14,marginTop:8}}>
+          {[
+            ['⚡', 'Autoconsommation collective', 'Partagez l'énergie locale à moins de 2 km'],
+            ['📦', 'Box Comwatt', 'Pilotage intelligent de votre consommation'],
+            ['☀️', 'Panneaux solaires + batterie', 'Produisez et stockez votre propre énergie'],
+          ].map(([icon, title, sub]) => (
+            <div key={title} style={{display:'flex',alignItems:'center',gap:14}}>
+              <span style={{fontSize:28,flexShrink:0}}>{icon}</span>
+              <div>
+                <div style={{fontWeight:700,fontSize:14,color:'white'}}>{title}</div>
+                <div style={{fontSize:12,color:'rgba(255,255,255,.55)',marginTop:2}}>{sub}</div>
+              </div>
             </div>
-          </div>
-          <div className="inp-group">
-            <label className="inp-label">Adresse</label>
-            <input className="inp" value={address}
-              onChange={e=>setAddress(e.target.value)}
-              onDoubleClick={fillDemo}
-              placeholder="72 rue Gabriel Péri 92120 Montrouge"/>
-          </div>
+          ))}
         </div>
-
-        <div className="acc-map-thumb" onClick={()=>setLightbox(true)}>
-          <img src="acc-zone-map.png" alt="Zones éligibles ACC tarif discount"/>
-        </div>
-        <p className="acc-map-hint">🔍 Zones éligibles ACC — cliquez pour agrandir</p>
       </div>
-
-      {lightbox && (
-        <div className="lightbox-overlay" onClick={()=>setLightbox(false)}>
-          <img src="acc-zone-map.png" alt="Zones éligibles ACC tarif discount"/>
-        </div>
-      )}
       <StickyFooter>
-        {onCreateAccount && (
-          <button className="btn btn-cta" onClick={onCreateAccount}>
-            Créer votre compte en 5 secondes →
-          </button>
-        )}
-        <button className="btn btn-sec"
-          onClick={()=>onStart({ name:name||DEMO_VALUES.name, bill:bill||Number(DEMO_VALUES.bill), address:address||DEMO_VALUES.address })}>
-          📍 Vérifier mon adresse ACC
+        <button className="btn btn-cta" onClick={onCreateAccount}>
+          Créer votre compte en 5 secondes →
         </button>
+        <button className="btn-link" onClick={onLogin}>Déjà membre ? Se connecter</button>
       </StickyFooter>
     </>
   );
@@ -1833,9 +1801,9 @@ function App() {
         return <MaConsoScreen onBack={goBack}/>;
 
       case 'SIMULATIONS': {
-        const base = { name: profile?.prenom||'', address:'', initialBill:2000, bill:2000, bravoItems:[], investment:0, eligible:false };
+        const base = { name: profile?.prenom||'', address:'Zone ACC', initialBill:2000, bill:2000, bravoItems:[], investment:0, eligible:true };
         return <SimulationsScreen
-          onACC={()=>goTo('WELCOME', base)}
+          onACC={()=>goTo('ADDRESS', base)}
           onBox={()=>goTo('COMWATT', base)}
           onSolar={()=>goTo('SOLAR', base)}
           onBack={goBack}/>;
@@ -1848,13 +1816,9 @@ function App() {
         return <AuthLoginScreen onGoToSignup={()=>goTo('AUTH_SIGNUP')}/>;
 
       case 'WELCOME':
-        return <WelcomeScreen state={state}
-          onCreateAccount={!user ? ()=>goTo('AUTH_SIGNUP') : null}
-          onStart={({name,bill,address})=>{
-            const cp = extractPostalCode(address);
-            const eligible = cp ? ELIGIBLE_CODES.has(cp) : false;
-            goTo('ADDRESS',{name,address,initialBill:bill,bill,bravoItems:[],eligible});
-          }}/>;
+        return <WelcomeScreen
+          onCreateAccount={()=>goTo('AUTH_SIGNUP')}
+          onLogin={()=>goTo('AUTH_LOGIN')}/>;
 
       case 'ADDRESS': {
         const accSaving = Math.round(state.initialBill * 0.15);

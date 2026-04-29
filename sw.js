@@ -1,11 +1,8 @@
-const CACHE = 'starvolt-v1';
+const CACHE = 'starvolt-v3';
 const STATIC = [
-  '/',
-  '/starvolt.html',
   '/manifest.json',
   '/icon-192.svg',
   '/icon-512.svg',
-  '/acc-zone-map.png',
   '/comwatt-box.png',
 ];
 
@@ -24,11 +21,20 @@ self.addEventListener('activate', e => {
 });
 
 self.addEventListener('fetch', e => {
-  // Only handle GET requests
   if (e.request.method !== 'GET') return;
-  // Skip CDN requests — always go to network
   if (!e.request.url.startsWith(self.location.origin)) return;
 
+  const url = new URL(e.request.url);
+
+  // HTML → network-first (toujours la dernière version)
+  if (url.pathname === '/' || url.pathname.endsWith('.html')) {
+    e.respondWith(
+      fetch(e.request).catch(() => caches.match(e.request))
+    );
+    return;
+  }
+
+  // Autres assets → cache-first
   e.respondWith(
     caches.match(e.request).then(cached => {
       if (cached) return cached;
