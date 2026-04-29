@@ -848,6 +848,59 @@
       transition: background .15s, color .15s; flex-shrink: 0;
     }
     .top-bar-logout:hover { background: rgba(255,255,255,.15); color: white; }
+
+    /* ══ ADMIN ═══════════════════════════════════════════════════ */
+    .admin-badge {
+      display: inline-flex; align-items: center; gap: 5px;
+      background: rgba(255,165,0,.15); border: 1px solid rgba(255,165,0,.35);
+      color: #ffb340; border-radius: 8px;
+      font-family: var(--font); font-size: 11px; font-weight: 700;
+      padding: 4px 10px; cursor: pointer;
+      transition: background .15s;
+    }
+    .admin-badge:hover { background: rgba(255,165,0,.25); }
+
+    .tariff-row-item {
+      display: flex; align-items: center; justify-content: space-between;
+      background: rgba(255,255,255,.07); border: 1px solid rgba(255,255,255,.12);
+      border-radius: 12px; padding: 12px 15px; cursor: pointer;
+      transition: background .15s, transform .1s;
+    }
+    .tariff-row-item:hover { background: rgba(255,255,255,.13); transform: translateX(3px); }
+    .tariff-row-name { font-size: 14px; font-weight: 700; color: white; }
+    .tariff-row-meta { font-size: 11.5px; color: rgba(255,255,255,.5); margin-top: 2px; }
+    .tariff-row-badges { display: flex; gap: 5px; margin-top: 4px; }
+    .tariff-badge {
+      font-size: 10px; font-weight: 700; padding: 2px 7px;
+      border-radius: 6px; display: inline-block;
+    }
+    .tariff-badge.dyn { background: rgba(8,145,178,.25); color: #5de0f5; border: 1px solid rgba(8,145,178,.35); }
+    .tariff-badge.bat { background: rgba(125,217,64,.15); color: #a3ed6a; border: 1px solid rgba(125,217,64,.3); }
+
+    /* ══ CONFIRM DELETE CARD ════════════════════════════════════ */
+    .delete-confirm-card {
+      background: rgba(255,60,60,.08);
+      border: 1px solid rgba(255,60,60,.3);
+      border-radius: 14px; padding: 18px;
+      margin-top: 12px;
+    }
+    .delete-confirm-card h3 {
+      font-size: 14px; font-weight: 700; color: rgba(255,140,140,.9);
+      margin-bottom: 8px;
+    }
+    .delete-confirm-card p {
+      font-size: 12.5px; color: rgba(255,255,255,.6); margin-bottom: 12px;
+      line-height: 1.5;
+    }
+    .btn-danger {
+      background: rgba(220,50,50,.85); color: white;
+      border: none; border-radius: var(--r-btn);
+      font-family: var(--font); font-size: 14px; font-weight: 700;
+      padding: 12px 18px; width: 100%; cursor: pointer;
+      transition: background .15s;
+    }
+    .btn-danger:hover { background: rgba(200,40,40,.95); }
+    .btn-danger:disabled { opacity: .5; cursor: default; }
   </style>
 </head>
 <body>
@@ -944,10 +997,9 @@ function Logo({ width = 135 }) {
 }
 
 // ─── Top Bar ──────────────────────────────────
-function TopBar({ name, showName, onLogout, logoOnly = false, onLogoClick, onProfileClick }) {
-  const initials = name
-    ? name.trim().split(/\s+/).map(w => w[0]?.toUpperCase() || '').join('').slice(0, 2)
-    : '';
+function TopBar({ name, avatarName, showName, onLogout, logoOnly = false, onLogoClick, onProfileClick, isAdmin, onAdmin }) {
+  const src = avatarName || name || '';
+  const initials = src.trim().split(/\s+/).map(w => w[0]?.toUpperCase() || '').join('').slice(0, 2);
   return (
     <div className="top-bar">
       <div onClick={onLogoClick} style={onLogoClick ? {cursor:'pointer'} : {}}>
@@ -955,6 +1007,9 @@ function TopBar({ name, showName, onLogout, logoOnly = false, onLogoClick, onPro
       </div>
       {!logoOnly && (
         <div style={{display:'flex',alignItems:'center',gap:8}}>
+          {isAdmin && onAdmin && (
+            <button className="admin-badge" onClick={onAdmin}>⚙️ Admin</button>
+          )}
           {showName && name && (
             <div className="user-chip" onClick={onProfileClick}
               style={onProfileClick ? {cursor:'pointer'} : {}}>
@@ -1475,7 +1530,7 @@ function InstallBanner() {
 }
 
 // ─── AuthSignupScreen ─────────────────────────
-function AuthSignupScreen({ onGoToLogin }) {
+function AuthSignupScreen({ onGoToLogin, onSignedUp }) {
   const [prenom,  setPrenom]  = useState('');
   const [nom,     setNom]     = useState('');
   const [email,   setEmail]   = useState('');
@@ -1496,6 +1551,7 @@ function AuthSignupScreen({ onGoToLogin }) {
     if (err) { setError(err.message); setLoading(false); return; }
     if (data.user) {
       await sb.from('profiles').insert({ id: data.user.id, prenom: prenom.trim(), nom: nom.trim() });
+      onSignedUp?.({ prenom: prenom.trim(), nom: nom.trim() });
     }
     if (!data.session) setCheckEmail(true);
     setLoading(false);
@@ -1723,17 +1779,21 @@ function SimulationsScreen({ onACC, onBox, onSolar, onBack }) {
 }
 
 // ─── ProfileScreen ───────────────────────────
-function ProfileScreen({ user, profile, onSave, onCancel, onLogout }) {
-  const [prenom,  setPrenom]  = useState(profile?.prenom || '');
-  const [nom,     setNom]     = useState(profile?.nom || '');
-  const [pseudo,  setPseudo]  = useState(profile?.pseudo || '');
-  const [adresse, setAdresse] = useState(profile?.adresse_ligne1 || '');
-  const [cp,      setCp]      = useState(profile?.code_postal || '');
-  const [ville,   setVille]   = useState(profile?.ville || '');
-  const [tel,     setTel]     = useState(profile?.telephone || '');
-  const [email,   setEmail]   = useState(user?.email || '');
-  const [loading, setLoading] = useState(false);
-  const [error,   setError]   = useState(null);
+function ProfileScreen({ user, profile, onSave, onCancel, onLogout, onDeleted }) {
+  const [prenom,    setPrenom]    = useState(profile?.prenom || '');
+  const [nom,       setNom]       = useState(profile?.nom || '');
+  const [pseudo,    setPseudo]    = useState(profile?.pseudo || '');
+  const [adresse,   setAdresse]   = useState(profile?.adresse_ligne1 || '');
+  const [cp,        setCp]        = useState(profile?.code_postal || '');
+  const [ville,     setVille]     = useState(profile?.ville || '');
+  const [tel,       setTel]       = useState(profile?.telephone || '');
+  const [email,     setEmail]     = useState(user?.email || '');
+  const [loading,   setLoading]   = useState(false);
+  const [error,     setError]     = useState(null);
+  const [showDelete, setShowDelete] = useState(false);
+  const [deleteEmail, setDeleteEmail] = useState('');
+  const [deleting,  setDeleting]  = useState(false);
+  const [deleteErr, setDeleteErr] = useState(null);
 
   const handleSave = async () => {
     if (!prenom.trim() || !nom.trim()) {
@@ -1757,6 +1817,16 @@ function ProfileScreen({ user, profile, onSave, onCancel, onLogout }) {
     onSave({ prenom:prenom.trim(), nom:nom.trim(), pseudo:pseudo.trim()||null,
              adresse_ligne1:adresse.trim()||null, code_postal:cp.trim()||null,
              ville:ville.trim()||null, telephone:tel.trim()||null });
+  };
+
+  const handleDeleteConfirm = async () => {
+    if (deleteEmail.trim() !== user.email) {
+      setDeleteErr("L'email ne correspond pas à votre compte."); return;
+    }
+    setDeleting(true); setDeleteErr(null);
+    await sb.rpc('delete_account');
+    await sb.auth.signOut();
+    onDeleted?.();
   };
 
   return (
@@ -1805,9 +1875,38 @@ function ProfileScreen({ user, profile, onSave, onCancel, onLogout }) {
           </div>
           {error && <div className="auth-error">{error}</div>}
         </div>
-        <button className="btn-link" style={{color:'rgba(255,100,100,.65)'}} onClick={onLogout}>
+
+        <button className="btn-link" style={{color:'white'}} onClick={onLogout}>
           Se déconnecter
         </button>
+
+        {!showDelete ? (
+          <button className="btn-link" style={{color:'rgba(255,120,120,.55)',fontSize:12,paddingTop:4}}
+            onClick={()=>setShowDelete(true)}>
+            Supprimer ce compte et toutes les données associées
+          </button>
+        ) : (
+          <div className="delete-confirm-card">
+            <h3>Supprimer le compte</h3>
+            <p>Cette action est irréversible. Toutes vos données seront effacées.<br/>
+               Saisissez votre email pour confirmer.</p>
+            <div className="inp-group" style={{marginBottom:12}}>
+              <input className="inp" type="email" value={deleteEmail}
+                onChange={e=>setDeleteEmail(e.target.value)}
+                placeholder={user.email}/>
+            </div>
+            {deleteErr && <div className="auth-error" style={{marginBottom:10}}>{deleteErr}</div>}
+            <div style={{display:'flex',gap:8}}>
+              <button className="btn-danger" onClick={handleDeleteConfirm} disabled={deleting}>
+                {deleting ? 'Suppression…' : 'Confirmer la suppression'}
+              </button>
+              <button className="btn btn-sec" style={{flex:'0 0 auto',padding:'12px 16px'}}
+                onClick={()=>{setShowDelete(false);setDeleteErr(null);setDeleteEmail('');}}>
+                Annuler
+              </button>
+            </div>
+          </div>
+        )}
       </div>
       <StickyFooter>
         <button className="btn btn-yes" onClick={handleSave} disabled={loading}>
@@ -1816,6 +1915,275 @@ function ProfileScreen({ user, profile, onSave, onCancel, onLogout }) {
         <button className="btn btn-sec" onClick={onCancel}>Quitter sans enregistrer</button>
       </StickyFooter>
     </>
+  );
+}
+
+// ─── AdminScreen ──────────────────────────────
+function AdminScreen({ onTariffs, onUsers, onBack }) {
+  return (
+    <div className="screen fade-in">
+      <button className="back-btn" onClick={onBack}>← Retour</button>
+      <div className="auth-header">
+        <div className="welcome-tag" style={{color:'#ffb340'}}>Administration</div>
+        <h1 className="welcome-title">Menu<br/><span className="accent">admin</span></h1>
+      </div>
+      <div className="sim-btns">
+        <button className="sim-btn" onClick={onTariffs}>
+          <span className="sim-icon">⚡</span>
+          <div className="sim-text">
+            <div className="sim-title">Gestion des tarifs d'électricité</div>
+            <div className="sim-sub">Créer, modifier, importer les prix spot</div>
+          </div>
+          <span className="sim-arrow">→</span>
+        </button>
+        <button className="sim-btn" onClick={onUsers}>
+          <span className="sim-icon">👥</span>
+          <div className="sim-text">
+            <div className="sim-title">Gestion des utilisateurs</div>
+            <div className="sim-sub">Voir et gérer les membres Starvolt</div>
+          </div>
+          <span className="sim-arrow">→</span>
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ─── AdminTariffsScreen ───────────────────────
+function AdminTariffsScreen({ onEdit, onNew, onBack }) {
+  const [tariffs, setTariffs] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    sb.from('tarifs_electricite')
+      .select('*').order('created_at')
+      .then(({ data }) => { setTariffs(data || []); setLoading(false); });
+  }, []);
+
+  const fmt = (ts) => ts ? new Date(ts).toLocaleDateString('fr-FR', {day:'2-digit',month:'2-digit',year:'2-digit'}) : '—';
+
+  return (
+    <div className="screen fade-in">
+      <button className="back-btn" onClick={onBack}>← Retour</button>
+      <div className="auth-header">
+        <div className="welcome-tag" style={{color:'#ffb340'}}>Administration</div>
+        <h1 className="welcome-title">Tarifs<br/><span className="accent">d'électricité</span></h1>
+      </div>
+      {loading ? <div style={{textAlign:'center',padding:40}}><div className="spinner" style={{margin:'0 auto'}}/></div> : (
+        <div style={{display:'flex',flexDirection:'column',gap:8,marginBottom:80}}>
+          {tariffs.map(t => (
+            <div key={t.id} className="tariff-row-item" onClick={()=>onEdit(t)}>
+              <div style={{flex:1}}>
+                <div className="tariff-row-name">{t.nom}</div>
+                <div className="tariff-row-meta">
+                  Abo : {t.abo_annuel ? `${t.abo_annuel} €/an` : '—'}
+                  {t.prix_hp ? ` · HP : ${t.prix_hp} €` : ''}
+                  {t.prix_hc ? ` · HC : ${t.prix_hc} €` : ''}
+                </div>
+                <div className="tariff-row-badges">
+                  {t.tarif_dynamique && <span className="tariff-badge dyn">Dynamique</span>}
+                  {t.bat_virtuelle && <span className="tariff-badge bat">Bat. virtuelle</span>}
+                </div>
+                <div className="tariff-row-meta" style={{marginTop:3}}>Modifié : {fmt(t.last_modified)}</div>
+              </div>
+              <span style={{color:'rgba(255,255,255,.35)',fontSize:18,marginLeft:10}}>›</span>
+            </div>
+          ))}
+        </div>
+      )}
+      <div style={{position:'fixed',bottom:0,left:0,right:0,padding:'16px',background:'linear-gradient(to top, rgba(5,65,78,1) 65%, transparent)',zIndex:200}}>
+        <div style={{maxWidth:520,margin:'0 auto',display:'flex',gap:10}}>
+          <button className="btn btn-sec" style={{flex:1,fontSize:13}} onClick={onNew}>+ Nouveau tarif</button>
+          <button className="btn btn-sec" style={{flex:1,fontSize:13,color:'#5de0f5',borderColor:'rgba(8,145,178,.4)'}}
+            onClick={()=>alert('Import prix spot — à venir')}>⚡ Importer prix spot</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── AdminTariffEditScreen ────────────────────
+function AdminTariffEditScreen({ tariff, onSave, onDelete, onBack }) {
+  const isNew = !tariff?.id;
+  const [f, setF] = useState({
+    nom:               tariff?.nom || '',
+    abo_annuel:        tariff?.abo_annuel ?? '',
+    prix_hp:           tariff?.prix_hp ?? '',
+    prix_hc:           tariff?.prix_hc ?? '',
+    heure_debut_hc1:   tariff?.heure_debut_hc1?.slice(0,5) || '',
+    heure_fin_hc1:     tariff?.heure_fin_hc1?.slice(0,5) || '',
+    heure_debut_hc2:   tariff?.heure_debut_hc2?.slice(0,5) || '',
+    heure_fin_hc2:     tariff?.heure_fin_hc2?.slice(0,5) || '',
+    bat_virtuelle:     tariff?.bat_virtuelle || false,
+    surcout_abonnement:tariff?.surcout_abonnement ?? '',
+    acheminement_hp:   tariff?.acheminement_hp ?? '',
+    acheminement_hc:   tariff?.acheminement_hc ?? '',
+    tarif_dynamique:   tariff?.tarif_dynamique || false,
+    turpe_fixe:        tariff?.turpe_fixe ?? '',
+    cta_fixe:          tariff?.cta_fixe ?? '',
+  });
+  const [loading, setLoading] = useState(false);
+  const [error,   setError]   = useState(null);
+
+  const upd = (k, v) => setF(p => ({...p, [k]: v}));
+
+  const n = (v) => v === '' || v === null || v === undefined ? null : parseFloat(v);
+
+  const handleSave = async () => {
+    if (!f.nom.trim()) { setError('Le nom est obligatoire.'); return; }
+    setLoading(true); setError(null);
+    const payload = {
+      nom: f.nom.trim(),
+      abo_annuel: n(f.abo_annuel),
+      prix_hp: f.tarif_dynamique ? null : n(f.prix_hp),
+      prix_hc: f.tarif_dynamique ? null : n(f.prix_hc),
+      heure_debut_hc1: f.heure_debut_hc1 || null,
+      heure_fin_hc1:   f.heure_fin_hc1   || null,
+      heure_debut_hc2: f.heure_debut_hc2 || null,
+      heure_fin_hc2:   f.heure_fin_hc2   || null,
+      bat_virtuelle:   f.bat_virtuelle,
+      surcout_abonnement: f.bat_virtuelle ? n(f.surcout_abonnement) : null,
+      acheminement_hp:    f.bat_virtuelle ? n(f.acheminement_hp) : null,
+      acheminement_hc:    f.bat_virtuelle ? n(f.acheminement_hc) : null,
+      tarif_dynamique: f.tarif_dynamique,
+      turpe_fixe: f.tarif_dynamique ? n(f.turpe_fixe) : null,
+      cta_fixe:   f.tarif_dynamique ? n(f.cta_fixe)   : null,
+      last_modified: new Date().toISOString(),
+    };
+    let err;
+    if (isNew) {
+      ({ error: err } = await sb.from('tarifs_electricite').insert(payload));
+    } else {
+      ({ error: err } = await sb.from('tarifs_electricite').update(payload).eq('id', tariff.id));
+    }
+    setLoading(false);
+    if (err) { setError(err.message); return; }
+    onSave();
+  };
+
+  const handleDelete = async () => {
+    if (!confirm(`Supprimer "${tariff.nom}" ?`)) return;
+    await sb.from('tarifs_electricite').delete().eq('id', tariff.id);
+    onDelete();
+  };
+
+  const Toggle = ({ label, val, onChange }) => (
+    <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'10px 0'}}>
+      <span style={{fontSize:13,color:'rgba(255,255,255,.75)',fontWeight:600}}>{label}</span>
+      <button onClick={()=>onChange(!val)} style={{
+        width:44,height:26,borderRadius:13,border:'none',cursor:'pointer',padding:3,
+        background: val ? 'var(--green)' : 'rgba(255,255,255,.2)',
+        display:'flex',alignItems:'center',justifyContent: val ? 'flex-end' : 'flex-start',
+        transition:'background .2s',
+      }}>
+        <span style={{width:20,height:20,borderRadius:10,background:'white',display:'block'}}/>
+      </button>
+    </div>
+  );
+
+  const Field = ({ label, fkey, type='text', placeholder='' }) => (
+    <div className="inp-group">
+      <label className="inp-label">{label}</label>
+      <input className="inp" type={type} value={f[fkey]} placeholder={placeholder}
+        onChange={e=>upd(fkey, e.target.value)}/>
+    </div>
+  );
+
+  return (
+    <>
+      <div className="screen fade-in">
+        <button className="back-btn" onClick={onBack}>← Retour</button>
+        <div className="auth-header">
+          <div className="welcome-tag" style={{color:'#ffb340'}}>Administration</div>
+          <h1 className="welcome-title">{isNew ? 'Nouveau' : 'Modifier'}<br/><span className="accent">tarif</span></h1>
+        </div>
+        <div className="form-card">
+          <Field label="Nom du tarif *" fkey="nom" placeholder="EDF TRV HC HP"/>
+          <Field label="Abonnement annuel (€/an)" fkey="abo_annuel" type="number" placeholder="237.72"/>
+          <Toggle label="Tarif dynamique (prix spot)" val={f.tarif_dynamique} onChange={v=>upd('tarif_dynamique',v)}/>
+          {f.tarif_dynamique ? (
+            <>
+              <div className="inp-row">
+                <Field label="TURPE fixe (€/an)" fkey="turpe_fixe" type="number" placeholder="129.79"/>
+                <Field label="CTA fixe (€/an)" fkey="cta_fixe" type="number" placeholder="19.47"/>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="inp-row">
+                <Field label="Prix HP (€/kWh)" fkey="prix_hp" type="number" placeholder="0.2081"/>
+                <Field label="Prix HC (€/kWh)" fkey="prix_hc" type="number" placeholder="0.1635"/>
+              </div>
+              <div style={{fontSize:12,color:'rgba(255,255,255,.45)',fontWeight:600,textTransform:'uppercase',letterSpacing:.5,marginTop:4}}>Plages HC</div>
+              <div className="inp-row">
+                <Field label="Début HC 1" fkey="heure_debut_hc1" type="time"/>
+                <Field label="Fin HC 1" fkey="heure_fin_hc1" type="time"/>
+              </div>
+              <div className="inp-row">
+                <Field label="Début HC 2" fkey="heure_debut_hc2" type="time"/>
+                <Field label="Fin HC 2" fkey="heure_fin_hc2" type="time"/>
+              </div>
+            </>
+          )}
+          <Toggle label="Batterie virtuelle" val={f.bat_virtuelle} onChange={v=>upd('bat_virtuelle',v)}/>
+          {f.bat_virtuelle && (
+            <>
+              <Field label="Surcout abonnement (€/an)" fkey="surcout_abonnement" type="number" placeholder="86.4"/>
+              <div className="inp-row">
+                <Field label="Acheminement HP (€/kWh)" fkey="acheminement_hp" type="number" placeholder="0.0953"/>
+                <Field label="Acheminement HC (€/kWh)" fkey="acheminement_hc" type="number" placeholder="0.078"/>
+              </div>
+            </>
+          )}
+          {error && <div className="auth-error">{error}</div>}
+        </div>
+        {!isNew && (
+          <button className="btn-link" style={{color:'rgba(255,100,100,.55)',marginTop:8}} onClick={handleDelete}>
+            Supprimer ce tarif
+          </button>
+        )}
+      </div>
+      <StickyFooter>
+        <button className="btn btn-yes" onClick={handleSave} disabled={loading}>
+          {loading ? 'Enregistrement…' : '✓ Enregistrer'}
+        </button>
+        <button className="btn btn-sec" onClick={onBack}>Annuler</button>
+      </StickyFooter>
+    </>
+  );
+}
+
+// ─── AdminUsersScreen ─────────────────────────
+function AdminUsersScreen({ onBack }) {
+  const [users,   setUsers]   = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    sb.from('profiles').select('prenom, nom, pseudo, created_at').order('created_at', {ascending:false})
+      .then(({ data }) => { setUsers(data || []); setLoading(false); });
+  }, []);
+
+  return (
+    <div className="screen fade-in">
+      <button className="back-btn" onClick={onBack}>← Retour</button>
+      <div className="auth-header">
+        <div className="welcome-tag" style={{color:'#ffb340'}}>Administration</div>
+        <h1 className="welcome-title">Utilisateurs<br/><span className="accent">({users.length})</span></h1>
+      </div>
+      {loading ? <div style={{textAlign:'center',padding:40}}><div className="spinner" style={{margin:'0 auto'}}/></div> : (
+        <div style={{display:'flex',flexDirection:'column',gap:8}}>
+          {users.map((u,i) => (
+            <div key={i} className="tariff-row-item" style={{cursor:'default'}}>
+              <div>
+                <div className="tariff-row-name">{u.prenom} {u.nom}</div>
+                {u.pseudo && <div className="tariff-row-meta">Pseudo : {u.pseudo}</div>}
+                <div className="tariff-row-meta">Inscrit le {u.created_at ? new Date(u.created_at).toLocaleDateString('fr-FR') : '—'}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -1837,6 +2205,7 @@ function App() {
   const [user,        setUser]       = useState(null);
   const [profile,     setProfile]    = useState(null);
   const [authLoading, setAuthLoading]= useState(true);
+  const pendingProfileRef            = useRef(null);
 
   const fetchProfile = useCallback(async (userId) => {
     const { data } = await sb.from('profiles')
@@ -1858,6 +2227,10 @@ function App() {
     const { data: { subscription } } = sb.auth.onAuthStateChange((event, session) => {
       if (event === 'SIGNED_IN' && session?.user) {
         setUser(session.user);
+        if (pendingProfileRef.current) {
+          setProfile(pendingProfileRef.current);
+          pendingProfileRef.current = null;
+        }
         fetchProfile(session.user.id);
         setState(s => ({ ...s, screen: 'HOME_LOGGED_IN' }));
         setHistory([]);
@@ -1887,6 +2260,8 @@ function App() {
 
   const handleLogout = async () => { await sb.auth.signOut(); };
 
+  const isAdmin = user?.email === 'greg@starvolt.fr';
+
   const render = () => {
     if (authLoading) return (
       <div style={{display:'flex',alignItems:'center',justifyContent:'center',minHeight:'60vh'}}>
@@ -1905,8 +2280,30 @@ function App() {
           profile={profile}
           onSave={(updated) => { setProfile(p => ({...p, ...updated})); goTo('HOME_LOGGED_IN'); }}
           onCancel={() => goTo('HOME_LOGGED_IN')}
-          onLogout={handleLogout}/>;
+          onLogout={handleLogout}
+          onDeleted={() => { setUser(null); setProfile(null); setState(INIT); setHistory([]); }}/>;
 
+      case 'ADMIN':
+        return <AdminScreen
+          onTariffs={()=>goTo('ADMIN_TARIFFS')}
+          onUsers={()=>goTo('ADMIN_USERS')}
+          onBack={goBack}/>;
+
+      case 'ADMIN_TARIFFS':
+        return <AdminTariffsScreen
+          onEdit={(t)=>goTo('ADMIN_TARIFF_EDIT', {editTariff: t})}
+          onNew={()=>goTo('ADMIN_TARIFF_EDIT', {editTariff: null})}
+          onBack={goBack}/>;
+
+      case 'ADMIN_TARIFF_EDIT':
+        return <AdminTariffEditScreen
+          tariff={state.editTariff}
+          onSave={()=>goTo('ADMIN_TARIFFS')}
+          onDelete={()=>goTo('ADMIN_TARIFFS')}
+          onBack={goBack}/>;
+
+      case 'ADMIN_USERS':
+        return <AdminUsersScreen onBack={goBack}/>;
 
       case 'MA_CONSO':
         return <MaConsoScreen onBack={goBack}/>;
@@ -1921,7 +2318,9 @@ function App() {
       }
 
       case 'AUTH_SIGNUP':
-        return <AuthSignupScreen onGoToLogin={()=>goTo('AUTH_LOGIN')}/>;
+        return <AuthSignupScreen
+          onGoToLogin={()=>goTo('AUTH_LOGIN')}
+          onSignedUp={(p)=>{ pendingProfileRef.current = {...p, pseudo:null, adresse_ligne1:null, code_postal:null, ville:null, telephone:null}; }}/>;
 
       case 'AUTH_LOGIN':
         return <AuthLoginScreen onGoToSignup={()=>goTo('AUTH_SIGNUP')}/>;
@@ -1988,33 +2387,45 @@ function App() {
 
   const isAuthScreen = ['AUTH_SIGNUP','AUTH_LOGIN'].includes(state.screen);
   const isHome = !authLoading && user && state.screen === 'HOME_LOGGED_IN';
-  const displayName = profile ? `${profile.pseudo || profile.prenom} ${profile.nom}` : state.name;
+  const chipLabel = profile ? (profile.pseudo || profile.prenom || '') : state.name;
+  const avatarName = profile ? `${profile.prenom || ''} ${profile.nom || ''}`.trim() : state.name;
   const showNameChip = profile ? true : state.screen !== 'WELCOME';
 
   return (
     <div className="app">
       <TopBar
-        name={displayName}
+        name={chipLabel}
+        avatarName={avatarName}
         showName={!isAuthScreen && showNameChip}
         logoOnly={isAuthScreen}
         onLogout={user && !isHome && state.screen !== 'PROFILE' ? handleLogout : null}
         onLogoClick={() => user ? goTo('HOME_LOGGED_IN') : goTo('WELCOME')}
         onProfileClick={user ? () => goTo('PROFILE') : null}
+        isAdmin={isAdmin}
+        onAdmin={()=>goTo('ADMIN')}
       />
       <div className="chevrons-deco" aria-hidden="true">
         {['»','»','»','»'].map((c,i)=><span key={i}>{c}</span>)}
       </div>
       {render()}
       {isHome && (
-        <StickyFooter row>
-          <button className="btn-home" onClick={()=>goTo('MA_CONSO')}>
-            <span>Ma conso actuelle</span>
-            <span className="btn-home-sub">renseignée à 0 %</span>
-          </button>
-          <button className="btn-home primary" onClick={()=>goTo('SIMULATIONS')}>
-            <span>Simulations</span>
-            <span className="btn-home-sub">d'économie</span>
-          </button>
+        <StickyFooter>
+          {isAdmin && (
+            <button className="btn btn-sec" style={{fontSize:13,color:'#ffb340',borderColor:'rgba(255,165,0,.35)'}}
+              onClick={()=>goTo('ADMIN')}>
+              ⚙️ Administration
+            </button>
+          )}
+          <div style={{display:'flex',gap:10}}>
+            <button className="btn-home" onClick={()=>goTo('MA_CONSO')}>
+              <span>Ma conso actuelle</span>
+              <span className="btn-home-sub">renseignée à 0 %</span>
+            </button>
+            <button className="btn-home primary" onClick={()=>goTo('SIMULATIONS')}>
+              <span>Simulations</span>
+              <span className="btn-home-sub">d'économie</span>
+            </button>
+          </div>
         </StickyFooter>
       )}
       <InstallBanner/>
