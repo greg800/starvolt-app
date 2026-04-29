@@ -944,17 +944,20 @@ function Logo({ width = 135 }) {
 }
 
 // ─── Top Bar ──────────────────────────────────
-function TopBar({ name, showName, onLogout, logoOnly = false }) {
+function TopBar({ name, showName, onLogout, logoOnly = false, onLogoClick, onProfileClick }) {
   const initials = name
     ? name.trim().split(/\s+/).map(w => w[0]?.toUpperCase() || '').join('').slice(0, 2)
     : '';
   return (
     <div className="top-bar">
-      <Logo width={110}/>
+      <div onClick={onLogoClick} style={onLogoClick ? {cursor:'pointer'} : {}}>
+        <Logo width={110}/>
+      </div>
       {!logoOnly && (
         <div style={{display:'flex',alignItems:'center',gap:8}}>
           {showName && name && (
-            <div className="user-chip">
+            <div className="user-chip" onClick={onProfileClick}
+              style={onProfileClick ? {cursor:'pointer'} : {}}>
               <div className="user-chip-av">{initials}</div>
               <span>{name}</span>
             </div>
@@ -1643,7 +1646,7 @@ function AuthLoginScreen({ onGoToSignup }) {
 
 // ─── HomeLoggedInScreen ───────────────────────
 function HomeLoggedInScreen({ profile }) {
-  const prenom = profile?.prenom || '…';
+  const prenom = profile?.pseudo || profile?.prenom || '…';
   return (
     <div className="screen fade-in">
       <div className="home-greeting">
@@ -1719,6 +1722,103 @@ function SimulationsScreen({ onACC, onBox, onSolar, onBack }) {
   );
 }
 
+// ─── ProfileScreen ───────────────────────────
+function ProfileScreen({ user, profile, onSave, onCancel, onLogout }) {
+  const [prenom,  setPrenom]  = useState(profile?.prenom || '');
+  const [nom,     setNom]     = useState(profile?.nom || '');
+  const [pseudo,  setPseudo]  = useState(profile?.pseudo || '');
+  const [adresse, setAdresse] = useState(profile?.adresse_ligne1 || '');
+  const [cp,      setCp]      = useState(profile?.code_postal || '');
+  const [ville,   setVille]   = useState(profile?.ville || '');
+  const [tel,     setTel]     = useState(profile?.telephone || '');
+  const [email,   setEmail]   = useState(user?.email || '');
+  const [loading, setLoading] = useState(false);
+  const [error,   setError]   = useState(null);
+
+  const handleSave = async () => {
+    if (!prenom.trim() || !nom.trim()) {
+      setError('Le prénom et le nom sont obligatoires.'); return;
+    }
+    setLoading(true); setError(null);
+    const { error: err } = await sb.from('profiles').update({
+      prenom:        prenom.trim(),
+      nom:           nom.trim(),
+      pseudo:        pseudo.trim() || null,
+      adresse_ligne1:adresse.trim() || null,
+      code_postal:   cp.trim() || null,
+      ville:         ville.trim() || null,
+      telephone:     tel.trim() || null,
+    }).eq('id', user.id);
+    if (err) { setError(err.message); setLoading(false); return; }
+    if (email.trim() && email.trim() !== user.email) {
+      await sb.auth.updateUser({ email: email.trim() });
+    }
+    setLoading(false);
+    onSave({ prenom:prenom.trim(), nom:nom.trim(), pseudo:pseudo.trim()||null,
+             adresse_ligne1:adresse.trim()||null, code_postal:cp.trim()||null,
+             ville:ville.trim()||null, telephone:tel.trim()||null });
+  };
+
+  return (
+    <>
+      <div className="screen fade-in">
+        <div className="auth-header">
+          <div className="welcome-tag">Mon compte</div>
+          <h1 className="welcome-title">Mes informations<br/><span className="accent">personnelles</span></h1>
+        </div>
+        <div className="form-card">
+          <div className="inp-row">
+            <div className="inp-group">
+              <label className="inp-label">Prénom *</label>
+              <input className="inp" value={prenom} onChange={e=>setPrenom(e.target.value)}/>
+            </div>
+            <div className="inp-group">
+              <label className="inp-label">Nom *</label>
+              <input className="inp" value={nom} onChange={e=>setNom(e.target.value)}/>
+            </div>
+          </div>
+          <div className="inp-group">
+            <label className="inp-label">Pseudo (affiché dans l'app)</label>
+            <input className="inp" value={pseudo} onChange={e=>setPseudo(e.target.value)} placeholder={prenom || 'Marie'}/>
+          </div>
+          <div className="inp-group">
+            <label className="inp-label">Numéro et rue</label>
+            <input className="inp" value={adresse} onChange={e=>setAdresse(e.target.value)} placeholder="12 rue de la Paix"/>
+          </div>
+          <div className="inp-row">
+            <div className="inp-group">
+              <label className="inp-label">Code postal</label>
+              <input className="inp" value={cp} onChange={e=>setCp(e.target.value)} placeholder="75001"/>
+            </div>
+            <div className="inp-group">
+              <label className="inp-label">Ville</label>
+              <input className="inp" value={ville} onChange={e=>setVille(e.target.value)} placeholder="Paris"/>
+            </div>
+          </div>
+          <div className="inp-group">
+            <label className="inp-label">Téléphone</label>
+            <input className="inp" type="tel" value={tel} onChange={e=>setTel(e.target.value)} placeholder="06 12 34 56 78"/>
+          </div>
+          <div className="inp-group">
+            <label className="inp-label">Email</label>
+            <input className="inp" type="email" value={email} onChange={e=>setEmail(e.target.value)}/>
+          </div>
+          {error && <div className="auth-error">{error}</div>}
+        </div>
+        <button className="btn-link" style={{color:'rgba(255,100,100,.65)'}} onClick={onLogout}>
+          Se déconnecter
+        </button>
+      </div>
+      <StickyFooter>
+        <button className="btn btn-yes" onClick={handleSave} disabled={loading}>
+          {loading ? 'Enregistrement…' : '✓ Enregistrer et quitter'}
+        </button>
+        <button className="btn btn-sec" onClick={onCancel}>Quitter sans enregistrer</button>
+      </StickyFooter>
+    </>
+  );
+}
+
 // ─── MAIN APP — Machine d'états ──────────────
 
 const INIT = {
@@ -1739,7 +1839,9 @@ function App() {
   const [authLoading, setAuthLoading]= useState(true);
 
   const fetchProfile = useCallback(async (userId) => {
-    const { data } = await sb.from('profiles').select('prenom, nom').eq('id', userId).single();
+    const { data } = await sb.from('profiles')
+      .select('prenom, nom, pseudo, adresse_ligne1, code_postal, ville, telephone')
+      .eq('id', userId).single();
     if (data) setProfile(data);
   }, []);
 
@@ -1796,6 +1898,15 @@ function App() {
 
       case 'HOME_LOGGED_IN':
         return <HomeLoggedInScreen profile={profile}/>;
+
+      case 'PROFILE':
+        return <ProfileScreen
+          user={user}
+          profile={profile}
+          onSave={(updated) => { setProfile(p => ({...p, ...updated})); goTo('HOME_LOGGED_IN'); }}
+          onCancel={() => goTo('HOME_LOGGED_IN')}
+          onLogout={handleLogout}/>;
+
 
       case 'MA_CONSO':
         return <MaConsoScreen onBack={goBack}/>;
@@ -1877,16 +1988,18 @@ function App() {
 
   const isAuthScreen = ['AUTH_SIGNUP','AUTH_LOGIN'].includes(state.screen);
   const isHome = !authLoading && user && state.screen === 'HOME_LOGGED_IN';
-  const topBarName = profile ? `${profile.prenom} ${profile.nom}` : state.name;
+  const displayName = profile ? `${profile.pseudo || profile.prenom} ${profile.nom}` : state.name;
   const showNameChip = profile ? true : state.screen !== 'WELCOME';
 
   return (
     <div className="app">
       <TopBar
-        name={topBarName}
+        name={displayName}
         showName={!isAuthScreen && showNameChip}
         logoOnly={isAuthScreen}
-        onLogout={user && !isHome ? handleLogout : null}
+        onLogout={user && !isHome && state.screen !== 'PROFILE' ? handleLogout : null}
+        onLogoClick={() => user ? goTo('HOME_LOGGED_IN') : goTo('WELCOME')}
+        onProfileClick={user ? () => goTo('PROFILE') : null}
       />
       <div className="chevrons-deco" aria-hidden="true">
         {['»','»','»','»'].map((c,i)=><span key={i}>{c}</span>)}
