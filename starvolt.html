@@ -832,7 +832,7 @@
       background: rgba(255,255,255,.17); border-color: var(--green);
       transform: translateY(-2px); box-shadow: 0 8px 24px rgba(0,0,0,.2);
     }
-    .sim-icon { font-size: 30px; flex-shrink: 0; }
+    .sim-icon { width: 44px; height: 44px; object-fit: contain; flex-shrink: 0; border-radius: 8px; }
     .sim-text { flex: 1; }
     .sim-title { font-size: 15px; font-weight: 700; margin-bottom: 2px; }
     .sim-sub { font-size: 11.5px; color: rgba(255,255,255,.5); }
@@ -1167,12 +1167,12 @@ function WelcomeScreen({ onCreateAccount, onLogin }) {
 
         <div className="card" style={{display:'flex',flexDirection:'column',gap:14,marginTop:8}}>
           {[
-            ['⚡', 'Autoconsommation collective', "Partagez l'énergie locale à moins de 2 km"],
-            ['📦', 'Box Comwatt', 'Pilotage intelligent de votre consommation'],
-            ['☀️', 'Panneaux solaires + batterie', 'Produisez et stockez votre propre énergie'],
-          ].map(([icon, title, sub]) => (
+            ['/acc.png', 'Autoconsommation collective', "Partagez l'énergie locale à moins de 2 km"],
+            ['/comwatt-box.png', 'Box Comwatt', 'Pilotage intelligent de votre consommation'],
+            ['/maison.png', 'Panneaux solaires + batterie', 'Produisez et stockez votre propre énergie'],
+          ].map(([img, title, sub]) => (
             <div key={title} style={{display:'flex',alignItems:'center',gap:14}}>
-              <span style={{fontSize:28,flexShrink:0}}>{icon}</span>
+              <img src={img} alt={title} style={{width:44,height:44,objectFit:'contain',flexShrink:0,borderRadius:8}}/>
               <div>
                 <div style={{fontWeight:700,fontSize:14,color:'white'}}>{title}</div>
                 <div style={{fontSize:12,color:'rgba(255,255,255,.55)',marginTop:2}}>{sub}</div>
@@ -1753,7 +1753,7 @@ function SimulationsScreen({ onACC, onBox, onSolar, onBack }) {
       </div>
       <div className="sim-btns">
         <button className="sim-btn" onClick={onACC}>
-          <span className="sim-icon">⚡</span>
+          <img src="/acc.png" alt="ACC" className="sim-icon"/>
           <div className="sim-text">
             <div className="sim-title">Économiser avec l'ACC</div>
             <div className="sim-sub">Autoconsommation collective locale</div>
@@ -1761,7 +1761,7 @@ function SimulationsScreen({ onACC, onBox, onSolar, onBack }) {
           <span className="sim-arrow">→</span>
         </button>
         <button className="sim-btn" onClick={onBox}>
-          <span className="sim-icon">📦</span>
+          <img src="/comwatt-box.png" alt="Box Comwatt" className="sim-icon"/>
           <div className="sim-text">
             <div className="sim-title">Économiser plus avec la Box</div>
             <div className="sim-sub">Pilotage intelligent de votre consommation</div>
@@ -1769,7 +1769,7 @@ function SimulationsScreen({ onACC, onBox, onSolar, onBack }) {
           <span className="sim-arrow">→</span>
         </button>
         <button className="sim-btn" onClick={onSolar}>
-          <span className="sim-icon">☀️</span>
+          <img src="/maison.png" alt="Solaire" className="sim-icon"/>
           <div className="sim-text">
             <div className="sim-title">Économiser avec le solaire</div>
             <div className="sim-sub">Panneaux solaires + batterie</div>
