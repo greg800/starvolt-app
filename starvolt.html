@@ -2067,12 +2067,13 @@ function SpotPricesScreen({ onBack }) {
   const fileRef = useRef(null);
 
   const loadData = useCallback(async () => {
-    const [{data:m}, {data:rows}] = await Promise.all([
+    const [{data:m}, {data:jsonRows}] = await Promise.all([
       sb.from('spot_metadata').select('*').eq('id',1).maybeSingle(),
-      sb.rpc('get_spot_all').limit(10000),
+      sb.rpc('get_spot_json'),
     ]);
     setMeta(m);
-    setSpotAll(rows && rows.length > 0 ? rows : null);
+    // get_spot_json returns a single JSON value (array), not paginated
+    setSpotAll(jsonRows && jsonRows.length > 0 ? jsonRows : null);
     setLoading(false);
   }, []);
 
