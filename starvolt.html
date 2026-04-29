@@ -27,6 +27,9 @@
   <!-- Canvas Confetti (fireworks) -->
   <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.3/dist/confetti.browser.min.js"></script>
 
+  <!-- Supabase -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+
   <style>
     /* =============================================
        RESET & ROOT
@@ -732,6 +735,119 @@
       transition: background .15s, color .15s;
     }
     .pwa-btn-close:hover { background: rgba(255,255,255,.2); color: white; }
+
+    /* ══ AUTH SCREENS ══════════════════════════════════════════════ */
+    .auth-header { text-align: center; margin-bottom: 20px; padding-top: 12px; }
+
+    .inp-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+
+    .auth-error {
+      background: rgba(255,80,80,.15);
+      border: 1px solid rgba(255,80,80,.3);
+      color: #ff9090; border-radius: 10px;
+      padding: 10px 14px;
+      font-size: 13px; font-weight: 600; line-height: 1.4;
+    }
+
+    .btn-link {
+      background: none; border: none;
+      color: rgba(255,255,255,.5);
+      font-family: var(--font); font-size: 13px; font-weight: 600;
+      cursor: pointer; padding: 10px 0; text-align: center; width: 100%;
+      text-decoration: underline; transition: color .2s;
+    }
+    .btn-link:hover { color: rgba(255,255,255,.85); }
+
+    /* ══ HOME LOGGED-IN ════════════════════════════════════════════ */
+    .home-greeting { text-align: center; padding: 36px 0 24px; }
+    .greeting-hello { font-size: 20px; font-weight: 600; color: rgba(255,255,255,.65); margin-bottom: 8px; }
+
+    .twinkling-name-container {
+      display: flex; align-items: center; justify-content: center;
+      gap: 8px; margin-bottom: 10px;
+    }
+    .greeting-name {
+      font-size: 54px; font-weight: 900; color: var(--green);
+      text-shadow: 0 0 40px rgba(125,217,64,.5); line-height: 1;
+    }
+    .star-tw {
+      color: var(--green); display: inline-block; font-size: 22px;
+      animation: tw 2s ease-in-out infinite;
+    }
+    .star-tw.sm { font-size: 14px; }
+    .star-tw:nth-child(1) { animation-delay: 0s; }
+    .star-tw:nth-child(2) { animation-delay: .5s; }
+    .star-tw:nth-child(4) { animation-delay: .3s; }
+    .star-tw:nth-child(5) { animation-delay: .8s; }
+    @keyframes tw {
+      0%,100% { opacity:.2; transform: scale(.75) rotate(-12deg); }
+      50%      { opacity:1;  transform: scale(1.3) rotate(12deg); }
+    }
+
+    .greeting-welcome { font-size: 18px; font-weight: 600; color: rgba(255,255,255,.78); }
+    .home-logo-area { display: flex; justify-content: center; margin: 24px 0; }
+    .home-tagline {
+      text-align: center; font-size: 14px; font-weight: 600;
+      color: rgba(255,255,255,.4); letter-spacing: .5px; margin-bottom: 16px;
+    }
+
+    /* ══ HOME — BOUTONS STICKY ═════════════════════════════════════ */
+    .btn-home {
+      flex: 1;
+      display: flex; flex-direction: column; align-items: center; gap: 3px;
+      padding: 13px 10px;
+      border-radius: var(--r-btn); border: 1.5px solid rgba(255,255,255,.22);
+      background: rgba(255,255,255,.10); color: white;
+      font-family: var(--font); font-size: 13px; font-weight: 700;
+      cursor: pointer; transition: all .15s ease; line-height: 1.2;
+    }
+    .btn-home:hover { background: rgba(255,255,255,.18); transform: translateY(-2px); }
+    .btn-home.primary { background: var(--green); color: #1a4500; border-color: transparent; }
+    .btn-home.primary:hover { background: var(--green-light); box-shadow: 0 6px 20px rgba(125,217,64,.35); }
+    .btn-home-sub { font-size: 10.5px; font-weight: 500; opacity: .7; }
+
+    /* Bouton CTA "créer compte" sur welcome */
+    .btn-cta {
+      background: var(--green); color: #1a4500;
+      font-size: 15px; font-weight: 800;
+    }
+    .btn-cta:hover { background: var(--green-light); box-shadow: 0 8px 28px rgba(125,217,64,.4); }
+
+    /* ══ SIMULATIONS SCREEN ════════════════════════════════════════ */
+    .sim-header { text-align: center; margin-bottom: 18px; padding-top: 8px; }
+    .sim-btns { display: flex; flex-direction: column; gap: 10px; }
+    .sim-btn {
+      display: flex; align-items: center; gap: 14px;
+      background: rgba(255,255,255,.10);
+      border: 1.5px solid rgba(255,255,255,.15);
+      border-radius: var(--r-card); padding: 18px;
+      color: white; font-family: var(--font);
+      cursor: pointer; text-align: left; width: 100%;
+      transition: all .2s ease;
+    }
+    .sim-btn:hover {
+      background: rgba(255,255,255,.17); border-color: var(--green);
+      transform: translateY(-2px); box-shadow: 0 8px 24px rgba(0,0,0,.2);
+    }
+    .sim-icon { font-size: 30px; flex-shrink: 0; }
+    .sim-text { flex: 1; }
+    .sim-title { font-size: 15px; font-weight: 700; margin-bottom: 2px; }
+    .sim-sub { font-size: 11.5px; color: rgba(255,255,255,.5); }
+    .sim-arrow { font-size: 18px; color: var(--green); flex-shrink: 0; }
+
+    /* ══ MA CONSO ══════════════════════════════════════════════════ */
+    .coming-soon { text-align: center; padding: 48px 24px; }
+
+    /* ══ TOP BAR logout btn ════════════════════════════════════════ */
+    .top-bar-logout {
+      background: rgba(255,255,255,.08);
+      border: 1px solid rgba(255,255,255,.18);
+      color: rgba(255,255,255,.6);
+      font-family: var(--font); font-size: 11px; font-weight: 600;
+      padding: 5px 10px; border-radius: 8px; cursor: pointer;
+      transition: background .15s, color .15s; flex-shrink: 0;
+    }
+    .top-bar-logout:hover { background: rgba(255,255,255,.15); color: white; }
   </style>
 </head>
 <body>
@@ -739,6 +855,12 @@
 
 <script type="text/babel">
 const { useState, useEffect, useRef, useCallback } = React;
+
+// ─── Supabase client ──────────────────────────
+const sb = supabase.createClient(
+  'https://hkxkhwegqkapdbsisxwv.supabase.co',
+  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhreGtod2VncWthcGRic2lzeHd2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc0MjY4NjksImV4cCI6MjA5MzAwMjg2OX0.9-_oHRJfwXZkl3bRYDMb5K56UzB8O1NOfa5QfrXFfkQ'
+);
 
 // ─── Eligibility ───────────────────────────────
 const ELIGIBLE_CODES = new Set(["01240","01250","01300","01480","04200","04410","05400","07170","07240","07400","07430","07580","07700","09100","09210","09350","09420","09700","11160","11170","11200","11270","11350","11400","11410","11420","11800","12130","13120","13160","13410","13660","13760","13880","15170","15250","15600","16290","16360","17240","17570","17770","19270","24250","26110","26150","26160","26210","26390","26400","26410","26450","30190","30200","30250","30340","30350","30610","30750","31370","31420","31460","31560","32300","32350","32380","32390","33610","33770","34290","34460","34480","34550","34630","38110","38118","38122","38150","38260","38350","38440","38450","38460","38510","38550","38560","38590","38650","38690","38710","38760","38770","38780","38840","38930","40200","40310","40400","43270","43300","43380","43580","46090","46150","46230","46300","46310","47430","47440","63160","63220","63420","63750","63890","64410","65140","65190","65200","65370","66300","66500","66700","73190","74270","82100","82210","82230","82290","82400","83670","84100","84200","84270","84380","84420","84480"]);
@@ -822,17 +944,24 @@ function Logo({ width = 135 }) {
 }
 
 // ─── Top Bar ──────────────────────────────────
-function TopBar({ name, showName }) {
+function TopBar({ name, showName, onLogout, logoOnly = false }) {
   const initials = name
     ? name.trim().split(/\s+/).map(w => w[0]?.toUpperCase() || '').join('').slice(0, 2)
     : '';
   return (
     <div className="top-bar">
       <Logo width={110}/>
-      {showName && name && (
-        <div className="user-chip">
-          <div className="user-chip-av">{initials}</div>
-          <span>{name}</span>
+      {!logoOnly && (
+        <div style={{display:'flex',alignItems:'center',gap:8}}>
+          {showName && name && (
+            <div className="user-chip">
+              <div className="user-chip-av">{initials}</div>
+              <span>{name}</span>
+            </div>
+          )}
+          {onLogout && (
+            <button className="top-bar-logout" onClick={onLogout}>Quitter</button>
+          )}
         </div>
       )}
     </div>
@@ -963,7 +1092,7 @@ const BackBtn = ({ onBack }) => (
 
 const DEMO_VALUES = { name: 'Marie Dupont', bill: '2000', address: '14 Rue du Temple, 30250 Combas' };
 
-function WelcomeScreen({ state, onStart }) {
+function WelcomeScreen({ state, onStart, onCreateAccount }) {
   const [name,        setName]       = useState(state.name);
   const [billStr,     setBillStr]    = useState(state.initialBill > 0 ? String(state.initialBill) : '');
   const [address,     setAddress]    = useState(state.address);
@@ -1019,9 +1148,14 @@ function WelcomeScreen({ state, onStart }) {
         </div>
       )}
       <StickyFooter>
-        <button className="btn btn-primary"
+        {onCreateAccount && (
+          <button className="btn btn-cta" onClick={onCreateAccount}>
+            Créer votre compte en 5 secondes →
+          </button>
+        )}
+        <button className="btn btn-sec"
           onClick={()=>onStart({ name:name||DEMO_VALUES.name, bill:bill||Number(DEMO_VALUES.bill), address:address||DEMO_VALUES.address })}>
-          📍 Vérifier si cette adresse est dans une boucle d'autoconsommation collective
+          📍 Vérifier mon adresse ACC
         </button>
       </StickyFooter>
     </>
@@ -1369,6 +1503,254 @@ function InstallBanner() {
   );
 }
 
+// ─── AuthSignupScreen ─────────────────────────
+function AuthSignupScreen({ onGoToLogin }) {
+  const [prenom,  setPrenom]  = useState('');
+  const [nom,     setNom]     = useState('');
+  const [email,   setEmail]   = useState('');
+  const [pwd,     setPwd]     = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error,   setError]   = useState(null);
+  const [checkEmail, setCheckEmail] = useState(false);
+
+  const handleSignup = async () => {
+    if (!prenom.trim() || !nom.trim() || !email.trim() || !pwd) {
+      setError('Tous les champs sont obligatoires.'); return;
+    }
+    if (pwd.length < 6) {
+      setError('Le mot de passe doit contenir au moins 6 caractères.'); return;
+    }
+    setLoading(true); setError(null);
+    const { data, error: err } = await sb.auth.signUp({ email: email.trim(), password: pwd });
+    if (err) { setError(err.message); setLoading(false); return; }
+    if (data.user) {
+      await sb.from('profiles').insert({ id: data.user.id, prenom: prenom.trim(), nom: nom.trim() });
+    }
+    if (!data.session) setCheckEmail(true);
+    setLoading(false);
+  };
+
+  if (checkEmail) return (
+    <>
+      <div className="screen fade-in">
+        <div className="auth-header">
+          <h1 className="welcome-title">Vérifiez<br/><span className="accent">votre email ✦</span></h1>
+          <p className="welcome-sub" style={{marginTop:12}}>
+            Un lien d'activation a été envoyé à <strong>{email}</strong>.
+          </p>
+        </div>
+      </div>
+      <StickyFooter>
+        <button className="btn btn-sec" onClick={onGoToLogin}>Retour à la connexion</button>
+      </StickyFooter>
+    </>
+  );
+
+  return (
+    <>
+      <div className="screen fade-in">
+        <div className="auth-header">
+          <div className="welcome-tag">La constellation vous attend</div>
+          <h1 className="welcome-title">Créez votre<br/><span className="accent">compte</span></h1>
+        </div>
+        <div className="form-card">
+          <div className="inp-row">
+            <div className="inp-group">
+              <label className="inp-label">Prénom</label>
+              <input className="inp" value={prenom} onChange={e=>setPrenom(e.target.value)} placeholder="Marie"/>
+            </div>
+            <div className="inp-group">
+              <label className="inp-label">Nom</label>
+              <input className="inp" value={nom} onChange={e=>setNom(e.target.value)} placeholder="Dupont"/>
+            </div>
+          </div>
+          <div className="inp-group">
+            <label className="inp-label">Email</label>
+            <input className="inp" type="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder="marie@exemple.fr"/>
+          </div>
+          <div className="inp-group">
+            <label className="inp-label">Mot de passe</label>
+            <input className="inp" type="password" value={pwd} onChange={e=>setPwd(e.target.value)} placeholder="••••••••"/>
+          </div>
+          {error && <div className="auth-error">{error}</div>}
+        </div>
+        <button className="btn-link" onClick={onGoToLogin}>Déjà membre ? Se connecter</button>
+      </div>
+      <StickyFooter>
+        <button className="btn btn-yes" onClick={handleSignup} disabled={loading}>
+          {loading ? 'Création en cours…' : 'Créer mon compte ✦'}
+        </button>
+      </StickyFooter>
+    </>
+  );
+}
+
+// ─── AuthLoginScreen ──────────────────────────
+function AuthLoginScreen({ onGoToSignup }) {
+  const [email,   setEmail]   = useState('');
+  const [pwd,     setPwd]     = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error,   setError]   = useState(null);
+  const [forgot,  setForgot]  = useState(false);
+  const [resetOk, setResetOk] = useState(false);
+
+  const handleLogin = async () => {
+    if (!email.trim() || !pwd) { setError('Email et mot de passe requis.'); return; }
+    setLoading(true); setError(null);
+    const { error: err } = await sb.auth.signInWithPassword({ email: email.trim(), password: pwd });
+    if (err) setError(err.message);
+    setLoading(false);
+  };
+
+  const handleReset = async () => {
+    if (!email.trim()) { setError("Entrez votre email d'abord."); return; }
+    setLoading(true); setError(null);
+    await sb.auth.resetPasswordForEmail(email.trim());
+    setResetOk(true); setLoading(false);
+  };
+
+  if (resetOk) return (
+    <>
+      <div className="screen fade-in">
+        <div className="auth-header">
+          <h1 className="welcome-title">Email<br/><span className="accent">envoyé ✦</span></h1>
+          <p className="welcome-sub" style={{marginTop:12}}>
+            Vérifiez votre boîte mail pour réinitialiser votre mot de passe.
+          </p>
+        </div>
+      </div>
+      <StickyFooter>
+        <button className="btn btn-sec" onClick={()=>{setForgot(false);setResetOk(false);}}>
+          Retour à la connexion
+        </button>
+      </StickyFooter>
+    </>
+  );
+
+  return (
+    <>
+      <div className="screen fade-in">
+        <div className="auth-header">
+          <div className="welcome-tag">{forgot ? 'Réinitialisation' : 'Connexion'}</div>
+          <h1 className="welcome-title">
+            {forgot
+              ? <>Mot de passe<br/><span className="accent">oublié ?</span></>
+              : <>Content de<br/><span className="accent">vous revoir</span></>}
+          </h1>
+        </div>
+        <div className="form-card">
+          <div className="inp-group">
+            <label className="inp-label">Email</label>
+            <input className="inp" type="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder="marie@exemple.fr"/>
+          </div>
+          {!forgot && (
+            <div className="inp-group">
+              <label className="inp-label">Mot de passe</label>
+              <input className="inp" type="password" value={pwd} onChange={e=>setPwd(e.target.value)} placeholder="••••••••"/>
+            </div>
+          )}
+          {error && <div className="auth-error">{error}</div>}
+        </div>
+        {!forgot
+          ? <button className="btn-link" onClick={()=>setForgot(true)}>Mot de passe oublié ?</button>
+          : <button className="btn-link" onClick={()=>setForgot(false)}>Retour à la connexion</button>
+        }
+        {!forgot && (
+          <button className="btn-link" onClick={onGoToSignup}>Pas encore membre ? Créer un compte</button>
+        )}
+      </div>
+      <StickyFooter>
+        {!forgot
+          ? <button className="btn btn-yes" onClick={handleLogin} disabled={loading}>
+              {loading ? 'Connexion…' : 'Se connecter →'}
+            </button>
+          : <button className="btn btn-yes" onClick={handleReset} disabled={loading}>
+              {loading ? 'Envoi…' : 'Envoyer le lien de réinitialisation'}
+            </button>
+        }
+      </StickyFooter>
+    </>
+  );
+}
+
+// ─── HomeLoggedInScreen ───────────────────────
+function HomeLoggedInScreen({ profile }) {
+  const prenom = profile?.prenom || '…';
+  return (
+    <div className="screen fade-in">
+      <div className="home-greeting">
+        <p className="greeting-hello">Bonjour</p>
+        <div className="twinkling-name-container">
+          <span className="star-tw">✦</span>
+          <span className="star-tw sm">✦</span>
+          <span className="greeting-name">{prenom}</span>
+          <span className="star-tw sm">✦</span>
+          <span className="star-tw">✦</span>
+        </div>
+        <p className="greeting-welcome">bienvenue chez <span className="accent">Starvolt</span></p>
+      </div>
+      <div className="home-logo-area"><Logo width={160}/></div>
+      <div className="home-tagline">Ensemble, on brille plus fort ✦</div>
+    </div>
+  );
+}
+
+// ─── MaConsoScreen ───────────────────────────
+function MaConsoScreen({ onBack }) {
+  return (
+    <div className="screen fade-in">
+      <button className="back-btn" onClick={onBack}>← Retour</button>
+      <div className="card coming-soon">
+        <div style={{fontSize:48,marginBottom:16}}>⚡</div>
+        <h2 className="screen-title">Ma consommation</h2>
+        <p className="screen-sub">
+          Cette section arrive bientôt.<br/>
+          Vous pourrez importer vos données Linky et analyser votre profil de consommation heure par heure.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+// ─── SimulationsScreen ────────────────────────
+function SimulationsScreen({ onACC, onBox, onSolar, onBack }) {
+  return (
+    <div className="screen fade-in">
+      <button className="back-btn" onClick={onBack}>← Retour</button>
+      <div className="sim-header">
+        <div className="welcome-tag">Vos leviers d'économie</div>
+        <h1 className="welcome-title">Simulations<br/><span className="accent">d'économie</span></h1>
+      </div>
+      <div className="sim-btns">
+        <button className="sim-btn" onClick={onACC}>
+          <span className="sim-icon">⚡</span>
+          <div className="sim-text">
+            <div className="sim-title">Économiser avec l'ACC</div>
+            <div className="sim-sub">Autoconsommation collective locale</div>
+          </div>
+          <span className="sim-arrow">→</span>
+        </button>
+        <button className="sim-btn" onClick={onBox}>
+          <span className="sim-icon">📦</span>
+          <div className="sim-text">
+            <div className="sim-title">Économiser plus avec la Box</div>
+            <div className="sim-sub">Pilotage intelligent de votre consommation</div>
+          </div>
+          <span className="sim-arrow">→</span>
+        </button>
+        <button className="sim-btn" onClick={onSolar}>
+          <span className="sim-icon">☀️</span>
+          <div className="sim-text">
+            <div className="sim-title">Économiser avec le solaire</div>
+            <div className="sim-sub">Panneaux solaires + batterie</div>
+          </div>
+          <span className="sim-arrow">→</span>
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ─── MAIN APP — Machine d'états ──────────────
 
 const INIT = {
@@ -1382,8 +1764,42 @@ const INIT = {
 };
 
 function App() {
-  const [state,   setState]   = useState(INIT);
-  const [history, setHistory] = useState([]);
+  const [state,       setState]      = useState(INIT);
+  const [history,     setHistory]    = useState([]);
+  const [user,        setUser]       = useState(null);
+  const [profile,     setProfile]    = useState(null);
+  const [authLoading, setAuthLoading]= useState(true);
+
+  const fetchProfile = useCallback(async (userId) => {
+    const { data } = await sb.from('profiles').select('prenom, nom').eq('id', userId).single();
+    if (data) setProfile(data);
+  }, []);
+
+  useEffect(() => {
+    sb.auth.getSession().then(({ data: { session } }) => {
+      if (session?.user) {
+        setUser(session.user);
+        fetchProfile(session.user.id);
+        setState(s => ({ ...s, screen: 'HOME_LOGGED_IN' }));
+      }
+      setAuthLoading(false);
+    });
+
+    const { data: { subscription } } = sb.auth.onAuthStateChange((event, session) => {
+      if (event === 'SIGNED_IN' && session?.user) {
+        setUser(session.user);
+        fetchProfile(session.user.id);
+        setState(s => ({ ...s, screen: 'HOME_LOGGED_IN' }));
+        setHistory([]);
+      }
+      if (event === 'SIGNED_OUT') {
+        setUser(null); setProfile(null);
+        setHistory([]); setState(INIT);
+      }
+    });
+
+    return () => subscription.unsubscribe();
+  }, [fetchProfile]);
 
   const goTo = useCallback((screen, updates = {}) => {
     setHistory(h => [...h, state]);
@@ -1399,16 +1815,46 @@ function App() {
     window.scrollTo({ top:0, behavior:'smooth' });
   }, [history]);
 
+  const handleLogout = async () => { await sb.auth.signOut(); };
+
   const render = () => {
+    if (authLoading) return (
+      <div style={{display:'flex',alignItems:'center',justifyContent:'center',minHeight:'60vh'}}>
+        <div className="spinner"/>
+      </div>
+    );
+
     switch (state.screen) {
+
+      case 'HOME_LOGGED_IN':
+        return <HomeLoggedInScreen profile={profile}/>;
+
+      case 'MA_CONSO':
+        return <MaConsoScreen onBack={goBack}/>;
+
+      case 'SIMULATIONS': {
+        const base = { name: profile?.prenom||'', address:'', initialBill:2000, bill:2000, bravoItems:[], investment:0, eligible:false };
+        return <SimulationsScreen
+          onACC={()=>goTo('WELCOME', base)}
+          onBox={()=>goTo('COMWATT', base)}
+          onSolar={()=>goTo('SOLAR', base)}
+          onBack={goBack}/>;
+      }
+
+      case 'AUTH_SIGNUP':
+        return <AuthSignupScreen onGoToLogin={()=>goTo('AUTH_LOGIN')}/>;
+
+      case 'AUTH_LOGIN':
+        return <AuthLoginScreen onGoToSignup={()=>goTo('AUTH_SIGNUP')}/>;
 
       case 'WELCOME':
         return <WelcomeScreen state={state}
+          onCreateAccount={!user ? ()=>goTo('AUTH_SIGNUP') : null}
           onStart={({name,bill,address})=>{
             const cp = extractPostalCode(address);
             const eligible = cp ? ELIGIBLE_CODES.has(cp) : false;
             goTo('ADDRESS',{name,address,initialBill:bill,bill,bravoItems:[],eligible});
-          }} />;
+          }}/>;
 
       case 'ADDRESS': {
         const accSaving = Math.round(state.initialBill * 0.15);
@@ -1465,13 +1911,35 @@ function App() {
     }
   };
 
+  const isAuthScreen = ['AUTH_SIGNUP','AUTH_LOGIN'].includes(state.screen);
+  const isHome = !authLoading && user && state.screen === 'HOME_LOGGED_IN';
+  const topBarName = profile ? `${profile.prenom} ${profile.nom}` : state.name;
+  const showNameChip = profile ? true : state.screen !== 'WELCOME';
+
   return (
     <div className="app">
-      <TopBar name={state.name} showName={state.screen !== 'WELCOME'}/>
+      <TopBar
+        name={topBarName}
+        showName={!isAuthScreen && showNameChip}
+        logoOnly={isAuthScreen}
+        onLogout={user && !isHome ? handleLogout : null}
+      />
       <div className="chevrons-deco" aria-hidden="true">
         {['»','»','»','»'].map((c,i)=><span key={i}>{c}</span>)}
       </div>
       {render()}
+      {isHome && (
+        <StickyFooter row>
+          <button className="btn-home" onClick={()=>goTo('MA_CONSO')}>
+            <span>Ma conso actuelle</span>
+            <span className="btn-home-sub">renseignée à 0 %</span>
+          </button>
+          <button className="btn-home primary" onClick={()=>goTo('SIMULATIONS')}>
+            <span>Simulations</span>
+            <span className="btn-home-sub">d'économie</span>
+          </button>
+        </StickyFooter>
+      )}
       <InstallBanner/>
     </div>
   );
