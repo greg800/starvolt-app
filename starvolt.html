@@ -1974,15 +1974,15 @@ const DAYS_IN_MONTH = [31,29,31,30,31,30,31,31,30,31,30,31];
 const MOIS_LABELS   = ['Jan','Fév','Mar','Avr','Mai','Jui','Jul','Aoû','Sep','Oct','Nov','Déc'];
 
 function SpotHeatmapCanvas({ spotAll }) {
-  const canvasRef = useRef(null);
+  const wrapperRef = useRef(null);
+  const canvasRef  = useRef(null);
 
-  useEffect(() => {
-    if (!canvasRef.current || !spotAll || spotAll.length === 0) return;
+  const draw = useCallback((containerW) => {
+    if (!canvasRef.current || !spotAll || spotAll.length === 0 || containerW < 10) return;
     const canvas = canvasRef.current;
     const ctx    = canvas.getContext('2d');
     const dpr    = window.devicePixelRatio || 1;
 
-    // Build day→24prices map
     const dayMap = {};
     spotAll.forEach(r => {
       const k = `${r.mois}_${r.jour}`;
@@ -1990,18 +1990,15 @@ function SpotHeatmapCanvas({ spotAll }) {
       dayMap[k][r.heure] = parseFloat(r.prix);
     });
 
-    // Ordered list of days
     const days = [];
-    for (let m = 1; m <= 12; m++) {
-      for (let d = 1; d <= DAYS_IN_MONTH[m-1]; d++) {
+    for (let m = 1; m <= 12; m++)
+      for (let d = 1; d <= DAYS_IN_MONTH[m-1]; d++)
         days.push({ mois:m, jour:d, prices: dayMap[`${m}_${d}`] || new Array(24).fill(null) });
-      }
-    }
 
-    const CELL_W = 13;
+    const LBL_W = 26;
+    const HDR_H = 16;
+    const CELL_W = Math.max(4, Math.floor((containerW - LBL_W) / 24));
     const CELL_H = 3;
-    const LBL_W  = 30;
-    const HDR_H  = 18;
     const W = LBL_W + 24 * CELL_W;
     const H = HDR_H + days.length * CELL_H;
 
@@ -2011,47 +2008,56 @@ function SpotHeatmapCanvas({ spotAll }) {
     canvas.style.height = H + 'px';
     ctx.scale(dpr, dpr);
 
-    // Background
-    ctx.fillStyle = 'rgba(4,55,66,0.7)';
+    ctx.fillStyle = 'rgba(4,55,66,0.85)';
     ctx.fillRect(0, 0, W, H);
 
-    // Hour header
-    ctx.fillStyle = 'rgba(255,255,255,0.45)';
-    ctx.font = `bold 8px Poppins, sans-serif`;
+    // Header heures — centré sur chaque colonne
+    ctx.fillStyle = 'rgba(255,255,255,0.5)';
+    ctx.font = 'bold 8px sans-serif';
     ctx.textAlign = 'center';
-    for (let h = 0; h < 24; h += 3) {
-      ctx.fillText(`${h}h`, LBL_W + h * CELL_W + CELL_W * 1.5, 12);
-    }
+    for (let h = 0; h < 24; h += 3)
+      ctx.fillText(`${h}h`, LBL_W + h * CELL_W + CELL_W / 2, 12);
 
-    // Cells + month separators
-    let prevMonth = 0;
+    // Dessine le label d'un mois centré verticalement sur son bloc
+    const drawMonthLabel = (mois, startRow, endRow) => {
+      const cy = HDR_H + (startRow + endRow) / 2 * CELL_H + 3;
+      ctx.fillStyle = 'rgba(255,255,255,0.75)';
+      ctx.font = 'bold 8px sans-serif';
+      ctx.textAlign = 'right';
+      ctx.fillText(MOIS_LABELS[mois-1], LBL_W - 3, cy);
+    };
+
+    let prevMonth = 0, mStartRow = 0;
     days.forEach((day, di) => {
       const y = HDR_H + di * CELL_H;
-
       if (day.mois !== prevMonth) {
-        // Separator line
         if (prevMonth !== 0) {
-          ctx.fillStyle = 'rgba(255,255,255,0.2)';
+          drawMonthLabel(prevMonth, mStartRow, di);
+          ctx.fillStyle = 'rgba(255,255,255,0.18)';
           ctx.fillRect(LBL_W, y, 24 * CELL_W, 1);
         }
-        // Month label
-        ctx.fillStyle = 'rgba(255,255,255,0.75)';
-        ctx.font = 'bold 8px Poppins, sans-serif';
-        ctx.textAlign = 'right';
-        ctx.fillText(MOIS_LABELS[day.mois-1], LBL_W - 3, y + CELL_H * 2 + 2);
+        mStartRow = di;
         prevMonth = day.mois;
       }
-
       day.prices.forEach((prix, h) => {
         ctx.fillStyle = spotColor(prix);
         ctx.fillRect(LBL_W + h * CELL_W, y, CELL_W - 1, CELL_H - 1);
       });
     });
-
+    if (prevMonth) drawMonthLabel(prevMonth, mStartRow, days.length);
   }, [spotAll]);
 
+  useEffect(() => {
+    if (!wrapperRef.current) return;
+    const ro = new ResizeObserver(entries =>
+      draw(Math.floor(entries[0].contentRect.width))
+    );
+    ro.observe(wrapperRef.current);
+    return () => ro.disconnect();
+  }, [draw]);
+
   return (
-    <div style={{overflowY:'auto',overflowX:'hidden',maxHeight:'65vh',borderRadius:10,border:'1px solid rgba(255,255,255,.1)'}}>
+    <div ref={wrapperRef} style={{width:'100%',overflowY:'auto',maxHeight:'calc(100vh - 230px)',borderRadius:8,border:'1px solid rgba(255,255,255,.1)'}}>
       <canvas ref={canvasRef} style={{display:'block'}}/>
     </div>
   );
@@ -2072,7 +2078,6 @@ function SpotPricesScreen({ onBack }) {
       sb.rpc('get_spot_json'),
     ]);
     setMeta(m);
-    // get_spot_json returns a single JSON value (array), not paginated
     setSpotAll(jsonRows && jsonRows.length > 0 ? jsonRows : null);
     setLoading(false);
   }, []);
@@ -2095,7 +2100,6 @@ function SpotPricesScreen({ onBack }) {
           heure: parseInt(r['heure'] ?? r['Heure'] ?? r['HEURE']),
           prix:  parseFloat(r['spot price'] ?? r['prix'] ?? r['Prix']),
         })).filter(r => !isNaN(r.mois) && !isNaN(r.jour) && !isNaN(r.heure) && !isNaN(r.prix));
-
         const CHUNK = 500;
         for (let i = 0; i < records.length; i += CHUNK) {
           const { error } = await sb.from('prix_spot').upsert(records.slice(i, i+CHUNK), { onConflict:'mois,jour,heure' });
@@ -2118,39 +2122,46 @@ function SpotPricesScreen({ onBack }) {
 
   return (
     <div className="screen fade-in">
-      <button className="back-btn" onClick={onBack}>← Retour</button>
-      <div className="auth-header">
-        <div className="welcome-tag" style={{color:'#ffb340'}}>Administration</div>
-        <h1 className="welcome-title">Prix<br/><span className="accent">spot</span></h1>
+      {/* Header compact */}
+      <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:6}}>
+        <button className="back-btn" style={{margin:0}} onClick={onBack}>← Retour</button>
+        <span style={{fontSize:13,fontWeight:800,color:'white',letterSpacing:.5}}>
+          Prix <span style={{color:'var(--green)'}}>spot</span>
+        </span>
+        <div style={{width:60}}/>
       </div>
 
-      <div className="card" style={{marginBottom:12,padding:'14px 16px'}}>
-        {[['Dernière MAJ', fmtDate(meta?.last_update)], ['Lignes', meta?.rows_count?.toLocaleString('fr-FR') ?? '—'], ['Source', meta?.source_file ?? '—']].map(([l,v])=>(
-          <div key={l} style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:8}}>
-            <span style={{fontSize:12.5,color:'rgba(255,255,255,.6)',fontWeight:600}}>{l}</span>
-            <span style={{fontSize:12.5,fontWeight:700,color:'white',textAlign:'right',maxWidth:'60%',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{v}</span>
+      {/* Méta + bouton import — ultra compact */}
+      <div style={{background:'rgba(255,255,255,.07)',border:'1px solid rgba(255,255,255,.12)',borderRadius:10,padding:'8px 12px',marginBottom:6,display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}}>
+        <div style={{flex:1,minWidth:0}}>
+          <div style={{fontSize:10,color:'rgba(255,255,255,.5)',fontWeight:600}}>
+            {meta ? `${meta.rows_count?.toLocaleString('fr-FR')} lignes · MAJ ${fmtDate(meta.last_update)}` : 'Aucune donnée importée'}
           </div>
-        ))}
+          {meta?.source_file && <div style={{fontSize:9,color:'rgba(255,255,255,.35)',marginTop:1,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{meta.source_file}</div>}
+          {importMsg && <div style={{fontSize:10,fontWeight:700,marginTop:2,color:importMsg.startsWith('✓')?'var(--green)':'#ff9090'}}>{importMsg}</div>}
+        </div>
         <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" style={{display:'none'}} onChange={handleImport}/>
-        <button className="btn btn-sec" style={{color:'#5de0f5',borderColor:'rgba(8,145,178,.4)',fontSize:13,marginTop:4}}
-          onClick={()=>fileRef.current?.click()} disabled={importing}>
-          {importing ? 'Import en cours…' : '⚡ Importer les prix spot (xlsx/csv)'}
+        <button onClick={()=>fileRef.current?.click()} disabled={importing} style={{
+          background:'rgba(8,145,178,.2)',border:'1px solid rgba(8,145,178,.4)',color:'#5de0f5',
+          fontFamily:'var(--font)',fontSize:11,fontWeight:700,borderRadius:8,padding:'6px 10px',
+          cursor:'pointer',whiteSpace:'nowrap',flexShrink:0
+        }}>
+          {importing ? '…' : '⚡ Importer'}
         </button>
-        {importMsg && <div style={{marginTop:8,fontSize:12,fontWeight:700,color:importMsg.startsWith('✓')?'var(--green)':'#ff9090'}}>{importMsg}</div>}
       </div>
 
-      {/* Légende */}
-      <div style={{display:'flex',gap:4,flexWrap:'wrap',marginBottom:8,padding:'0 2px'}}>
+      {/* Légende compacte */}
+      <div style={{display:'flex',gap:5,flexWrap:'wrap',marginBottom:5}}>
         {[['<3c',0.02],['3-6',0.045],['6-9',0.075],['9-12',0.105],['12-15',0.135],['15-18',0.165],['18-20',0.19],['20-22',0.21],['22-26',0.24],['>26',0.30]].map(([lbl,v])=>(
-          <div key={lbl} style={{display:'flex',alignItems:'center',gap:3,fontSize:9,color:'rgba(255,255,255,.6)',fontWeight:700}}>
-            <div style={{width:10,height:10,borderRadius:2,background:spotColor(v),flexShrink:0}}/>
+          <div key={lbl} style={{display:'flex',alignItems:'center',gap:2,fontSize:8.5,color:'rgba(255,255,255,.55)',fontWeight:700}}>
+            <div style={{width:9,height:9,borderRadius:2,background:spotColor(v),flexShrink:0}}/>
             {lbl}
           </div>
         ))}
-        <div style={{fontSize:9,color:'rgba(255,255,255,.35)',alignSelf:'center',marginLeft:2}}>c€/kWh</div>
+        <span style={{fontSize:8.5,color:'rgba(255,255,255,.3)',alignSelf:'center'}}>c€/kWh</span>
       </div>
 
-      {/* Heatmap */}
+      {/* Heatmap pleine largeur */}
       {loading ? (
         <div style={{textAlign:'center',padding:40}}><div className="spinner" style={{margin:'0 auto'}}/></div>
       ) : spotAll ? (
@@ -2158,7 +2169,7 @@ function SpotPricesScreen({ onBack }) {
       ) : (
         <div className="card" style={{textAlign:'center',padding:'32px 20px'}}>
           <div style={{fontSize:32,marginBottom:10}}>⚡</div>
-          <p style={{color:'rgba(255,255,255,.6)',fontSize:13}}>Aucun prix spot importé.<br/>Utilisez le bouton ci-dessus pour importer un fichier Excel.</p>
+          <p style={{color:'rgba(255,255,255,.6)',fontSize:13}}>Aucun prix spot importé.</p>
         </div>
       )}
     </div>
