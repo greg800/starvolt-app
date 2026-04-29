@@ -24,6 +24,9 @@
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 
+  <!-- SheetJS (lecture Excel côté client) -->
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+
   <!-- Canvas Confetti (fireworks) -->
   <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.3/dist/confetti.browser.min.js"></script>
 
@@ -1788,6 +1791,10 @@ function ProfileScreen({ user, profile, onSave, onCancel, onLogout, onDeleted })
   const [ville,     setVille]     = useState(profile?.ville || '');
   const [tel,       setTel]       = useState(profile?.telephone || '');
   const [email,     setEmail]     = useState(user?.email || '');
+  const [hc1Start,  setHc1Start]  = useState(profile?.heure_debut_hc1?.slice(0,5) || '');
+  const [hc1End,    setHc1End]    = useState(profile?.heure_fin_hc1?.slice(0,5) || '');
+  const [hc2Start,  setHc2Start]  = useState(profile?.heure_debut_hc2?.slice(0,5) || '');
+  const [hc2End,    setHc2End]    = useState(profile?.heure_fin_hc2?.slice(0,5) || '');
   const [loading,   setLoading]   = useState(false);
   const [error,     setError]     = useState(null);
   const [showDelete, setShowDelete] = useState(false);
@@ -1801,13 +1808,17 @@ function ProfileScreen({ user, profile, onSave, onCancel, onLogout, onDeleted })
     }
     setLoading(true); setError(null);
     const { error: err } = await sb.from('profiles').update({
-      prenom:        prenom.trim(),
-      nom:           nom.trim(),
-      pseudo:        pseudo.trim() || null,
-      adresse_ligne1:adresse.trim() || null,
-      code_postal:   cp.trim() || null,
-      ville:         ville.trim() || null,
-      telephone:     tel.trim() || null,
+      prenom:         prenom.trim(),
+      nom:            nom.trim(),
+      pseudo:         pseudo.trim() || null,
+      adresse_ligne1: adresse.trim() || null,
+      code_postal:    cp.trim() || null,
+      ville:          ville.trim() || null,
+      telephone:      tel.trim() || null,
+      heure_debut_hc1: hc1Start || null,
+      heure_fin_hc1:   hc1End   || null,
+      heure_debut_hc2: hc2Start || null,
+      heure_fin_hc2:   hc2End   || null,
     }).eq('id', user.id);
     if (err) { setError(err.message); setLoading(false); return; }
     if (email.trim() && email.trim() !== user.email) {
@@ -1816,7 +1827,9 @@ function ProfileScreen({ user, profile, onSave, onCancel, onLogout, onDeleted })
     setLoading(false);
     onSave({ prenom:prenom.trim(), nom:nom.trim(), pseudo:pseudo.trim()||null,
              adresse_ligne1:adresse.trim()||null, code_postal:cp.trim()||null,
-             ville:ville.trim()||null, telephone:tel.trim()||null });
+             ville:ville.trim()||null, telephone:tel.trim()||null,
+             heure_debut_hc1:hc1Start||null, heure_fin_hc1:hc1End||null,
+             heure_debut_hc2:hc2Start||null, heure_fin_hc2:hc2End||null });
   };
 
   const handleDeleteConfirm = async () => {
@@ -1873,6 +1886,29 @@ function ProfileScreen({ user, profile, onSave, onCancel, onLogout, onDeleted })
             <label className="inp-label">Email</label>
             <input className="inp" type="email" value={email} onChange={e=>setEmail(e.target.value)}/>
           </div>
+          <div style={{fontSize:11,color:'rgba(255,255,255,.45)',fontWeight:700,textTransform:'uppercase',letterSpacing:.5,marginTop:4}}>
+            Plages heures creuses (compteur Linky)
+          </div>
+          <div className="inp-row">
+            <div className="inp-group">
+              <label className="inp-label">Début HC 1</label>
+              <input className="inp" type="time" value={hc1Start} onChange={e=>setHc1Start(e.target.value)}/>
+            </div>
+            <div className="inp-group">
+              <label className="inp-label">Fin HC 1</label>
+              <input className="inp" type="time" value={hc1End} onChange={e=>setHc1End(e.target.value)}/>
+            </div>
+          </div>
+          <div className="inp-row">
+            <div className="inp-group">
+              <label className="inp-label">Début HC 2</label>
+              <input className="inp" type="time" value={hc2Start} onChange={e=>setHc2Start(e.target.value)}/>
+            </div>
+            <div className="inp-group">
+              <label className="inp-label">Fin HC 2</label>
+              <input className="inp" type="time" value={hc2End} onChange={e=>setHc2End(e.target.value)}/>
+            </div>
+          </div>
           {error && <div className="auth-error">{error}</div>}
         </div>
 
@@ -1918,8 +1954,194 @@ function ProfileScreen({ user, profile, onSave, onCancel, onLogout, onDeleted })
   );
 }
 
+// ─── couleur spot ─────────────────────────────
+function spotColor(prix) {
+  if (prix === null || prix === undefined) return 'rgba(255,255,255,.08)';
+  if (prix < 0.03) return '#c8f0c8';
+  if (prix < 0.06) return '#90d890';
+  if (prix < 0.09) return '#58c058';
+  if (prix < 0.12) return '#28a028';
+  if (prix < 0.15) return '#b0c820';
+  if (prix < 0.18) return '#d8b000';
+  if (prix < 0.20) return '#e07818';
+  if (prix < 0.22) return '#d84010';
+  if (prix < 0.26) return '#b01010';
+  return '#600010';
+}
+
+// ─── SpotPricesScreen ─────────────────────────
+function SpotPricesScreen({ onBack }) {
+  const [meta,     setMeta]     = useState(null);
+  const [spotData, setSpotData] = useState(null);
+  const [loading,  setLoading]  = useState(true);
+  const [importing,setImporting]= useState(false);
+  const [importMsg,setImportMsg]= useState(null);
+  const fileRef = useRef(null);
+
+  const MOIS = ['Jan','Fév','Mar','Avr','Mai','Jui','Jul','Aoû','Sep','Oct','Nov','Déc'];
+
+  useEffect(() => {
+    Promise.all([
+      sb.from('spot_metadata').select('*').eq('id',1).maybeSingle(),
+      sb.from('prix_spot').select('mois,heure,prix'),
+    ]).then(([{data:m},{data:rows}]) => {
+      setMeta(m);
+      if (rows && rows.length > 0) {
+        // avg par mois × heure
+        const acc = {};
+        rows.forEach(r => {
+          const k = `${r.mois}_${r.heure}`;
+          if (!acc[k]) acc[k] = { sum:0, cnt:0 };
+          acc[k].sum += parseFloat(r.prix);
+          acc[k].cnt++;
+        });
+        const avg = {};
+        Object.entries(acc).forEach(([k,{sum,cnt}]) => avg[k] = sum/cnt);
+        setSpotData(avg);
+      }
+      setLoading(false);
+    });
+  }, []);
+
+  const handleImport = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setImporting(true); setImportMsg(null);
+    const reader = new FileReader();
+    reader.onload = async (ev) => {
+      try {
+        const wb = XLSX.read(ev.target.result, { type:'array' });
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        const rows = XLSX.utils.sheet_to_json(ws, { header:0 });
+        const records = rows.map(r => ({
+          mois:  parseInt(r['mois'] ?? r['Mois'] ?? r['MOIS']),
+          jour:  parseInt(r['jour'] ?? r['Jour'] ?? r['JOUR']),
+          heure: parseInt(r['heure'] ?? r['Heure'] ?? r['HEURE']),
+          prix:  parseFloat(r['spot price'] ?? r['prix'] ?? r['Prix']),
+        })).filter(r => !isNaN(r.mois) && !isNaN(r.jour) && !isNaN(r.heure) && !isNaN(r.prix));
+
+        // Upsert par chunks de 500
+        const CHUNK = 500;
+        for (let i = 0; i < records.length; i += CHUNK) {
+          const chunk = records.slice(i, i+CHUNK);
+          const { error } = await sb.from('prix_spot').upsert(chunk, { onConflict:'mois,jour,heure' });
+          if (error) { setImportMsg('Erreur : ' + error.message); setImporting(false); return; }
+        }
+        await sb.from('spot_metadata').upsert({ id:1, last_update: new Date().toISOString(), rows_count: records.length, source_file: file.name }, { onConflict:'id' });
+
+        setImportMsg(`✓ ${records.length} lignes importées`);
+        setImporting(false);
+        // Reload
+        const {data:m2} = await sb.from('spot_metadata').select('*').eq('id',1).maybeSingle();
+        setMeta(m2);
+        const {data:rows2} = await sb.from('prix_spot').select('mois,heure,prix');
+        if (rows2) {
+          const acc = {};
+          rows2.forEach(r => {
+            const k = `${r.mois}_${r.heure}`;
+            if (!acc[k]) acc[k] = { sum:0, cnt:0 };
+            acc[k].sum += parseFloat(r.prix);
+            acc[k].cnt++;
+          });
+          const avg = {};
+          Object.entries(acc).forEach(([k,{sum,cnt}]) => avg[k] = sum/cnt);
+          setSpotData(avg);
+        }
+      } catch(err) {
+        setImportMsg('Erreur lecture fichier : ' + err.message);
+        setImporting(false);
+      }
+    };
+    reader.readAsArrayBuffer(file);
+    e.target.value = '';
+  };
+
+  const fmtDate = (ts) => ts ? new Date(ts).toLocaleDateString('fr-FR', {day:'2-digit',month:'2-digit',year:'2-digit',hour:'2-digit',minute:'2-digit'}) : '—';
+  const fmtP = (v) => v !== undefined ? (v*100).toFixed(2) + ' c€' : '—';
+
+  return (
+    <div className="screen fade-in">
+      <button className="back-btn" onClick={onBack}>← Retour</button>
+      <div className="auth-header">
+        <div className="welcome-tag" style={{color:'#ffb340'}}>Administration</div>
+        <h1 className="welcome-title">Prix<br/><span className="accent">spot</span></h1>
+      </div>
+
+      {/* Méta */}
+      <div className="card" style={{marginBottom:12,padding:'16px 18px'}}>
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:10}}>
+          <span style={{fontSize:13,color:'rgba(255,255,255,.6)',fontWeight:600}}>Dernière mise à jour</span>
+          <span style={{fontSize:13,fontWeight:700,color:'white'}}>{fmtDate(meta?.last_update)}</span>
+        </div>
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:10}}>
+          <span style={{fontSize:13,color:'rgba(255,255,255,.6)',fontWeight:600}}>Lignes importées</span>
+          <span style={{fontSize:13,fontWeight:700,color:'white'}}>{meta?.rows_count?.toLocaleString('fr-FR') ?? '—'}</span>
+        </div>
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:14}}>
+          <span style={{fontSize:13,color:'rgba(255,255,255,.6)',fontWeight:600}}>Source</span>
+          <span style={{fontSize:12,fontWeight:600,color:'rgba(255,255,255,.5)'}}>{meta?.source_file ?? '—'}</span>
+        </div>
+        <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" style={{display:'none'}} onChange={handleImport}/>
+        <button className="btn btn-sec" style={{color:'#5de0f5',borderColor:'rgba(8,145,178,.4)',fontSize:13}}
+          onClick={()=>fileRef.current?.click()} disabled={importing}>
+          {importing ? 'Import en cours…' : '⚡ Importer les prix spot (xlsx/csv)'}
+        </button>
+        {importMsg && <div style={{marginTop:8,fontSize:12,fontWeight:700,color: importMsg.startsWith('✓') ? 'var(--green)' : '#ff9090'}}>{importMsg}</div>}
+      </div>
+
+      {/* Légende couleurs */}
+      <div style={{display:'flex',gap:3,flexWrap:'wrap',marginBottom:10,padding:'0 2px'}}>
+        {[['< 3c€',0.02],['3-6',0.04],['6-9',0.07],['9-12',0.10],['12-15',0.13],['15-18',0.16],['18-20',0.19],['20-22',0.21],['22-26',0.24],['>26',0.30]].map(([lbl,v])=>(
+          <div key={lbl} style={{display:'flex',alignItems:'center',gap:3,fontSize:9.5,color:'rgba(255,255,255,.65)',fontWeight:600}}>
+            <div style={{width:12,height:12,borderRadius:2,background:spotColor(v),flexShrink:0}}/>
+            {lbl}
+          </div>
+        ))}
+      </div>
+
+      {/* Heatmap heures × mois */}
+      {loading ? (
+        <div style={{textAlign:'center',padding:40}}><div className="spinner" style={{margin:'0 auto'}}/></div>
+      ) : spotData ? (
+        <div style={{overflowX:'auto',marginBottom:80}}>
+          <div style={{minWidth:320}}>
+            {/* Header mois */}
+            <div style={{display:'grid',gridTemplateColumns:'28px repeat(12,1fr)',gap:2,marginBottom:2}}>
+              <div/>
+              {MOIS.map(m=>(
+                <div key={m} style={{textAlign:'center',fontSize:9,color:'rgba(255,255,255,.5)',fontWeight:700}}>{m}</div>
+              ))}
+            </div>
+            {/* Lignes heures */}
+            {Array.from({length:24},(_,h)=>(
+              <div key={h} style={{display:'grid',gridTemplateColumns:'28px repeat(12,1fr)',gap:2,marginBottom:2}}>
+                <div style={{fontSize:9,color:'rgba(255,255,255,.45)',fontWeight:600,display:'flex',alignItems:'center',justifyContent:'flex-end',paddingRight:4}}>
+                  {String(h).padStart(2,'0')}h
+                </div>
+                {Array.from({length:12},(_,mi)=>{
+                  const k = `${mi+1}_${h}`;
+                  const val = spotData[k];
+                  return (
+                    <div key={mi} title={val !== undefined ? `${MOIS[mi]} ${String(h).padStart(2,'0')}h : ${(val*100).toFixed(2)} c€/kWh` : ''}
+                      style={{height:16,borderRadius:2,background:spotColor(val),cursor:val!==undefined?'help':'default'}}/>
+                  );
+                })}
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : (
+        <div className="card" style={{textAlign:'center',padding:'32px 20px'}}>
+          <div style={{fontSize:32,marginBottom:10}}>⚡</div>
+          <p style={{color:'rgba(255,255,255,.6)',fontSize:13}}>Aucun prix spot importé.<br/>Utilisez le bouton ci-dessus pour importer un fichier Excel.</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── AdminScreen ──────────────────────────────
-function AdminScreen({ onTariffs, onUsers, onBack }) {
+function AdminScreen({ onTariffs, onUsers, onSpot, onBack }) {
   return (
     <div className="screen fade-in">
       <button className="back-btn" onClick={onBack}>← Retour</button>
@@ -1932,7 +2154,15 @@ function AdminScreen({ onTariffs, onUsers, onBack }) {
           <span className="sim-icon">⚡</span>
           <div className="sim-text">
             <div className="sim-title">Gestion des tarifs d'électricité</div>
-            <div className="sim-sub">Créer, modifier, importer les prix spot</div>
+            <div className="sim-sub">Créer et modifier les tarifs fournisseurs</div>
+          </div>
+          <span className="sim-arrow">→</span>
+        </button>
+        <button className="sim-btn" onClick={onSpot}>
+          <span className="sim-icon">📈</span>
+          <div className="sim-text">
+            <div className="sim-title">Prix spot</div>
+            <div className="sim-sub">Importer et visualiser les prix horaires</div>
           </div>
           <span className="sim-arrow">→</span>
         </button>
@@ -2002,6 +2232,33 @@ function AdminTariffsScreen({ onEdit, onNew, onBack }) {
   );
 }
 
+// ─── Helpers tariff form (définis hors composant pour éviter remount) ──
+function TariffToggle({ label, val, onChange }) {
+  return (
+    <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'10px 0'}}>
+      <span style={{fontSize:13,color:'rgba(255,255,255,.75)',fontWeight:600}}>{label}</span>
+      <button type="button" onClick={()=>onChange(!val)} style={{
+        width:44,height:26,borderRadius:13,border:'none',cursor:'pointer',padding:3,
+        background: val ? 'var(--green)' : 'rgba(255,255,255,.2)',
+        display:'flex',alignItems:'center',justifyContent: val ? 'flex-end' : 'flex-start',
+        transition:'background .2s',flexShrink:0,
+      }}>
+        <span style={{width:20,height:20,borderRadius:10,background:'white',display:'block'}}/>
+      </button>
+    </div>
+  );
+}
+
+function TariffField({ label, fkey, type='text', placeholder='', value, onChange }) {
+  return (
+    <div className="inp-group">
+      <label className="inp-label">{label}</label>
+      <input className="inp" type={type} value={value} placeholder={placeholder}
+        onChange={e=>onChange(fkey, e.target.value)}/>
+    </div>
+  );
+}
+
 // ─── AdminTariffEditScreen ────────────────────
 function AdminTariffEditScreen({ tariff, onSave, onDelete, onBack }) {
   const isNew = !tariff?.id;
@@ -2010,10 +2267,6 @@ function AdminTariffEditScreen({ tariff, onSave, onDelete, onBack }) {
     abo_annuel:        tariff?.abo_annuel ?? '',
     prix_hp:           tariff?.prix_hp ?? '',
     prix_hc:           tariff?.prix_hc ?? '',
-    heure_debut_hc1:   tariff?.heure_debut_hc1?.slice(0,5) || '',
-    heure_fin_hc1:     tariff?.heure_fin_hc1?.slice(0,5) || '',
-    heure_debut_hc2:   tariff?.heure_debut_hc2?.slice(0,5) || '',
-    heure_fin_hc2:     tariff?.heure_fin_hc2?.slice(0,5) || '',
     bat_virtuelle:     tariff?.bat_virtuelle || false,
     surcout_abonnement:tariff?.surcout_abonnement ?? '',
     acheminement_hp:   tariff?.acheminement_hp ?? '',
@@ -2025,8 +2278,7 @@ function AdminTariffEditScreen({ tariff, onSave, onDelete, onBack }) {
   const [loading, setLoading] = useState(false);
   const [error,   setError]   = useState(null);
 
-  const upd = (k, v) => setF(p => ({...p, [k]: v}));
-
+  const upd = useCallback((k, v) => setF(p => ({...p, [k]: v})), []);
   const n = (v) => v === '' || v === null || v === undefined ? null : parseFloat(v);
 
   const handleSave = async () => {
@@ -2037,10 +2289,6 @@ function AdminTariffEditScreen({ tariff, onSave, onDelete, onBack }) {
       abo_annuel: n(f.abo_annuel),
       prix_hp: f.tarif_dynamique ? null : n(f.prix_hp),
       prix_hc: f.tarif_dynamique ? null : n(f.prix_hc),
-      heure_debut_hc1: f.heure_debut_hc1 || null,
-      heure_fin_hc1:   f.heure_fin_hc1   || null,
-      heure_debut_hc2: f.heure_debut_hc2 || null,
-      heure_fin_hc2:   f.heure_fin_hc2   || null,
       bat_virtuelle:   f.bat_virtuelle,
       surcout_abonnement: f.bat_virtuelle ? n(f.surcout_abonnement) : null,
       acheminement_hp:    f.bat_virtuelle ? n(f.acheminement_hp) : null,
@@ -2067,28 +2315,6 @@ function AdminTariffEditScreen({ tariff, onSave, onDelete, onBack }) {
     onDelete();
   };
 
-  const Toggle = ({ label, val, onChange }) => (
-    <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'10px 0'}}>
-      <span style={{fontSize:13,color:'rgba(255,255,255,.75)',fontWeight:600}}>{label}</span>
-      <button onClick={()=>onChange(!val)} style={{
-        width:44,height:26,borderRadius:13,border:'none',cursor:'pointer',padding:3,
-        background: val ? 'var(--green)' : 'rgba(255,255,255,.2)',
-        display:'flex',alignItems:'center',justifyContent: val ? 'flex-end' : 'flex-start',
-        transition:'background .2s',
-      }}>
-        <span style={{width:20,height:20,borderRadius:10,background:'white',display:'block'}}/>
-      </button>
-    </div>
-  );
-
-  const Field = ({ label, fkey, type='text', placeholder='' }) => (
-    <div className="inp-group">
-      <label className="inp-label">{label}</label>
-      <input className="inp" type={type} value={f[fkey]} placeholder={placeholder}
-        onChange={e=>upd(fkey, e.target.value)}/>
-    </div>
-  );
-
   return (
     <>
       <div className="screen fade-in">
@@ -2098,43 +2324,28 @@ function AdminTariffEditScreen({ tariff, onSave, onDelete, onBack }) {
           <h1 className="welcome-title">{isNew ? 'Nouveau' : 'Modifier'}<br/><span className="accent">tarif</span></h1>
         </div>
         <div className="form-card">
-          <Field label="Nom du tarif *" fkey="nom" placeholder="EDF TRV HC HP"/>
-          <Field label="Abonnement annuel (€/an)" fkey="abo_annuel" type="number" placeholder="237.72"/>
-          <Toggle label="Tarif dynamique (prix spot)" val={f.tarif_dynamique} onChange={v=>upd('tarif_dynamique',v)}/>
+          <TariffField label="Nom du tarif *" fkey="nom" value={f.nom} onChange={upd} placeholder="EDF TRV HC HP"/>
+          <TariffField label="Abonnement annuel (€/an)" fkey="abo_annuel" type="number" value={String(f.abo_annuel)} onChange={upd} placeholder="237.72"/>
+          <TariffToggle label="Tarif dynamique (prix spot)" val={f.tarif_dynamique} onChange={v=>upd('tarif_dynamique',v)}/>
           {f.tarif_dynamique ? (
-            <>
-              <div className="inp-row">
-                <Field label="TURPE fixe (€/an)" fkey="turpe_fixe" type="number" placeholder="129.79"/>
-                <Field label="CTA fixe (€/an)" fkey="cta_fixe" type="number" placeholder="19.47"/>
-              </div>
-            </>
+            <div className="inp-row">
+              <TariffField label="TURPE fixe (€/an)" fkey="turpe_fixe" type="number" value={String(f.turpe_fixe)} onChange={upd} placeholder="129.79"/>
+              <TariffField label="CTA fixe (€/an)" fkey="cta_fixe" type="number" value={String(f.cta_fixe)} onChange={upd} placeholder="19.47"/>
+            </div>
           ) : (
-            <>
-              <div className="inp-row">
-                <Field label="Prix HP (€/kWh)" fkey="prix_hp" type="number" placeholder="0.2081"/>
-                <Field label="Prix HC (€/kWh)" fkey="prix_hc" type="number" placeholder="0.1635"/>
-              </div>
-              <div style={{fontSize:12,color:'rgba(255,255,255,.45)',fontWeight:600,textTransform:'uppercase',letterSpacing:.5,marginTop:4}}>Plages HC</div>
-              <div className="inp-row">
-                <Field label="Début HC 1" fkey="heure_debut_hc1" type="time"/>
-                <Field label="Fin HC 1" fkey="heure_fin_hc1" type="time"/>
-              </div>
-              <div className="inp-row">
-                <Field label="Début HC 2" fkey="heure_debut_hc2" type="time"/>
-                <Field label="Fin HC 2" fkey="heure_fin_hc2" type="time"/>
-              </div>
-            </>
+            <div className="inp-row">
+              <TariffField label="Prix HP (€/kWh)" fkey="prix_hp" type="number" value={String(f.prix_hp)} onChange={upd} placeholder="0.2081"/>
+              <TariffField label="Prix HC (€/kWh)" fkey="prix_hc" type="number" value={String(f.prix_hc)} onChange={upd} placeholder="0.1635"/>
+            </div>
           )}
-          <Toggle label="Batterie virtuelle" val={f.bat_virtuelle} onChange={v=>upd('bat_virtuelle',v)}/>
-          {f.bat_virtuelle && (
-            <>
-              <Field label="Surcout abonnement (€/an)" fkey="surcout_abonnement" type="number" placeholder="86.4"/>
-              <div className="inp-row">
-                <Field label="Acheminement HP (€/kWh)" fkey="acheminement_hp" type="number" placeholder="0.0953"/>
-                <Field label="Acheminement HC (€/kWh)" fkey="acheminement_hc" type="number" placeholder="0.078"/>
-              </div>
-            </>
-          )}
+          <TariffToggle label="Batterie virtuelle" val={f.bat_virtuelle} onChange={v=>upd('bat_virtuelle',v)}/>
+          {f.bat_virtuelle && (<>
+            <TariffField label="Surcout abonnement (€/an)" fkey="surcout_abonnement" type="number" value={String(f.surcout_abonnement)} onChange={upd} placeholder="86.4"/>
+            <div className="inp-row">
+              <TariffField label="Acheminement HP (€/kWh)" fkey="acheminement_hp" type="number" value={String(f.acheminement_hp)} onChange={upd} placeholder="0.0953"/>
+              <TariffField label="Acheminement HC (€/kWh)" fkey="acheminement_hc" type="number" value={String(f.acheminement_hc)} onChange={upd} placeholder="0.078"/>
+            </div>
+          </>)}
           {error && <div className="auth-error">{error}</div>}
         </div>
         {!isNew && (
@@ -2209,7 +2420,7 @@ function App() {
 
   const fetchProfile = useCallback(async (userId) => {
     const { data } = await sb.from('profiles')
-      .select('prenom, nom, pseudo, adresse_ligne1, code_postal, ville, telephone')
+      .select('prenom, nom, pseudo, adresse_ligne1, code_postal, ville, telephone, heure_debut_hc1, heure_fin_hc1, heure_debut_hc2, heure_fin_hc2')
       .eq('id', userId).single();
     if (data) setProfile(data);
   }, []);
@@ -2286,8 +2497,12 @@ function App() {
       case 'ADMIN':
         return <AdminScreen
           onTariffs={()=>goTo('ADMIN_TARIFFS')}
+          onSpot={()=>goTo('SPOT_PRICES')}
           onUsers={()=>goTo('ADMIN_USERS')}
           onBack={goBack}/>;
+
+      case 'SPOT_PRICES':
+        return <SpotPricesScreen onBack={goBack}/>;
 
       case 'ADMIN_TARIFFS':
         return <AdminTariffsScreen
@@ -2409,23 +2624,15 @@ function App() {
       </div>
       {render()}
       {isHome && (
-        <StickyFooter>
-          {isAdmin && (
-            <button className="btn btn-sec" style={{fontSize:13,color:'#ffb340',borderColor:'rgba(255,165,0,.35)'}}
-              onClick={()=>goTo('ADMIN')}>
-              ⚙️ Administration
-            </button>
-          )}
-          <div style={{display:'flex',gap:10}}>
-            <button className="btn-home" onClick={()=>goTo('MA_CONSO')}>
-              <span>Ma conso actuelle</span>
-              <span className="btn-home-sub">renseignée à 0 %</span>
-            </button>
-            <button className="btn-home primary" onClick={()=>goTo('SIMULATIONS')}>
-              <span>Simulations</span>
-              <span className="btn-home-sub">d'économie</span>
-            </button>
-          </div>
+        <StickyFooter row>
+          <button className="btn-home" onClick={()=>goTo('MA_CONSO')}>
+            <span>Ma conso actuelle</span>
+            <span className="btn-home-sub">renseignée à 0 %</span>
+          </button>
+          <button className="btn-home primary" onClick={()=>goTo('SIMULATIONS')}>
+            <span>Simulations</span>
+            <span className="btn-home-sub">d'économie</span>
+          </button>
         </StickyFooter>
       )}
       <InstallBanner/>
