@@ -929,7 +929,13 @@
       50%      { opacity: .9; }
     }
     /* Override Leaflet default background in dark UI */
-    .leaflet-container { background: #1a3a48; }
+    .leaflet-container { background: #0f2535; }
+    /* Circle distance labels */
+    .acc-ring-lbl { background: rgba(6,30,42,.88) !important; border-radius: 10px !important; padding: 2px 7px !important; font-size: 10px !important; font-weight: 800 !important; white-space: nowrap !important; box-shadow: 0 1px 5px rgba(0,0,0,.4) !important; border: none !important; }
+    .acc-ring-lbl::before { display: none !important; }
+    /* Leaflet attribution */
+    .leaflet-control-attribution { font-size: 8px !important; background: rgba(0,0,0,.35) !important; color: rgba(255,255,255,.4) !important; }
+    .leaflet-control-attribution a { color: rgba(255,255,255,.5) !important; }
   </style>
 </head>
 <body>
@@ -1755,6 +1761,7 @@ function HomeLoggedInScreen({ profile }) {
 const PROF_DAYS=[31,29,31,30,31,30,31,31,30,31,30,31];
 function profIdx(m,d,h){let o=0;for(let i=1;i<m;i++)o+=PROF_DAYS[i-1]*24;return o+(d-1)*24+h;}
 function fmtKwh(v){return v>=1000?`${(v/1000).toFixed(1)} MWh`:`${Math.round(v)} kWh`;}
+function haversine(lat1,lon1,lat2,lon2){const R=6371,dLat=(lat2-lat1)*Math.PI/180,dLon=(lon2-lon1)*Math.PI/180,a=Math.sin(dLat/2)**2+Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLon/2)**2;return R*2*Math.asin(Math.sqrt(a));}
 function lastSunUTC(y,m0){const d=new Date(Date.UTC(y,m0+1,0,1));while(d.getUTCDay()!==0)d.setUTCDate(d.getUTCDate()-1);return d.getTime();}
 function frOff(utcMs){const y=new Date(utcMs).getUTCFullYear();return(utcMs>=lastSunUTC(y,2)&&utcMs<lastSunUTC(y,9))?2:1;}
 function utcToFR(utcMs){const ms=utcMs+frOff(utcMs)*3600000,d=new Date(ms);return{year:d.getUTCFullYear(),month:d.getUTCMonth()+1,day:d.getUTCDate(),hour:d.getUTCHours(),minute:d.getUTCMinutes()};}
@@ -3192,11 +3199,15 @@ function AccMapScreen({ user, userProfile, onBack }) {
   const [activeSite,  setActiveSite]  = useState(null);
   const [activeTariff,setActiveTariff]= useState(null);
   const [loading,     setLoading]     = useState(true);
-  const [showMap,     setShowMap]     = useState(false);
-  const [popup,       setPopup]       = useState(null); // {nom, code_postal, puissance_pv, prix_vente_ttc}
-  const mapDivRef  = useRef(null);
-  const leafletRef = useRef(null);
+  const [siteLatLng,  setSiteLatLng]  = useState(null); // [lat, lon] of active site
+  const [nearbyAcc,   setNearbyAcc]   = useState([]);   // acc sites within 20km
+  const [popup,       setPopup]       = useState(null);
+  const localMapDivRef  = useRef(null);
+  const localLeafletRef = useRef(null);
+  const franceMapDivRef  = useRef(null);
+  const franceLeafletRef = useRef(null);
 
+  // Load data
   useEffect(() => {
     const siteId = localStorage.getItem('starvolt_active_site_id');
     Promise.all([
@@ -3212,33 +3223,117 @@ function AccMapScreen({ user, userProfile, onBack }) {
         setActiveTariff(t);
       }
       setLoading(false);
-      setTimeout(() => setShowMap(true), 600);
+      // Geocode active site address
+      if (site) {
+        const q = [site.adresse_ligne1, site.code_postal, site.ville].filter(Boolean).join(' ');
+        fetch(`https://api-adresse.data.gouv.fr/search/?q=${encodeURIComponent(q)}&limit=1`)
+          .then(r => r.json())
+          .then(geo => {
+            const feat = geo?.features?.[0];
+            if (!feat) return;
+            const [lon, lat] = feat.geometry.coordinates;
+            setSiteLatLng([lat, lon]);
+            const nearby = (acc || []).filter(s => s.latitude && s.longitude && haversine(lat, lon, parseFloat(s.latitude), parseFloat(s.longitude)) <= 20);
+            setNearbyAcc(nearby);
+          }).catch(() => {});
+      }
     });
   }, []);
 
-  // Init Leaflet map
+  // Local proximity map
   useEffect(() => {
-    if (!showMap || !mapDivRef.current || leafletRef.current || !window.L) return;
-    const map = window.L.map(mapDivRef.current, { center:[46.5, 2.3], zoom:5, zoomControl:true, scrollWheelZoom:true });
-    window.L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
-      attribution:'<a href="https://carto.com">CARTO</a>', subdomains:'abcd', maxZoom:19,
+    if (!siteLatLng || !localMapDivRef.current || localLeafletRef.current || !window.L) return;
+    const L = window.L;
+    const [lat, lon] = siteLatLng;
+    const map = L.map(localMapDivRef.current, {
+      center: [lat, lon], zoom: 11,
+      zoomControl: true, scrollWheelZoom: true, attributionControl: true,
+    });
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+      attribution: '© <a href="https://carto.com">CARTO</a>', subdomains: 'abcd', maxZoom: 19,
     }).addTo(map);
 
-    const SunIcon = window.L.divIcon({
-      className: '',
-      html: '<div style="width:28px;height:28px;border-radius:50%;background:#ffd700;border:2px solid #fff;box-shadow:0 0 10px #ffd700;display:flex;align-items:center;justify-content:center;font-size:14px">☀️</div>',
-      iconSize: [28, 28], iconAnchor: [14, 14], popupAnchor: [0, -18],
+    // Helper: label at right edge of circle
+    const ringLabel = (centerLat, centerLon, radiusKm, text, color) => {
+      // offset lon by radiusKm to find right-edge position
+      const dLon = radiusKm / (111.32 * Math.cos(centerLat * Math.PI / 180));
+      const lbl = L.marker([centerLat, centerLon + dLon], {
+        icon: L.divIcon({
+          className: 'acc-ring-lbl',
+          html: `<span style="color:${color}">${text}</span>`,
+          iconAnchor: [0, 10],
+        }),
+        interactive: false,
+      });
+      lbl.addTo(map);
+    };
+
+    // 3 concentric circles
+    const rings = [
+      { r: 2,  color: '#7dd940', dashArray: null,   label: '2 km' },
+      { r: 10, color: '#38c8e0', dashArray: '8 6',  label: '10 km' },
+      { r: 20, color: 'rgba(255,255,255,.55)', dashArray: '10 8', label: '20 km' },
+    ];
+    rings.forEach(({ r, color, dashArray, label }) => {
+      L.circle([lat, lon], {
+        radius: r * 1000, color, weight: dashArray ? 1.5 : 2,
+        fillOpacity: r === 2 ? 0.06 : 0.02,
+        dashArray, interactive: false,
+      }).addTo(map);
+      ringLabel(lat, lon, r, label, color);
     });
 
+    // House marker for active site
+    const houseIcon = L.divIcon({
+      className: '',
+      html: '<div style="width:32px;height:32px;border-radius:50%;background:rgba(125,217,64,.25);border:2px solid #7dd940;box-shadow:0 0 12px rgba(125,217,64,.6);display:flex;align-items:center;justify-content:center;font-size:16px">🏠</div>',
+      iconSize: [32, 32], iconAnchor: [16, 16],
+    });
+    L.marker([lat, lon], { icon: houseIcon, zIndexOffset: 1000 })
+      .bindTooltip('Votre site', { permanent: false, direction: 'top', className: 'acc-ring-lbl' })
+      .addTo(map);
+
+    // ACC markers within 20km
+    const SunIcon = L.divIcon({
+      className: '',
+      html: '<div style="width:26px;height:26px;border-radius:50%;background:rgba(255,215,0,.2);border:2px solid #ffd700;box-shadow:0 0 8px rgba(255,215,0,.5);display:flex;align-items:center;justify-content:center;font-size:13px">☀️</div>',
+      iconSize: [26, 26], iconAnchor: [13, 13],
+    });
+    nearbyAcc.forEach(s => {
+      const m = L.marker([parseFloat(s.latitude), parseFloat(s.longitude)], { icon: SunIcon });
+      m.addTo(map);
+      m.on('click', () => setPopup(s));
+    });
+
+    // Fit to 20km circle with small padding
+    const sw = L.latLng(lat - 0.18, lon - 0.27);
+    const ne = L.latLng(lat + 0.18, lon + 0.27);
+    map.fitBounds(L.latLngBounds(sw, ne));
+
+    localLeafletRef.current = map;
+  }, [siteLatLng, nearbyAcc]);
+
+  // France-wide map (only if no local map, or always below)
+  useEffect(() => {
+    if (!accSites || !franceMapDivRef.current || franceLeafletRef.current || !window.L) return;
+    const L = window.L;
+    const map = L.map(franceMapDivRef.current, { center:[46.5, 2.3], zoom:5, zoomControl:true, scrollWheelZoom:true });
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+      attribution: '© <a href="https://carto.com">CARTO</a>', subdomains: 'abcd', maxZoom: 19,
+    }).addTo(map);
+    const SunIcon = L.divIcon({
+      className: '',
+      html: '<div style="width:22px;height:22px;border-radius:50%;background:rgba(255,215,0,.2);border:1.5px solid #ffd700;box-shadow:0 0 6px rgba(255,215,0,.45);display:flex;align-items:center;justify-content:center;font-size:11px">☀️</div>',
+      iconSize: [22, 22], iconAnchor: [11, 11],
+    });
     (accSites || []).forEach(s => {
       if (!s.latitude || !s.longitude) return;
-      const marker = window.L.marker([s.latitude, s.longitude], { icon: SunIcon });
-      marker.addTo(map);
-      marker.on('click', () => setPopup(s));
+      const m = L.marker([parseFloat(s.latitude), parseFloat(s.longitude)], { icon: SunIcon });
+      m.addTo(map);
+      m.on('click', () => setPopup(s));
     });
-
-    leafletRef.current = map;
-  }, [showMap, accSites]);
+    franceLeafletRef.current = map;
+  }, [accSites]);
 
   const eligible = activeSite && (accSites||[]).some(s => s.code_postal === activeSite.code_postal);
   const eligibleSite = eligible ? (accSites||[]).find(s => s.code_postal === activeSite.code_postal) : null;
@@ -3257,47 +3352,42 @@ function AccMapScreen({ user, userProfile, onBack }) {
   const accPriceKwh = eligibleSite?.prix_vente_ttc || 0.11;
   const accSavings = Math.max(0, Math.round(kwh918 * (priceRef - accPriceKwh)));
 
-  const SunAnim = () => (
-    <div style={{ display:'flex', justifyContent:'center', alignItems:'flex-end', gap:24, padding:'16px 0 10px' }}>
-      <div style={{ position:'relative', width:56, height:56, flexShrink:0 }}>
-        <div style={{ width:42, height:42, borderRadius:'50%', background:'#ffd700', position:'absolute', top:4, left:7,
-          animation:'sunPulse 2.5s ease-in-out infinite' }}/>
-        {[0,60,120,180,240,300].map(a=>(
-          <div key={a} style={{ position:'absolute', top:'50%', left:'50%', width:2, height:9,
-            background:'#ffd700', borderRadius:1, opacity:.6,
-            transform:`rotate(${a}deg) translate(-50%, -210%)`,
-            animation:`sunRay 2.5s ease-in-out infinite ${a*6}ms` }}/>
-        ))}
-      </div>
-      <svg viewBox="0 0 100 14" style={{ width:'15%', marginBottom:18, overflow:'visible' }}>
-        <line x1="0" y1="7" x2="100" y2="7" stroke="#7dd940" strokeWidth="1.5" strokeDasharray="6 4" opacity=".5"/>
-        <circle r="3.5" fill="#7dd940"><animateMotion dur="1.8s" repeatCount="indefinite" path="M0,7 L100,7"/></circle>
-      </svg>
-      <img src="/maison.png" alt="Maison" style={{ width:72, height:72, objectFit:'contain' }}/>
-    </div>
-  );
-
   return (
     <div className="screen fade-in">
       <button className="back-btn" onClick={onBack}>← Retour</button>
       <div style={{ fontSize:9, letterSpacing:'.6px', color:'rgba(125,217,64,.8)', fontWeight:700, textTransform:'uppercase', marginBottom:2 }}>Simulation</div>
       <div style={{ fontSize:18, fontWeight:900, color:'white', lineHeight:1.1, marginBottom:14 }}>Autoconsommation <span className="accent">collective</span></div>
 
-      {/* Animation */}
-      <div className="card" style={{ padding:'8px 16px 12px', marginBottom:10, textAlign:'center' }}>
-        <SunAnim/>
-        <div style={{ fontSize:11, color:'rgba(255,255,255,.45)', letterSpacing:.3 }}>Énergie locale · moins de 2 km · sans investissement</div>
+      {/* Local proximity map */}
+      <div className="card" style={{ padding:0, marginBottom:10, overflow:'hidden', border:'1px solid rgba(255,255,255,.1)' }}>
+        {!loading && activeSite && !siteLatLng && (
+          <div style={{ padding:'14px 16px', textAlign:'center' }}>
+            <div className="spinner" style={{ margin:'0 auto 8px' }}/>
+            <div style={{ fontSize:11, color:'rgba(255,255,255,.4)' }}>Géolocalisation en cours…</div>
+          </div>
+        )}
+        {!loading && !activeSite && (
+          <div style={{ padding:'14px 16px', textAlign:'center' }}>
+            <div style={{ fontSize:13, color:'rgba(255,255,255,.5)' }}>Configurez un site dans « Ma conso » pour voir la carte de proximité.</div>
+          </div>
+        )}
+        {loading && (
+          <div style={{ padding:'24px', textAlign:'center' }}><div className="spinner" style={{ margin:'0 auto' }}/></div>
+        )}
+        <div ref={localMapDivRef} style={{ width:'100%', height: siteLatLng ? 300 : 0, display: siteLatLng ? 'block' : 'none', position:'relative', zIndex:0 }}/>
+        {siteLatLng && (
+          <div style={{ padding:'8px 14px', background:'rgba(0,0,0,.35)', display:'flex', alignItems:'center', justifyContent:'space-between' }}>
+            <div style={{ fontSize:10, color:'rgba(255,255,255,.45)', letterSpacing:.3 }}>
+              🏠 {activeSite?.nom} · {nearbyAcc.length} site{nearbyAcc.length !== 1 ? 's' : ''} ACC dans un rayon de 20 km
+            </div>
+            <div style={{ fontSize:9, color:'rgba(125,217,64,.6)', fontWeight:700 }}>ZOOM DISPONIBLE</div>
+          </div>
+        )}
       </div>
 
-      {loading ? (
-        <div style={{ textAlign:'center', padding:20 }}><div className="spinner" style={{ margin:'0 auto' }}/></div>
-      ) : (<>
+      {!loading && (<>
         {/* Eligibility card */}
-        {!activeSite ? (
-          <div className="card" style={{ padding:'14px 16px', marginBottom:10 }}>
-            <div style={{ fontSize:13, color:'rgba(255,255,255,.6)' }}>Aucun site actif. Configurez un site dans « Ma conso » d'abord.</div>
-          </div>
-        ) : eligible ? (
+        {!activeSite ? null : eligible ? (
           <div className="card" style={{ padding:'14px 16px', marginBottom:10, background:'rgba(125,217,64,.07)', border:'1.5px solid rgba(125,217,64,.45)' }}>
             <div className="badge success" style={{ marginBottom:8 }}>
               <span className="star-twinkle">✦</span> Bonne nouvelle ! <span className="star-twinkle delay2">✦</span>
@@ -3329,20 +3419,13 @@ function AccMapScreen({ user, userProfile, onBack }) {
           </div>
         )}
 
-        {/* Leaflet map */}
-        {showMap && (
-          <div style={{ marginBottom:10 }}>
-            <div style={{ fontWeight:700, fontSize:11, color:'rgba(255,255,255,.45)', letterSpacing:'.5px', textTransform:'uppercase', marginBottom:5 }}>
-              Sites ACC actifs · France
-            </div>
-            <div ref={mapDivRef} style={{ width:'100%', height:320, borderRadius:12, overflow:'hidden', border:'1px solid rgba(255,255,255,.1)', position:'relative', zIndex:0 }}/>
-            {(accSites||[]).filter(s=>s.latitude&&s.longitude).length === 0 && (
-              <div style={{ fontSize:11, color:'rgba(255,255,255,.3)', textAlign:'center', marginTop:6 }}>
-                Aucun site ACC avec coordonnées géographiques.
-              </div>
-            )}
+        {/* France-wide map */}
+        <div style={{ marginBottom:10 }}>
+          <div style={{ fontWeight:700, fontSize:11, color:'rgba(255,255,255,.45)', letterSpacing:'.5px', textTransform:'uppercase', marginBottom:5 }}>
+            Sites ACC actifs · France
           </div>
-        )}
+          <div ref={franceMapDivRef} style={{ width:'100%', height:300, borderRadius:12, overflow:'hidden', border:'1px solid rgba(255,255,255,.1)', position:'relative', zIndex:0 }}/>
+        </div>
 
         {/* Popup marker details */}
         {popup && (
