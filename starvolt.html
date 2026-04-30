@@ -3684,12 +3684,12 @@ function AdminAccEditScreen({ site, onSave, onDelete, onBack }) {
     onDelete();
   };
 
-  const Field = ({label, k, type='text', placeholder}) => (
-    <div style={{marginBottom:10}}>
-      <div style={{fontSize:11,color:'rgba(255,255,255,.5)',fontWeight:700,marginBottom:4}}>{label}</div>
-      <input className="inp" type={type} step={type==='number'?'any':undefined} placeholder={placeholder} value={String(f[k])}
-        onChange={e=>upd(k,e.target.value)} style={{fontSize:14}}/>
-    </div>
+  const inpStyle = {fontSize:14};
+  const lbl = (txt) => <div style={{fontSize:11,color:'rgba(255,255,255,.5)',fontWeight:700,marginBottom:4}}>{txt}</div>;
+  const fi = (k, type='text', placeholder='', extra={}) => (
+    <input className="inp" type={type} step={type==='number'?'any':undefined}
+      placeholder={placeholder} value={String(f[k])}
+      onChange={e=>upd(k,e.target.value)} style={inpStyle} {...extra}/>
   );
 
   return (
@@ -3701,17 +3701,17 @@ function AdminAccEditScreen({ site, onSave, onDelete, onBack }) {
           <h1 className="welcome-title">{isNew?'Nouveau':'Modifier'}<br/><span className="accent">site ACC</span></h1>
         </div>
         <div className="form-card">
-          <Field label="Nom du site" k="nom" placeholder="Ex: Parc solaire Nîmes Sud"/>
-          <Field label="Adresse" k="adresse" placeholder="Ex: 14 rue du Soleil, 30000 Nîmes"/>
-          <Field label="Code postal *" k="code_postal" placeholder="30000"/>
-          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8}}>
-            <Field label="Puissance PV (kWc)" k="puissance_pv" type="number" placeholder="100"/>
-            <Field label="Prix de vente TTC (€/kWh)" k="prix_vente_ttc" type="number" placeholder="0.11"/>
+          <div style={{marginBottom:10}}>{lbl('Nom du site')}{fi('nom','text','Ex: Parc solaire Nîmes Sud')}</div>
+          <div style={{marginBottom:10}}>{lbl('Adresse')}{fi('adresse','text','Ex: 14 rue du Soleil, 30000 Nîmes')}</div>
+          <div style={{marginBottom:10}}>{lbl('Code postal *')}{fi('code_postal','text','30000')}</div>
+          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8,marginBottom:10}}>
+            <div>{lbl('Puissance PV (kWc)')}{fi('puissance_pv','number','100')}</div>
+            <div>{lbl('Prix vente TTC (€/kWh)')}{fi('prix_vente_ttc','number','0.11')}</div>
           </div>
           <div style={{fontSize:11,color:'rgba(255,217,64,.7)',fontWeight:700,marginBottom:6,marginTop:4}}>Coordonnées GPS (pour la carte)</div>
-          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8}}>
-            <Field label="Latitude" k="latitude" type="number" placeholder="43.8367"/>
-            <Field label="Longitude" k="longitude" type="number" placeholder="4.3601"/>
+          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8,marginBottom:10}}>
+            <div>{lbl('Latitude')}{fi('latitude','number','43.8367')}</div>
+            <div>{lbl('Longitude')}{fi('longitude','number','4.3601')}</div>
           </div>
           {error && <div className="auth-error">{error}</div>}
         </div>
