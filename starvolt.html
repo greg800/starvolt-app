@@ -2327,12 +2327,61 @@ function calcHcHp(consoProfile, userProfile) {
   return { kwh_hc: Math.round(kwh_hc), kwh_hp: Math.round(kwh_hp), hasHC: windows.length > 0 };
 }
 
-function calcTariffCost(tariff, kwh_hc, kwh_hp) {
-  if (tariff.tarif_dynamique) return null;
+function calcTariffCost(tariff, kwh_hc, kwh_hp, dynamicCtx = null) {
+  if (tariff.tarif_dynamique) {
+    const { consoProfile, spotMap, natParams, userProfile } = dynamicCtx || {};
+    if (!consoProfile || !spotMap || !natParams) return null;
+    return calcDynamicCost(tariff, consoProfile, spotMap, natParams, userProfile);
+  }
   const abo = tariff.abo_annuel || 0;
   const hp  = tariff.prix_hp || 0;
   const hc  = tariff.prix_hc != null ? tariff.prix_hc : hp;
   return { total: abo + kwh_hp * hp + kwh_hc * hc, abo, hp_cost: kwh_hp * hp, hc_cost: kwh_hc * hc, is_base: tariff.prix_hc == null };
+}
+
+// ─── Helpers TURPE / TTC / Spot ───────────────
+function getTurpeRate(mois, heure, natParams, hcWindows) {
+  const isEte = mois >= 4 && mois <= 10;
+  const isHc  = hcWindows?.length > 0 && isHcHour(heure, hcWindows);
+  if (isEte  && isHc)  return (natParams?.turpe_hc_ete   || 0) / 100;
+  if (isEte  && !isHc) return (natParams?.turpe_hp_ete   || 0) / 100;
+  if (!isEte && isHc)  return (natParams?.turpe_hc_hiver || 0) / 100;
+  return (natParams?.turpe_hp_hiver || 0) / 100;
+}
+
+function calcPrixTTC(spotEuroKwh, mois, heure, natParams, hcWindows) {
+  const turpe  = getTurpeRate(mois, heure, natParams, hcWindows);
+  const accise = (natParams?.accise || 0) / 100;
+  const tva    = (natParams?.tva ?? 20) / 100;
+  return (spotEuroKwh + turpe + accise) * (1 + tva);
+}
+
+function buildSpotMap(spotAll) {
+  const m = {};
+  (spotAll || []).forEach(r => { m[`${r.mois}_${r.jour}_${r.heure}`] = parseFloat(r.prix); });
+  return m;
+}
+
+function calcDynamicCost(tariff, consoProfile, spotMap, natParams, userProfile) {
+  const windows = [
+    { s: parseHcHour(userProfile?.heure_debut_hc1), e: parseHcHour(userProfile?.heure_fin_hc1) },
+    { s: parseHcHour(userProfile?.heure_debut_hc2), e: parseHcHour(userProfile?.heure_fin_hc2) },
+  ].filter(w => w.s !== null && w.e !== null);
+  const marge  = (tariff.marge_fournisseur_ceur_kwh || 0) / 100;
+  const accise = (natParams?.accise || 0) / 100;
+  const tva    = (natParams?.tva ?? 20) / 100;
+  let varCost = 0;
+  for (let mo = 1; mo <= 12; mo++)
+    for (let d = 1; d <= PROF_DAYS[mo - 1]; d++)
+      for (let h = 0; h < 24; h++) {
+        const kwh  = (consoProfile[profIdx(mo, d, h)] || 0) / 1000;
+        if (!kwh) continue;
+        const spot = spotMap[`${mo}_${d}_${h}`] || 0;
+        varCost += kwh * (spot + getTurpeRate(mo, h, natParams, windows) + accise + marge);
+      }
+  const fixedHT = (tariff.abo_annuel || 0) + (tariff.turpe_fixe || 0) + (tariff.cta_fixe || 0);
+  const total   = (varCost + fixedHT) * (1 + tva);
+  return { total, varCost: varCost * (1 + tva), fixedCost: fixedHT * (1 + tva), abo: fixedHT * (1 + tva), is_base: false, is_dynamic: true };
 }
 
 // ─── OptimisationScreen ───────────────────────
@@ -2342,13 +2391,20 @@ function OptimisationScreen({ user, userProfile, onBack }) {
   const [tariffs,  setTariffs]  = useState([]);
   const [loading,  setLoading]  = useState(true);
 
+  const [spotMap,   setSpotMap]   = useState(null);
+  const [natParams, setNatParams] = useState(null);
+
   useEffect(() => {
     Promise.all([
       sb.from('sites').select('id,nom,conso_profil,conso_annuelle_kwh,tarif_id').eq('user_id', user.id).not('conso_profil', 'is', null).order('created_at'),
       sb.from('tarifs_electricite').select('*').order('nom'),
-    ]).then(([{ data: s }, { data: t }]) => {
+      sb.rpc('get_spot_json'),
+      sb.from('parametres_nationaux').select('*').eq('id', 1).maybeSingle(),
+    ]).then(([{ data: s }, { data: t }, { data: spotRows }, { data: nat }]) => {
       setSites(s || []);
       setTariffs(t || []);
+      setSpotMap(buildSpotMap(spotRows));
+      setNatParams(nat || null);
       if (s?.length) setActiveId(s[0].id);
       setLoading(false);
     });
@@ -2362,8 +2418,12 @@ function OptimisationScreen({ user, userProfile, onBack }) {
 
   const kwh_total = kwh_hc + kwh_hp;
 
+  const dynamicCtx = site?.conso_profil && spotMap && natParams
+    ? { consoProfile: site.conso_profil, spotMap, natParams, userProfile }
+    : null;
+
   const ranked = tariffs
-    .map(t => ({ t, result: calcTariffCost(t, kwh_hc, kwh_hp) }))
+    .map(t => ({ t, result: calcTariffCost(t, kwh_hc, kwh_hp, dynamicCtx) }))
     .filter(({ result }) => result !== null)
     .sort((a, b) => a.result.total - b.result.total);
 
@@ -2473,9 +2533,11 @@ function OptimisationScreen({ user, userProfile, onBack }) {
                       <span style={{ fontSize:18 }}>{rank}</span>
                       <div>
                         <div style={{ fontWeight:800, fontSize:14, color:'white' }}>{t.nom}</div>
-                        {result.is_base
-                          ? <div style={{ fontSize:11, color:'rgba(255,255,255,.45)', marginTop:2 }}>Tarif base · {t.prix_hp} €/kWh · Abo {fmtE(result.abo)}</div>
-                          : <div style={{ fontSize:11, color:'rgba(255,255,255,.45)', marginTop:2 }}>HP {t.prix_hp} €/kWh · HC {t.prix_hc} €/kWh · Abo {fmtE(result.abo)}</div>
+                        {result.is_dynamic
+                          ? <div style={{ fontSize:11, color:'rgba(125,217,64,.55)', marginTop:2 }}>Dynamique · marge {t.marge_fournisseur_ceur_kwh ?? '—'} c€/kWh · Abo {fmtE(result.abo)}</div>
+                          : result.is_base
+                            ? <div style={{ fontSize:11, color:'rgba(255,255,255,.45)', marginTop:2 }}>Tarif base · {t.prix_hp} €/kWh · Abo {fmtE(result.abo)}</div>
+                            : <div style={{ fontSize:11, color:'rgba(255,255,255,.45)', marginTop:2 }}>HP {t.prix_hp} €/kWh · HC {t.prix_hc} €/kWh · Abo {fmtE(result.abo)}</div>
                         }
                       </div>
                     </div>
@@ -2486,7 +2548,10 @@ function OptimisationScreen({ user, userProfile, onBack }) {
                     </div>
                   </div>
                   <div style={{ display:'flex', gap:10, marginTop:8 }}>
-                    {[['Abonnement', result.abo], result.is_base ? ['Consommation', result.hp_cost] : ['HP', result.hp_cost], ...(result.is_base ? [] : [['HC', result.hc_cost]])].map(([lbl, val]) => (
+                    {(result.is_dynamic
+                      ? [['Abo+fixes TTC', result.fixedCost], ['Conso TTC', result.varCost]]
+                      : [['Abonnement', result.abo], result.is_base ? ['Consommation', result.hp_cost] : ['HP', result.hp_cost], ...(result.is_base ? [] : [['HC', result.hc_cost]])]
+                    ).map(([lbl, val]) => (
                       <div key={lbl} style={{ flex:1, background:'rgba(255,255,255,.05)', borderRadius:6, padding:'5px 6px', textAlign:'center' }}>
                         <div style={{ fontSize:12, fontWeight:700, color:'rgba(255,255,255,.85)' }}>{fmtE(val)}</div>
                         <div style={{ fontSize:9, color:'rgba(255,255,255,.4)', fontWeight:700 }}>{lbl.toUpperCase()}</div>
@@ -2700,19 +2765,39 @@ function spotColor(prix) {
   return '#600010';
 }
 
+function ttcColor(prix) {
+  if (prix === null || prix === undefined) return 'rgba(255,255,255,.08)';
+  if (prix < 0.10) return '#c8f0c8';
+  if (prix < 0.13) return '#90d890';
+  if (prix < 0.16) return '#58c058';
+  if (prix < 0.19) return '#28a028';
+  if (prix < 0.22) return '#b0c820';
+  if (prix < 0.26) return '#d8b000';
+  if (prix < 0.30) return '#e07818';
+  if (prix < 0.35) return '#d84010';
+  if (prix < 0.45) return '#b01010';
+  return '#600010';
+}
+
 // ─── SpotHeatmapCanvas ────────────────────────
 const DAYS_IN_MONTH = [31,29,31,30,31,30,31,31,30,31,30,31];
 const MOIS_LABELS   = ['Jan','Fév','Mar','Avr','Mai','Jui','Jul','Aoû','Sep','Oct','Nov','Déc'];
 
-function SpotHeatmapCanvas({ spotAll }) {
+function SpotHeatmapCanvas({ spotAll, natParams, heatmapMode }) {
   const wrapperRef = useRef(null);
   const canvasRef  = useRef(null);
+
+  const hcWindows = useMemo(() => natParams ? [
+    { s: natParams.hc_debut1 ?? null, e: natParams.hc_fin1 ?? null },
+    { s: natParams.hc_debut2 ?? null, e: natParams.hc_fin2 ?? null },
+  ].filter(w => w.s !== null && w.e !== null) : [], [natParams]);
 
   const draw = useCallback((containerW) => {
     if (!canvasRef.current || !spotAll || spotAll.length === 0 || containerW < 10) return;
     const canvas = canvasRef.current;
     const ctx    = canvas.getContext('2d');
     const dpr    = window.devicePixelRatio || 1;
+    const isTTC  = heatmapMode === 'ttc' && natParams;
 
     const dayMap = {};
     spotAll.forEach(r => {
@@ -2771,12 +2856,14 @@ function SpotHeatmapCanvas({ spotAll }) {
         prevMonth = day.mois;
       }
       day.prices.forEach((prix, h) => {
-        ctx.fillStyle = spotColor(prix);
+        let p = prix;
+        if (isTTC && prix !== null) p = calcPrixTTC(prix, day.mois, h, natParams, hcWindows);
+        ctx.fillStyle = isTTC ? ttcColor(p) : spotColor(p);
         ctx.fillRect(LBL_W + h * CELL_W, y, CELL_W - 1, CELL_H - 1);
       });
     });
     if (prevMonth) drawMonthLabel(prevMonth, mStartRow, days.length);
-  }, [spotAll]);
+  }, [spotAll, natParams, heatmapMode, hcWindows]);
 
   useEffect(() => {
     if (!wrapperRef.current) return;
@@ -2796,22 +2883,71 @@ function SpotHeatmapCanvas({ spotAll }) {
 
 // ─── SpotPricesScreen ─────────────────────────
 function SpotPricesScreen({ onBack }) {
-  const [meta,     setMeta]     = useState(null);
-  const [spotAll,  setSpotAll]  = useState(null);
-  const [loading,  setLoading]  = useState(true);
-  const [importing,setImporting]= useState(false);
-  const [importMsg,setImportMsg]= useState(null);
+  const [meta,       setMeta]       = useState(null);
+  const [spotAll,    setSpotAll]    = useState(null);
+  const [loading,    setLoading]    = useState(true);
+  const [importing,  setImporting]  = useState(false);
+  const [importMsg,  setImportMsg]  = useState(null);
+  const [natParams,  setNatParams]  = useState(null);
+  const [natForm,    setNatForm]    = useState(null);   // null = collapsed
+  const [savingNat,  setSavingNat]  = useState(false);
+  const [saveNatMsg, setSaveNatMsg] = useState(null);
+  const [heatmapMode,setHeatmapMode]= useState('spot'); // 'spot' | 'ttc'
   const fileRef = useRef(null);
 
   const loadData = useCallback(async () => {
-    const [{data:m}, {data:jsonRows}] = await Promise.all([
+    const [{data:m}, {data:jsonRows}, {data:nat}] = await Promise.all([
       sb.from('spot_metadata').select('*').eq('id',1).maybeSingle(),
       sb.rpc('get_spot_json'),
+      sb.from('parametres_nationaux').select('*').eq('id',1).maybeSingle(),
     ]);
     setMeta(m);
     setSpotAll(jsonRows && jsonRows.length > 0 ? jsonRows : null);
+    setNatParams(nat || null);
     setLoading(false);
   }, []);
+
+  const openNatForm = () => {
+    const n = natParams || {};
+    setNatForm({
+      turpe_hp_hiver: n.turpe_hp_hiver ?? '',
+      turpe_hc_hiver: n.turpe_hc_hiver ?? '',
+      turpe_hp_ete:   n.turpe_hp_ete   ?? '',
+      turpe_hc_ete:   n.turpe_hc_ete   ?? '',
+      accise:         n.accise          ?? '',
+      tva:            n.tva             ?? 20,
+      hc_debut1:      n.hc_debut1       ?? '',
+      hc_fin1:        n.hc_fin1         ?? '',
+      hc_debut2:      n.hc_debut2       ?? '',
+      hc_fin2:        n.hc_fin2         ?? '',
+    });
+    setSaveNatMsg(null);
+  };
+
+  const saveNatParams = async () => {
+    setSavingNat(true); setSaveNatMsg(null);
+    const num = v => v === '' ? null : parseFloat(v);
+    const intr = v => v === '' ? null : parseInt(v);
+    const { error } = await sb.from('parametres_nationaux').upsert({
+      id: 1,
+      turpe_hp_hiver: num(natForm.turpe_hp_hiver),
+      turpe_hc_hiver: num(natForm.turpe_hc_hiver),
+      turpe_hp_ete:   num(natForm.turpe_hp_ete),
+      turpe_hc_ete:   num(natForm.turpe_hc_ete),
+      accise:         num(natForm.accise),
+      tva:            num(natForm.tva),
+      hc_debut1:      intr(natForm.hc_debut1),
+      hc_fin1:        intr(natForm.hc_fin1),
+      hc_debut2:      intr(natForm.hc_debut2),
+      hc_fin2:        intr(natForm.hc_fin2),
+      updated_at:     new Date().toISOString(),
+    }, { onConflict: 'id' });
+    setSavingNat(false);
+    if (error) { setSaveNatMsg('Erreur : ' + error.message); return; }
+    setSaveNatMsg('✓ Paramètres enregistrés');
+    setNatForm(null);
+    await loadData();
+  };
 
   useEffect(() => { loadData(); }, [loadData]);
 
@@ -2881,22 +3017,97 @@ function SpotPricesScreen({ onBack }) {
         </button>
       </div>
 
-      {/* Légende compacte */}
-      <div style={{display:'flex',gap:5,flexWrap:'wrap',marginBottom:5}}>
-        {[['<3c',0.02],['3-6',0.045],['6-9',0.075],['9-12',0.105],['12-15',0.135],['15-18',0.165],['18-20',0.19],['20-22',0.21],['22-26',0.24],['>26',0.30]].map(([lbl,v])=>(
-          <div key={lbl} style={{display:'flex',alignItems:'center',gap:2,fontSize:8.5,color:'rgba(255,255,255,.55)',fontWeight:700}}>
-            <div style={{width:9,height:9,borderRadius:2,background:spotColor(v),flexShrink:0}}/>
-            {lbl}
+      {/* Variables nationales */}
+      {natForm ? (
+        <div className="card" style={{padding:'12px 14px',marginBottom:8}}>
+          <div style={{fontWeight:800,fontSize:13,color:'white',marginBottom:10}}>Variables nationales</div>
+          <div style={{fontSize:11,color:'rgba(255,217,64,.75)',fontWeight:700,marginBottom:6}}>TURPE variable (c€/kWh) — 4 combinaisons</div>
+          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:6,marginBottom:10}}>
+            {[['HP Hiver','turpe_hp_hiver','ex: 1.47'],['HC Hiver','turpe_hc_hiver','ex: 0.89'],['HP Été (avr–oct)','turpe_hp_ete','ex: 0.86'],['HC Été','turpe_hc_ete','ex: 0.52']].map(([lbl,key,ph])=>(
+              <div key={key}>
+                <div style={{fontSize:10,color:'rgba(255,255,255,.45)',fontWeight:700,marginBottom:2}}>{lbl}</div>
+                <input className="inp" type="number" step="0.01" placeholder={ph} value={String(natForm[key])}
+                  onChange={e=>setNatForm(p=>({...p,[key]:e.target.value}))} style={{fontSize:13,padding:'6px 8px'}}/>
+              </div>
+            ))}
           </div>
-        ))}
-        <span style={{fontSize:8.5,color:'rgba(255,255,255,.3)',alignSelf:'center'}}>c€/kWh</span>
-      </div>
+          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:6,marginBottom:10}}>
+            <div>
+              <div style={{fontSize:10,color:'rgba(255,255,255,.45)',fontWeight:700,marginBottom:2}}>Accise (c€/kWh)</div>
+              <input className="inp" type="number" step="0.001" placeholder="ex: 2.139" value={String(natForm.accise)}
+                onChange={e=>setNatForm(p=>({...p,accise:e.target.value}))} style={{fontSize:13,padding:'6px 8px'}}/>
+            </div>
+            <div>
+              <div style={{fontSize:10,color:'rgba(255,255,255,.45)',fontWeight:700,marginBottom:2}}>TVA (%)</div>
+              <input className="inp" type="number" step="0.1" placeholder="20" value={String(natForm.tva)}
+                onChange={e=>setNatForm(p=>({...p,tva:e.target.value}))} style={{fontSize:13,padding:'6px 8px'}}/>
+            </div>
+          </div>
+          <div style={{fontSize:11,color:'rgba(255,217,64,.75)',fontWeight:700,marginBottom:6}}>Plages HC (pour heatmap TTC)</div>
+          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr 1fr',gap:6,marginBottom:10}}>
+            {[['HC1 début h','hc_debut1','22'],['HC1 fin h','hc_fin1','6'],['HC2 début h','hc_debut2',''],['HC2 fin h','hc_fin2','']].map(([lbl,key,ph])=>(
+              <div key={key}>
+                <div style={{fontSize:10,color:'rgba(255,255,255,.45)',fontWeight:700,marginBottom:2}}>{lbl}</div>
+                <input className="inp" type="number" min="0" max="23" placeholder={ph} value={String(natForm[key])}
+                  onChange={e=>setNatForm(p=>({...p,[key]:e.target.value}))} style={{fontSize:13,padding:'6px 8px'}}/>
+              </div>
+            ))}
+          </div>
+          {saveNatMsg && <div style={{fontSize:11,fontWeight:700,color:saveNatMsg.startsWith('✓')?'var(--green)':'#ff9090',marginBottom:6}}>{saveNatMsg}</div>}
+          <div style={{display:'flex',gap:8}}>
+            <button onClick={saveNatParams} disabled={savingNat} style={{flex:1,background:'rgba(125,217,64,.2)',border:'1px solid rgba(125,217,64,.4)',color:'#7dd940',fontFamily:'var(--font)',fontSize:12,fontWeight:700,borderRadius:8,padding:'8px',cursor:'pointer'}}>
+              {savingNat ? 'Enregistrement…' : '✓ Enregistrer'}
+            </button>
+            <button onClick={()=>setNatForm(null)} style={{flex:1,background:'rgba(255,255,255,.07)',border:'1px solid rgba(255,255,255,.15)',color:'rgba(255,255,255,.6)',fontFamily:'var(--font)',fontSize:12,fontWeight:700,borderRadius:8,padding:'8px',cursor:'pointer'}}>
+              Annuler
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div style={{display:'flex',gap:6,marginBottom:8,flexWrap:'wrap'}}>
+          <button onClick={openNatForm} style={{fontSize:11,fontWeight:700,background:'rgba(255,217,64,.1)',border:'1px solid rgba(255,217,64,.3)',color:'rgba(255,217,64,.8)',borderRadius:7,padding:'5px 10px',cursor:'pointer',fontFamily:'var(--font)'}}>
+            ⚙ Variables nationales {natParams ? '(configurées)' : '(non configurées)'}
+          </button>
+          {natParams && spotAll && (
+            <div style={{display:'flex',background:'rgba(255,255,255,.06)',borderRadius:7,padding:2,gap:2}}>
+              {[['spot','Prix spot'],['ttc','Prix TTC']].map(([m,lbl])=>(
+                <button key={m} onClick={()=>setHeatmapMode(m)} style={{fontSize:11,fontWeight:700,border:'none',borderRadius:5,padding:'4px 10px',cursor:'pointer',fontFamily:'var(--font)',background:heatmapMode===m?'rgba(125,217,64,.25)':'transparent',color:heatmapMode===m?'#7dd940':'rgba(255,255,255,.45)'}}>
+                  {lbl}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Légende compacte */}
+      {heatmapMode === 'ttc' && natParams ? (
+        <div style={{display:'flex',gap:5,flexWrap:'wrap',marginBottom:5}}>
+          {[['<10c',0.08],['10-13',0.115],['13-16',0.145],['16-19',0.175],['19-22',0.205],['22-26',0.24],['26-30',0.28],['30-35',0.33],['35-45',0.40],['>45',0.50]].map(([lbl,v])=>(
+            <div key={lbl} style={{display:'flex',alignItems:'center',gap:2,fontSize:8.5,color:'rgba(255,255,255,.55)',fontWeight:700}}>
+              <div style={{width:9,height:9,borderRadius:2,background:ttcColor(v),flexShrink:0}}/>
+              {lbl}
+            </div>
+          ))}
+          <span style={{fontSize:8.5,color:'rgba(255,255,255,.3)',alignSelf:'center'}}>c€/kWh TTC</span>
+        </div>
+      ) : (
+        <div style={{display:'flex',gap:5,flexWrap:'wrap',marginBottom:5}}>
+          {[['<3c',0.02],['3-6',0.045],['6-9',0.075],['9-12',0.105],['12-15',0.135],['15-18',0.165],['18-20',0.19],['20-22',0.21],['22-26',0.24],['>26',0.30]].map(([lbl,v])=>(
+            <div key={lbl} style={{display:'flex',alignItems:'center',gap:2,fontSize:8.5,color:'rgba(255,255,255,.55)',fontWeight:700}}>
+              <div style={{width:9,height:9,borderRadius:2,background:spotColor(v),flexShrink:0}}/>
+              {lbl}
+            </div>
+          ))}
+          <span style={{fontSize:8.5,color:'rgba(255,255,255,.3)',alignSelf:'center'}}>c€/kWh</span>
+        </div>
+      )}
 
       {/* Heatmap pleine largeur */}
       {loading ? (
         <div style={{textAlign:'center',padding:40}}><div className="spinner" style={{margin:'0 auto'}}/></div>
       ) : spotAll ? (
-        <SpotHeatmapCanvas spotAll={spotAll}/>
+        <SpotHeatmapCanvas spotAll={spotAll} natParams={natParams} heatmapMode={heatmapMode}/>
       ) : (
         <div className="card" style={{textAlign:'center',padding:'32px 20px'}}>
           <div style={{fontSize:32,marginBottom:10}}>⚡</div>
@@ -3038,9 +3249,10 @@ function AdminTariffEditScreen({ tariff, onSave, onDelete, onBack }) {
     surcout_abonnement:tariff?.surcout_abonnement ?? '',
     acheminement_hp:   tariff?.acheminement_hp ?? '',
     acheminement_hc:   tariff?.acheminement_hc ?? '',
-    tarif_dynamique:   tariff?.tarif_dynamique || false,
-    turpe_fixe:        tariff?.turpe_fixe ?? '',
-    cta_fixe:          tariff?.cta_fixe ?? '',
+    tarif_dynamique:           tariff?.tarif_dynamique || false,
+    turpe_fixe:                tariff?.turpe_fixe ?? '',
+    cta_fixe:                  tariff?.cta_fixe ?? '',
+    marge_fournisseur_ceur_kwh: tariff?.marge_fournisseur_ceur_kwh ?? '',
   });
   const [loading, setLoading] = useState(false);
   const [error,   setError]   = useState(null);
@@ -3061,8 +3273,9 @@ function AdminTariffEditScreen({ tariff, onSave, onDelete, onBack }) {
       acheminement_hp:    f.bat_virtuelle ? n(f.acheminement_hp) : null,
       acheminement_hc:    f.bat_virtuelle ? n(f.acheminement_hc) : null,
       tarif_dynamique: f.tarif_dynamique,
-      turpe_fixe: f.tarif_dynamique ? n(f.turpe_fixe) : null,
-      cta_fixe:   f.tarif_dynamique ? n(f.cta_fixe)   : null,
+      turpe_fixe:                  f.tarif_dynamique ? n(f.turpe_fixe) : null,
+      cta_fixe:                    f.tarif_dynamique ? n(f.cta_fixe)   : null,
+      marge_fournisseur_ceur_kwh:  f.tarif_dynamique ? n(f.marge_fournisseur_ceur_kwh) : null,
       last_modified: new Date().toISOString(),
     };
     let err;
@@ -3095,10 +3308,13 @@ function AdminTariffEditScreen({ tariff, onSave, onDelete, onBack }) {
           <TariffField label="Abonnement annuel (€/an)" fkey="abo_annuel" type="number" value={String(f.abo_annuel)} onChange={upd} placeholder="237.72"/>
           <TariffToggle label="Tarif dynamique (prix spot)" val={f.tarif_dynamique} onChange={v=>upd('tarif_dynamique',v)}/>
           {f.tarif_dynamique ? (
-            <div className="inp-row">
-              <TariffField label="TURPE fixe (€/an)" fkey="turpe_fixe" type="number" value={String(f.turpe_fixe)} onChange={upd} placeholder="129.79"/>
-              <TariffField label="CTA fixe (€/an)" fkey="cta_fixe" type="number" value={String(f.cta_fixe)} onChange={upd} placeholder="19.47"/>
-            </div>
+            <>
+              <div className="inp-row">
+                <TariffField label="TURPE fixe (€/an)" fkey="turpe_fixe" type="number" value={String(f.turpe_fixe)} onChange={upd} placeholder="129.79"/>
+                <TariffField label="CTA fixe (€/an)" fkey="cta_fixe" type="number" value={String(f.cta_fixe)} onChange={upd} placeholder="19.47"/>
+              </div>
+              <TariffField label="Marge fournisseur (c€/kWh)" fkey="marge_fournisseur_ceur_kwh" type="number" value={String(f.marge_fournisseur_ceur_kwh)} onChange={upd} placeholder="ex: 1.5"/>
+            </>
           ) : (
             <div className="inp-row">
               <TariffField label="Prix HP (€/kWh)" fkey="prix_hp" type="number" value={String(f.prix_hp)} onChange={upd} placeholder="0.2081"/>
