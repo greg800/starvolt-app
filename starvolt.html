@@ -2211,7 +2211,14 @@ function MaConsoScreen({ user, userProfile, onBack }) {
 }
 
 // ─── SimulationsScreen ────────────────────────
-function SimulationsScreen({ onACC, onBox, onSolar, onBack }) {
+function SimulationsScreen({ onACC, onBox, onSolar, onOptimisation, onBack, user }) {
+  const [hasConso, setHasConso] = useState(false);
+  useEffect(() => {
+    if (!user) return;
+    sb.from('sites').select('id').eq('user_id', user.id).not('conso_profil', 'is', null).limit(1)
+      .then(({ data }) => setHasConso((data?.length || 0) > 0));
+  }, [user?.id]);
+
   return (
     <div className="screen fade-in">
       <button className="back-btn" onClick={onBack}>← Retour</button>
@@ -2220,6 +2227,16 @@ function SimulationsScreen({ onACC, onBox, onSolar, onBack }) {
         <h1 className="welcome-title">Simulations<br/><span className="accent">d'économie</span></h1>
       </div>
       <div className="sim-btns">
+        {hasConso && (
+          <button className="sim-btn" onClick={onOptimisation} style={{border:'1.5px solid rgba(125,217,64,.35)'}}>
+            <img src="/optimisation.png" alt="Optimisation" className="sim-icon" style={{filter:'invert(1) brightness(1.2)'}}/>
+            <div className="sim-text">
+              <div className="sim-title">Optimisation fournisseur</div>
+              <div className="sim-sub">Comparez tous les tarifs sur votre conso réelle</div>
+            </div>
+            <span className="sim-arrow">→</span>
+          </button>
+        )}
         <button className="sim-btn" onClick={onACC}>
           <img src="/acc.png" alt="ACC" className="sim-icon"/>
           <div className="sim-text">
@@ -2245,6 +2262,207 @@ function SimulationsScreen({ onACC, onBox, onSolar, onBack }) {
           <span className="sim-arrow">→</span>
         </button>
       </div>
+    </div>
+  );
+}
+
+// ─── Optimisation utilities ───────────────────
+function parseHcHour(s) { return s ? parseInt(s.split(':')[0]) : null; }
+
+function isHcHour(h, windows) {
+  for (const { s, e } of windows) {
+    if (s === null || e === null) continue;
+    if (s < e) { if (h >= s && h < e) return true; }
+    else { if (h >= s || h < e) return true; } // crosses midnight
+  }
+  return false;
+}
+
+function calcHcHp(consoProfile, userProfile) {
+  const windows = [
+    { s: parseHcHour(userProfile?.heure_debut_hc1), e: parseHcHour(userProfile?.heure_fin_hc1) },
+    { s: parseHcHour(userProfile?.heure_debut_hc2), e: parseHcHour(userProfile?.heure_fin_hc2) },
+  ].filter(w => w.s !== null && w.e !== null);
+
+  let kwh_hc = 0, kwh_hp = 0;
+  for (let m = 1; m <= 12; m++)
+    for (let d = 1; d <= PROF_DAYS[m - 1]; d++)
+      for (let h = 0; h < 24; h++) {
+        const kwh = (consoProfile[profIdx(m, d, h)] || 0) / 1000;
+        (windows.length > 0 && isHcHour(h, windows) ? kwh_hc : (kwh_hp += kwh, 0)) && (kwh_hc += kwh);
+      }
+  // fix the ternary side-effect above with cleaner version:
+  kwh_hc = 0; kwh_hp = 0;
+  for (let m = 1; m <= 12; m++)
+    for (let d = 1; d <= PROF_DAYS[m - 1]; d++)
+      for (let h = 0; h < 24; h++) {
+        const kwh = (consoProfile[profIdx(m, d, h)] || 0) / 1000;
+        if (windows.length > 0 && isHcHour(h, windows)) kwh_hc += kwh;
+        else kwh_hp += kwh;
+      }
+  return { kwh_hc: Math.round(kwh_hc), kwh_hp: Math.round(kwh_hp), hasHC: windows.length > 0 };
+}
+
+function calcTariffCost(tariff, kwh_hc, kwh_hp) {
+  if (tariff.tarif_dynamique) return null;
+  const abo = tariff.abo_annuel || 0;
+  const hp  = tariff.prix_hp || 0;
+  const hc  = tariff.prix_hc != null ? tariff.prix_hc : hp;
+  return { total: abo + kwh_hp * hp + kwh_hc * hc, abo, hp_cost: kwh_hp * hp, hc_cost: kwh_hc * hc, is_base: tariff.prix_hc == null };
+}
+
+// ─── OptimisationScreen ───────────────────────
+function OptimisationScreen({ user, userProfile, onBack }) {
+  const [sites,    setSites]    = useState(null);
+  const [activeId, setActiveId] = useState(null);
+  const [tariffs,  setTariffs]  = useState([]);
+  const [loading,  setLoading]  = useState(true);
+
+  useEffect(() => {
+    Promise.all([
+      sb.from('sites').select('id,nom,conso_profil,conso_annuelle_kwh').eq('user_id', user.id).not('conso_profil', 'is', null).order('created_at'),
+      sb.from('tarifs_electricite').select('*').order('nom'),
+    ]).then(([{ data: s }, { data: t }]) => {
+      setSites(s || []);
+      setTariffs(t || []);
+      if (s?.length) setActiveId(s[0].id);
+      setLoading(false);
+    });
+  }, []);
+
+  const site = sites?.find(s => s.id === activeId) || null;
+
+  const { kwh_hc, kwh_hp, hasHC } = site?.conso_profil
+    ? calcHcHp(site.conso_profil, userProfile)
+    : { kwh_hc: 0, kwh_hp: 0, hasHC: false };
+
+  const kwh_total = kwh_hc + kwh_hp;
+
+  const ranked = tariffs
+    .map(t => ({ t, result: calcTariffCost(t, kwh_hc, kwh_hp) }))
+    .filter(({ result }) => result !== null)
+    .sort((a, b) => a.result.total - b.result.total);
+
+  const fmt = (v) => Math.round(v).toLocaleString('fr-FR');
+  const fmtE = (v) => `${fmt(v)} €`;
+
+  return (
+    <div className="screen fade-in">
+      <button className="back-btn" onClick={onBack}>← Retour</button>
+      <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:12, marginTop:4 }}>
+        <img src="/optimisation.png" alt="" style={{ width:32, height:32, objectFit:'contain', filter:'invert(1) brightness(1.2)', opacity:.85 }}/>
+        <div>
+          <div style={{ fontSize:9, letterSpacing:'.6px', color:'rgba(125,217,64,.8)', fontWeight:700, textTransform:'uppercase' }}>Comparatif</div>
+          <div style={{ fontSize:18, fontWeight:900, color:'white', lineHeight:1.1 }}>Optimisation <span className="accent">fournisseur</span></div>
+        </div>
+      </div>
+
+      {loading && <div style={{ textAlign:'center', padding:40, color:'rgba(255,255,255,.5)' }}>Chargement…</div>}
+
+      {!loading && sites?.length === 0 && (
+        <div className="card" style={{ textAlign:'center', padding:'24px 20px' }}>
+          <div style={{ color:'rgba(255,255,255,.6)', fontSize:13 }}>Aucun profil de consommation trouvé.<br/>Importez d'abord vos données dans « Ma conso ».</div>
+        </div>
+      )}
+
+      {!loading && site && (
+        <>
+          {/* Site selector */}
+          {sites.length > 1 && (
+            <select className="inp inp-sel" style={{ fontSize:13, marginBottom:10 }} value={activeId} onChange={e => setActiveId(e.target.value)}>
+              {sites.map(s => <option key={s.id} value={s.id}>{s.nom}</option>)}
+            </select>
+          )}
+
+          {/* HC/HP summary */}
+          <div className="card" style={{ padding:'12px 14px', marginBottom:10 }}>
+            <div style={{ fontWeight:800, fontSize:13, color:'white', marginBottom:8 }}>{site.nom}</div>
+            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:6 }}>
+              {[
+                ['Total', `${fmt(kwh_total)} kWh`, '#7dd940'],
+                ['Heures pleines', `${fmt(kwh_hp)} kWh`, 'rgba(255,255,255,.8)'],
+                ['Heures creuses', hasHC ? `${fmt(kwh_hc)} kWh` : 'non def.', hasHC ? '#5de0f5' : 'rgba(255,255,255,.3)'],
+              ].map(([lbl, val, col]) => (
+                <div key={lbl} style={{ background:'rgba(255,255,255,.06)', borderRadius:8, padding:'8px 6px', textAlign:'center' }}>
+                  <div style={{ fontSize:14, fontWeight:900, color:col }}>{val}</div>
+                  <div style={{ fontSize:9, color:'rgba(255,255,255,.45)', marginTop:2, fontWeight:700 }}>{lbl.toUpperCase()}</div>
+                </div>
+              ))}
+            </div>
+            {!hasHC && (
+              <div style={{ fontSize:11, color:'rgba(255,200,50,.7)', marginTop:8 }}>
+                ⚠ Plages HC non définies dans votre profil → toute la conso est comptée en HP
+              </div>
+            )}
+            {hasHC && (
+              <div style={{ fontSize:11, color:'rgba(255,255,255,.4)', marginTop:8 }}>
+                Plages HC : {[userProfile?.heure_debut_hc1 && `${userProfile.heure_debut_hc1}–${userProfile.heure_fin_hc1}`, userProfile?.heure_debut_hc2 && `${userProfile.heure_debut_hc2}–${userProfile.heure_fin_hc2}`].filter(Boolean).join(' et ')}
+                {' '}· Part HC : {kwh_total > 0 ? Math.round(kwh_hc / kwh_total * 100) : 0}%
+              </div>
+            )}
+          </div>
+
+          {/* Ranking */}
+          <div style={{ fontWeight:700, fontSize:12, color:'rgba(255,255,255,.5)', letterSpacing:'.5px', textTransform:'uppercase', marginBottom:6, paddingLeft:2 }}>
+            {ranked.length} tarif{ranked.length > 1 ? 's' : ''} classé{ranked.length > 1 ? 's' : ''} du moins cher au plus cher
+          </div>
+
+          {ranked.length === 0 && (
+            <div className="card" style={{ textAlign:'center', padding:'20px', color:'rgba(255,255,255,.5)', fontSize:13 }}>
+              Aucun tarif statique disponible. Ajoutez des tarifs dans l'admin.
+            </div>
+          )}
+
+          <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
+            {ranked.map(({ t, result }, idx) => {
+              const medals = ['🥇','🥈','🥉'];
+              const rank = medals[idx] || `#${idx + 1}`;
+              const saving = idx > 0 ? result.total - ranked[0].result.total : null;
+              return (
+                <div key={t.id} className="card" style={{
+                  padding:'12px 14px',
+                  border: idx === 0 ? '1.5px solid rgba(125,217,64,.4)' : '1px solid rgba(255,255,255,.1)',
+                  background: idx === 0 ? 'rgba(125,217,64,.06)' : undefined,
+                }}>
+                  <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start' }}>
+                    <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+                      <span style={{ fontSize:18 }}>{rank}</span>
+                      <div>
+                        <div style={{ fontWeight:800, fontSize:14, color:'white' }}>{t.nom}</div>
+                        {result.is_base
+                          ? <div style={{ fontSize:11, color:'rgba(255,255,255,.45)', marginTop:2 }}>Tarif base · {t.prix_hp} €/kWh · Abo {fmtE(result.abo)}</div>
+                          : <div style={{ fontSize:11, color:'rgba(255,255,255,.45)', marginTop:2 }}>HP {t.prix_hp} €/kWh · HC {t.prix_hc} €/kWh · Abo {fmtE(result.abo)}</div>
+                        }
+                      </div>
+                    </div>
+                    <div style={{ textAlign:'right', flexShrink:0 }}>
+                      <div style={{ fontSize:20, fontWeight:900, color: idx === 0 ? '#7dd940' : 'white' }}>{fmtE(result.total)}</div>
+                      <div style={{ fontSize:10, color:'rgba(255,255,255,.4)' }}>/an</div>
+                    </div>
+                  </div>
+                  <div style={{ display:'flex', gap:10, marginTop:8 }}>
+                    {[['Abonnement', result.abo], result.is_base ? ['Consommation', result.hp_cost] : ['HP', result.hp_cost], ...(result.is_base ? [] : [['HC', result.hc_cost]])].map(([lbl, val]) => (
+                      <div key={lbl} style={{ flex:1, background:'rgba(255,255,255,.05)', borderRadius:6, padding:'5px 6px', textAlign:'center' }}>
+                        <div style={{ fontSize:12, fontWeight:700, color:'rgba(255,255,255,.85)' }}>{fmtE(val)}</div>
+                        <div style={{ fontSize:9, color:'rgba(255,255,255,.4)', fontWeight:700 }}>{lbl.toUpperCase()}</div>
+                      </div>
+                    ))}
+                  </div>
+                  {saving !== null && saving > 0 && (
+                    <div style={{ marginTop:6, fontSize:11, color:'rgba(255,150,50,.8)', textAlign:'right' }}>
+                      +{fmtE(saving)} vs le moins cher
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
+          <div style={{ fontSize:10, color:'rgba(255,255,255,.3)', textAlign:'center', marginTop:12, paddingBottom:8 }}>
+            Calculs basés sur votre profil annuel · Tarifs dynamiques et batterie virtuelle à venir
+          </div>
+        </>
+      )}
     </div>
   );
 }
@@ -3030,11 +3248,16 @@ function App() {
       case 'SIMULATIONS': {
         const base = { name: profile?.prenom||'', address:'Zone ACC', initialBill:2000, bill:2000, bravoItems:[], investment:0, eligible:true };
         return <SimulationsScreen
+          user={user}
           onACC={()=>goTo('ADDRESS', base)}
           onBox={()=>goTo('COMWATT', base)}
           onSolar={()=>goTo('SOLAR', base)}
+          onOptimisation={()=>goTo('OPTIMISATION')}
           onBack={goBack}/>;
       }
+
+      case 'OPTIMISATION':
+        return <OptimisationScreen user={user} userProfile={profile} onBack={goBack}/>;
 
       case 'AUTH_SIGNUP':
         return <AuthSignupScreen
