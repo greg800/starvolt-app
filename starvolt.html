@@ -2211,12 +2211,33 @@ function MaConsoScreen({ user, userProfile, onBack }) {
 }
 
 // ─── SimulationsScreen ────────────────────────
-function SimulationsScreen({ onACC, onBox, onSolar, onOptimisation, onBack, user }) {
-  const [hasConso, setHasConso] = useState(false);
+function SimulationsScreen({ onACC, onBox, onSolar, onOptimisation, onBack, user, userProfile }) {
+  const [hasConso,  setHasConso]  = useState(false);
+  const [maxSaving, setMaxSaving] = useState(null);
+
   useEffect(() => {
     if (!user) return;
-    sb.from('sites').select('id').eq('user_id', user.id).not('conso_profil', 'is', null).limit(1)
-      .then(({ data }) => setHasConso((data?.length || 0) > 0));
+    Promise.all([
+      sb.from('sites').select('id,conso_profil,tarif_id').eq('user_id', user.id).not('conso_profil', 'is', null).order('created_at'),
+      sb.from('tarifs_electricite').select('*').order('nom'),
+    ]).then(([{ data: sites }, { data: tariffs }]) => {
+      if (!sites?.length) return;
+      setHasConso(true);
+      const site = sites[0];
+      if (!tariffs?.length || !site.conso_profil) return;
+      const { kwh_hc, kwh_hp } = calcHcHp(site.conso_profil, userProfile);
+      const kwh_total = kwh_hc + kwh_hp;
+      if (!kwh_total) return;
+      const ranked = tariffs
+        .map(t => ({ t, result: calcTariffCost(t, kwh_hc, kwh_hp) }))
+        .filter(({ result }) => result !== null)
+        .sort((a, b) => a.result.total - b.result.total);
+      if (!ranked.length) return;
+      const best = ranked[0].result.total;
+      const currentRanked = site.tarif_id ? ranked.find(r => r.t.id === site.tarif_id) : null;
+      const saving = currentRanked ? Math.round(currentRanked.result.total - best) : null;
+      setMaxSaving(saving);
+    });
   }, [user?.id]);
 
   return (
@@ -2232,7 +2253,10 @@ function SimulationsScreen({ onACC, onBox, onSolar, onOptimisation, onBack, user
             <img src="/optimisation.png" alt="Optimisation" className="sim-icon" style={{mixBlendMode:'screen'}}/>
             <div className="sim-text">
               <div className="sim-title">Optimisation fournisseur</div>
-              <div className="sim-sub">Comparez tous les tarifs sur votre conso réelle</div>
+              {maxSaving !== null && maxSaving > 0
+                ? <div className="sim-sub" style={{color:'#7dd940',fontWeight:700}}>Jusqu'à -{maxSaving.toLocaleString('fr-FR')} €/an d'économie</div>
+                : <div className="sim-sub">Comparez tous les tarifs sur votre conso réelle</div>
+              }
             </div>
             <span className="sim-arrow">→</span>
           </button>
@@ -2320,7 +2344,7 @@ function OptimisationScreen({ user, userProfile, onBack }) {
 
   useEffect(() => {
     Promise.all([
-      sb.from('sites').select('id,nom,conso_profil,conso_annuelle_kwh').eq('user_id', user.id).not('conso_profil', 'is', null).order('created_at'),
+      sb.from('sites').select('id,nom,conso_profil,conso_annuelle_kwh,tarif_id').eq('user_id', user.id).not('conso_profil', 'is', null).order('created_at'),
       sb.from('tarifs_electricite').select('*').order('nom'),
     ]).then(([{ data: s }, { data: t }]) => {
       setSites(s || []);
@@ -2343,8 +2367,14 @@ function OptimisationScreen({ user, userProfile, onBack }) {
     .filter(({ result }) => result !== null)
     .sort((a, b) => a.result.total - b.result.total);
 
+  const currentRanked = site?.tarif_id ? ranked.find(r => r.t.id === site.tarif_id) : null;
+  const heroSaving = currentRanked && ranked.length > 0 && currentRanked !== ranked[0]
+    ? Math.round(currentRanked.result.total - ranked[0].result.total)
+    : null;
+
   const fmt = (v) => Math.round(v).toLocaleString('fr-FR');
   const fmtE = (v) => `${fmt(v)} €`;
+  const fmtKwh = (total) => kwh_total > 0 ? `${(total / kwh_total * 100).toFixed(1)} c€/kWh` : null;
 
   return (
     <div className="screen fade-in">
@@ -2402,6 +2432,20 @@ function OptimisationScreen({ user, userProfile, onBack }) {
             )}
           </div>
 
+          {/* Hero savings */}
+          {heroSaving !== null && heroSaving > 0 && (
+            <div className="card" style={{ padding:'18px 16px', marginBottom:12, background:'rgba(125,217,64,.08)', border:'2px solid rgba(125,217,64,.45)', textAlign:'center' }}>
+              <div style={{ fontSize:11, color:'rgba(255,255,255,.5)', letterSpacing:'.4px', textTransform:'uppercase', marginBottom:4 }}>En changeant de tarif</div>
+              <div style={{ fontSize:40, fontWeight:900, color:'#7dd940', lineHeight:1, letterSpacing:'-1px' }}>
+                -{heroSaving.toLocaleString('fr-FR')} €<span style={{fontSize:22, fontWeight:700}}>/an</span>
+              </div>
+              <div style={{ fontSize:12, color:'rgba(255,255,255,.55)', marginTop:8 }}>
+                <span style={{color:'rgba(255,150,50,.8)'}}>{currentRanked.t.nom}</span>
+                {' '}→ <span style={{color:'#7dd940', fontWeight:700}}>{ranked[0].t.nom}</span>
+              </div>
+            </div>
+          )}
+
           {/* Ranking */}
           <div style={{ fontWeight:700, fontSize:12, color:'rgba(255,255,255,.5)', letterSpacing:'.5px', textTransform:'uppercase', marginBottom:6, paddingLeft:2 }}>
             {ranked.length} tarif{ranked.length > 1 ? 's' : ''} classé{ranked.length > 1 ? 's' : ''} du moins cher au plus cher
@@ -2438,6 +2482,7 @@ function OptimisationScreen({ user, userProfile, onBack }) {
                     <div style={{ textAlign:'right', flexShrink:0 }}>
                       <div style={{ fontSize:20, fontWeight:900, color: idx === 0 ? '#7dd940' : 'white' }}>{fmtE(result.total)}</div>
                       <div style={{ fontSize:10, color:'rgba(255,255,255,.4)' }}>/an</div>
+                      {fmtKwh(result.total) && <div style={{ fontSize:11, color:'rgba(255,255,255,.45)', marginTop:2 }}>{fmtKwh(result.total)}</div>}
                     </div>
                   </div>
                   <div style={{ display:'flex', gap:10, marginTop:8 }}>
@@ -3249,6 +3294,7 @@ function App() {
         const base = { name: profile?.prenom||'', address:'Zone ACC', initialBill:2000, bill:2000, bravoItems:[], investment:0, eligible:true };
         return <SimulationsScreen
           user={user}
+          userProfile={profile}
           onACC={()=>goTo('ADDRESS', base)}
           onBox={()=>goTo('COMWATT', base)}
           onSolar={()=>goTo('SOLAR', base)}
