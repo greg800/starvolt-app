@@ -30,6 +30,10 @@
   <!-- Canvas Confetti (fireworks) -->
   <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.3/dist/confetti.browser.min.js"></script>
 
+  <!-- Leaflet (carte France interactive) -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
   <!-- Supabase -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 
@@ -916,6 +920,16 @@
     }
     .btn-danger:hover { background: rgba(200,40,40,.95); }
     .btn-danger:disabled { opacity: .5; cursor: default; }
+    @keyframes sunPulse {
+      0%,100% { box-shadow: 0 0 18px #ffd700, 0 0 35px rgba(255,215,0,.35); }
+      50%      { box-shadow: 0 0 28px #ffd700, 0 0 55px rgba(255,215,0,.6); transform: scale(1.06); }
+    }
+    @keyframes sunRay {
+      0%,100% { opacity: .4; }
+      50%      { opacity: .9; }
+    }
+    /* Override Leaflet default background in dark UI */
+    .leaflet-container { background: #1a3a48; }
   </style>
 </head>
 <body>
@@ -1740,6 +1754,7 @@ function HomeLoggedInScreen({ profile }) {
 // ─── Conso processing ────────────────────────
 const PROF_DAYS=[31,29,31,30,31,30,31,31,30,31,30,31];
 function profIdx(m,d,h){let o=0;for(let i=1;i<m;i++)o+=PROF_DAYS[i-1]*24;return o+(d-1)*24+h;}
+function fmtKwh(v){return v>=1000?`${(v/1000).toFixed(1)} MWh`:`${Math.round(v)} kWh`;}
 function lastSunUTC(y,m0){const d=new Date(Date.UTC(y,m0+1,0,1));while(d.getUTCDay()!==0)d.setUTCDate(d.getUTCDate()-1);return d.getTime();}
 function frOff(utcMs){const y=new Date(utcMs).getUTCFullYear();return(utcMs>=lastSunUTC(y,2)&&utcMs<lastSunUTC(y,9))?2:1;}
 function utcToFR(utcMs){const ms=utcMs+frOff(utcMs)*3600000,d=new Date(ms);return{year:d.getUTCFullYear(),month:d.getUTCMonth()+1,day:d.getUTCDate(),hour:d.getUTCHours(),minute:d.getUTCMinutes()};}
@@ -1985,7 +2000,10 @@ function MaConsoScreen({ user, userProfile, onBack }) {
       sb.from('tarifs_electricite').select('id,nom').order('nom')
     ]);
     setSites(s||[]);setTariffs(t||[]);
-    setActiveId(id=>id||(s?.length?s[0].id:null));
+    const stored=localStorage.getItem('starvolt_active_site_id');
+    const valid=stored&&s?.find(x=>x.id===stored)?stored:(s?.length?s[0].id:null);
+    setActiveId(valid);
+    if(valid)localStorage.setItem('starvolt_active_site_id',valid);
   };
   useEffect(()=>{load();},[]);
 
@@ -1999,11 +2017,12 @@ function MaConsoScreen({ user, userProfile, onBack }) {
   const handleAddSite=async(data)=>{
     const{data:ns}=await sb.from('sites').insert({user_id:user.id,...data}).select().single();
     setShowAdd(false);await load();
-    if(ns)setActiveId(ns.id);
+    if(ns){setActiveId(ns.id);localStorage.setItem('starvolt_active_site_id',ns.id);}
   };
 
   const handleDeleteConfirmed=async()=>{
     await sb.from('sites').delete().eq('id',activeId);
+    localStorage.removeItem('starvolt_active_site_id');
     setActiveId(null);setEditMode(false);setShowDeleteConfirm(false);
     await load();
   };
@@ -2067,7 +2086,11 @@ function MaConsoScreen({ user, userProfile, onBack }) {
         {/* Site selector */}
         {sites.length>1&&(
           <div style={{marginBottom:8}}>
-            <select className="inp inp-sel" style={{fontSize:13,padding:'9px 36px 9px 12px'}} value={activeId||''} onChange={e=>{setActiveId(e.target.value);setEditMode(false);setImportMsg(null);setShowDeleteConfirm(false);}}>
+            <select className="inp inp-sel" style={{fontSize:13,padding:'9px 36px 9px 12px'}} value={activeId||''} onChange={e=>{
+              const id=e.target.value;
+              setActiveId(id);localStorage.setItem('starvolt_active_site_id',id);
+              setEditMode(false);setImportMsg(null);setShowDeleteConfirm(false);
+            }}>
               {sites.map(s=><option key={s.id} value={s.id}>{s.nom}</option>)}
             </select>
           </div>
@@ -2092,13 +2115,16 @@ function MaConsoScreen({ user, userProfile, onBack }) {
             {!editMode?(
               <div className="card" style={{padding:'10px 14px',marginBottom:8}}>
                 <div style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
-                  <div>
+                  <div style={{flex:1,minWidth:0}}>
                     <div style={{fontWeight:800,fontSize:14,color:'white'}}>{site.nom}</div>
                     {(site.adresse_ligne1||site.ville)&&(
                       <div style={{fontSize:11,color:'rgba(255,255,255,.5)',marginTop:2}}>
                         {[site.adresse_ligne1,site.code_postal,site.ville].filter(Boolean).join(' ')}
                       </div>
                     )}
+                    <div style={{fontSize:10,color:'rgba(125,217,64,.7)',fontWeight:700,marginTop:5,display:'flex',alignItems:'center',gap:4}}>
+                      <span>✦</span> Ce site sera utilisé dans tous les calculs d'économie
+                    </div>
                   </div>
                   <button style={{background:'none',border:'none',color:'rgba(255,255,255,.4)',cursor:'pointer',fontSize:12,flexShrink:0}} onClick={()=>setEditMode(true)}>✏️</button>
                 </div>
@@ -2214,29 +2240,48 @@ function MaConsoScreen({ user, userProfile, onBack }) {
 function SimulationsScreen({ onACC, onBox, onSolar, onOptimisation, onBack, user, userProfile }) {
   const [hasConso,  setHasConso]  = useState(false);
   const [maxSaving, setMaxSaving] = useState(null);
+  const [accSaving, setAccSaving] = useState(null);
 
   useEffect(() => {
     if (!user) return;
+    const activeId = localStorage.getItem('starvolt_active_site_id');
     Promise.all([
-      sb.from('sites').select('id,conso_profil,tarif_id').eq('user_id', user.id).not('conso_profil', 'is', null).order('created_at'),
+      activeId
+        ? sb.from('sites').select('id,conso_profil,tarif_id').eq('id', activeId).maybeSingle()
+        : sb.from('sites').select('id,conso_profil,tarif_id').eq('user_id', user.id).not('conso_profil','is',null).order('created_at').limit(1).maybeSingle(),
       sb.from('tarifs_electricite').select('*').order('nom'),
-    ]).then(([{ data: sites }, { data: tariffs }]) => {
-      if (!sites?.length) return;
+    ]).then(async ([{ data: siteData }, { data: tariffs }]) => {
+      const site = Array.isArray(siteData) ? siteData[0] : siteData;
+      if (!site?.conso_profil) return;
       setHasConso(true);
-      const site = sites[0];
-      if (!tariffs?.length || !site.conso_profil) return;
-      const { kwh_hc, kwh_hp } = calcHcHp(site.conso_profil, userProfile);
-      const kwh_total = kwh_hc + kwh_hp;
-      if (!kwh_total) return;
-      const ranked = tariffs
-        .map(t => ({ t, result: calcTariffCost(t, kwh_hc, kwh_hp) }))
-        .filter(({ result }) => result !== null)
-        .sort((a, b) => a.result.total - b.result.total);
-      if (!ranked.length) return;
-      const best = ranked[0].result.total;
-      const currentRanked = site.tarif_id ? ranked.find(r => r.t.id === site.tarif_id) : null;
-      const saving = currentRanked ? Math.round(currentRanked.result.total - best) : null;
-      setMaxSaving(saving);
+
+      // Optimisation savings
+      if (tariffs?.length) {
+        const { kwh_hc, kwh_hp } = calcHcHp(site.conso_profil, userProfile);
+        if (kwh_hc + kwh_hp > 0) {
+          const ranked = tariffs.map(t=>({t,result:calcTariffCost(t,kwh_hc,kwh_hp)})).filter(({result})=>result!==null).sort((a,b)=>a.result.total-b.result.total);
+          if (ranked.length) {
+            const cur = site.tarif_id ? ranked.find(r=>r.t.id===site.tarif_id) : null;
+            setMaxSaving(cur ? Math.round(cur.result.total - ranked[0].result.total) : null);
+          }
+        }
+      }
+
+      // ACC savings (9h–18h vs tarif actuel)
+      if (site.conso_profil) {
+        let kwh918 = 0;
+        for (let m=1; m<=12; m++)
+          for (let d=1; d<=PROF_DAYS[m-1]; d++)
+            for (let h=9; h<18; h++)
+              kwh918 += (site.conso_profil[profIdx(m,d,h)]||0)/1000;
+        let priceRef = 0.24;
+        if (site.tarif_id && tariffs?.length) {
+          const t = tariffs.find(x=>x.id===site.tarif_id);
+          if (t?.prix_hp) priceRef = t.prix_hp;
+        }
+        const sav = Math.round(kwh918 * (priceRef - 0.11));
+        if (sav > 0) setAccSaving(sav);
+      }
     });
   }, [user?.id]);
 
@@ -2265,7 +2310,10 @@ function SimulationsScreen({ onACC, onBox, onSolar, onOptimisation, onBack, user
           <img src="/acc.png" alt="ACC" className="sim-icon"/>
           <div className="sim-text">
             <div className="sim-title">Économiser avec l'ACC</div>
-            <div className="sim-sub">Autoconsommation collective locale</div>
+            {accSaving !== null && accSaving > 0
+              ? <div className="sim-sub" style={{color:'#7dd940',fontWeight:700}}>Jusqu'à -{accSaving.toLocaleString('fr-FR')} €/an d'économie</div>
+              : <div className="sim-sub">Autoconsommation collective locale</div>
+            }
           </div>
           <span className="sim-arrow">→</span>
         </button>
@@ -2370,24 +2418,39 @@ function calcDynamicCost(tariff, consoProfile, spotMap, natParams, userProfile) 
   const marge  = (tariff.marge_fournisseur_ceur_kwh || 0) / 100;
   const accise = (natParams?.accise || 0) / 100;
   const tva    = (natParams?.tva ?? 20) / 100;
-  let varCost = 0;
-  for (let mo = 1; mo <= 12; mo++)
+  let varCost = 0, varCost_ete = 0, varCost_hiver = 0, kwh_ete = 0, kwh_hiver = 0;
+  for (let mo = 1; mo <= 12; mo++) {
+    const isEte = mo >= 4 && mo <= 10;
     for (let d = 1; d <= PROF_DAYS[mo - 1]; d++)
       for (let h = 0; h < 24; h++) {
         const kwh  = (consoProfile[profIdx(mo, d, h)] || 0) / 1000;
         if (!kwh) continue;
         const spot = spotMap[`${mo}_${d}_${h}`] || 0;
-        varCost += kwh * (spot + getTurpeRate(mo, h, natParams, windows) + accise + marge);
+        const cv   = kwh * (spot + getTurpeRate(mo, h, natParams, windows) + accise + marge);
+        varCost += cv;
+        if (isEte) { varCost_ete += cv; kwh_ete += kwh; }
+        else       { varCost_hiver += cv; kwh_hiver += kwh; }
       }
+  }
+  const kwh_total_dyn = kwh_ete + kwh_hiver;
   const fixedHT = (tariff.abo_annuel || 0) + (tariff.turpe_fixe || 0) + (tariff.cta_fixe || 0);
   const total   = (varCost + fixedHT) * (1 + tva);
-  return { total, varCost: varCost * (1 + tva), fixedCost: fixedHT * (1 + tva), abo: fixedHT * (1 + tva), is_base: false, is_dynamic: true };
+  const avgCeur = (vc, kwh) => {
+    if (!kwh || !kwh_total_dyn) return null;
+    return ((vc + fixedHT * kwh / kwh_total_dyn) * (1 + tva) / kwh) * 100;
+  };
+  return {
+    total, varCost: varCost * (1 + tva), fixedCost: fixedHT * (1 + tva), abo: fixedHT * (1 + tva),
+    is_base: false, is_dynamic: true,
+    avg_ete_ceur:   avgCeur(varCost_ete,   kwh_ete),
+    avg_hiver_ceur: avgCeur(varCost_hiver, kwh_hiver),
+  };
 }
 
 // ─── OptimisationScreen ───────────────────────
 function OptimisationScreen({ user, userProfile, onBack }) {
   const [sites,    setSites]    = useState(null);
-  const [activeId, setActiveId] = useState(null);
+  const [activeId] = useState(() => localStorage.getItem('starvolt_active_site_id'));
   const [tariffs,  setTariffs]  = useState([]);
   const [loading,  setLoading]  = useState(true);
 
@@ -2405,7 +2468,6 @@ function OptimisationScreen({ user, userProfile, onBack }) {
       setTariffs(t || []);
       setSpotMap(buildSpotMap(spotRows));
       setNatParams(nat || null);
-      if (s?.length) setActiveId(s[0].id);
       setLoading(false);
     });
   }, []);
@@ -2434,7 +2496,7 @@ function OptimisationScreen({ user, userProfile, onBack }) {
 
   const fmt = (v) => Math.round(v).toLocaleString('fr-FR');
   const fmtE = (v) => `${fmt(v)} €`;
-  const fmtKwh = (total) => kwh_total > 0 ? `${(total / kwh_total * 100).toFixed(1)} c€/kWh` : null;
+  const fmtPrixKwh = (total) => kwh_total > 0 ? `${(total / kwh_total * 100).toFixed(1)} c€/kWh` : null;
 
   return (
     <div className="screen fade-in">
@@ -2457,21 +2519,17 @@ function OptimisationScreen({ user, userProfile, onBack }) {
 
       {!loading && site && (
         <>
-          {/* Site selector */}
-          {sites.length > 1 && (
-            <select className="inp inp-sel" style={{ fontSize:13, marginBottom:10 }} value={activeId} onChange={e => setActiveId(e.target.value)}>
-              {sites.map(s => <option key={s.id} value={s.id}>{s.nom}</option>)}
-            </select>
-          )}
-
           {/* HC/HP summary */}
           <div className="card" style={{ padding:'12px 14px', marginBottom:10 }}>
-            <div style={{ fontWeight:800, fontSize:13, color:'white', marginBottom:8 }}>{site.nom}</div>
+            <div style={{ fontWeight:800, fontSize:13, color:'white', marginBottom:4 }}>{site.nom}</div>
+            <div style={{ fontSize:10, color:'rgba(125,217,64,.7)', fontWeight:700, marginBottom:8, display:'flex', alignItems:'center', gap:4 }}>
+              <span>✦</span> Site utilisé pour tous les calculs
+            </div>
             <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:6 }}>
               {[
-                ['Total', `${fmt(kwh_total)} kWh`, '#7dd940'],
-                ['Heures pleines', `${fmt(kwh_hp)} kWh`, 'rgba(255,255,255,.8)'],
-                ['Heures creuses', hasHC ? `${fmt(kwh_hc)} kWh` : 'non def.', hasHC ? '#5de0f5' : 'rgba(255,255,255,.3)'],
+                ['Total', fmtKwh(kwh_total), '#7dd940'],
+                ['Heures pleines', fmtKwh(kwh_hp), 'rgba(255,255,255,.8)'],
+                ['Heures creuses', hasHC ? fmtKwh(kwh_hc) : 'non def.', hasHC ? '#5de0f5' : 'rgba(255,255,255,.3)'],
               ].map(([lbl, val, col]) => (
                 <div key={lbl} style={{ background:'rgba(255,255,255,.06)', borderRadius:8, padding:'8px 6px', textAlign:'center' }}>
                   <div style={{ fontSize:14, fontWeight:900, color:col }}>{val}</div>
@@ -2544,7 +2602,7 @@ function OptimisationScreen({ user, userProfile, onBack }) {
                     <div style={{ textAlign:'right', flexShrink:0 }}>
                       <div style={{ fontSize:20, fontWeight:900, color: idx === 0 ? '#7dd940' : 'white' }}>{fmtE(result.total)}</div>
                       <div style={{ fontSize:10, color:'rgba(255,255,255,.4)' }}>/an</div>
-                      {fmtKwh(result.total) && <div style={{ fontSize:11, color:'rgba(255,255,255,.45)', marginTop:2 }}>{fmtKwh(result.total)}</div>}
+                      {fmtPrixKwh(result.total) && <div style={{ fontSize:11, color:'rgba(255,255,255,.45)', marginTop:2 }}>{fmtPrixKwh(result.total)}</div>}
                     </div>
                   </div>
                   <div style={{ display:'flex', gap:10, marginTop:8 }}>
@@ -2558,6 +2616,16 @@ function OptimisationScreen({ user, userProfile, onBack }) {
                       </div>
                     ))}
                   </div>
+                  {result.is_dynamic && (result.avg_ete_ceur != null || result.avg_hiver_ceur != null) && (
+                    <div style={{ display:'flex', gap:6, marginTop:6 }}>
+                      {[['☀️ Été moy.', result.avg_ete_ceur], ['❄️ Hiver moy.', result.avg_hiver_ceur]].filter(([,v])=>v!=null).map(([lbl,val])=>(
+                        <div key={lbl} style={{ flex:1, background:'rgba(255,255,255,.05)', borderRadius:6, padding:'5px 6px', textAlign:'center' }}>
+                          <div style={{ fontSize:12, fontWeight:700, color:'rgba(125,217,64,.9)' }}>{val.toFixed(1)} c€/kWh</div>
+                          <div style={{ fontSize:9, color:'rgba(255,255,255,.4)', fontWeight:700 }}>{lbl.toUpperCase()}</div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                   {saving !== null && saving > 0 && (
                     <div style={{ marginTop:6, fontSize:11, color:'rgba(255,150,50,.8)', textAlign:'right' }}>
                       +{fmtE(saving)} vs le moins cher
@@ -3118,8 +3186,186 @@ function SpotPricesScreen({ onBack }) {
   );
 }
 
+// ─── AccMapScreen ─────────────────────────────
+function AccMapScreen({ user, userProfile, onBack }) {
+  const [accSites,    setAccSites]    = useState(null);
+  const [activeSite,  setActiveSite]  = useState(null);
+  const [activeTariff,setActiveTariff]= useState(null);
+  const [loading,     setLoading]     = useState(true);
+  const [showMap,     setShowMap]     = useState(false);
+  const [popup,       setPopup]       = useState(null); // {nom, code_postal, puissance_pv, prix_vente_ttc}
+  const mapDivRef  = useRef(null);
+  const leafletRef = useRef(null);
+
+  useEffect(() => {
+    const siteId = localStorage.getItem('starvolt_active_site_id');
+    Promise.all([
+      sb.from('sites_acc').select('*').order('created_at'),
+      siteId
+        ? sb.from('sites').select('id,nom,adresse_ligne1,code_postal,ville,conso_profil,tarif_id').eq('id', siteId).maybeSingle()
+        : Promise.resolve({ data: null }),
+    ]).then(async ([{ data: acc }, { data: site }]) => {
+      setAccSites(acc || []);
+      setActiveSite(site || null);
+      if (site?.tarif_id) {
+        const { data: t } = await sb.from('tarifs_electricite').select('prix_hp,prix_hc,nom').eq('id', site.tarif_id).maybeSingle();
+        setActiveTariff(t);
+      }
+      setLoading(false);
+      setTimeout(() => setShowMap(true), 600);
+    });
+  }, []);
+
+  // Init Leaflet map
+  useEffect(() => {
+    if (!showMap || !mapDivRef.current || leafletRef.current || !window.L) return;
+    const map = window.L.map(mapDivRef.current, { center:[46.5, 2.3], zoom:5, zoomControl:true, scrollWheelZoom:true });
+    window.L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+      attribution:'<a href="https://carto.com">CARTO</a>', subdomains:'abcd', maxZoom:19,
+    }).addTo(map);
+
+    const SunIcon = window.L.divIcon({
+      className: '',
+      html: '<div style="width:28px;height:28px;border-radius:50%;background:#ffd700;border:2px solid #fff;box-shadow:0 0 10px #ffd700;display:flex;align-items:center;justify-content:center;font-size:14px">☀️</div>',
+      iconSize: [28, 28], iconAnchor: [14, 14], popupAnchor: [0, -18],
+    });
+
+    (accSites || []).forEach(s => {
+      if (!s.latitude || !s.longitude) return;
+      const marker = window.L.marker([s.latitude, s.longitude], { icon: SunIcon });
+      marker.addTo(map);
+      marker.on('click', () => setPopup(s));
+    });
+
+    leafletRef.current = map;
+  }, [showMap, accSites]);
+
+  const eligible = activeSite && (accSites||[]).some(s => s.code_postal === activeSite.code_postal);
+  const eligibleSite = eligible ? (accSites||[]).find(s => s.code_postal === activeSite.code_postal) : null;
+
+  const kwh918 = useMemo(() => {
+    if (!activeSite?.conso_profil) return 0;
+    let k = 0;
+    for (let m=1; m<=12; m++)
+      for (let d=1; d<=PROF_DAYS[m-1]; d++)
+        for (let h=9; h<18; h++)
+          k += (activeSite.conso_profil[profIdx(m,d,h)]||0)/1000;
+    return Math.round(k);
+  }, [activeSite]);
+
+  const priceRef = activeTariff?.prix_hp || 0.24;
+  const accPriceKwh = eligibleSite?.prix_vente_ttc || 0.11;
+  const accSavings = Math.max(0, Math.round(kwh918 * (priceRef - accPriceKwh)));
+
+  const SunAnim = () => (
+    <div style={{ display:'flex', justifyContent:'center', alignItems:'flex-end', gap:24, padding:'16px 0 10px' }}>
+      <div style={{ position:'relative', width:56, height:56, flexShrink:0 }}>
+        <div style={{ width:42, height:42, borderRadius:'50%', background:'#ffd700', position:'absolute', top:4, left:7,
+          animation:'sunPulse 2.5s ease-in-out infinite' }}/>
+        {[0,60,120,180,240,300].map(a=>(
+          <div key={a} style={{ position:'absolute', top:'50%', left:'50%', width:2, height:9,
+            background:'#ffd700', borderRadius:1, opacity:.6,
+            transform:`rotate(${a}deg) translate(-50%, -210%)`,
+            animation:`sunRay 2.5s ease-in-out infinite ${a*6}ms` }}/>
+        ))}
+      </div>
+      <svg viewBox="0 0 100 14" style={{ width:'15%', marginBottom:18, overflow:'visible' }}>
+        <line x1="0" y1="7" x2="100" y2="7" stroke="#7dd940" strokeWidth="1.5" strokeDasharray="6 4" opacity=".5"/>
+        <circle r="3.5" fill="#7dd940"><animateMotion dur="1.8s" repeatCount="indefinite" path="M0,7 L100,7"/></circle>
+      </svg>
+      <img src="/maison.png" alt="Maison" style={{ width:72, height:72, objectFit:'contain' }}/>
+    </div>
+  );
+
+  return (
+    <div className="screen fade-in">
+      <button className="back-btn" onClick={onBack}>← Retour</button>
+      <div style={{ fontSize:9, letterSpacing:'.6px', color:'rgba(125,217,64,.8)', fontWeight:700, textTransform:'uppercase', marginBottom:2 }}>Simulation</div>
+      <div style={{ fontSize:18, fontWeight:900, color:'white', lineHeight:1.1, marginBottom:14 }}>Autoconsommation <span className="accent">collective</span></div>
+
+      {/* Animation */}
+      <div className="card" style={{ padding:'8px 16px 12px', marginBottom:10, textAlign:'center' }}>
+        <SunAnim/>
+        <div style={{ fontSize:11, color:'rgba(255,255,255,.45)', letterSpacing:.3 }}>Énergie locale · moins de 2 km · sans investissement</div>
+      </div>
+
+      {loading ? (
+        <div style={{ textAlign:'center', padding:20 }}><div className="spinner" style={{ margin:'0 auto' }}/></div>
+      ) : (<>
+        {/* Eligibility card */}
+        {!activeSite ? (
+          <div className="card" style={{ padding:'14px 16px', marginBottom:10 }}>
+            <div style={{ fontSize:13, color:'rgba(255,255,255,.6)' }}>Aucun site actif. Configurez un site dans « Ma conso » d'abord.</div>
+          </div>
+        ) : eligible ? (
+          <div className="card" style={{ padding:'14px 16px', marginBottom:10, background:'rgba(125,217,64,.07)', border:'1.5px solid rgba(125,217,64,.45)' }}>
+            <div className="badge success" style={{ marginBottom:8 }}>
+              <span className="star-twinkle">✦</span> Bonne nouvelle ! <span className="star-twinkle delay2">✦</span>
+            </div>
+            <div style={{ fontWeight:800, fontSize:14, color:'white', marginBottom:4 }}>{activeSite.nom} est éligible à l'ACC</div>
+            <div style={{ fontSize:11, color:'rgba(255,255,255,.5)' }}>
+              {[activeSite.adresse_ligne1, activeSite.code_postal, activeSite.ville].filter(Boolean).join(' ')}
+            </div>
+            {eligibleSite?.nom && <div style={{ fontSize:11, color:'rgba(125,217,64,.8)', marginTop:4 }}>Site ACC : {eligibleSite.nom} · {eligibleSite.puissance_pv ? eligibleSite.puissance_pv + ' kWc' : ''}</div>}
+            {accSavings > 0 && (
+              <div style={{ marginTop:10, background:'rgba(0,0,0,.2)', borderRadius:8, padding:'10px 12px', textAlign:'center' }}>
+                <div style={{ fontSize:10, color:'rgba(255,255,255,.45)', marginBottom:2 }}>Économies estimées (9h–18h)</div>
+                <div style={{ fontSize:30, fontWeight:900, color:'#7dd940', lineHeight:1 }}>-{accSavings.toLocaleString('fr-FR')} €<span style={{ fontSize:16 }}>/an</span></div>
+                <div style={{ fontSize:10, color:'rgba(255,255,255,.35)', marginTop:2 }}>Tarif ACC : {(accPriceKwh*100).toFixed(1)} c€/kWh · vs {(priceRef*100).toFixed(1)} c€/kWh actuel</div>
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="card" style={{ padding:'14px 16px', marginBottom:10, background:'rgba(255,180,50,.05)', border:'1px solid rgba(255,180,50,.3)' }}>
+            <div className="badge info" style={{ marginBottom:8 }}>
+              <span className="star-twinkle">✦</span> Pas encore disponible
+            </div>
+            <div style={{ fontWeight:700, fontSize:14, color:'white', marginBottom:4 }}>
+              {activeSite.code_postal} — pas encore dans une zone ACC active
+            </div>
+            <div style={{ fontSize:12, color:'rgba(255,255,255,.5)', marginTop:4 }}>
+              Starvolt déploie ses zones ACC progressivement. Votre adresse sera notifiée dès qu'une zone ouvre près de chez vous.
+            </div>
+          </div>
+        )}
+
+        {/* Leaflet map */}
+        {showMap && (
+          <div style={{ marginBottom:10 }}>
+            <div style={{ fontWeight:700, fontSize:11, color:'rgba(255,255,255,.45)', letterSpacing:'.5px', textTransform:'uppercase', marginBottom:5 }}>
+              Sites ACC actifs · France
+            </div>
+            <div ref={mapDivRef} style={{ width:'100%', height:320, borderRadius:12, overflow:'hidden', border:'1px solid rgba(255,255,255,.1)', position:'relative', zIndex:0 }}/>
+            {(accSites||[]).filter(s=>s.latitude&&s.longitude).length === 0 && (
+              <div style={{ fontSize:11, color:'rgba(255,255,255,.3)', textAlign:'center', marginTop:6 }}>
+                Aucun site ACC avec coordonnées géographiques.
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Popup marker details */}
+        {popup && (
+          <div className="card" style={{ padding:'12px 14px', background:'rgba(125,217,64,.08)', border:'1.5px solid rgba(125,217,64,.35)' }}>
+            <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start' }}>
+              <div>
+                <div style={{ fontWeight:800, fontSize:14, color:'white' }}>☀️ {popup.nom || 'Site ACC'}</div>
+                <div style={{ fontSize:12, color:'rgba(255,255,255,.55)', marginTop:3 }}>📮 Code postal : {popup.code_postal}</div>
+                {popup.adresse && <div style={{ fontSize:11, color:'rgba(255,255,255,.4)', marginTop:1 }}>{popup.adresse}</div>}
+                <div style={{ fontSize:12, color:'rgba(255,255,255,.55)', marginTop:2 }}>⚡ Puissance : {popup.puissance_pv ? popup.puissance_pv + ' kWc' : '—'}</div>
+                <div style={{ fontSize:12, color:'rgba(125,217,64,.8)', marginTop:2 }}>🏷 {((popup.prix_vente_ttc||0.11)*100).toFixed(1)} c€/kWh TTC</div>
+              </div>
+              <button onClick={()=>setPopup(null)} style={{ background:'none', border:'none', color:'rgba(255,255,255,.4)', cursor:'pointer', fontSize:18, lineHeight:1 }}>×</button>
+            </div>
+          </div>
+        )}
+      </>)}
+    </div>
+  );
+}
+
 // ─── AdminScreen ──────────────────────────────
-function AdminScreen({ onTariffs, onUsers, onSpot, onBack }) {
+function AdminScreen({ onTariffs, onUsers, onSpot, onAcc, onBack }) {
   return (
     <div className="screen fade-in">
       <button className="back-btn" onClick={onBack}>← Retour</button>
@@ -3141,6 +3387,14 @@ function AdminScreen({ onTariffs, onUsers, onSpot, onBack }) {
           <div className="sim-text">
             <div className="sim-title">Prix spot</div>
             <div className="sim-sub">Importer et visualiser les prix horaires</div>
+          </div>
+          <span className="sim-arrow">→</span>
+        </button>
+        <button className="sim-btn" onClick={onAcc}>
+          <span className="sim-icon">☀️</span>
+          <div className="sim-text">
+            <div className="sim-title">Gestion des sites en ACC</div>
+            <div className="sim-sub">Sites photovoltaïques pour l'autoconsommation collective</div>
           </div>
           <span className="sim-arrow">→</span>
         </button>
@@ -3347,6 +3601,136 @@ function AdminTariffEditScreen({ tariff, onSave, onDelete, onBack }) {
   );
 }
 
+// ─── AdminAccScreen ───────────────────────────
+function AdminAccScreen({ onEdit, onNew, onBack }) {
+  const [sites,   setSites]   = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  const load = () => sb.from('sites_acc').select('*').order('created_at').then(({data})=>{setSites(data||[]);setLoading(false);});
+  useEffect(() => { load(); }, []);
+
+  return (
+    <div className="screen fade-in">
+      <button className="back-btn" onClick={onBack}>← Retour</button>
+      <div className="auth-header">
+        <div className="welcome-tag" style={{color:'#ffb340'}}>Administration</div>
+        <h1 className="welcome-title">Sites <span className="accent">ACC</span></h1>
+      </div>
+      {loading ? <div style={{textAlign:'center',padding:40}}><div className="spinner" style={{margin:'0 auto'}}/></div> : (
+        <div style={{display:'flex',flexDirection:'column',gap:8,marginBottom:80}}>
+          {sites.length === 0 && (
+            <div className="card" style={{textAlign:'center',padding:'24px 16px',color:'rgba(255,255,255,.5)',fontSize:13}}>
+              Aucun site ACC configuré. Ajoutez le premier site.
+            </div>
+          )}
+          {sites.map(s => (
+            <div key={s.id} className="tariff-row-item" onClick={()=>onEdit(s)}>
+              <div>
+                <div className="tariff-row-name">{s.nom || 'Sans nom'}</div>
+                <div className="tariff-row-meta">📮 {s.code_postal} · ⚡ {s.puissance_pv ? s.puissance_pv + ' kWc' : '—'} · 🏷 {s.prix_vente_ttc ? (s.prix_vente_ttc*100).toFixed(1) : '11'} c€/kWh</div>
+                {s.latitude && s.longitude && <div className="tariff-row-meta" style={{color:'rgba(125,217,64,.6)'}}>📍 {Number(s.latitude).toFixed(4)}, {Number(s.longitude).toFixed(4)}</div>}
+              </div>
+              <span style={{color:'rgba(255,255,255,.3)',fontSize:14}}>›</span>
+            </div>
+          ))}
+        </div>
+      )}
+      <StickyFooter>
+        <button className="btn btn-yes" onClick={onNew}>+ Ajouter un site ACC</button>
+      </StickyFooter>
+    </div>
+  );
+}
+
+function AdminAccEditScreen({ site, onSave, onDelete, onBack }) {
+  const isNew = !site?.id;
+  const [f, setF] = useState({
+    nom:           site?.nom           ?? '',
+    adresse:       site?.adresse       ?? '',
+    code_postal:   site?.code_postal   ?? '',
+    puissance_pv:  site?.puissance_pv  ?? '',
+    prix_vente_ttc:site?.prix_vente_ttc ?? 0.11,
+    latitude:      site?.latitude      ?? '',
+    longitude:     site?.longitude     ?? '',
+  });
+  const [loading, setLoading] = useState(false);
+  const [error,   setError]   = useState(null);
+  const upd = (k, v) => setF(p=>({...p,[k]:v}));
+  const n = v => v===''||v==null ? null : parseFloat(v);
+
+  const handleSave = async () => {
+    if (!f.code_postal.trim()) { setError('Le code postal est obligatoire.'); return; }
+    setLoading(true); setError(null);
+    const payload = {
+      nom:           f.nom.trim() || null,
+      adresse:       f.adresse.trim() || null,
+      code_postal:   f.code_postal.trim(),
+      puissance_pv:  n(f.puissance_pv),
+      prix_vente_ttc:n(f.prix_vente_ttc) ?? 0.11,
+      latitude:      n(f.latitude),
+      longitude:     n(f.longitude),
+    };
+    let err;
+    if (isNew) ({ error: err } = await sb.from('sites_acc').insert(payload));
+    else ({ error: err } = await sb.from('sites_acc').update(payload).eq('id', site.id));
+    setLoading(false);
+    if (err) { setError(err.message); return; }
+    onSave();
+  };
+
+  const handleDelete = async () => {
+    if (!confirm(`Supprimer ce site ACC ?`)) return;
+    await sb.from('sites_acc').delete().eq('id', site.id);
+    onDelete();
+  };
+
+  const Field = ({label, k, type='text', placeholder}) => (
+    <div style={{marginBottom:10}}>
+      <div style={{fontSize:11,color:'rgba(255,255,255,.5)',fontWeight:700,marginBottom:4}}>{label}</div>
+      <input className="inp" type={type} step={type==='number'?'any':undefined} placeholder={placeholder} value={String(f[k])}
+        onChange={e=>upd(k,e.target.value)} style={{fontSize:14}}/>
+    </div>
+  );
+
+  return (
+    <>
+      <div className="screen fade-in">
+        <button className="back-btn" onClick={onBack}>← Retour</button>
+        <div className="auth-header">
+          <div className="welcome-tag" style={{color:'#ffb340'}}>Administration</div>
+          <h1 className="welcome-title">{isNew?'Nouveau':'Modifier'}<br/><span className="accent">site ACC</span></h1>
+        </div>
+        <div className="form-card">
+          <Field label="Nom du site" k="nom" placeholder="Ex: Parc solaire Nîmes Sud"/>
+          <Field label="Adresse" k="adresse" placeholder="Ex: 14 rue du Soleil, 30000 Nîmes"/>
+          <Field label="Code postal *" k="code_postal" placeholder="30000"/>
+          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8}}>
+            <Field label="Puissance PV (kWc)" k="puissance_pv" type="number" placeholder="100"/>
+            <Field label="Prix de vente TTC (€/kWh)" k="prix_vente_ttc" type="number" placeholder="0.11"/>
+          </div>
+          <div style={{fontSize:11,color:'rgba(255,217,64,.7)',fontWeight:700,marginBottom:6,marginTop:4}}>Coordonnées GPS (pour la carte)</div>
+          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8}}>
+            <Field label="Latitude" k="latitude" type="number" placeholder="43.8367"/>
+            <Field label="Longitude" k="longitude" type="number" placeholder="4.3601"/>
+          </div>
+          {error && <div className="auth-error">{error}</div>}
+        </div>
+        {!isNew && (
+          <button className="btn-link" style={{color:'rgba(255,100,100,.55)',marginTop:8}} onClick={handleDelete}>
+            Supprimer ce site ACC
+          </button>
+        )}
+      </div>
+      <StickyFooter>
+        <button className="btn btn-yes" onClick={handleSave} disabled={loading}>
+          {loading ? 'Enregistrement…' : '✓ Enregistrer'}
+        </button>
+        <button className="btn btn-sec" onClick={onBack}>Annuler</button>
+      </StickyFooter>
+    </>
+  );
+}
+
 // ─── AdminUsersScreen ─────────────────────────
 function AdminUsersScreen({ onBack }) {
   const [users,   setUsers]   = useState([]);
@@ -3482,6 +3866,7 @@ function App() {
           onTariffs={()=>goTo('ADMIN_TARIFFS')}
           onSpot={()=>goTo('SPOT_PRICES')}
           onUsers={()=>goTo('ADMIN_USERS')}
+          onAcc={()=>goTo('ADMIN_ACC')}
           onBack={goBack}/>;
 
       case 'SPOT_PRICES':
@@ -3503,6 +3888,19 @@ function App() {
       case 'ADMIN_USERS':
         return <AdminUsersScreen onBack={goBack}/>;
 
+      case 'ADMIN_ACC':
+        return <AdminAccScreen
+          onEdit={(s)=>goTo('ADMIN_ACC_EDIT',{editAccSite:s})}
+          onNew={()=>goTo('ADMIN_ACC_EDIT',{editAccSite:null})}
+          onBack={goBack}/>;
+
+      case 'ADMIN_ACC_EDIT':
+        return <AdminAccEditScreen
+          site={state.editAccSite}
+          onSave={()=>goTo('ADMIN_ACC')}
+          onDelete={()=>goTo('ADMIN_ACC')}
+          onBack={goBack}/>;
+
       case 'MA_CONSO':
         return <MaConsoScreen user={user} userProfile={profile} onBack={goBack}/>;
 
@@ -3511,7 +3909,7 @@ function App() {
         return <SimulationsScreen
           user={user}
           userProfile={profile}
-          onACC={()=>goTo('ADDRESS', base)}
+          onACC={()=>goTo('ACC_MAP')}
           onBox={()=>goTo('COMWATT', base)}
           onSolar={()=>goTo('SOLAR', base)}
           onOptimisation={()=>goTo('OPTIMISATION')}
@@ -3520,6 +3918,9 @@ function App() {
 
       case 'OPTIMISATION':
         return <OptimisationScreen user={user} userProfile={profile} onBack={goBack}/>;
+
+      case 'ACC_MAP':
+        return <AccMapScreen user={user} userProfile={profile} onBack={goBack}/>;
 
       case 'AUTH_SIGNUP':
         return <AuthSignupScreen
