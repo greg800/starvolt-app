@@ -1855,6 +1855,81 @@ async function processConsoXLS(buf) {
   return{profile,annualKwh,gapsPatched,error:null};
 }
 
+// ─── Conso heatmap colors (10 déciles, vert clair → marron foncé) ──
+const CONSO_COLORS=['#c8f0c0','#9ed870','#70c048','#a8b830','#d0a018','#c87828','#b05018','#8c3010','#651a08','#3d0802'];
+function consoColor(val,thresholds){
+  if(!val||val<=0)return'rgba(255,255,255,.06)';
+  for(let i=0;i<thresholds.length;i++)if(val<=thresholds[i])return CONSO_COLORS[i];
+  return CONSO_COLORS[9];
+}
+
+// ─── ConsoHeatmapCanvas ───────────────────────
+function ConsoHeatmapCanvas({profile}){
+  const wrapperRef=useRef(null),canvasRef=useRef(null);
+  const thresholds=useMemo(()=>{
+    const nz=profile.filter(v=>v>0).sort((a,b)=>a-b);
+    const t=[];for(let i=1;i<=9;i++)t.push(nz[Math.floor(nz.length*i/10)]);return t;
+  },[profile]);
+
+  const draw=useCallback((containerW)=>{
+    if(!canvasRef.current||containerW<10)return;
+    const canvas=canvasRef.current,ctx=canvas.getContext('2d'),dpr=window.devicePixelRatio||1;
+    const days=[];
+    for(let m=1;m<=12;m++)for(let d=1;d<=PROF_DAYS[m-1];d++)days.push({mois:m,jour:d});
+    const LBL_W=26,HDR_H=16,CELL_H=3;
+    const CELL_W=Math.max(4,Math.floor((containerW-LBL_W)/24));
+    const W=LBL_W+24*CELL_W,H=HDR_H+days.length*CELL_H;
+    canvas.width=W*dpr;canvas.height=H*dpr;canvas.style.width=W+'px';canvas.style.height=H+'px';
+    ctx.scale(dpr,dpr);
+    ctx.fillStyle='rgba(4,55,66,0.85)';ctx.fillRect(0,0,W,H);
+    ctx.fillStyle='rgba(255,255,255,0.5)';ctx.font='bold 8px sans-serif';ctx.textAlign='center';
+    for(let h=0;h<24;h+=3)ctx.fillText(`${h}h`,LBL_W+h*CELL_W+CELL_W/2,12);
+    const drawML=(mois,s,e)=>{
+      ctx.fillStyle='rgba(255,255,255,0.75)';ctx.font='bold 8px sans-serif';ctx.textAlign='right';
+      ctx.fillText(MOIS_LABELS[mois-1],LBL_W-3,HDR_H+(s+e)/2*CELL_H+3);
+    };
+    let pm=0,ms=0;
+    days.forEach((day,di)=>{
+      const y=HDR_H+di*CELL_H;
+      if(day.mois!==pm){
+        if(pm){drawML(pm,ms,di);ctx.fillStyle='rgba(255,255,255,.18)';ctx.fillRect(LBL_W,y,24*CELL_W,1);}
+        ms=di;pm=day.mois;
+      }
+      for(let h=0;h<24;h++){
+        ctx.fillStyle=consoColor(profile[profIdx(day.mois,day.jour,h)],thresholds);
+        ctx.fillRect(LBL_W+h*CELL_W,y,CELL_W-1,CELL_H-1);
+      }
+    });
+    if(pm)drawML(pm,ms,days.length);
+  },[profile,thresholds]);
+
+  useEffect(()=>{
+    if(!wrapperRef.current)return;
+    const ro=new ResizeObserver(e=>draw(Math.floor(e[0].contentRect.width)));
+    ro.observe(wrapperRef.current);return()=>ro.disconnect();
+  },[draw]);
+
+  return(
+    <>
+      <div style={{display:'flex',gap:3,flexWrap:'wrap',marginBottom:5,padding:'0 2px'}}>
+        {CONSO_COLORS.map((color,i)=>{
+          const lo=i===0?0:Math.round(thresholds[i-1]||0);
+          const hi=i===9?'+':Math.round(thresholds[i]||0);
+          return(
+            <div key={i} style={{display:'flex',alignItems:'center',gap:2,fontSize:8,color:'rgba(255,255,255,.6)',fontWeight:700}}>
+              <div style={{width:9,height:9,borderRadius:2,background:color,flexShrink:0}}/>
+              {lo}–{hi}
+            </div>
+          );
+        })}
+      </div>
+      <div ref={wrapperRef} style={{width:'100%',overflowY:'auto',maxHeight:'calc(100vh - 200px)',borderRadius:8,border:'1px solid rgba(255,255,255,.1)'}}>
+        <canvas ref={canvasRef} style={{display:'block'}}/>
+      </div>
+    </>
+  );
+}
+
 // ─── PDLInput (save on blur) ──────────────────
 function PDLInput({value,onSave}){
   const[v,setV]=React.useState(value);
@@ -1864,15 +1939,14 @@ function PDLInput({value,onSave}){
 }
 
 // ─── SiteFormCard ─────────────────────────────
-function SiteFormCard({initial={},onSave,onCancel,onDelete}){
+function SiteFormCard({initial={},onSave,onCancel}){
   const[nom,setNom]=React.useState(initial.nom||'');
   const[adr,setAdr]=React.useState(initial.adresse_ligne1||'');
   const[cp,setCp]=React.useState(initial.code_postal||'');
   const[ville,setVille]=React.useState(initial.ville||'');
-  const isEdit=!!initial.id;
   return(
     <div className="card" style={{padding:'14px 16px',marginBottom:10}}>
-      <div style={{fontWeight:700,fontSize:14,color:'white',marginBottom:12}}>{isEdit?'Modifier le site':'Nouveau site'}</div>
+      <div style={{fontWeight:700,fontSize:14,color:'white',marginBottom:12}}>{initial.id?'Modifier le site':'Nouveau site'}</div>
       <div style={{display:'flex',flexDirection:'column',gap:8}}>
         <input className="inp" placeholder="Nom du site *" value={nom} onChange={e=>setNom(e.target.value)}/>
         <input className="inp" placeholder="Rue et numéro" value={adr} onChange={e=>setAdr(e.target.value)}/>
@@ -1887,17 +1961,13 @@ function SiteFormCard({initial={},onSave,onCancel,onDelete}){
           </button>
           <button className="btn btn-sec" style={{flex:1,fontSize:13,padding:'10px 0'}} onClick={onCancel}>Annuler</button>
         </div>
-        {isEdit&&onDelete&&(
-          <button style={{background:'none',border:'none',color:'rgba(255,100,100,.7)',fontSize:12,cursor:'pointer',padding:'4px 0',textAlign:'center'}}
-            onClick={onDelete}>Supprimer ce site</button>
-        )}
       </div>
     </div>
   );
 }
 
 // ─── MaConsoScreen ───────────────────────────
-function MaConsoScreen({ user, onBack }) {
+function MaConsoScreen({ user, userProfile, onBack }) {
   const[sites,setSites]=useState(null);
   const[activeId,setActiveId]=useState(null);
   const[tariffs,setTariffs]=useState([]);
@@ -1906,6 +1976,7 @@ function MaConsoScreen({ user, onBack }) {
   const[importing,setImporting]=useState(false);
   const[importMsg,setImportMsg]=useState(null);
   const[showGaps,setShowGaps]=useState(false);
+  const[showDeleteConfirm,setShowDeleteConfirm]=useState(false);
   const fileRef=useRef(null);
 
   const load=async()=>{
@@ -1927,20 +1998,18 @@ function MaConsoScreen({ user, onBack }) {
 
   const handleAddSite=async(data)=>{
     const{data:ns}=await sb.from('sites').insert({user_id:user.id,...data}).select().single();
-    setShowAdd(false);
-    await load();
+    setShowAdd(false);await load();
     if(ns)setActiveId(ns.id);
   };
 
-  const handleDelete=async()=>{
-    if(!confirm(`Supprimer "${site.nom}" ?`))return;
+  const handleDeleteConfirmed=async()=>{
     await sb.from('sites').delete().eq('id',activeId);
-    setActiveId(null);setEditMode(false);
+    setActiveId(null);setEditMode(false);setShowDeleteConfirm(false);
     await load();
   };
 
   const handleImport=async(e)=>{
-    const file=e.target.files?.[0]; if(!file)return;
+    const file=e.target.files?.[0];if(!file)return;
     setImporting(true);setImportMsg(null);
     try{
       const result=await processConsoXLS(await file.arrayBuffer());
@@ -1964,137 +2033,180 @@ function MaConsoScreen({ user, onBack }) {
     </div>
   );
 
+  // Default address from profile for first site
+  const firstDefault=sites.length===0?{
+    adresse_ligne1:userProfile?.adresse_ligne1||'',
+    code_postal:userProfile?.code_postal||'',
+    ville:userProfile?.ville||''
+  }:{};
+
+  const showFooter=!showAdd&&!editMode;
+
   return(
-    <div className="screen fade-in">
-      <button className="back-btn" onClick={onBack}>← Retour</button>
-      <div className="auth-header" style={{paddingBottom:0}}>
-        <div className="welcome-tag">Énergie</div>
-        <h1 className="welcome-title" style={{fontSize:'clamp(26px,6vw,34px)'}}>Ma <span className="accent">consommation</span></h1>
-      </div>
-
-      {/* Site selector */}
-      {sites.length>1&&(
-        <div style={{marginBottom:10}}>
-          <select className="inp inp-sel" value={activeId||''} onChange={e=>{setActiveId(e.target.value);setEditMode(false);setImportMsg(null);}}>
-            {sites.map(s=><option key={s.id} value={s.id}>{s.nom}</option>)}
-          </select>
-        </div>
-      )}
-
-      {/* Add site form */}
-      {showAdd&&<SiteFormCard onSave={handleAddSite} onCancel={()=>setShowAdd(false)}/>}
-
-      {/* Empty state */}
-      {sites.length===0&&!showAdd&&(
-        <div className="card" style={{textAlign:'center',padding:'28px 20px'}}>
-          <div style={{fontSize:36,marginBottom:12}}>🏠</div>
-          <div style={{color:'white',fontWeight:700,marginBottom:6}}>Aucun site configuré</div>
-          <div style={{color:'rgba(255,255,255,.55)',fontSize:13,marginBottom:16}}>Ajoutez votre site pour importer votre profil de consommation.</div>
-          <button className="btn btn-primary" style={{fontSize:13}} onClick={()=>setShowAdd(true)}>+ Ajouter un site</button>
-        </div>
-      )}
-
-      {/* Active site */}
-      {site&&!showAdd&&(
-        <>
-          {/* Site info / edit */}
-          {!editMode?(
-            <div className="card" style={{padding:'14px 16px',marginBottom:10}}>
-              <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start'}}>
-                <div>
-                  <div style={{fontWeight:800,fontSize:16,color:'white'}}>{site.nom}</div>
-                  {(site.adresse_ligne1||site.ville)&&(
-                    <div style={{fontSize:12,color:'rgba(255,255,255,.55)',marginTop:3}}>
-                      {[site.adresse_ligne1,site.code_postal,site.ville].filter(Boolean).join(' · ')}
-                    </div>
-                  )}
-                </div>
-                <button style={{background:'none',border:'none',color:'rgba(255,255,255,.45)',cursor:'pointer',fontSize:12,flexShrink:0}} onClick={()=>setEditMode(true)}>✏️ Modifier</button>
-              </div>
-            </div>
-          ):(
-            <SiteFormCard initial={site} onSave={async d=>{await updateSite(d);setEditMode(false);}} onCancel={()=>setEditMode(false)} onDelete={handleDelete}/>
-          )}
-
-          {/* Tariff + PDL */}
-          <div className="card" style={{padding:'14px 16px',marginBottom:10,display:'flex',flexDirection:'column',gap:12}}>
+    <>
+      <div className="screen fade-in">
+        {/* Compact header row */}
+        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:10,marginTop:4}}>
+          <div style={{display:'flex',alignItems:'center',gap:10}}>
+            <button className="back-btn" style={{position:'static',margin:0,padding:'6px 10px',fontSize:12}} onClick={onBack}>← Retour</button>
             <div>
-              <label style={{fontSize:11,color:'rgba(255,255,255,.5)',fontWeight:700,letterSpacing:'.5px',display:'block',marginBottom:6}}>TARIF D'ÉLECTRICITÉ</label>
-              <select className="inp inp-sel" value={site.tarif_id||''} onChange={e=>updateSite({tarif_id:e.target.value||null})}>
-                <option value=''>— Sélectionner un tarif —</option>
-                {tariffs.map(t=><option key={t.id} value={t.id}>{t.nom}</option>)}
-              </select>
-            </div>
-            <div>
-              <label style={{fontSize:11,color:'rgba(255,255,255,.5)',fontWeight:700,letterSpacing:'.5px',display:'block',marginBottom:6}}>NUMÉRO DE PDL (optionnel)</label>
-              <PDLInput value={site.pdl||''} onSave={v=>updateSite({pdl:v})}/>
+              <div style={{fontSize:9,letterSpacing:'.6px',color:'rgba(125,217,64,.8)',fontWeight:700,textTransform:'uppercase'}}>Énergie</div>
+              <div style={{fontSize:18,fontWeight:900,color:'white',lineHeight:1.1}}>Ma <span className="accent">conso</span></div>
             </div>
           </div>
-
-          {/* Conso import + results */}
-          <div className="card" style={{padding:'14px 16px'}}>
-            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:12}}>
-              <div style={{fontWeight:700,fontSize:14,color:'white'}}>Profil de consommation</div>
-              <button className="btn btn-sec" style={{fontSize:12,padding:'7px 14px',borderRadius:10}} onClick={()=>fileRef.current?.click()} disabled={importing}>
-                {importing?'⏳ Traitement…':'📂 Importer XLS'}
+          <div style={{display:'flex',alignItems:'center',gap:6}}>
+            {site&&!showAdd&&!editMode&&(
+              <button className="btn btn-sec" style={{fontSize:11,padding:'6px 12px',borderRadius:8,whiteSpace:'nowrap'}} onClick={()=>fileRef.current?.click()} disabled={importing}>
+                {importing?'⏳':'📂'} {importing?'Traitement…':'Importer'}
               </button>
-              <input ref={fileRef} type="file" accept=".xlsx,.xls" style={{display:'none'}} onChange={handleImport}/>
+            )}
+          </div>
+          <input ref={fileRef} type="file" accept=".xlsx,.xls" style={{display:'none'}} onChange={handleImport}/>
+        </div>
+
+        {/* Site selector */}
+        {sites.length>1&&(
+          <div style={{marginBottom:8}}>
+            <select className="inp inp-sel" style={{fontSize:13,padding:'9px 36px 9px 12px'}} value={activeId||''} onChange={e=>{setActiveId(e.target.value);setEditMode(false);setImportMsg(null);setShowDeleteConfirm(false);}}>
+              {sites.map(s=><option key={s.id} value={s.id}>{s.nom}</option>)}
+            </select>
+          </div>
+        )}
+
+        {/* Add site form */}
+        {showAdd&&<SiteFormCard initial={firstDefault} onSave={handleAddSite} onCancel={()=>setShowAdd(false)}/>}
+
+        {/* Empty state */}
+        {sites.length===0&&!showAdd&&(
+          <div className="card" style={{textAlign:'center',padding:'24px 20px'}}>
+            <div style={{fontSize:32,marginBottom:10}}>🏠</div>
+            <div style={{color:'white',fontWeight:700,marginBottom:5}}>Aucun site configuré</div>
+            <div style={{color:'rgba(255,255,255,.55)',fontSize:13,marginBottom:14}}>Ajoutez votre site pour importer votre profil de consommation.</div>
+          </div>
+        )}
+
+        {/* Active site */}
+        {site&&!showAdd&&(
+          <>
+            {/* Site info / edit */}
+            {!editMode?(
+              <div className="card" style={{padding:'10px 14px',marginBottom:8}}>
+                <div style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+                  <div>
+                    <div style={{fontWeight:800,fontSize:14,color:'white'}}>{site.nom}</div>
+                    {(site.adresse_ligne1||site.ville)&&(
+                      <div style={{fontSize:11,color:'rgba(255,255,255,.5)',marginTop:2}}>
+                        {[site.adresse_ligne1,site.code_postal,site.ville].filter(Boolean).join(' ')}
+                      </div>
+                    )}
+                  </div>
+                  <button style={{background:'none',border:'none',color:'rgba(255,255,255,.4)',cursor:'pointer',fontSize:12,flexShrink:0}} onClick={()=>setEditMode(true)}>✏️</button>
+                </div>
+              </div>
+            ):(
+              <SiteFormCard initial={site} onSave={async d=>{await updateSite(d);setEditMode(false);}} onCancel={()=>setEditMode(false)}/>
+            )}
+
+            {/* Tariff + PDL — compact */}
+            <div className="card" style={{padding:'10px 14px',marginBottom:8,display:'flex',flexDirection:'column',gap:8}}>
+              <div>
+                <label style={{fontSize:10,color:'rgba(255,255,255,.45)',fontWeight:700,letterSpacing:'.5px',display:'block',marginBottom:4}}>TARIF D'ÉLECTRICITÉ</label>
+                <select className="inp inp-sel" style={{fontSize:13,padding:'8px 36px 8px 12px'}} value={site.tarif_id||''} onChange={e=>updateSite({tarif_id:e.target.value||null})}>
+                  <option value=''>— Sélectionner —</option>
+                  {tariffs.map(t=><option key={t.id} value={t.id}>{t.nom}</option>)}
+                </select>
+              </div>
+              <div>
+                <label style={{fontSize:10,color:'rgba(255,255,255,.45)',fontWeight:700,letterSpacing:'.5px',display:'block',marginBottom:4}}>PDL (optionnel)</label>
+                <PDLInput value={site.pdl||''} onSave={v=>updateSite({pdl:v})}/>
+              </div>
             </div>
 
+            {/* Conso stats */}
             {importMsg?.type==='err'&&(
-              <div style={{color:'#ff6b6b',fontSize:13,padding:'8px 12px',background:'rgba(255,50,50,.1)',borderRadius:8,marginBottom:10}}>⚠️ {importMsg.text}</div>
+              <div style={{color:'#ff6b6b',fontSize:12,padding:'7px 12px',background:'rgba(255,50,50,.1)',borderRadius:8,marginBottom:8}}>⚠️ {importMsg.text}</div>
             )}
             {importMsg?.type==='ok'&&(
-              <div style={{color:'#7dd940',fontSize:13,padding:'8px 12px',background:'rgba(125,217,64,.08)',borderRadius:8,marginBottom:10}}>
-                ✅ Import réussi — {importMsg.kwh.toLocaleString('fr-FR')} kWh/an{importMsg.gaps>0?` · ${importMsg.gaps} trou(s) rebouché(s)`:''}
+              <div style={{color:'#7dd940',fontSize:12,padding:'7px 12px',background:'rgba(125,217,64,.08)',borderRadius:8,marginBottom:8}}>
+                ✅ {importMsg.kwh.toLocaleString('fr-FR')} kWh/an{importMsg.gaps>0?` · ${importMsg.gaps} trou(s) rebouché(s)`:''}
               </div>
             )}
 
             {site.conso_annuelle_kwh?(
-              <>
-                <div style={{display:'flex',alignItems:'baseline',gap:8,marginBottom:4}}>
-                  <span style={{fontSize:34,fontWeight:900,color:'white'}}>{Math.round(site.conso_annuelle_kwh).toLocaleString('fr-FR')}</span>
-                  <span style={{fontSize:15,color:'rgba(255,255,255,.6)',fontWeight:600}}>kWh/an</span>
-                </div>
-                <div style={{fontSize:11,color:'rgba(255,255,255,.38)',marginBottom:12}}>
-                  Importé le {new Date(site.conso_imported_at).toLocaleDateString('fr-FR',{day:'numeric',month:'long',year:'numeric'})}
+              <div className="card" style={{padding:'10px 14px',marginBottom:8}}>
+                <div style={{display:'flex',alignItems:'baseline',gap:6,marginBottom:2}}>
+                  <span style={{fontSize:28,fontWeight:900,color:'white'}}>{Math.round(site.conso_annuelle_kwh).toLocaleString('fr-FR')}</span>
+                  <span style={{fontSize:13,color:'rgba(255,255,255,.6)',fontWeight:600}}>kWh/an</span>
+                  <span style={{fontSize:10,color:'rgba(255,255,255,.35)',marginLeft:4}}>
+                    · importé le {new Date(site.conso_imported_at).toLocaleDateString('fr-FR',{day:'numeric',month:'short',year:'numeric'})}
+                  </span>
                 </div>
                 {site.conso_gaps?.length>0&&(
-                  <div>
-                    <button style={{background:'none',border:'none',color:'rgba(255,255,255,.5)',fontSize:12,cursor:'pointer',padding:'0 0 8px 0'}}
+                  <>
+                    <button style={{background:'none',border:'none',color:'rgba(255,255,255,.45)',fontSize:11,cursor:'pointer',padding:'2px 0'}}
                       onClick={()=>setShowGaps(!showGaps)}>
                       {showGaps?'▼':'▶'} {site.conso_gaps.length} trou{site.conso_gaps.length>1?'s':''} rebouché{site.conso_gaps.length>1?'s':''}
                     </button>
                     {showGaps&&(
-                      <div style={{display:'flex',flexDirection:'column',gap:5}}>
+                      <div style={{display:'flex',flexDirection:'column',gap:4,marginTop:6}}>
                         {site.conso_gaps.map((g,idx)=>(
                           <div key={idx} className="gap-item">
                             <span>{formatGapDate(g.start)} → {formatGapDate(g.end)}</span>
-                            <span style={{color:'rgba(255,255,255,.45)',fontSize:11}}>{g.hours}h · {g.method}</span>
+                            <span style={{color:'rgba(255,255,255,.4)',fontSize:10}}>{g.hours}h · {g.method}</span>
                           </div>
                         ))}
                       </div>
                     )}
-                  </div>
+                  </>
                 )}
-              </>
+              </div>
             ):(
-              <div style={{color:'rgba(255,255,255,.45)',fontSize:13,textAlign:'center',padding:'12px 0'}}>
-                Aucune donnée importée.<br/>
-                <span style={{fontSize:11,color:'rgba(255,255,255,.3)'}}>Format : 2 colonnes — horodate ISO, puissance en W</span>
+              <div className="card" style={{padding:'10px 14px',marginBottom:8}}>
+                <div style={{color:'rgba(255,255,255,.4)',fontSize:12,textAlign:'center',padding:'8px 0'}}>
+                  Aucune donnée — importez un fichier XLS (2 colonnes : horodate ISO, puissance W)
+                </div>
               </div>
             )}
-          </div>
-        </>
-      )}
 
-      {/* Add site button */}
-      {sites.length>0&&!showAdd&&(
-        <button className="btn btn-sec" style={{width:'100%',marginTop:8}} onClick={()=>{setShowAdd(true);setEditMode(false);}}>
-          + Ajouter un nouveau site
-        </button>
+            {/* Heatmap */}
+            {site.conso_profil?.length===8784&&(
+              <div className="card" style={{padding:'10px 14px',marginBottom:8}}>
+                <div style={{fontWeight:700,fontSize:12,color:'rgba(255,255,255,.7)',marginBottom:6}}>Heatmap · heures (0–23h) × jours (jan–déc)</div>
+                <ConsoHeatmapCanvas profile={site.conso_profil}/>
+              </div>
+            )}
+
+            {/* Delete confirmation */}
+            {showDeleteConfirm&&(
+              <div className="card" style={{padding:'14px 16px',border:'1px solid rgba(255,80,80,.3)',marginBottom:8}}>
+                <div style={{color:'#ff6b6b',fontWeight:700,marginBottom:6}}>⚠️ Supprimer « {site.nom} » ?</div>
+                <div style={{fontSize:12,color:'rgba(255,255,255,.6)',marginBottom:12}}>
+                  Toutes les données de consommation associées seront supprimées définitivement.
+                </div>
+                <div style={{display:'flex',gap:8}}>
+                  <button className="btn btn-no" style={{flex:1,fontSize:13}} onClick={handleDeleteConfirmed}>Supprimer</button>
+                  <button className="btn btn-sec" style={{flex:1,fontSize:13}} onClick={()=>setShowDeleteConfirm(false)}>Annuler</button>
+                </div>
+              </div>
+            )}
+          </>
+        )}
+      </div>
+
+      {/* Sticky footer */}
+      {showFooter&&(
+        <StickyFooter row={!site}>
+          <button className="btn btn-primary" style={{fontSize:13}} onClick={()=>{setShowAdd(true);setEditMode(false);setShowDeleteConfirm(false);}}>
+            + Ajouter un nouveau site
+          </button>
+          {site&&!showDeleteConfirm&&(
+            <button className="btn btn-no" style={{fontSize:13}} onClick={()=>setShowDeleteConfirm(true)}>
+              🗑️ Supprimer ce site
+            </button>
+          )}
+        </StickyFooter>
       )}
-    </div>
+    </>
   );
 }
 
@@ -2913,7 +3025,7 @@ function App() {
         return <AdminUsersScreen onBack={goBack}/>;
 
       case 'MA_CONSO':
-        return <MaConsoScreen user={user} onBack={goBack}/>;
+        return <MaConsoScreen user={user} userProfile={profile} onBack={goBack}/>;
 
       case 'SIMULATIONS': {
         const base = { name: profile?.prenom||'', address:'Zone ACC', initialBill:2000, bill:2000, bravoItems:[], investment:0, eligible:true };
