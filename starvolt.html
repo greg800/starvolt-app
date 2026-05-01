@@ -2248,7 +2248,8 @@ function SimulationsScreen({ onACC, onBox, onSolar, onOptimisation, onBack, user
   const [hasConso,  setHasConso]  = useState(false);
   const [maxSaving, setMaxSaving] = useState(null);
   const [accSaving, setAccSaving] = useState(null);
-  const [boxSaving, setBoxSaving] = useState(null);
+  const [boxSaving,   setBoxSaving]   = useState(null);
+  const [solarSaving, setSolarSaving] = useState(null);
 
   useEffect(() => {
     if (!user) return;
@@ -2279,6 +2280,7 @@ function SimulationsScreen({ onACC, onBox, onSolar, onOptimisation, onBack, user
           const curBill = cur?.result?.total || (kwh_total * 0.18);
           const bSav = Math.round(140 + curBill * (isDynamic ? 0.20 : 0.10));
           if (bSav > 0) setBoxSaving(bSav);
+          setSolarSaving(Math.round(curBill * 0.50));
         }
       }
 
@@ -2347,7 +2349,10 @@ function SimulationsScreen({ onACC, onBox, onSolar, onOptimisation, onBack, user
           <img src="/maison.png" alt="Solaire" className="sim-icon"/>
           <div className="sim-text">
             <div className="sim-title">Économiser avec le solaire</div>
-            <div className="sim-sub">Panneaux solaires + batterie</div>
+            {solarSaving !== null && solarSaving > 0
+              ? <div className="sim-sub" style={{color:'#7dd940',fontWeight:700}}>Jusqu'à -{solarSaving.toLocaleString('fr-FR')} €/an d'économie</div>
+              : <div className="sim-sub">Panneaux solaires + batterie</div>
+            }
           </div>
           <span className="sim-arrow">→</span>
         </button>
@@ -3612,13 +3617,222 @@ function BoxSimScreen({ user, userProfile, onBack }) {
 
       {!loading && (
         <StickyFooter row>
-          <button className="btn btn-no" style={{fontSize:12, padding:'12px 8px'}} onClick={() => setChosen('free')}>
+          <button className="btn btn-no" style={{fontSize:12, padding:'12px 8px'}} onClick={() => { localStorage.setItem('starvolt_box_chosen','free'); setChosen('free'); }}>
             🎁 Je veux une box gratuite
           </button>
-          <button className="btn btn-yes" style={{fontSize:12, padding:'12px 8px'}} onClick={() => setChosen('buy')}>
+          <button className="btn btn-yes" style={{fontSize:12, padding:'12px 8px'}} onClick={() => { localStorage.setItem('starvolt_box_chosen','buy'); setChosen('buy'); }}>
             📦 J'achète à 550 €
           </button>
         </StickyFooter>
+      )}
+    </>
+  );
+}
+
+// ─── SolarSimScreen ───────────────────────────
+function SolarSimScreen({ user, userProfile, onBack }) {
+  const [loading,     setLoading]     = useState(true);
+  const [currentBill, setCurrentBill] = useState(null);
+  const [isDynamic,   setIsDynamic]   = useState(false);
+  const [chosen,      setChosen]      = useState(null); // 'solar_only' | 'solar_box'
+  const hasBox = !!localStorage.getItem('starvolt_box_chosen');
+
+  useEffect(() => {
+    const siteId = localStorage.getItem('starvolt_active_site_id');
+    if (!siteId) { setLoading(false); return; }
+    Promise.all([
+      sb.from('sites').select('id,conso_profil,tarif_id').eq('id', siteId).maybeSingle(),
+      sb.from('tarifs_electricite').select('*'),
+      sb.rpc('get_spot_json'),
+      sb.from('parametres_nationaux').select('*').eq('id', 1).maybeSingle(),
+    ]).then(([{ data: site }, { data: tariffs }, { data: spotRows }, { data: nat }]) => {
+      if (!site?.conso_profil) { setLoading(false); return; }
+      const curTariff = site.tarif_id ? (tariffs || []).find(t => t.id === site.tarif_id) : null;
+      const { kwh_hc, kwh_hp } = calcHcHp(site.conso_profil, userProfile);
+      const kwh_total = kwh_hc + kwh_hp;
+      let bill = null;
+      if (curTariff?.tarif_dynamique) {
+        setIsDynamic(true);
+        if (spotRows && nat) {
+          const r = calcDynamicCost(curTariff, site.conso_profil, buildSpotMap(spotRows), nat, userProfile);
+          bill = r?.total || null;
+        }
+      } else if (curTariff) {
+        bill = calcTariffCost(curTariff, kwh_hc, kwh_hp)?.total || null;
+      }
+      if (!bill && kwh_total > 0) bill = Math.round(kwh_total * 0.18);
+      setCurrentBill(bill ? Math.round(bill) : null);
+      setLoading(false);
+    });
+  }, []);
+
+  // Gains solaires
+  const solarOnlySaving = currentBill ? Math.round(currentBill * 0.30) : null;
+  const solarBoxSaving  = currentBill ? Math.round(currentBill * 0.50) : null;
+  // Gains box (rappel)
+  const shiftPct  = isDynamic ? 0.20 : 0.10;
+  const shiftGain = currentBill ? Math.round(currentBill * shiftPct) : null;
+  const boxTotal  = 140 + (shiftGain || 0);
+
+  const effectiveChoice = chosen || (hasBox ? 'solar_box' : null);
+  const finalSolarSaving = effectiveChoice === 'solar_box' ? solarBoxSaving : solarOnlySaving;
+
+  if (chosen) {
+    const withBox = chosen === 'solar_box';
+    return (
+      <div className="screen fade-in">
+        <Fireworks final/>
+        <button className="back-btn" onClick={onBack}>← Retour</button>
+        <div style={{ textAlign:'center', marginBottom:16 }}>
+          <div style={{ fontSize:38, marginBottom:4 }}>☀️</div>
+          <div style={{ fontSize:22, fontWeight:900, color:'white', lineHeight:1.2 }}>
+            {withBox ? 'Solaire + Box activés !' : 'Projet solaire lancé !'}
+          </div>
+          <div style={{ fontSize:13, color:'rgba(255,255,255,.5)', marginTop:6 }}>
+            Un conseiller Starvolt vous contacte sous 48h pour l'étude personnalisée.
+          </div>
+        </div>
+
+        {currentBill && (
+          <div className="card" style={{ padding:'16px', marginBottom:10, textAlign:'center' }}>
+            <div style={{ fontSize:11, color:'rgba(255,255,255,.4)', marginBottom:10, textTransform:'uppercase', letterSpacing:'.5px' }}>Votre facture évolue</div>
+            <div style={{ display:'flex', alignItems:'center', justifyContent:'center', gap:18, marginBottom:14 }}>
+              <div>
+                <div style={{ fontSize:28, fontWeight:900, color:'rgba(255,100,100,.7)', textDecoration:'line-through', lineHeight:1 }}>
+                  {currentBill.toLocaleString('fr-FR')} €
+                </div>
+                <div style={{ fontSize:10, color:'rgba(255,255,255,.35)', marginTop:3 }}>AVANT</div>
+              </div>
+              <div style={{ fontSize:22, color:'#7dd940' }}>→</div>
+              <div>
+                <div style={{ fontSize:36, fontWeight:900, color:'#7dd940', lineHeight:1 }}>
+                  {currentBill && finalSolarSaving ? (currentBill - finalSolarSaving).toLocaleString('fr-FR') : '—'} €
+                </div>
+                <div style={{ fontSize:10, color:'rgba(255,255,255,.35)', marginTop:3 }}>APRÈS SOLAIRE{withBox ? ' + BOX' : ''}</div>
+              </div>
+            </div>
+            <div style={{ background:'rgba(125,217,64,.1)', borderRadius:8, padding:'10px 12px', marginBottom: withBox ? 10 : 0 }}>
+              <div style={{ fontSize:11, color:'rgba(255,255,255,.5)', marginBottom:2 }}>Économies grâce au solaire</div>
+              <div style={{ fontSize:24, fontWeight:900, color:'#7dd940' }}>-{finalSolarSaving?.toLocaleString('fr-FR')} €/an</div>
+              <div style={{ fontSize:10, color:'rgba(255,255,255,.35)', marginTop:2 }}>
+                {withBox ? '-50% de votre facture grâce aux panneaux + pilotage Box' : '-30% de votre facture grâce aux panneaux solaires'}
+              </div>
+            </div>
+            {withBox && (
+              <div style={{ background:'rgba(56,189,248,.08)', borderRadius:8, padding:'10px 12px', border:'1px solid rgba(56,189,248,.2)' }}>
+                <div style={{ fontSize:11, color:'rgba(255,255,255,.5)', marginBottom:2 }}>Économies supplémentaires avec la Box</div>
+                <div style={{ fontSize:20, fontWeight:900, color:'#38bdf8' }}>+{boxTotal.toLocaleString('fr-FR')} €/an</div>
+                <div style={{ fontSize:10, color:'rgba(255,255,255,.35)', marginTop:2 }}>
+                  140 € cagnotte flexibilité + {shiftGain || 0} € déplacement des consommations
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {withBox && currentBill && (
+          <div className="card" style={{ padding:'14px 16px', marginBottom:10, background:'rgba(125,217,64,.06)', border:'1px solid rgba(125,217,64,.25)', textAlign:'center' }}>
+            <div style={{ fontSize:13, color:'rgba(255,255,255,.5)', marginBottom:4 }}>Total économies annuelles estimées</div>
+            <div style={{ fontSize:30, fontWeight:900, color:'#7dd940' }}>
+              -{(finalSolarSaving + boxTotal).toLocaleString('fr-FR')} €/an
+            </div>
+            <div style={{ fontSize:10, color:'rgba(255,255,255,.35)', marginTop:4 }}>solaire + flexibilité + déplacement conso</div>
+          </div>
+        )}
+
+        <div className="card" style={{ padding:'14px 16px', background:'rgba(125,217,64,.06)', border:'1px solid rgba(125,217,64,.25)' }}>
+          <div style={{ fontWeight:700, fontSize:13, color:'#7dd940', marginBottom:6 }}>✦ Prochaine étape</div>
+          <div style={{ fontSize:12, color:'rgba(255,255,255,.6)' }}>
+            Notre expert réalise une étude de votre toiture et dimensionne votre installation. Gratuit et sans engagement.
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <div className="screen fade-in">
+        <button className="back-btn" onClick={onBack}>← Retour</button>
+        <div style={{ fontSize:9, letterSpacing:'.6px', color:'rgba(125,217,64,.8)', fontWeight:700, textTransform:'uppercase', marginBottom:2 }}>Simulation</div>
+        <div style={{ fontSize:18, fontWeight:900, color:'white', lineHeight:1.1, marginBottom:14 }}>Le solaire <span className="accent">chez vous</span></div>
+
+        {loading ? (
+          <div style={{ textAlign:'center', padding:40 }}><div className="spinner" style={{ margin:'0 auto' }}/></div>
+        ) : (<>
+          {/* Image maison */}
+          <div className="card" style={{ padding:'14px 16px 10px', marginBottom:10, textAlign:'center' }}>
+            <img src="/maison.png" alt="Maison solaire" style={{ width:'100%', maxWidth:180, marginBottom:10 }}/>
+            <div style={{ fontSize:13, fontWeight:700, color:'white', marginBottom:4 }}>Panneaux solaires + Batterie</div>
+            <div style={{ fontSize:11, color:'rgba(255,255,255,.45)' }}>Installation clé en main, étude gratuite.</div>
+          </div>
+
+          {/* Solaire seul */}
+          <div className="card" style={{ padding:'14px 16px', marginBottom:8, background:'rgba(255,215,0,.05)', border:'1px solid rgba(255,215,0,.25)' }}>
+            <div style={{ display:'flex', alignItems:'flex-start', gap:12 }}>
+              <div style={{ fontSize:28, flexShrink:0 }}>☀️</div>
+              <div>
+                <div style={{ fontWeight:800, fontSize:14, color:'#fbbf24', marginBottom:4 }}>
+                  {solarOnlySaving !== null ? `-${solarOnlySaving.toLocaleString('fr-FR')} €/an` : '-30%'} avec le solaire seul
+                </div>
+                <div style={{ fontSize:12, color:'rgba(255,255,255,.6)', lineHeight:1.5 }}>
+                  Les panneaux solaires couvrent en moyenne 30% de votre consommation annuelle.
+                  L'énergie produite en journée est directement autoconsommée.
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Solaire + Box */}
+          <div className="card" style={{ padding:'14px 16px', marginBottom:8, background:'rgba(125,217,64,.07)', border:'1.5px solid rgba(125,217,64,.35)' }}>
+            <div style={{ display:'flex', alignItems:'flex-start', gap:12 }}>
+              <div style={{ fontSize:28, flexShrink:0 }}>⚡</div>
+              <div>
+                <div style={{ fontWeight:800, fontSize:14, color:'#7dd940', marginBottom:4 }}>
+                  {solarBoxSaving !== null ? `-${solarBoxSaving.toLocaleString('fr-FR')} €/an` : '-50%'} avec solaire + Box Comwatt
+                </div>
+                <div style={{ fontSize:12, color:'rgba(255,255,255,.6)', lineHeight:1.5 }}>
+                  La Box pilote vos appareils pour consommer quand le soleil produit.
+                  Elle maximise l'autoconsommation et réduit de 50% votre facture.
+                </div>
+              </div>
+            </div>
+            {hasBox && (
+              <div style={{ marginTop:8, paddingTop:8, borderTop:'1px solid rgba(125,217,64,.2)', fontSize:11, color:'rgba(125,217,64,.8)', fontWeight:700 }}>
+                ✦ Vous avez déjà une Box — vos gains seront maximisés automatiquement.
+              </div>
+            )}
+          </div>
+
+          {/* Rappel gains box si déjà choisi */}
+          {hasBox && (
+            <div className="card" style={{ padding:'12px 14px', marginBottom:8, background:'rgba(56,189,248,.05)', border:'1px solid rgba(56,189,248,.2)' }}>
+              <div style={{ fontSize:12, color:'rgba(56,189,248,.9)', fontWeight:700, marginBottom:2 }}>📦 Box déjà activée — gains additionnels rappel</div>
+              <div style={{ fontSize:11, color:'rgba(255,255,255,.5)' }}>
+                +140 € cagnotte flexibilité · +{shiftGain || 0} € déplacement conso · Total box : +{boxTotal} €/an
+              </div>
+            </div>
+          )}
+        </>)}
+      </div>
+
+      {!loading && (
+        hasBox ? (
+          <StickyFooter>
+            <button className="btn btn-yes" onClick={() => setChosen('solar_box')}>
+              ☀️ Je veux des panneaux solaires
+            </button>
+          </StickyFooter>
+        ) : (
+          <StickyFooter row>
+            <button className="btn btn-no" style={{fontSize:12, padding:'12px 8px'}} onClick={() => setChosen('solar_only')}>
+              ☀️ Solaire seul
+            </button>
+            <button className="btn btn-yes" style={{fontSize:12, padding:'12px 8px'}} onClick={() => setChosen('solar_box')}>
+              ☀️ + Box Comwatt
+            </button>
+          </StickyFooter>
+        )
       )}
     </>
   );
@@ -4171,13 +4385,16 @@ function App() {
           userProfile={profile}
           onACC={()=>goTo('ACC_MAP')}
           onBox={()=>goTo('BOX_SIM')}
-          onSolar={()=>goTo('SOLAR', base)}
+          onSolar={()=>goTo('SOLAR_SIM')}
           onOptimisation={()=>goTo('OPTIMISATION')}
           onBack={goBack}/>;
       }
 
       case 'BOX_SIM':
         return <BoxSimScreen user={user} userProfile={profile} onBack={goBack}/>;
+
+      case 'SOLAR_SIM':
+        return <SolarSimScreen user={user} userProfile={profile} onBack={goBack}/>;
 
       case 'OPTIMISATION':
         return <OptimisationScreen user={user} userProfile={profile} onBack={goBack}/>;
