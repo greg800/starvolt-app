@@ -2248,6 +2248,7 @@ function SimulationsScreen({ onACC, onBox, onSolar, onOptimisation, onBack, user
   const [hasConso,  setHasConso]  = useState(false);
   const [maxSaving, setMaxSaving] = useState(null);
   const [accSaving, setAccSaving] = useState(null);
+  const [boxSaving, setBoxSaving] = useState(null);
 
   useEffect(() => {
     if (!user) return;
@@ -2262,15 +2263,22 @@ function SimulationsScreen({ onACC, onBox, onSolar, onOptimisation, onBack, user
       if (!site?.conso_profil) return;
       setHasConso(true);
 
+      const { kwh_hc, kwh_hp } = calcHcHp(site.conso_profil, userProfile);
+      const kwh_total = kwh_hc + kwh_hp;
+
       // Optimisation savings
-      if (tariffs?.length) {
-        const { kwh_hc, kwh_hp } = calcHcHp(site.conso_profil, userProfile);
-        if (kwh_hc + kwh_hp > 0) {
-          const ranked = tariffs.map(t=>({t,result:calcTariffCost(t,kwh_hc,kwh_hp)})).filter(({result})=>result!==null).sort((a,b)=>a.result.total-b.result.total);
-          if (ranked.length) {
-            const cur = site.tarif_id ? ranked.find(r=>r.t.id===site.tarif_id) : null;
-            setMaxSaving(cur ? Math.round(cur.result.total - ranked[0].result.total) : null);
-          }
+      if (tariffs?.length && kwh_total > 0) {
+        const ranked = tariffs.map(t=>({t,result:calcTariffCost(t,kwh_hc,kwh_hp)})).filter(({result})=>result!==null).sort((a,b)=>a.result.total-b.result.total);
+        if (ranked.length) {
+          const cur = site.tarif_id ? ranked.find(r=>r.t.id===site.tarif_id) : null;
+          setMaxSaving(cur ? Math.round(cur.result.total - ranked[0].result.total) : null);
+
+          // Box saving: 140€ flex + 10% (HC/HP) or 20% (dynamic) of current bill
+          const curTariff = site.tarif_id ? tariffs.find(t => t.id === site.tarif_id) : null;
+          const isDynamic = curTariff?.tarif_dynamique === true;
+          const curBill = cur?.result?.total || (kwh_total * 0.18);
+          const bSav = Math.round(140 + curBill * (isDynamic ? 0.20 : 0.10));
+          if (bSav > 0) setBoxSaving(bSav);
         }
       }
 
@@ -2328,7 +2336,10 @@ function SimulationsScreen({ onACC, onBox, onSolar, onOptimisation, onBack, user
           <img src="/comwatt-box.png" alt="Box Comwatt" className="sim-icon"/>
           <div className="sim-text">
             <div className="sim-title">Économiser plus avec la Box</div>
-            <div className="sim-sub">Pilotage intelligent de votre consommation</div>
+            {boxSaving !== null
+              ? <div className="sim-sub" style={{color:'#7dd940',fontWeight:700}}>Jusqu'à -{boxSaving.toLocaleString('fr-FR')} €/an d'économie</div>
+              : <div className="sim-sub">Pilotage intelligent de votre consommation</div>
+            }
           </div>
           <span className="sim-arrow">→</span>
         </button>
@@ -2526,35 +2537,28 @@ function OptimisationScreen({ user, userProfile, onBack }) {
 
       {!loading && site && (
         <>
-          {/* HC/HP summary */}
+          {/* Site summary */}
           <div className="card" style={{ padding:'12px 14px', marginBottom:10 }}>
-            <div style={{ fontWeight:800, fontSize:13, color:'white', marginBottom:4 }}>{site.nom}</div>
-            <div style={{ fontSize:10, color:'rgba(125,217,64,.7)', fontWeight:700, marginBottom:8, display:'flex', alignItems:'center', gap:4 }}>
+            <div style={{ fontWeight:800, fontSize:13, color:'white', marginBottom:2 }}>{site.nom}</div>
+            <div style={{ fontSize:10, color:'rgba(125,217,64,.7)', fontWeight:700, marginBottom:10, display:'flex', alignItems:'center', gap:4 }}>
               <span>✦</span> Site utilisé pour tous les calculs
             </div>
-            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:6 }}>
-              {[
-                ['Total', fmtKwh(kwh_total), '#7dd940'],
-                ['Heures pleines', fmtKwh(kwh_hp), 'rgba(255,255,255,.8)'],
-                ['Heures creuses', hasHC ? fmtKwh(kwh_hc) : 'non def.', hasHC ? '#5de0f5' : 'rgba(255,255,255,.3)'],
-              ].map(([lbl, val, col]) => (
-                <div key={lbl} style={{ background:'rgba(255,255,255,.06)', borderRadius:8, padding:'8px 6px', textAlign:'center' }}>
-                  <div style={{ fontSize:14, fontWeight:900, color:col }}>{val}</div>
-                  <div style={{ fontSize:9, color:'rgba(255,255,255,.45)', marginTop:2, fontWeight:700 }}>{lbl.toUpperCase()}</div>
+            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8 }}>
+              <div style={{ background:'rgba(255,255,255,.06)', borderRadius:8, padding:'10px 8px', textAlign:'center' }}>
+                <div style={{ fontSize:22, fontWeight:900, color:'#7dd940', lineHeight:1 }}>
+                  {currentRanked ? fmtE(currentRanked.result.total) : '—'}
                 </div>
-              ))}
+                <div style={{ fontSize:9, color:'rgba(255,255,255,.45)', marginTop:3, fontWeight:700 }}>FACTURE ANNUELLE</div>
+                {!currentRanked && <div style={{ fontSize:9, color:'rgba(255,200,50,.55)', marginTop:2 }}>Tarif non sélectionné</div>}
+              </div>
+              <div style={{ background:'rgba(255,255,255,.06)', borderRadius:8, padding:'10px 8px', textAlign:'center' }}>
+                <div style={{ fontSize:22, fontWeight:900, lineHeight:1, color: hasHC ? '#5de0f5' : 'rgba(255,255,255,.3)' }}>
+                  {hasHC ? `${kwh_total > 0 ? Math.round(kwh_hc / kwh_total * 100) : 0}%` : '—'}
+                </div>
+                <div style={{ fontSize:9, color:'rgba(255,255,255,.45)', marginTop:3, fontWeight:700 }}>CONSO HEURES CREUSES</div>
+                {!hasHC && <div style={{ fontSize:9, color:'rgba(255,200,50,.55)', marginTop:2 }}>Plages HC non définies</div>}
+              </div>
             </div>
-            {!hasHC && (
-              <div style={{ fontSize:11, color:'rgba(255,200,50,.7)', marginTop:8 }}>
-                ⚠ Plages HC non définies dans votre profil → toute la conso est comptée en HP
-              </div>
-            )}
-            {hasHC && (
-              <div style={{ fontSize:11, color:'rgba(255,255,255,.4)', marginTop:8 }}>
-                Plages HC : {[userProfile?.heure_debut_hc1 && `${userProfile.heure_debut_hc1}–${userProfile.heure_fin_hc1}`, userProfile?.heure_debut_hc2 && `${userProfile.heure_debut_hc2}–${userProfile.heure_fin_hc2}`].filter(Boolean).join(' et ')}
-                {' '}· Part HC : {kwh_total > 0 ? Math.round(kwh_hc / kwh_total * 100) : 0}%
-              </div>
-            )}
           </div>
 
           {/* Hero savings */}
@@ -2582,60 +2586,53 @@ function OptimisationScreen({ user, userProfile, onBack }) {
             </div>
           )}
 
-          <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
+          <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
             {ranked.map(({ t, result }, idx) => {
               const medals = ['🥇','🥈','🥉'];
               const rank = medals[idx] || `#${idx + 1}`;
               const saving = idx > 0 ? result.total - ranked[0].result.total : null;
+              const prixKwh = kwh_total > 0 ? (result.total / kwh_total * 100).toFixed(1) : null;
+              const isCurrent = t.id === site?.tarif_id;
               return (
                 <div key={t.id} className="card" style={{
-                  padding:'12px 14px',
-                  border: idx === 0 ? '1.5px solid rgba(125,217,64,.4)' : '1px solid rgba(255,255,255,.1)',
-                  background: idx === 0 ? 'rgba(125,217,64,.06)' : undefined,
+                  padding:'10px 12px',
+                  border: isCurrent ? '1.5px solid rgba(125,217,64,.5)' : idx === 0 ? '1.5px solid rgba(125,217,64,.3)' : '1px solid rgba(255,255,255,.08)',
+                  background: isCurrent ? 'rgba(125,217,64,.07)' : idx === 0 ? 'rgba(125,217,64,.04)' : undefined,
                 }}>
-                  <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start' }}>
-                    <div style={{ display:'flex', alignItems:'center', gap:8 }}>
-                      <span style={{ fontSize:18 }}>{rank}</span>
-                      <div>
-                        <div style={{ fontWeight:800, fontSize:14, color:'white' }}>{t.nom}</div>
-                        {result.is_dynamic
-                          ? <div style={{ fontSize:11, color:'rgba(125,217,64,.55)', marginTop:2 }}>Dynamique · marge {t.marge_fournisseur_ceur_kwh ?? '—'} c€/kWh · Abo {fmtE(result.abo)}</div>
-                          : result.is_base
-                            ? <div style={{ fontSize:11, color:'rgba(255,255,255,.45)', marginTop:2 }}>Tarif base · {t.prix_hp} €/kWh · Abo {fmtE(result.abo)}</div>
-                            : <div style={{ fontSize:11, color:'rgba(255,255,255,.45)', marginTop:2 }}>HP {t.prix_hp} €/kWh · HC {t.prix_hc} €/kWh · Abo {fmtE(result.abo)}</div>
-                        }
+                  <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+                    <div style={{ display:'flex', alignItems:'center', gap:7, flex:1, minWidth:0 }}>
+                      <span style={{ fontSize:17, flexShrink:0 }}>{rank}</span>
+                      <div style={{ minWidth:0 }}>
+                        <div style={{ fontWeight:800, fontSize:13, color:'white', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{t.nom}</div>
+                        <div style={{ fontSize:10, color: result.is_dynamic ? 'rgba(125,217,64,.55)' : 'rgba(255,255,255,.38)', marginTop:1 }}>
+                          {result.is_dynamic ? `Dynamique · Abo ${fmtE(result.abo)}` : result.is_base ? `Tarif base · Abo ${fmtE(result.abo)}` : `HC+HP · Abo ${fmtE(result.abo)}`}
+                        </div>
                       </div>
                     </div>
-                    <div style={{ textAlign:'right', flexShrink:0 }}>
-                      <div style={{ fontSize:20, fontWeight:900, color: idx === 0 ? '#7dd940' : 'white' }}>{fmtE(result.total)}</div>
-                      <div style={{ fontSize:10, color:'rgba(255,255,255,.4)' }}>/an</div>
-                      {fmtPrixKwh(result.total) && <div style={{ fontSize:11, color:'rgba(255,255,255,.45)', marginTop:2 }}>{fmtPrixKwh(result.total)}</div>}
+                    <div style={{ textAlign:'right', flexShrink:0, marginLeft:10 }}>
+                      <div style={{ fontSize:20, fontWeight:900, color: idx === 0 ? '#7dd940' : 'white', lineHeight:1 }}>{fmtE(result.total)}</div>
+                      <div style={{ fontSize:10, color:'rgba(255,255,255,.38)', lineHeight:1.2 }}>/an</div>
+                      {prixKwh && <div style={{ fontSize:16, fontWeight:800, color: idx === 0 ? '#7dd940' : 'rgba(255,255,255,.7)', marginTop:2 }}>{prixKwh} c€/kWh</div>}
                     </div>
-                  </div>
-                  <div style={{ display:'flex', gap:10, marginTop:8 }}>
-                    {(result.is_dynamic
-                      ? [['Abo+fixes TTC', result.fixedCost], ['Conso TTC', result.varCost]]
-                      : [['Abonnement', result.abo], result.is_base ? ['Consommation', result.hp_cost] : ['HP', result.hp_cost], ...(result.is_base ? [] : [['HC', result.hc_cost]])]
-                    ).map(([lbl, val]) => (
-                      <div key={lbl} style={{ flex:1, background:'rgba(255,255,255,.05)', borderRadius:6, padding:'5px 6px', textAlign:'center' }}>
-                        <div style={{ fontSize:12, fontWeight:700, color:'rgba(255,255,255,.85)' }}>{fmtE(val)}</div>
-                        <div style={{ fontSize:9, color:'rgba(255,255,255,.4)', fontWeight:700 }}>{lbl.toUpperCase()}</div>
-                      </div>
-                    ))}
                   </div>
                   {result.is_dynamic && (result.avg_ete_ceur != null || result.avg_hiver_ceur != null) && (
-                    <div style={{ display:'flex', gap:6, marginTop:6 }}>
-                      {[['☀️ Été moy.', result.avg_ete_ceur], ['❄️ Hiver moy.', result.avg_hiver_ceur]].filter(([,v])=>v!=null).map(([lbl,val])=>(
-                        <div key={lbl} style={{ flex:1, background:'rgba(255,255,255,.05)', borderRadius:6, padding:'5px 6px', textAlign:'center' }}>
-                          <div style={{ fontSize:12, fontWeight:700, color:'rgba(125,217,64,.9)' }}>{val.toFixed(1)} c€/kWh</div>
-                          <div style={{ fontSize:9, color:'rgba(255,255,255,.4)', fontWeight:700 }}>{lbl.toUpperCase()}</div>
+                    <div style={{ display:'flex', gap:6, marginTop:6, paddingTop:6, borderTop:'1px solid rgba(255,255,255,.07)' }}>
+                      {[['☀️ Été', result.avg_ete_ceur], ['❄️ Hiver', result.avg_hiver_ceur]].filter(([,v])=>v!=null).map(([lbl,val])=>(
+                        <div key={lbl} style={{ flex:1, background:'rgba(255,255,255,.05)', borderRadius:6, padding:'4px 6px', textAlign:'center' }}>
+                          <div style={{ fontSize:13, fontWeight:800, color:'rgba(125,217,64,.9)' }}>{val.toFixed(1)} c€/kWh</div>
+                          <div style={{ fontSize:9, color:'rgba(255,255,255,.38)', fontWeight:700 }}>{lbl.toUpperCase()}</div>
                         </div>
                       ))}
                     </div>
                   )}
                   {saving !== null && saving > 0 && (
-                    <div style={{ marginTop:6, fontSize:11, color:'rgba(255,150,50,.8)', textAlign:'right' }}>
+                    <div style={{ marginTop:4, fontSize:10, color:'rgba(255,140,40,.75)', textAlign:'right' }}>
                       +{fmtE(saving)} vs le moins cher
+                    </div>
+                  )}
+                  {isCurrent && (
+                    <div style={{ marginTop:4, fontSize:10, color:'rgba(125,217,64,.7)', textAlign:'right', fontWeight:700 }}>
+                      ✦ Tarif actuel
                     </div>
                   )}
                 </div>
@@ -3443,6 +3440,190 @@ function AccMapScreen({ user, userProfile, onBack }) {
   );
 }
 
+// ─── BoxSimScreen ─────────────────────────────
+function BoxSimScreen({ user, userProfile, onBack }) {
+  const [loading,      setLoading]      = useState(true);
+  const [currentBill,  setCurrentBill]  = useState(null);
+  const [isDynamic,    setIsDynamic]    = useState(false);
+  const [chosen,       setChosen]       = useState(null); // 'buy' | 'free'
+
+  useEffect(() => {
+    const siteId = localStorage.getItem('starvolt_active_site_id');
+    if (!siteId) { setLoading(false); return; }
+    Promise.all([
+      sb.from('sites').select('id,conso_profil,tarif_id').eq('id', siteId).maybeSingle(),
+      sb.from('tarifs_electricite').select('*'),
+      sb.rpc('get_spot_json'),
+      sb.from('parametres_nationaux').select('*').eq('id', 1).maybeSingle(),
+    ]).then(([{ data: site }, { data: tariffs }, { data: spotRows }, { data: nat }]) => {
+      if (!site?.conso_profil) { setLoading(false); return; }
+      const curTariff = site.tarif_id ? (tariffs || []).find(t => t.id === site.tarif_id) : null;
+      const { kwh_hc, kwh_hp } = calcHcHp(site.conso_profil, userProfile);
+      const kwh_total = kwh_hc + kwh_hp;
+      let bill = null;
+      if (curTariff?.tarif_dynamique) {
+        setIsDynamic(true);
+        if (spotRows && nat) {
+          const r = calcDynamicCost(curTariff, site.conso_profil, buildSpotMap(spotRows), nat, userProfile);
+          bill = r?.total || null;
+        }
+      } else if (curTariff) {
+        bill = calcTariffCost(curTariff, kwh_hc, kwh_hp)?.total || null;
+      }
+      if (!bill && kwh_total > 0) bill = Math.round(kwh_total * 0.18);
+      setCurrentBill(bill ? Math.round(bill) : null);
+      setLoading(false);
+    });
+  }, []);
+
+  const flexGain  = 140;
+  const shiftPct  = isDynamic ? 0.20 : 0.10;
+  const shiftGain = currentBill ? Math.round(currentBill * shiftPct) : null;
+  const totalGain = flexGain + (shiftGain || 0);
+  const newBill   = currentBill ? Math.round(currentBill - (shiftGain || 0)) : null;
+
+  if (chosen) {
+    return (
+      <div className="screen fade-in">
+        <Fireworks final/>
+        <button className="back-btn" onClick={onBack}>← Retour</button>
+        <div style={{ textAlign:'center', marginBottom:16 }}>
+          <div style={{ fontSize:38, marginBottom:4 }}>{chosen === 'buy' ? '📦' : '🎁'}</div>
+          <div style={{ fontSize:22, fontWeight:900, color:'white', lineHeight:1.2 }}>
+            {chosen === 'buy' ? 'Box commandée !' : 'Box gratuite activée !'}
+          </div>
+          <div style={{ fontSize:13, color:'rgba(255,255,255,.5)', marginTop:6 }}>
+            {chosen === 'buy' ? 'Votre box Comwatt arrive sous 5–10 jours.' : 'Vos revenus de flexibilité financent votre box pendant 3 ans.'}
+          </div>
+        </div>
+        {currentBill && (
+          <div className="card" style={{ padding:'16px', marginBottom:10, textAlign:'center' }}>
+            <div style={{ fontSize:11, color:'rgba(255,255,255,.4)', marginBottom:8, textTransform:'uppercase', letterSpacing:'.5px' }}>Votre facture évolue</div>
+            <div style={{ display:'flex', alignItems:'center', justifyContent:'center', gap:18 }}>
+              <div>
+                <div style={{ fontSize:28, fontWeight:900, color:'rgba(255,100,100,.7)', textDecoration:'line-through', lineHeight:1 }}>
+                  {currentBill.toLocaleString('fr-FR')} €
+                </div>
+                <div style={{ fontSize:10, color:'rgba(255,255,255,.35)', marginTop:3 }}>AVANT</div>
+              </div>
+              <div style={{ fontSize:22, color:'#7dd940' }}>→</div>
+              <div>
+                <div style={{ fontSize:36, fontWeight:900, color:'#7dd940', lineHeight:1 }}>
+                  {newBill !== null ? newBill.toLocaleString('fr-FR') : '—'} €
+                </div>
+                <div style={{ fontSize:10, color:'rgba(255,255,255,.35)', marginTop:3 }}>APRÈS BOX</div>
+              </div>
+            </div>
+            <div style={{ marginTop:12, background:'rgba(125,217,64,.1)', borderRadius:8, padding:'8px 12px' }}>
+              <div style={{ fontSize:11, color:'rgba(255,255,255,.5)', marginBottom:2 }}>Économies annuelles estimées</div>
+              <div style={{ fontSize:24, fontWeight:900, color:'#7dd940' }}>-{totalGain.toLocaleString('fr-FR')} €/an</div>
+              <div style={{ fontSize:10, color:'rgba(255,255,255,.35)', marginTop:2 }}>
+                dont 140 € de cagnotte flexibilité + {shiftGain || 0} € de déplacement des consommations
+              </div>
+            </div>
+            {chosen === 'buy' && (
+              <div style={{ marginTop:10, fontSize:11, color:'rgba(255,255,255,.4)' }}>
+                Investissement initial : <strong style={{color:'white'}}>550 € TTC</strong> · Retour sur investissement &lt; {shiftGain ? Math.ceil(550 / totalGain) : 4} an{shiftGain && Math.ceil(550 / totalGain) > 1 ? 's' : ''}
+              </div>
+            )}
+          </div>
+        )}
+        <div className="card" style={{ padding:'14px 16px', background:'rgba(125,217,64,.06)', border:'1px solid rgba(125,217,64,.25)' }}>
+          <div style={{ fontWeight:700, fontSize:13, color:'#7dd940', marginBottom:6 }}>✦ Prochaine étape</div>
+          <div style={{ fontSize:12, color:'rgba(255,255,255,.6)' }}>
+            Un conseiller Starvolt vous contacte sous 48h pour planifier l'installation. Préparez votre numéro de compteur Linky.
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <div className="screen fade-in">
+        <button className="back-btn" onClick={onBack}>← Retour</button>
+        <div style={{ fontSize:9, letterSpacing:'.6px', color:'rgba(125,217,64,.8)', fontWeight:700, textTransform:'uppercase', marginBottom:2 }}>Simulation</div>
+        <div style={{ fontSize:18, fontWeight:900, color:'white', lineHeight:1.1, marginBottom:14 }}>La Box <span className="accent">Comwatt</span></div>
+
+        {loading ? (
+          <div style={{ textAlign:'center', padding:40 }}><div className="spinner" style={{ margin:'0 auto' }}/></div>
+        ) : (<>
+          {/* Box image */}
+          <div className="card" style={{ padding:'14px 16px 10px', marginBottom:10, textAlign:'center' }}>
+            <img src="/comwatt-box.png" alt="Box Comwatt" style={{ width:'100%', maxWidth:200, borderRadius:12, marginBottom:10 }}/>
+            <div style={{ fontSize:13, fontWeight:700, color:'white', marginBottom:4 }}>Box Comwatt · Pilotage intelligent</div>
+            <div style={{ fontSize:11, color:'rgba(255,255,255,.45)' }}>Se branche sur votre tableau électrique en 30 min.</div>
+          </div>
+
+          {/* Flex gains */}
+          <div className="card" style={{ padding:'14px 16px', marginBottom:8, background:'rgba(125,217,64,.06)', border:'1px solid rgba(125,217,64,.25)' }}>
+            <div style={{ display:'flex', alignItems:'flex-start', gap:12 }}>
+              <div style={{ fontSize:28, flexShrink:0 }}>💰</div>
+              <div>
+                <div style={{ fontWeight:800, fontSize:14, color:'#7dd940', marginBottom:4 }}>+140 €/an de cagnotte flexibilité</div>
+                <div style={{ fontSize:12, color:'rgba(255,255,255,.6)', lineHeight:1.5 }}>
+                  La box rend des services au réseau électrique en adaptant votre consommation aux besoins du réseau.
+                  En contrepartie, <strong style={{color:'white'}}>Starvolt crédite 140 €/an</strong> sur votre cagnotte flexibilité.
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Shift gains */}
+          <div className="card" style={{ padding:'14px 16px', marginBottom:8, background:'rgba(56,189,248,.05)', border:'1px solid rgba(56,189,248,.2)' }}>
+            <div style={{ display:'flex', alignItems:'flex-start', gap:12 }}>
+              <div style={{ fontSize:28, flexShrink:0 }}>⚡</div>
+              <div>
+                <div style={{ fontWeight:800, fontSize:14, color:'#38bdf8', marginBottom:4 }}>
+                  {shiftGain !== null ? `-${shiftGain.toLocaleString('fr-FR')} €/an` : 'Jusqu\'à -20%'} sur votre facture
+                </div>
+                <div style={{ fontSize:12, color:'rgba(255,255,255,.6)', lineHeight:1.5 }}>
+                  La box déplace automatiquement vos consommations (chauffe-eau, lave-linge, charge VE) vers les heures les moins chères.
+                  {isDynamic ? ' Avec votre tarif dynamique, le gain peut atteindre 20% de votre facture.' : ' Gain estimé à 10% de votre facture.'}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Investment */}
+          <div className="card" style={{ padding:'14px 16px', marginBottom:8 }}>
+            <div style={{ fontWeight:700, fontSize:13, color:'white', marginBottom:10 }}>Votre investissement</div>
+            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8 }}>
+              <div style={{ background:'rgba(255,255,255,.06)', borderRadius:10, padding:'12px 10px', textAlign:'center' }}>
+                <div style={{ fontSize:22, fontWeight:900, color:'white' }}>550 €</div>
+                <div style={{ fontSize:10, color:'rgba(255,255,255,.45)', marginTop:2, fontWeight:700 }}>ACHAT DIRECT</div>
+                <div style={{ fontSize:10, color:'rgba(255,255,255,.35)', marginTop:4 }}>Rentabilisé en {shiftGain && totalGain > 0 ? Math.ceil(550 / totalGain) + ' an' + (Math.ceil(550/totalGain)>1?'s':'') : '< 4 ans'}</div>
+              </div>
+              <div style={{ background:'rgba(125,217,64,.1)', borderRadius:10, padding:'12px 10px', textAlign:'center', border:'1.5px solid rgba(125,217,64,.35)' }}>
+                <div style={{ fontSize:22, fontWeight:900, color:'#7dd940' }}>Gratuite</div>
+                <div style={{ fontSize:10, color:'rgba(125,217,64,.7)', marginTop:2, fontWeight:700 }}>BOX OFFERTE</div>
+                <div style={{ fontSize:10, color:'rgba(255,255,255,.35)', marginTop:4 }}>Cagnotte flex reversée à Starvolt pendant 3 ans</div>
+              </div>
+            </div>
+          </div>
+
+          {currentBill && (
+            <div style={{ textAlign:'center', marginBottom:8, fontSize:11, color:'rgba(255,255,255,.35)' }}>
+              Économies totales estimées : <strong style={{color:'#7dd940'}}>-{totalGain.toLocaleString('fr-FR')} €/an</strong>
+            </div>
+          )}
+        </>)}
+      </div>
+
+      {!loading && (
+        <StickyFooter row>
+          <button className="btn btn-no" style={{fontSize:12, padding:'12px 8px'}} onClick={() => setChosen('free')}>
+            🎁 Je veux une box gratuite
+          </button>
+          <button className="btn btn-yes" style={{fontSize:12, padding:'12px 8px'}} onClick={() => setChosen('buy')}>
+            📦 J'achète à 550 €
+          </button>
+        </StickyFooter>
+      )}
+    </>
+  );
+}
+
 // ─── AdminScreen ──────────────────────────────
 function AdminScreen({ onTariffs, onUsers, onSpot, onAcc, onBack }) {
   return (
@@ -3989,11 +4170,14 @@ function App() {
           user={user}
           userProfile={profile}
           onACC={()=>goTo('ACC_MAP')}
-          onBox={()=>goTo('COMWATT', base)}
+          onBox={()=>goTo('BOX_SIM')}
           onSolar={()=>goTo('SOLAR', base)}
           onOptimisation={()=>goTo('OPTIMISATION')}
           onBack={goBack}/>;
       }
+
+      case 'BOX_SIM':
+        return <BoxSimScreen user={user} userProfile={profile} onBack={goBack}/>;
 
       case 'OPTIMISATION':
         return <OptimisationScreen user={user} userProfile={profile} onBack={goBack}/>;
