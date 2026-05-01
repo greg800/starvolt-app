@@ -929,7 +929,7 @@
       50%      { opacity: .9; }
     }
     /* Override Leaflet default background in dark UI */
-    .leaflet-container { background: #0f2535; }
+    .leaflet-container { background: #e8e0d8; }
     /* Circle distance labels */
     .acc-ring-lbl { background: rgba(6,30,42,.88) !important; border-radius: 10px !important; padding: 2px 7px !important; font-size: 10px !important; font-weight: 800 !important; white-space: nowrap !important; box-shadow: 0 1px 5px rgba(0,0,0,.4) !important; border: none !important; }
     .acc-ring-lbl::before { display: none !important; }
@@ -3199,15 +3199,13 @@ function AccMapScreen({ user, userProfile, onBack }) {
   const [activeSite,  setActiveSite]  = useState(null);
   const [activeTariff,setActiveTariff]= useState(null);
   const [loading,     setLoading]     = useState(true);
-  const [siteLatLng,  setSiteLatLng]  = useState(null); // [lat, lon] of active site
-  const [nearbyAcc,   setNearbyAcc]   = useState([]);   // acc sites within 20km
+  const [siteLatLng,  setSiteLatLng]  = useState(null);
+  const [nearbyAcc,   setNearbyAcc]   = useState([]);
   const [popup,       setPopup]       = useState(null);
-  const localMapDivRef  = useRef(null);
-  const localLeafletRef = useRef(null);
-  const franceMapDivRef  = useRef(null);
-  const franceLeafletRef = useRef(null);
+  const mapDivRef = useRef(null);
+  const leafletRef = useRef(null);
 
-  // Load data
+  // Load data + geocode
   useEffect(() => {
     const siteId = localStorage.getItem('starvolt_active_site_id');
     Promise.all([
@@ -3216,14 +3214,14 @@ function AccMapScreen({ user, userProfile, onBack }) {
         ? sb.from('sites').select('id,nom,adresse_ligne1,code_postal,ville,conso_profil,tarif_id').eq('id', siteId).maybeSingle()
         : Promise.resolve({ data: null }),
     ]).then(async ([{ data: acc }, { data: site }]) => {
-      setAccSites(acc || []);
+      const accList = acc || [];
+      setAccSites(accList);
       setActiveSite(site || null);
       if (site?.tarif_id) {
         const { data: t } = await sb.from('tarifs_electricite').select('prix_hp,prix_hc,nom').eq('id', site.tarif_id).maybeSingle();
         setActiveTariff(t);
       }
       setLoading(false);
-      // Geocode active site address
       if (site) {
         const q = [site.adresse_ligne1, site.code_postal, site.ville].filter(Boolean).join(' ');
         fetch(`https://api-adresse.data.gouv.fr/search/?q=${encodeURIComponent(q)}&limit=1`)
@@ -3233,98 +3231,31 @@ function AccMapScreen({ user, userProfile, onBack }) {
             if (!feat) return;
             const [lon, lat] = feat.geometry.coordinates;
             setSiteLatLng([lat, lon]);
-            const nearby = (acc || []).filter(s => s.latitude && s.longitude && haversine(lat, lon, parseFloat(s.latitude), parseFloat(s.longitude)) <= 20);
-            setNearbyAcc(nearby);
+            setNearbyAcc(accList.filter(s => s.latitude && s.longitude && haversine(lat, lon, parseFloat(s.latitude), parseFloat(s.longitude)) <= 20));
           }).catch(() => {});
       }
     });
   }, []);
 
-  // Local proximity map
+  // Build map once accSites and loading are ready
   useEffect(() => {
-    if (!siteLatLng || !localMapDivRef.current || localLeafletRef.current || !window.L) return;
+    if (loading || !accSites || !mapDivRef.current || leafletRef.current || !window.L) return;
     const L = window.L;
-    const [lat, lon] = siteLatLng;
-    const map = L.map(localMapDivRef.current, {
-      center: [lat, lon], zoom: 11,
+    const center = siteLatLng || [46.5, 2.3];
+    const map = L.map(mapDivRef.current, {
+      center, zoom: siteLatLng ? 10 : 6,
       zoomControl: true, scrollWheelZoom: true, attributionControl: true,
     });
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-      attribution: '© <a href="https://carto.com">CARTO</a>', subdomains: 'abcd', maxZoom: 19,
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+      attribution: '© <a href="https://www.openstreetmap.org/copyright">OSM</a> © <a href="https://carto.com">CARTO</a>',
+      subdomains: 'abcd', maxZoom: 19,
     }).addTo(map);
 
-    // Helper: label at right edge of circle
-    const ringLabel = (centerLat, centerLon, radiusKm, text, color) => {
-      // offset lon by radiusKm to find right-edge position
-      const dLon = radiusKm / (111.32 * Math.cos(centerLat * Math.PI / 180));
-      const lbl = L.marker([centerLat, centerLon + dLon], {
-        icon: L.divIcon({
-          className: 'acc-ring-lbl',
-          html: `<span style="color:${color}">${text}</span>`,
-          iconAnchor: [0, 10],
-        }),
-        interactive: false,
-      });
-      lbl.addTo(map);
-    };
-
-    // 3 concentric circles
-    const rings = [
-      { r: 2,  color: '#7dd940', dashArray: null,   label: '2 km' },
-      { r: 10, color: '#38c8e0', dashArray: '8 6',  label: '10 km' },
-      { r: 20, color: 'rgba(255,255,255,.55)', dashArray: '10 8', label: '20 km' },
-    ];
-    rings.forEach(({ r, color, dashArray, label }) => {
-      L.circle([lat, lon], {
-        radius: r * 1000, color, weight: dashArray ? 1.5 : 2,
-        fillOpacity: r === 2 ? 0.06 : 0.02,
-        dashArray, interactive: false,
-      }).addTo(map);
-      ringLabel(lat, lon, r, label, color);
-    });
-
-    // House marker for active site
-    const houseIcon = L.divIcon({
-      className: '',
-      html: '<div style="width:32px;height:32px;border-radius:50%;background:rgba(125,217,64,.25);border:2px solid #7dd940;box-shadow:0 0 12px rgba(125,217,64,.6);display:flex;align-items:center;justify-content:center;font-size:16px">🏠</div>',
-      iconSize: [32, 32], iconAnchor: [16, 16],
-    });
-    L.marker([lat, lon], { icon: houseIcon, zIndexOffset: 1000 })
-      .bindTooltip('Votre site', { permanent: false, direction: 'top', className: 'acc-ring-lbl' })
-      .addTo(map);
-
-    // ACC markers within 20km
+    // ALL acc site markers (all France, user can pan/zoom)
     const SunIcon = L.divIcon({
       className: '',
-      html: '<div style="width:26px;height:26px;border-radius:50%;background:rgba(255,215,0,.2);border:2px solid #ffd700;box-shadow:0 0 8px rgba(255,215,0,.5);display:flex;align-items:center;justify-content:center;font-size:13px">☀️</div>',
-      iconSize: [26, 26], iconAnchor: [13, 13],
-    });
-    nearbyAcc.forEach(s => {
-      const m = L.marker([parseFloat(s.latitude), parseFloat(s.longitude)], { icon: SunIcon });
-      m.addTo(map);
-      m.on('click', () => setPopup(s));
-    });
-
-    // Fit to 20km circle with small padding
-    const sw = L.latLng(lat - 0.18, lon - 0.27);
-    const ne = L.latLng(lat + 0.18, lon + 0.27);
-    map.fitBounds(L.latLngBounds(sw, ne));
-
-    localLeafletRef.current = map;
-  }, [siteLatLng, nearbyAcc]);
-
-  // France-wide map (only if no local map, or always below)
-  useEffect(() => {
-    if (!accSites || !franceMapDivRef.current || franceLeafletRef.current || !window.L) return;
-    const L = window.L;
-    const map = L.map(franceMapDivRef.current, { center:[46.5, 2.3], zoom:5, zoomControl:true, scrollWheelZoom:true });
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-      attribution: '© <a href="https://carto.com">CARTO</a>', subdomains: 'abcd', maxZoom: 19,
-    }).addTo(map);
-    const SunIcon = L.divIcon({
-      className: '',
-      html: '<div style="width:22px;height:22px;border-radius:50%;background:rgba(255,215,0,.2);border:1.5px solid #ffd700;box-shadow:0 0 6px rgba(255,215,0,.45);display:flex;align-items:center;justify-content:center;font-size:11px">☀️</div>',
-      iconSize: [22, 22], iconAnchor: [11, 11],
+      html: '<div style="width:28px;height:28px;border-radius:50%;background:#fff7d6;border:2.5px solid #f59e0b;box-shadow:0 2px 8px rgba(245,158,11,.5);display:flex;align-items:center;justify-content:center;font-size:14px;cursor:pointer">☀️</div>',
+      iconSize: [28, 28], iconAnchor: [14, 14],
     });
     (accSites || []).forEach(s => {
       if (!s.latitude || !s.longitude) return;
@@ -3332,8 +3263,79 @@ function AccMapScreen({ user, userProfile, onBack }) {
       m.addTo(map);
       m.on('click', () => setPopup(s));
     });
-    franceLeafletRef.current = map;
-  }, [accSites]);
+
+    // Proximity rings + house marker if geocoded
+    if (siteLatLng) {
+      const [lat, lon] = siteLatLng;
+      const ringLabel = (rLat, rLon, radiusKm, text, color) => {
+        const dLon = radiusKm / (111.32 * Math.cos(rLat * Math.PI / 180));
+        L.marker([rLat, rLon + dLon], {
+          icon: L.divIcon({
+            className: 'acc-ring-lbl',
+            html: `<span style="color:${color};font-weight:800">${text}</span>`,
+            iconAnchor: [0, 10],
+          }),
+          interactive: false,
+        }).addTo(map);
+      };
+      [
+        { r: 2,  color: '#16a34a', dash: null,   lbl: '2 km'  },
+        { r: 10, color: '#0284c7', dash: '8 6',  lbl: '10 km' },
+        { r: 20, color: '#6b7280', dash: '10 8', lbl: '20 km' },
+      ].forEach(({ r, color, dash, lbl }) => {
+        L.circle([lat, lon], {
+          radius: r * 1000, color, weight: 2,
+          fillOpacity: r === 2 ? 0.08 : 0.02, dashArray: dash, interactive: false,
+        }).addTo(map);
+        ringLabel(lat, lon, r, lbl, color);
+      });
+      const houseIcon = L.divIcon({
+        className: '',
+        html: '<div style="width:34px;height:34px;border-radius:50%;background:#dcfce7;border:2.5px solid #16a34a;box-shadow:0 2px 12px rgba(22,163,74,.5);display:flex;align-items:center;justify-content:center;font-size:17px">🏠</div>',
+        iconSize: [34, 34], iconAnchor: [17, 17],
+      });
+      L.marker([lat, lon], { icon: houseIcon, zIndexOffset: 1000 })
+        .bindTooltip('Votre site', { permanent: false, direction: 'top', className: 'acc-ring-lbl' })
+        .addTo(map);
+      // Fit to 20km bounds
+      const deg20 = 20 / 111.32;
+      map.fitBounds([[lat - deg20, lon - deg20 / Math.cos(lat*Math.PI/180)], [lat + deg20, lon + deg20 / Math.cos(lat*Math.PI/180)]], { padding: [16, 16] });
+    }
+    leafletRef.current = map;
+  }, [loading, accSites, siteLatLng]);
+
+  // Rebuild map if siteLatLng arrives after initial render
+  useEffect(() => {
+    if (!siteLatLng || !leafletRef.current || !window.L) return;
+    const L = window.L;
+    const map = leafletRef.current;
+    const [lat, lon] = siteLatLng;
+    const ringLabel = (rLat, rLon, radiusKm, text, color) => {
+      const dLon = radiusKm / (111.32 * Math.cos(rLat * Math.PI / 180));
+      L.marker([rLat, rLon + dLon], {
+        icon: L.divIcon({ className: 'acc-ring-lbl', html: `<span style="color:${color};font-weight:800">${text}</span>`, iconAnchor: [0, 10] }),
+        interactive: false,
+      }).addTo(map);
+    };
+    [
+      { r: 2,  color: '#16a34a', dash: null,   lbl: '2 km'  },
+      { r: 10, color: '#0284c7', dash: '8 6',  lbl: '10 km' },
+      { r: 20, color: '#6b7280', dash: '10 8', lbl: '20 km' },
+    ].forEach(({ r, color, dash, lbl }) => {
+      L.circle([lat, lon], { radius: r*1000, color, weight:2, fillOpacity: r===2?0.08:0.02, dashArray:dash, interactive:false }).addTo(map);
+      ringLabel(lat, lon, r, lbl, color);
+    });
+    const houseIcon = L.divIcon({
+      className: '',
+      html: '<div style="width:34px;height:34px;border-radius:50%;background:#dcfce7;border:2.5px solid #16a34a;box-shadow:0 2px 12px rgba(22,163,74,.5);display:flex;align-items:center;justify-content:center;font-size:17px">🏠</div>',
+      iconSize: [34, 34], iconAnchor: [17, 17],
+    });
+    L.marker([lat, lon], { icon: houseIcon, zIndexOffset: 1000 })
+      .bindTooltip('Votre site', { permanent: false, direction: 'top', className: 'acc-ring-lbl' })
+      .addTo(map);
+    const deg20 = 20 / 111.32;
+    map.fitBounds([[lat - deg20, lon - deg20 / Math.cos(lat*Math.PI/180)], [lat + deg20, lon + deg20 / Math.cos(lat*Math.PI/180)]], { padding: [16, 16] });
+  }, [siteLatLng]);
 
   const eligible = activeSite && (accSites||[]).some(s => s.code_postal === activeSite.code_postal);
   const eligibleSite = eligible ? (accSites||[]).find(s => s.code_postal === activeSite.code_postal) : null;
@@ -3353,96 +3355,90 @@ function AccMapScreen({ user, userProfile, onBack }) {
   const accSavings = Math.max(0, Math.round(kwh918 * (priceRef - accPriceKwh)));
 
   return (
-    <div className="screen fade-in">
-      <button className="back-btn" onClick={onBack}>← Retour</button>
-      <div style={{ fontSize:9, letterSpacing:'.6px', color:'rgba(125,217,64,.8)', fontWeight:700, textTransform:'uppercase', marginBottom:2 }}>Simulation</div>
-      <div style={{ fontSize:18, fontWeight:900, color:'white', lineHeight:1.1, marginBottom:14 }}>Autoconsommation <span className="accent">collective</span></div>
+    <div style={{ position:'fixed', inset:0, zIndex:200, display:'flex', flexDirection:'column', background:'#0a1628', overflow:'hidden' }} className="fade-in">
 
-      {/* Local proximity map */}
-      <div className="card" style={{ padding:0, marginBottom:10, overflow:'hidden', border:'1px solid rgba(255,255,255,.1)' }}>
-        {!loading && activeSite && !siteLatLng && (
-          <div style={{ padding:'14px 16px', textAlign:'center' }}>
-            <div className="spinner" style={{ margin:'0 auto 8px' }}/>
-            <div style={{ fontSize:11, color:'rgba(255,255,255,.4)' }}>Géolocalisation en cours…</div>
+      {/* ── Top bar: compact header + eligibility ── */}
+      <div style={{ flexShrink:0, padding:'10px 14px 8px', background:'linear-gradient(180deg,#0a1628 80%,transparent)', position:'relative', zIndex:2 }}>
+        <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:6 }}>
+          <button className="back-btn" onClick={onBack} style={{ position:'static', margin:0 }}>← Retour</button>
+          <div>
+            <div style={{ fontSize:8, letterSpacing:'.6px', color:'rgba(125,217,64,.8)', fontWeight:700, textTransform:'uppercase' }}>Simulation</div>
+            <div style={{ fontSize:15, fontWeight:900, color:'white', lineHeight:1.1 }}>Autoconsommation <span className="accent">collective</span></div>
           </div>
-        )}
-        {!loading && !activeSite && (
-          <div style={{ padding:'14px 16px', textAlign:'center' }}>
-            <div style={{ fontSize:13, color:'rgba(255,255,255,.5)' }}>Configurez un site dans « Ma conso » pour voir la carte de proximité.</div>
-          </div>
-        )}
-        {loading && (
-          <div style={{ padding:'24px', textAlign:'center' }}><div className="spinner" style={{ margin:'0 auto' }}/></div>
-        )}
-        <div ref={localMapDivRef} style={{ width:'100%', height: siteLatLng ? 300 : 0, display: siteLatLng ? 'block' : 'none', position:'relative', zIndex:0 }}/>
-        {siteLatLng && (
-          <div style={{ padding:'8px 14px', background:'rgba(0,0,0,.35)', display:'flex', alignItems:'center', justifyContent:'space-between' }}>
-            <div style={{ fontSize:10, color:'rgba(255,255,255,.45)', letterSpacing:.3 }}>
-              🏠 {activeSite?.nom} · {nearbyAcc.length} site{nearbyAcc.length !== 1 ? 's' : ''} ACC dans un rayon de 20 km
-            </div>
-            <div style={{ fontSize:9, color:'rgba(125,217,64,.6)', fontWeight:700 }}>ZOOM DISPONIBLE</div>
-          </div>
-        )}
-      </div>
+        </div>
 
-      {!loading && (<>
-        {/* Eligibility card */}
-        {!activeSite ? null : eligible ? (
-          <div className="card" style={{ padding:'14px 16px', marginBottom:10, background:'rgba(125,217,64,.07)', border:'1.5px solid rgba(125,217,64,.45)' }}>
-            <div className="badge success" style={{ marginBottom:8 }}>
-              <span className="star-twinkle">✦</span> Bonne nouvelle ! <span className="star-twinkle delay2">✦</span>
+        {/* Compact eligibility result */}
+        {!loading && activeSite && (eligible ? (
+          <div style={{ background:'rgba(22,163,74,.15)', border:'1.5px solid rgba(22,163,74,.5)', borderRadius:10, padding:'8px 12px', display:'flex', alignItems:'center', gap:10 }}>
+            <div style={{ fontSize:22, lineHeight:1 }}>✅</div>
+            <div style={{ flex:1 }}>
+              <div style={{ fontWeight:800, fontSize:13, color:'#4ade80', lineHeight:1.2 }}>{activeSite.nom} — éligible ACC</div>
+              {eligibleSite?.nom && <div style={{ fontSize:10, color:'rgba(255,255,255,.5)', marginTop:1 }}>{eligibleSite.nom} · {eligibleSite.puissance_pv ? eligibleSite.puissance_pv + ' kWc' : ''}</div>}
             </div>
-            <div style={{ fontWeight:800, fontSize:14, color:'white', marginBottom:4 }}>{activeSite.nom} est éligible à l'ACC</div>
-            <div style={{ fontSize:11, color:'rgba(255,255,255,.5)' }}>
-              {[activeSite.adresse_ligne1, activeSite.code_postal, activeSite.ville].filter(Boolean).join(' ')}
-            </div>
-            {eligibleSite?.nom && <div style={{ fontSize:11, color:'rgba(125,217,64,.8)', marginTop:4 }}>Site ACC : {eligibleSite.nom} · {eligibleSite.puissance_pv ? eligibleSite.puissance_pv + ' kWc' : ''}</div>}
             {accSavings > 0 && (
-              <div style={{ marginTop:10, background:'rgba(0,0,0,.2)', borderRadius:8, padding:'10px 12px', textAlign:'center' }}>
-                <div style={{ fontSize:10, color:'rgba(255,255,255,.45)', marginBottom:2 }}>Économies estimées (9h–18h)</div>
-                <div style={{ fontSize:30, fontWeight:900, color:'#7dd940', lineHeight:1 }}>-{accSavings.toLocaleString('fr-FR')} €<span style={{ fontSize:16 }}>/an</span></div>
-                <div style={{ fontSize:10, color:'rgba(255,255,255,.35)', marginTop:2 }}>Tarif ACC : {(accPriceKwh*100).toFixed(1)} c€/kWh · vs {(priceRef*100).toFixed(1)} c€/kWh actuel</div>
+              <div style={{ textAlign:'right', flexShrink:0 }}>
+                <div style={{ fontSize:18, fontWeight:900, color:'#7dd940', lineHeight:1 }}>-{accSavings.toLocaleString('fr-FR')} €</div>
+                <div style={{ fontSize:9, color:'rgba(255,255,255,.4)' }}>/an estimé</div>
               </div>
             )}
           </div>
         ) : (
-          <div className="card" style={{ padding:'14px 16px', marginBottom:10, background:'rgba(255,180,50,.05)', border:'1px solid rgba(255,180,50,.3)' }}>
-            <div className="badge info" style={{ marginBottom:8 }}>
-              <span className="star-twinkle">✦</span> Pas encore disponible
+          <div style={{ background:'rgba(245,158,11,.08)', border:'1px solid rgba(245,158,11,.35)', borderRadius:10, padding:'8px 12px', display:'flex', alignItems:'center', gap:10 }}>
+            <div style={{ fontSize:20, lineHeight:1 }}>⏳</div>
+            <div>
+              <div style={{ fontWeight:700, fontSize:13, color:'#fbbf24', lineHeight:1.2 }}>{activeSite.code_postal} — zone non encore disponible</div>
+              <div style={{ fontSize:10, color:'rgba(255,255,255,.4)', marginTop:1 }}>Starvolt déploie progressivement. Vous serez notifié dès l'ouverture.</div>
             </div>
-            <div style={{ fontWeight:700, fontSize:14, color:'white', marginBottom:4 }}>
-              {activeSite.code_postal} — pas encore dans une zone ACC active
-            </div>
-            <div style={{ fontSize:12, color:'rgba(255,255,255,.5)', marginTop:4 }}>
-              Starvolt déploie ses zones ACC progressivement. Votre adresse sera notifiée dès qu'une zone ouvre près de chez vous.
-            </div>
+          </div>
+        ))}
+        {!loading && !activeSite && (
+          <div style={{ background:'rgba(255,255,255,.05)', borderRadius:10, padding:'8px 12px', fontSize:12, color:'rgba(255,255,255,.5)' }}>
+            Configurez un site dans « Ma conso » pour voir l'éligibilité.
+          </div>
+        )}
+        {loading && <div style={{ display:'flex', alignItems:'center', gap:8, padding:'4px 0' }}><div className="spinner" style={{ width:16, height:16 }}/><div style={{ fontSize:11, color:'rgba(255,255,255,.4)' }}>Chargement…</div></div>}
+      </div>
+
+      {/* ── Map: fills remaining height ── */}
+      <div style={{ flex:1, position:'relative', minHeight:0 }}>
+        <div ref={mapDivRef} style={{ width:'100%', height:'100%', position:'absolute', inset:0, zIndex:0 }}/>
+
+        {/* Geocoding spinner overlay */}
+        {!loading && activeSite && !siteLatLng && (
+          <div style={{ position:'absolute', bottom:16, left:'50%', transform:'translateX(-50%)', zIndex:10, background:'rgba(10,22,40,.85)', borderRadius:20, padding:'6px 14px', display:'flex', alignItems:'center', gap:6 }}>
+            <div className="spinner" style={{ width:12, height:12 }}/>
+            <div style={{ fontSize:11, color:'rgba(255,255,255,.6)' }}>Géolocalisation en cours…</div>
           </div>
         )}
 
-        {/* France-wide map */}
-        <div style={{ marginBottom:10 }}>
-          <div style={{ fontWeight:700, fontSize:11, color:'rgba(255,255,255,.45)', letterSpacing:'.5px', textTransform:'uppercase', marginBottom:5 }}>
-            Sites ACC actifs · France
+        {/* Nearby count badge */}
+        {siteLatLng && (
+          <div style={{ position:'absolute', top:10, right:10, zIndex:10, background:'rgba(10,22,40,.85)', borderRadius:8, padding:'5px 10px' }}>
+            <div style={{ fontSize:10, color:'rgba(255,255,255,.5)', letterSpacing:.2 }}>Dans 20 km</div>
+            <div style={{ fontSize:16, fontWeight:900, color:'#7dd940', lineHeight:1.1 }}>{nearbyAcc.length} site{nearbyAcc.length!==1?'s':''} ACC</div>
           </div>
-          <div ref={franceMapDivRef} style={{ width:'100%', height:300, borderRadius:12, overflow:'hidden', border:'1px solid rgba(255,255,255,.1)', position:'relative', zIndex:0 }}/>
-        </div>
+        )}
 
-        {/* Popup marker details */}
+        {/* Popup card floating over map */}
         {popup && (
-          <div className="card" style={{ padding:'12px 14px', background:'rgba(125,217,64,.08)', border:'1.5px solid rgba(125,217,64,.35)' }}>
+          <div style={{ position:'absolute', bottom:16, left:12, right:12, zIndex:20, background:'rgba(10,22,40,.95)', border:'1.5px solid rgba(125,217,64,.4)', borderRadius:12, padding:'12px 14px', boxShadow:'0 4px 24px rgba(0,0,0,.5)' }}>
             <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start' }}>
               <div>
                 <div style={{ fontWeight:800, fontSize:14, color:'white' }}>☀️ {popup.nom || 'Site ACC'}</div>
-                <div style={{ fontSize:12, color:'rgba(255,255,255,.55)', marginTop:3 }}>📮 Code postal : {popup.code_postal}</div>
-                {popup.adresse && <div style={{ fontSize:11, color:'rgba(255,255,255,.4)', marginTop:1 }}>{popup.adresse}</div>}
-                <div style={{ fontSize:12, color:'rgba(255,255,255,.55)', marginTop:2 }}>⚡ Puissance : {popup.puissance_pv ? popup.puissance_pv + ' kWc' : '—'}</div>
-                <div style={{ fontSize:12, color:'rgba(125,217,64,.8)', marginTop:2 }}>🏷 {((popup.prix_vente_ttc||0.11)*100).toFixed(1)} c€/kWh TTC</div>
+                <div style={{ fontSize:11, color:'rgba(255,255,255,.5)', marginTop:2 }}>
+                  {popup.adresse ? popup.adresse + ' · ' : ''}{popup.code_postal}
+                </div>
+                <div style={{ display:'flex', gap:14, marginTop:6 }}>
+                  <div><div style={{ fontSize:9, color:'rgba(255,255,255,.35)', textTransform:'uppercase' }}>Puissance</div><div style={{ fontSize:13, fontWeight:700, color:'#38bdf8' }}>{popup.puissance_pv ? popup.puissance_pv + ' kWc' : '—'}</div></div>
+                  <div><div style={{ fontSize:9, color:'rgba(255,255,255,.35)', textTransform:'uppercase' }}>Prix vente</div><div style={{ fontSize:13, fontWeight:700, color:'#7dd940' }}>{((popup.prix_vente_ttc||0.11)*100).toFixed(1)} c€/kWh</div></div>
+                  {siteLatLng && popup.latitude && popup.longitude && <div><div style={{ fontSize:9, color:'rgba(255,255,255,.35)', textTransform:'uppercase' }}>Distance</div><div style={{ fontSize:13, fontWeight:700, color:'white' }}>{haversine(siteLatLng[0],siteLatLng[1],parseFloat(popup.latitude),parseFloat(popup.longitude)).toFixed(1)} km</div></div>}
+                </div>
               </div>
-              <button onClick={()=>setPopup(null)} style={{ background:'none', border:'none', color:'rgba(255,255,255,.4)', cursor:'pointer', fontSize:18, lineHeight:1 }}>×</button>
+              <button onClick={()=>setPopup(null)} style={{ background:'rgba(255,255,255,.08)', border:'none', color:'rgba(255,255,255,.6)', cursor:'pointer', fontSize:16, lineHeight:1, borderRadius:6, width:26, height:26, display:'flex', alignItems:'center', justifyContent:'center' }}>×</button>
             </div>
           </div>
         )}
-      </>)}
+      </div>
     </div>
   );
 }
