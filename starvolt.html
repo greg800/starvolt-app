@@ -3204,6 +3204,7 @@ function AccMapScreen({ user, userProfile, onBack }) {
   const [siteLatLng,  setSiteLatLng]  = useState(null);
   const [nearbyAcc,   setNearbyAcc]   = useState([]);
   const [popup,       setPopup]       = useState(null);
+  const [chosen,      setChosen]      = useState(null); // 'join' | 'create'
   const mapDivRef = useRef(null);
   const leafletRef = useRef(null);
 
@@ -3356,6 +3357,54 @@ function AccMapScreen({ user, userProfile, onBack }) {
   const accPriceKwh = eligibleSite?.prix_vente_ttc || 0.11;
   const accSavings = Math.max(0, Math.round(kwh918 * (priceRef - accPriceKwh)));
 
+  // ── Écran confetti après action ──
+  if (chosen) {
+    const isJoin = chosen === 'join';
+    return (
+      <div style={{ position:'fixed', inset:0, zIndex:200, display:'flex', flexDirection:'column', background:'#0a1628', overflow:'hidden' }} className="fade-in">
+        <Fireworks final/>
+        <div style={{ flex:1, overflowY:'auto', padding:'20px 16px 24px' }}>
+          <div style={{ textAlign:'center', marginBottom:20, marginTop:8 }}>
+            <div style={{ fontSize:52, marginBottom:8 }}>{isJoin ? '🤝' : '⭐'}</div>
+            <div style={{ fontSize:22, fontWeight:900, color:'white', lineHeight:1.2, marginBottom:8 }}>
+              {isJoin ? 'Bienvenue dans la boucle !' : 'Initiative lancée !'}
+            </div>
+            <div style={{ fontSize:14, color:'rgba(255,255,255,.6)', lineHeight:1.6 }}>
+              {isJoin
+                ? `${activeSite?.nom || 'Votre site'} rejoint la boucle ACC de ${eligibleSite?.nom || 'votre zone'}. Vous êtes maintenant une étoile de la constellation Starvolt.`
+                : `Votre demande de création d'une boucle ACC est enregistrée. Un conseiller Starvolt vous contacte sous 48h pour étudier la faisabilité dans votre zone.`
+              }
+            </div>
+          </div>
+
+          {isJoin && accSavings > 0 && (
+            <div style={{ background:'rgba(125,217,64,.1)', border:'1.5px solid rgba(125,217,64,.4)', borderRadius:12, padding:'16px', textAlign:'center', marginBottom:12 }}>
+              <div style={{ fontSize:11, color:'rgba(255,255,255,.45)', textTransform:'uppercase', letterSpacing:'.5px', marginBottom:4 }}>Économies estimées dès maintenant</div>
+              <div style={{ fontSize:36, fontWeight:900, color:'#7dd940', lineHeight:1 }}>-{accSavings.toLocaleString('fr-FR')} €<span style={{fontSize:18}}>/an</span></div>
+              <div style={{ fontSize:11, color:'rgba(255,255,255,.35)', marginTop:4 }}>
+                Tarif ACC : {((accPriceKwh)*100).toFixed(1)} c€/kWh · sur votre conso 9h–18h
+              </div>
+            </div>
+          )}
+
+          <div style={{ background:'rgba(125,217,64,.06)', border:'1px solid rgba(125,217,64,.2)', borderRadius:10, padding:'14px 16px' }}>
+            <div style={{ fontWeight:700, fontSize:13, color:'#7dd940', marginBottom:6 }}>✦ Prochaine étape</div>
+            <div style={{ fontSize:12, color:'rgba(255,255,255,.55)', lineHeight:1.6 }}>
+              {isJoin
+                ? 'Un conseiller Starvolt vous contacte sous 48h pour finaliser votre adhésion et paramétrer votre compteur Linky pour l\'ACC.'
+                : 'Nous analysons le potentiel solaire de votre zone et identifions les voisins intéressés. Minimum 3 foyers pour créer une boucle.'}
+            </div>
+          </div>
+        </div>
+
+        {/* Footer : retour uniquement */}
+        <div style={{ flexShrink:0, padding:'12px 14px', background:'rgba(10,22,40,.95)', borderTop:'1px solid rgba(255,255,255,.08)', display:'flex', gap:10 }}>
+          <button className="btn btn-yes" style={{ flex:1 }} onClick={onBack}>← Retour au menu</button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div style={{ position:'fixed', inset:0, zIndex:200, display:'flex', flexDirection:'column', background:'#0a1628', overflow:'hidden' }} className="fade-in">
 
@@ -3407,7 +3456,7 @@ function AccMapScreen({ user, userProfile, onBack }) {
 
         {/* Geocoding spinner overlay */}
         {!loading && activeSite && !siteLatLng && (
-          <div style={{ position:'absolute', bottom:16, left:'50%', transform:'translateX(-50%)', zIndex:10, background:'rgba(10,22,40,.85)', borderRadius:20, padding:'6px 14px', display:'flex', alignItems:'center', gap:6 }}>
+          <div style={{ position:'absolute', bottom:80, left:'50%', transform:'translateX(-50%)', zIndex:10, background:'rgba(10,22,40,.85)', borderRadius:20, padding:'6px 14px', display:'flex', alignItems:'center', gap:6 }}>
             <div className="spinner" style={{ width:12, height:12 }}/>
             <div style={{ fontSize:11, color:'rgba(255,255,255,.6)' }}>Géolocalisation en cours…</div>
           </div>
@@ -3423,7 +3472,7 @@ function AccMapScreen({ user, userProfile, onBack }) {
 
         {/* Popup card floating over map */}
         {popup && (
-          <div style={{ position:'absolute', bottom:16, left:12, right:12, zIndex:20, background:'rgba(10,22,40,.95)', border:'1.5px solid rgba(125,217,64,.4)', borderRadius:12, padding:'12px 14px', boxShadow:'0 4px 24px rgba(0,0,0,.5)' }}>
+          <div style={{ position:'absolute', bottom:80, left:12, right:12, zIndex:20, background:'rgba(10,22,40,.95)', border:'1.5px solid rgba(125,217,64,.4)', borderRadius:12, padding:'12px 14px', boxShadow:'0 4px 24px rgba(0,0,0,.5)' }}>
             <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start' }}>
               <div>
                 <div style={{ fontWeight:800, fontSize:14, color:'white' }}>☀️ {popup.nom || 'Site ACC'}</div>
@@ -3441,6 +3490,27 @@ function AccMapScreen({ user, userProfile, onBack }) {
           </div>
         )}
       </div>
+
+      {/* ── Sticky footer buttons ── */}
+      {!loading && (
+        <div style={{ flexShrink:0, padding:'10px 12px', background:'rgba(10,22,40,.97)', borderTop:'1px solid rgba(255,255,255,.08)', display:'flex', gap:8 }}>
+          {activeSite && eligible ? (
+            <button className="btn btn-yes" style={{ flex:2, fontSize:13, padding:'12px 8px' }}
+              onClick={() => setChosen('join')}>
+              🤝 Rejoindre cette boucle
+            </button>
+          ) : activeSite ? (
+            <button className="btn btn-yes" style={{ flex:2, fontSize:12, padding:'12px 6px' }}
+              onClick={() => setChosen('create')}>
+              ⭐ Créer votre propre boucle ACC
+            </button>
+          ) : null}
+          <button className="btn btn-no" style={{ flex:1, fontSize:12, padding:'12px 6px' }}
+            onClick={onBack}>
+            ← Menu
+          </button>
+        </div>
+      )}
     </div>
   );
 }
