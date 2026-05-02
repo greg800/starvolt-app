@@ -2001,6 +2001,18 @@ function MaConsoScreen({ user, userProfile, onBack }) {
   const[showDeleteConfirm,setShowDeleteConfirm]=useState(false);
   const fileRef=useRef(null);
 
+  // Sync site actif → localStorage + profiles.active_site_id en DB
+  const persistActiveSite = (id) => {
+    setActiveId(id);
+    if (id) {
+      localStorage.setItem('starvolt_active_site_id', id);
+      sb.from('profiles').update({ active_site_id: id }).eq('id', user.id);
+    } else {
+      localStorage.removeItem('starvolt_active_site_id');
+      sb.from('profiles').update({ active_site_id: null }).eq('id', user.id);
+    }
+  };
+
   const load=async()=>{
     const[{data:s},{data:t}]=await Promise.all([
       sb.from('sites').select('*').eq('user_id',user.id).order('created_at'),
@@ -2009,8 +2021,7 @@ function MaConsoScreen({ user, userProfile, onBack }) {
     setSites(s||[]);setTariffs(t||[]);
     const stored=localStorage.getItem('starvolt_active_site_id');
     const valid=stored&&s?.find(x=>x.id===stored)?stored:(s?.length?s[0].id:null);
-    setActiveId(valid);
-    if(valid)localStorage.setItem('starvolt_active_site_id',valid);
+    persistActiveSite(valid);
   };
   useEffect(()=>{load();},[]);
 
@@ -2024,13 +2035,13 @@ function MaConsoScreen({ user, userProfile, onBack }) {
   const handleAddSite=async(data)=>{
     const{data:ns}=await sb.from('sites').insert({user_id:user.id,...data}).select().single();
     setShowAdd(false);await load();
-    if(ns){setActiveId(ns.id);localStorage.setItem('starvolt_active_site_id',ns.id);}
+    if(ns) persistActiveSite(ns.id);
   };
 
   const handleDeleteConfirmed=async()=>{
     await sb.from('sites').delete().eq('id',activeId);
-    localStorage.removeItem('starvolt_active_site_id');
-    setActiveId(null);setEditMode(false);setShowDeleteConfirm(false);
+    persistActiveSite(null);
+    setEditMode(false);setShowDeleteConfirm(false);
     await load();
   };
 
@@ -2095,7 +2106,7 @@ function MaConsoScreen({ user, userProfile, onBack }) {
           <div style={{marginBottom:8}}>
             <select className="inp inp-sel" style={{fontSize:13,padding:'9px 36px 9px 12px'}} value={activeId||''} onChange={e=>{
               const id=e.target.value;
-              setActiveId(id);localStorage.setItem('starvolt_active_site_id',id);
+              persistActiveSite(id);
               setEditMode(false);setImportMsg(null);setShowDeleteConfirm(false);
             }}>
               {sites.map(s=><option key={s.id} value={s.id}>{s.nom}</option>)}
@@ -3196,7 +3207,7 @@ function SpotPricesScreen({ onBack }) {
 }
 
 // ─── AccMapScreen ─────────────────────────────
-function AccMapScreen({ user, userProfile, onBack }) {
+function AccMapScreen({ user, userProfile, onBack, onJoin, onCreate }) {
   const [accSites,    setAccSites]    = useState(null);
   const [activeSite,  setActiveSite]  = useState(null);
   const [activeTariff,setActiveTariff]= useState(null);
@@ -3204,7 +3215,6 @@ function AccMapScreen({ user, userProfile, onBack }) {
   const [siteLatLng,  setSiteLatLng]  = useState(null);
   const [nearbyAcc,   setNearbyAcc]   = useState([]);
   const [popup,       setPopup]       = useState(null);
-  const [chosen,      setChosen]      = useState(null); // 'join' | 'create'
   const mapDivRef = useRef(null);
   const leafletRef = useRef(null);
 
@@ -3357,54 +3367,6 @@ function AccMapScreen({ user, userProfile, onBack }) {
   const accPriceKwh = eligibleSite?.prix_vente_ttc || 0.11;
   const accSavings = Math.max(0, Math.round(kwh918 * (priceRef - accPriceKwh)));
 
-  // ── Écran confetti après action ──
-  if (chosen) {
-    const isJoin = chosen === 'join';
-    return (
-      <div style={{ position:'fixed', inset:0, zIndex:200, display:'flex', flexDirection:'column', background:'#0a1628', overflow:'hidden' }} className="fade-in">
-        <Fireworks final/>
-        <div style={{ flex:1, overflowY:'auto', padding:'20px 16px 24px' }}>
-          <div style={{ textAlign:'center', marginBottom:20, marginTop:8 }}>
-            <div style={{ fontSize:52, marginBottom:8 }}>{isJoin ? '🤝' : '⭐'}</div>
-            <div style={{ fontSize:22, fontWeight:900, color:'white', lineHeight:1.2, marginBottom:8 }}>
-              {isJoin ? 'Bienvenue dans la boucle !' : 'Initiative lancée !'}
-            </div>
-            <div style={{ fontSize:14, color:'rgba(255,255,255,.6)', lineHeight:1.6 }}>
-              {isJoin
-                ? `${activeSite?.nom || 'Votre site'} rejoint la boucle ACC de ${eligibleSite?.nom || 'votre zone'}. Vous êtes maintenant une étoile de la constellation Starvolt.`
-                : `Votre demande de création d'une boucle ACC est enregistrée. Un conseiller Starvolt vous contacte sous 48h pour étudier la faisabilité dans votre zone.`
-              }
-            </div>
-          </div>
-
-          {isJoin && accSavings > 0 && (
-            <div style={{ background:'rgba(125,217,64,.1)', border:'1.5px solid rgba(125,217,64,.4)', borderRadius:12, padding:'16px', textAlign:'center', marginBottom:12 }}>
-              <div style={{ fontSize:11, color:'rgba(255,255,255,.45)', textTransform:'uppercase', letterSpacing:'.5px', marginBottom:4 }}>Économies estimées dès maintenant</div>
-              <div style={{ fontSize:36, fontWeight:900, color:'#7dd940', lineHeight:1 }}>-{accSavings.toLocaleString('fr-FR')} €<span style={{fontSize:18}}>/an</span></div>
-              <div style={{ fontSize:11, color:'rgba(255,255,255,.35)', marginTop:4 }}>
-                Tarif ACC : {((accPriceKwh)*100).toFixed(1)} c€/kWh · sur votre conso 9h–18h
-              </div>
-            </div>
-          )}
-
-          <div style={{ background:'rgba(125,217,64,.06)', border:'1px solid rgba(125,217,64,.2)', borderRadius:10, padding:'14px 16px' }}>
-            <div style={{ fontWeight:700, fontSize:13, color:'#7dd940', marginBottom:6 }}>✦ Prochaine étape</div>
-            <div style={{ fontSize:12, color:'rgba(255,255,255,.55)', lineHeight:1.6 }}>
-              {isJoin
-                ? 'Un conseiller Starvolt vous contacte sous 48h pour finaliser votre adhésion et paramétrer votre compteur Linky pour l\'ACC.'
-                : 'Nous analysons le potentiel solaire de votre zone et identifions les voisins intéressés. Minimum 3 foyers pour créer une boucle.'}
-            </div>
-          </div>
-        </div>
-
-        {/* Footer : retour uniquement */}
-        <div style={{ flexShrink:0, padding:'12px 14px', background:'rgba(10,22,40,.95)', borderTop:'1px solid rgba(255,255,255,.08)', display:'flex', gap:10 }}>
-          <button className="btn btn-yes" style={{ flex:1 }} onClick={onBack}>← Retour au menu</button>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div style={{ position:'fixed', inset:0, zIndex:200, display:'flex', flexDirection:'column', background:'#0a1628', overflow:'hidden' }} className="fade-in">
 
@@ -3496,12 +3458,12 @@ function AccMapScreen({ user, userProfile, onBack }) {
         <div style={{ flexShrink:0, padding:'10px 12px', background:'rgba(10,22,40,.97)', borderTop:'1px solid rgba(255,255,255,.08)', display:'flex', gap:8, position:'relative', zIndex:1000 }}>
           {activeSite && eligible ? (
             <button className="btn btn-yes" style={{ flex:2, fontSize:13, padding:'12px 8px' }}
-              onClick={() => setChosen('join')}>
+              onClick={() => onJoin({ accSavings, accPriceKwh, eligibleSite, activeSite })}>
               🤝 Rejoindre cette boucle
             </button>
           ) : activeSite ? (
             <button className="btn btn-yes" style={{ flex:2, fontSize:12, padding:'12px 6px' }}
-              onClick={() => setChosen('create')}>
+              onClick={() => onCreate({ activeSite })}>
               ⭐ Créer votre propre boucle ACC
             </button>
           ) : null}
@@ -3511,6 +3473,50 @@ function AccMapScreen({ user, userProfile, onBack }) {
           </button>
         </div>
       )}
+    </div>
+  );
+}
+
+// ─── AccResultScreen ──────────────────────────
+function AccResultScreen({ state, onBack }) {
+  const isJoin = state.accAction === 'join';
+  const { accSavings, accPriceKwh, eligibleSite, activeSite } = state;
+  return (
+    <div className="screen fade-in">
+      <Fireworks final/>
+      <button className="back-btn" onClick={onBack}>← Retour</button>
+      <div style={{ textAlign:'center', marginBottom:20, marginTop:8 }}>
+        <div style={{ fontSize:52, marginBottom:8 }}>{isJoin ? '🤝' : '⭐'}</div>
+        <div style={{ fontSize:22, fontWeight:900, color:'white', lineHeight:1.2, marginBottom:8 }}>
+          {isJoin ? 'Bienvenue dans la boucle !' : 'Initiative lancée !'}
+        </div>
+        <div style={{ fontSize:14, color:'rgba(255,255,255,.6)', lineHeight:1.6 }}>
+          {isJoin
+            ? `${activeSite?.nom || 'Votre site'} rejoint la boucle ACC de ${eligibleSite?.nom || 'votre zone'}. Vous êtes maintenant une étoile de la constellation Starvolt.`
+            : `Votre demande de création d'une boucle ACC est enregistrée. Un conseiller vous contacte sous 48h pour étudier la faisabilité dans votre zone.`
+          }
+        </div>
+      </div>
+      {isJoin && accSavings > 0 && (
+        <div className="card" style={{ padding:'16px', marginBottom:12, textAlign:'center', background:'rgba(125,217,64,.09)', border:'1.5px solid rgba(125,217,64,.4)' }}>
+          <div style={{ fontSize:11, color:'rgba(255,255,255,.45)', textTransform:'uppercase', letterSpacing:'.5px', marginBottom:4 }}>Économies estimées dès maintenant</div>
+          <div style={{ fontSize:36, fontWeight:900, color:'#7dd940', lineHeight:1 }}>-{accSavings.toLocaleString('fr-FR')} €<span style={{fontSize:18}}>/an</span></div>
+          <div style={{ fontSize:11, color:'rgba(255,255,255,.35)', marginTop:4 }}>
+            Tarif ACC : {((accPriceKwh||0.09)*100).toFixed(1)} c€/kWh · sur votre conso 9h–18h
+          </div>
+        </div>
+      )}
+      <div className="card" style={{ padding:'14px 16px', background:'rgba(125,217,64,.06)', border:'1px solid rgba(125,217,64,.2)' }}>
+        <div style={{ fontWeight:700, fontSize:13, color:'#7dd940', marginBottom:6 }}>✦ Prochaine étape</div>
+        <div style={{ fontSize:12, color:'rgba(255,255,255,.55)', lineHeight:1.6 }}>
+          {isJoin
+            ? 'Un conseiller Starvolt vous contacte sous 48h pour finaliser votre adhésion et paramétrer votre compteur Linky.'
+            : 'Nous analysons le potentiel solaire de votre zone et identifions les voisins intéressés. Minimum 3 foyers pour créer une boucle.'}
+        </div>
+      </div>
+      <div style={{ marginTop:16 }}>
+        <button className="btn btn-yes" style={{ width:'100%' }} onClick={onBack}>← Retour au menu</button>
+      </div>
     </div>
   );
 }
@@ -4331,9 +4337,15 @@ function App() {
 
   const fetchProfile = useCallback(async (userId) => {
     const { data } = await sb.from('profiles')
-      .select('prenom, nom, pseudo, adresse_ligne1, code_postal, ville, telephone, heure_debut_hc1, heure_fin_hc1, heure_debut_hc2, heure_fin_hc2')
+      .select('prenom, nom, pseudo, adresse_ligne1, code_postal, ville, telephone, heure_debut_hc1, heure_fin_hc1, heure_debut_hc2, heure_fin_hc2, active_site_id')
       .eq('id', userId).single();
-    if (data) setProfile(data);
+    if (data) {
+      setProfile(data);
+      // Restaure le site actif depuis la DB (prioritaire sur localStorage)
+      if (data.active_site_id) {
+        localStorage.setItem('starvolt_active_site_id', data.active_site_id);
+      }
+    }
   }, []);
 
   useEffect(() => {
@@ -4360,6 +4372,7 @@ function App() {
       if (event === 'SIGNED_OUT') {
         setUser(null); setProfile(null);
         setHistory([]); setState(INIT);
+        localStorage.removeItem('starvolt_active_site_id');
       }
     });
 
@@ -4470,7 +4483,12 @@ function App() {
         return <OptimisationScreen user={user} userProfile={profile} onBack={goBack}/>;
 
       case 'ACC_MAP':
-        return <AccMapScreen user={user} userProfile={profile} onBack={goBack}/>;
+        return <AccMapScreen user={user} userProfile={profile} onBack={goBack}
+          onJoin={(data) => goTo('ACC_RESULT', { ...data, accAction:'join' })}
+          onCreate={(data) => goTo('ACC_RESULT', { ...data, accAction:'create' })}/>;
+
+      case 'ACC_RESULT':
+        return <AccResultScreen state={state} onBack={goBack}/>;
 
       case 'AUTH_SIGNUP':
         return <AuthSignupScreen
