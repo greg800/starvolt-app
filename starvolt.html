@@ -326,7 +326,7 @@
        BACK BUTTON
        ============================================= */
     .back-btn {
-      position: fixed; bottom: 0; left: 0; right: 0; z-index: 100;
+      position: fixed; bottom: 0; left: 0; right: 0; z-index: 200;
       display: flex; align-items: center; justify-content: center; gap: 6px;
       background: rgba(5,65,78,.97); border: none; border-top: 1px solid rgba(255,255,255,.09);
       backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
@@ -1065,14 +1065,18 @@ function TopBar({ name, avatarName, showName, onLogout, logoOnly = false, onLogo
 
 // ─── Sticky Footer ────────────────────────────
 function StickyFooter({ row = false, onBack, children }) {
+  const forceRow = row || !!onBack;
   return (
     <div className="sticky-footer">
-      {onBack && (
-        <button onClick={onBack} style={{ background:'none', border:'none', cursor:'pointer', color:'rgba(255,255,255,.4)', fontSize:12, fontWeight:600, padding:'0 0 10px', display:'block', width:'100%', textAlign:'center', fontFamily:'inherit', letterSpacing:'.2px' }}>
-          ← Retour
-        </button>
-      )}
-      <div className={`sticky-footer-inner${row ? ' row' : ''}`}>{children}</div>
+      <div className={`sticky-footer-inner${forceRow ? ' row' : ''}`}>
+        {onBack && (
+          <button onClick={onBack} className="btn btn-sec"
+            style={{ flex:'0 0 auto', fontSize:13, padding:'12px 16px', minWidth:90 }}>
+            ← Retour
+          </button>
+        )}
+        {children}
+      </div>
     </div>
   );
 }
@@ -4013,14 +4017,12 @@ function AdminTariffsScreen({ onEdit, onNew, onBack }) {
           ))}
         </div>
       )}
-      <div style={{position:'fixed',bottom:0,left:0,right:0,padding:'10px 16px 16px',background:'rgba(5,65,78,.97)',borderTop:'1px solid rgba(255,255,255,.09)',backdropFilter:'blur(14px)',zIndex:200}}>
-        <div style={{maxWidth:520,margin:'0 auto'}}>
-          <button onClick={onBack} style={{background:'none',border:'none',cursor:'pointer',color:'rgba(255,255,255,.4)',fontSize:12,fontWeight:600,padding:'0 0 8px',display:'block',width:'100%',textAlign:'center',fontFamily:'inherit'}}>← Retour</button>
-          <div style={{display:'flex',gap:10}}>
-            <button className="btn btn-sec" style={{flex:1,fontSize:13}} onClick={onNew}>+ Nouveau tarif</button>
-            <button className="btn btn-sec" style={{flex:1,fontSize:13,color:'#5de0f5',borderColor:'rgba(8,145,178,.4)'}}
-              onClick={()=>alert('Import prix spot — à venir')}>⚡ Importer prix spot</button>
-          </div>
+      <div style={{position:'fixed',bottom:0,left:0,right:0,padding:'24px 16px 22px',background:'linear-gradient(to top, rgba(5,65,78,1) 65%, rgba(5,65,78,.92) 85%, transparent)',zIndex:200}}>
+        <div style={{maxWidth:520,margin:'0 auto',display:'flex',gap:10}}>
+          <button className="btn btn-sec" style={{flex:'0 0 auto',fontSize:13,padding:'12px 16px',minWidth:90}} onClick={onBack}>← Retour</button>
+          <button className="btn btn-sec" style={{flex:1,fontSize:13}} onClick={onNew}>+ Nouveau tarif</button>
+          <button className="btn btn-sec" style={{flex:1,fontSize:13,color:'#5de0f5',borderColor:'rgba(8,145,178,.4)'}}
+            onClick={()=>alert('Import prix spot — à venir')}>⚡ Importer</button>
         </div>
       </div>
     </div>
