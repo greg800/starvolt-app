@@ -1070,8 +1070,14 @@ function StickyFooter({ row = false, onBack, children }) {
     <div className="sticky-footer">
       <div className={`sticky-footer-inner${forceRow ? ' row' : ''}`}>
         {onBack && (
-          <button onClick={onBack} className="btn btn-sec"
-            style={{ flex:'0 0 auto', fontSize:13, padding:'12px 16px', minWidth:90 }}>
+          <button onClick={onBack} style={{
+            flexGrow:0, flexShrink:0, flexBasis:'auto',
+            background:'rgba(255,255,255,.07)', border:'1px solid rgba(255,255,255,.14)',
+            borderRadius:10, color:'rgba(255,255,255,.65)',
+            fontSize:13, fontWeight:600, fontFamily:'inherit',
+            padding:'12px 16px', cursor:'pointer', whiteSpace:'nowrap',
+            transition:'color .15s'
+          }}>
             ← Retour
           </button>
         )}
