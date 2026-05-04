@@ -1047,11 +1047,11 @@ function TopBar({ name, avatarName, showName, logoOnly = false, onLogoClick, onP
           {isAdmin && onAdmin && (
             <button className="admin-badge" onClick={onAdmin}>⚙️ Admin</button>
           )}
-          {showName && name && (
+          {showName && onProfileClick && (
             <div className="user-chip" onClick={onProfileClick}
-              style={onProfileClick ? {cursor:'pointer'} : {}}>
-              <div className="user-chip-av">{initials}</div>
-              <span>{name}</span>
+              style={{cursor:'pointer'}}>
+              <div className="user-chip-av">{initials || '?'}</div>
+              {name && <span>{name}</span>}
             </div>
           )}
         </div>
@@ -1599,11 +1599,13 @@ function AuthSignupScreen({ onGoToLogin, onSignedUp }) {
       setError('Le mot de passe doit contenir au moins 6 caractères.'); return;
     }
     setLoading(true); setError(null);
+    // Préremplir le profil AVANT signUp pour que pendingProfileRef soit prêt
+    // quand l'event SIGNED_IN se déclenche (qui peut précéder onSignedUp)
+    onSignedUp?.({ prenom: prenom.trim(), nom: nom.trim() });
     const { data, error: err } = await sb.auth.signUp({ email: email.trim(), password: pwd });
     if (err) { setError(err.message); setLoading(false); return; }
     if (data.user) {
       await sb.from('profiles').insert({ id: data.user.id, prenom: prenom.trim(), nom: nom.trim() });
-      onSignedUp?.({ prenom: prenom.trim(), nom: nom.trim() });
     }
     if (!data.session) setCheckEmail(true);
     setLoading(false);
