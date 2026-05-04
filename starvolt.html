@@ -3608,6 +3608,7 @@ function AccResultScreen({ state, onBack }) {
   const isJoin = state.accAction === 'join';
   const { accSavings, accPriceKwh, eligibleSite, activeSite } = state;
   return (
+    <>
     <div className="screen fade-in">
       <Fireworks final/>
       <div style={{ textAlign:'center', marginBottom:20, marginTop:8 }}>
@@ -3641,6 +3642,7 @@ function AccResultScreen({ state, onBack }) {
       </div>
     </div>
     <StickyFooter onBack={onBack}/>
+    </>
   );
 }
 
