@@ -1069,10 +1069,10 @@ function StickyFooter({ row = false, onBack, children }) {
         {onBack && (
           <button onClick={onBack} style={{
             flexGrow:0, flexShrink:0, flexBasis:'auto',
-            background:'rgba(255,255,255,.07)', border:'1px solid rgba(255,255,255,.14)',
-            borderRadius:10, color:'rgba(255,255,255,.65)',
-            fontSize:13, fontWeight:600, fontFamily:'inherit',
-            padding:'12px 16px', cursor:'pointer', whiteSpace:'nowrap',
+            background:'rgba(255,255,255,.06)', border:'1px solid rgba(255,255,255,.12)',
+            borderRadius:10, color:'rgba(255,255,255,.5)',
+            fontSize:11, fontWeight:600, fontFamily:'inherit',
+            padding:'10px 12px', cursor:'pointer', whiteSpace:'nowrap',
             transition:'color .15s'
           }}>
             ← Retour
@@ -1983,6 +1983,10 @@ function SiteFormCard({initial={},onSave,onCancel}){
   const[adr,setAdr]=React.useState(initial.adresse_ligne1||'');
   const[cp,setCp]=React.useState(initial.code_postal||'');
   const[ville,setVille]=React.useState(initial.ville||'');
+  const[hc1s,setHc1s]=React.useState(initial.heure_debut_hc1||'');
+  const[hc1e,setHc1e]=React.useState(initial.heure_fin_hc1||'');
+  const[hc2s,setHc2s]=React.useState(initial.heure_debut_hc2||'');
+  const[hc2e,setHc2e]=React.useState(initial.heure_fin_hc2||'');
   return(
     <div className="card" style={{padding:'14px 16px',marginBottom:10}}>
       <div style={{fontWeight:700,fontSize:14,color:'white',marginBottom:12}}>{initial.id?'Modifier le site':'Nouveau site'}</div>
@@ -1993,9 +1997,36 @@ function SiteFormCard({initial={},onSave,onCancel}){
           <input className="inp" placeholder="Code postal" value={cp} onChange={e=>setCp(e.target.value)} style={{flex:'0 0 120px'}}/>
           <input className="inp" placeholder="Ville" value={ville} onChange={e=>setVille(e.target.value)}/>
         </div>
+        <div style={{fontSize:10,color:'rgba(255,255,255,.4)',fontWeight:700,textTransform:'uppercase',letterSpacing:.5,marginTop:6}}>
+          Heures creuses Linky (optionnel)
+        </div>
+        <div style={{display:'flex',gap:8}}>
+          <div style={{flex:1}}>
+            <div style={{fontSize:10,color:'rgba(255,255,255,.4)',marginBottom:3}}>Début HC 1</div>
+            <input className="inp" type="time" value={hc1s} onChange={e=>setHc1s(e.target.value)}/>
+          </div>
+          <div style={{flex:1}}>
+            <div style={{fontSize:10,color:'rgba(255,255,255,.4)',marginBottom:3}}>Fin HC 1</div>
+            <input className="inp" type="time" value={hc1e} onChange={e=>setHc1e(e.target.value)}/>
+          </div>
+        </div>
+        <div style={{display:'flex',gap:8}}>
+          <div style={{flex:1}}>
+            <div style={{fontSize:10,color:'rgba(255,255,255,.4)',marginBottom:3}}>Début HC 2</div>
+            <input className="inp" type="time" value={hc2s} onChange={e=>setHc2s(e.target.value)}/>
+          </div>
+          <div style={{flex:1}}>
+            <div style={{fontSize:10,color:'rgba(255,255,255,.4)',marginBottom:3}}>Fin HC 2</div>
+            <input className="inp" type="time" value={hc2e} onChange={e=>setHc2e(e.target.value)}/>
+          </div>
+        </div>
         <div style={{display:'flex',gap:8,marginTop:4}}>
           <button className="btn btn-primary" style={{flex:1,fontSize:13,padding:'10px 0'}}
-            onClick={()=>nom.trim()&&onSave({nom:nom.trim(),adresse_ligne1:adr,code_postal:cp,ville})}>
+            onClick={()=>nom.trim()&&onSave({
+              nom:nom.trim(),adresse_ligne1:adr,code_postal:cp,ville,
+              heure_debut_hc1:hc1s||null,heure_fin_hc1:hc1e||null,
+              heure_debut_hc2:hc2s||null,heure_fin_hc2:hc2e||null,
+            })}>
             Enregistrer
           </button>
           <button className="btn btn-sec" style={{flex:1,fontSize:13,padding:'10px 0'}} onClick={onCancel}>Annuler</button>
@@ -2096,7 +2127,7 @@ function MaConsoScreen({ user, userProfile, onBack }) {
       <div className="screen fade-in">
         <div style={{textAlign:'center',padding:40,color:'rgba(255,255,255,.5)'}}>Chargement…</div>
       </div>
-      <BackBtn onBack={onBack}/>
+      <StickyFooter onBack={onBack}/>
     </>
   );
 
@@ -2107,19 +2138,16 @@ function MaConsoScreen({ user, userProfile, onBack }) {
     ville:userProfile?.ville||''
   }:{};
 
-  const showFooter=!showAdd&&!editMode;
+  const showActions=!showAdd&&!editMode;
 
   return(
     <>
       <div className="screen fade-in">
         {/* Compact header row */}
         <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:10,marginTop:4}}>
-          <div style={{display:'flex',alignItems:'center',gap:10}}>
-            <button className="back-btn" style={{position:'static',margin:0,padding:'6px 10px',fontSize:12}} onClick={onBack}>← Retour</button>
-            <div>
-              <div style={{fontSize:9,letterSpacing:'.6px',color:'rgba(125,217,64,.8)',fontWeight:700,textTransform:'uppercase'}}>Énergie</div>
-              <div style={{fontSize:18,fontWeight:900,color:'white',lineHeight:1.1}}>Ma <span className="accent">conso</span></div>
-            </div>
+          <div>
+            <div style={{fontSize:9,letterSpacing:'.6px',color:'rgba(125,217,64,.8)',fontWeight:700,textTransform:'uppercase'}}>Énergie</div>
+            <div style={{fontSize:18,fontWeight:900,color:'white',lineHeight:1.1}}>Ma <span className="accent">conso</span></div>
           </div>
           <div style={{display:'flex',alignItems:'center',gap:6}}>
             {site&&!showAdd&&!editMode&&(
@@ -2267,32 +2295,31 @@ function MaConsoScreen({ user, userProfile, onBack }) {
         )}
       </div>
 
-      {/* Sticky footer */}
-      {showFooter&&(
-        <StickyFooter row={sites.length===0||!!site}>
-          {sites.length===0?(
-            <>
-              <button className="btn btn-primary" style={{fontSize:13,flex:1}} onClick={()=>{setShowAdd(true);setEditMode(false);}}>
-                🏠 Créer mon site
+      {/* Sticky footer — retour toujours visible, actions conditionnelles */}
+      <StickyFooter row onBack={onBack}>
+        {showActions&&sites.length===0&&(
+          <>
+            <button className="btn btn-primary" style={{fontSize:13,flex:1}} onClick={()=>{setShowAdd(true);setEditMode(false);}}>
+              🏠 Créer mon site
+            </button>
+            <button className="btn btn-sec" style={{fontSize:13,flex:1}} disabled={importingDemo} onClick={handleImportDemo}>
+              {importingDemo?'⏳ Chargement…':'📂 Données témoins'}
+            </button>
+          </>
+        )}
+        {showActions&&sites.length>0&&(
+          <>
+            <button className="btn btn-primary" style={{fontSize:13}} onClick={()=>{setShowAdd(true);setEditMode(false);setShowDeleteConfirm(false);}}>
+              + Ajouter un site
+            </button>
+            {site&&!showDeleteConfirm&&(
+              <button className="btn btn-no" style={{fontSize:13}} onClick={()=>setShowDeleteConfirm(true)}>
+                🗑️ Supprimer
               </button>
-              <button className="btn btn-sec" style={{fontSize:13,flex:1}} disabled={importingDemo} onClick={handleImportDemo}>
-                {importingDemo?'⏳ Chargement…':'📂 Données témoins'}
-              </button>
-            </>
-          ):(
-            <>
-              <button className="btn btn-primary" style={{fontSize:13}} onClick={()=>{setShowAdd(true);setEditMode(false);setShowDeleteConfirm(false);}}>
-                + Ajouter un site
-              </button>
-              {site&&!showDeleteConfirm&&(
-                <button className="btn btn-no" style={{fontSize:13}} onClick={()=>setShowDeleteConfirm(true)}>
-                  🗑️ Supprimer
-                </button>
-              )}
-            </>
-          )}
-        </StickyFooter>
-      )}
+            )}
+          </>
+        )}
+      </StickyFooter>
     </>
   );
 }
@@ -2312,15 +2339,15 @@ function SimulationsScreen({ onACC, onBox, onSolar, onOptimisation, onBack, user
     const activeId = localStorage.getItem('starvolt_active_site_id');
     Promise.all([
       activeId
-        ? sb.from('sites').select('id,conso_profil,tarif_id').eq('id', activeId).maybeSingle()
-        : sb.from('sites').select('id,conso_profil,tarif_id').eq('user_id', user.id).not('conso_profil','is',null).order('created_at').limit(1).maybeSingle(),
+        ? sb.from('sites').select('id,conso_profil,tarif_id,heure_debut_hc1,heure_fin_hc1,heure_debut_hc2,heure_fin_hc2').eq('id', activeId).maybeSingle()
+        : sb.from('sites').select('id,conso_profil,tarif_id,heure_debut_hc1,heure_fin_hc1,heure_debut_hc2,heure_fin_hc2').eq('user_id', user.id).not('conso_profil','is',null).order('created_at').limit(1).maybeSingle(),
       sb.from('tarifs_electricite').select('*').order('nom'),
     ]).then(async ([{ data: siteData }, { data: tariffs }]) => {
       const site = Array.isArray(siteData) ? siteData[0] : siteData;
       if (!site?.conso_profil) return;
       setHasConso(true);
 
-      const { kwh_hc, kwh_hp } = calcHcHp(site.conso_profil, userProfile);
+      const { kwh_hc, kwh_hp } = calcHcHp(site.conso_profil, site);
       const kwh_total = kwh_hc + kwh_hp;
 
       // Optimisation savings
@@ -2363,7 +2390,6 @@ function SimulationsScreen({ onACC, onBox, onSolar, onOptimisation, onBack, user
   if (changedTariff) {
     return (
       <>
-      <BackBtn onBack={onBack}/>
       <div className="screen fade-in">
         <Fireworks final/>
         <div style={{ textAlign:'center', marginBottom:20, marginTop:8 }}>
@@ -2390,6 +2416,7 @@ function SimulationsScreen({ onACC, onBox, onSolar, onOptimisation, onBack, user
           </div>
         </div>
       </div>
+      <StickyFooter onBack={onBack}/>
       </>
     );
   }
@@ -2450,14 +2477,7 @@ function SimulationsScreen({ onACC, onBox, onSolar, onOptimisation, onBack, user
         </button>
       </div>
     </div>
-    <StickyFooter row onBack={onBack}>
-      {hasConso && maxSaving > 0 && (
-        <button className="btn btn-yes" style={{fontSize:12, padding:'12px 10px'}}
-          onClick={() => { confetti({ particleCount:120, spread:70, origin:{y:.6} }); setChangedTariff(true); }}>
-          ⚡ Je change de fournisseur
-        </button>
-      )}
-    </StickyFooter>
+    <StickyFooter onBack={onBack}/>
     </>
   );
 }
@@ -2501,9 +2521,9 @@ function calcHcHp(consoProfile, userProfile) {
 
 function calcTariffCost(tariff, kwh_hc, kwh_hp, dynamicCtx = null) {
   if (tariff.tarif_dynamique) {
-    const { consoProfile, spotMap, natParams, userProfile } = dynamicCtx || {};
+    const { consoProfile, spotMap, natParams, site } = dynamicCtx || {};
     if (!consoProfile || !spotMap || !natParams) return null;
-    return calcDynamicCost(tariff, consoProfile, spotMap, natParams, userProfile);
+    return calcDynamicCost(tariff, consoProfile, spotMap, natParams, site);
   }
   const abo = tariff.abo_annuel || 0;
   const hp  = tariff.prix_hp || 0;
@@ -2584,7 +2604,7 @@ function OptimisationScreen({ user, userProfile, onBack }) {
 
   useEffect(() => {
     Promise.all([
-      sb.from('sites').select('id,nom,conso_profil,conso_annuelle_kwh,tarif_id').eq('user_id', user.id).not('conso_profil', 'is', null).order('created_at'),
+      sb.from('sites').select('id,nom,conso_profil,conso_annuelle_kwh,tarif_id,heure_debut_hc1,heure_fin_hc1,heure_debut_hc2,heure_fin_hc2').eq('user_id', user.id).not('conso_profil', 'is', null).order('created_at'),
       sb.from('tarifs_electricite').select('*').order('nom'),
       sb.rpc('get_spot_json'),
       sb.from('parametres_nationaux').select('*').eq('id', 1).maybeSingle(),
@@ -2600,13 +2620,13 @@ function OptimisationScreen({ user, userProfile, onBack }) {
   const site = sites?.find(s => s.id === activeId) || null;
 
   const { kwh_hc, kwh_hp, hasHC } = site?.conso_profil
-    ? calcHcHp(site.conso_profil, userProfile)
+    ? calcHcHp(site.conso_profil, site)
     : { kwh_hc: 0, kwh_hp: 0, hasHC: false };
 
   const kwh_total = kwh_hc + kwh_hp;
 
   const dynamicCtx = site?.conso_profil && spotMap && natParams
-    ? { consoProfile: site.conso_profil, spotMap, natParams, userProfile }
+    ? { consoProfile: site.conso_profil, spotMap, natParams, site }
     : null;
 
   const ranked = tariffs
@@ -2626,7 +2646,6 @@ function OptimisationScreen({ user, userProfile, onBack }) {
   if (chosen) {
     return (
       <>
-      <BackBtn onBack={onBack}/>
       <div className="screen fade-in">
         <Fireworks final/>
         <div style={{ textAlign:'center', marginBottom:20, marginTop:8 }}>
@@ -2650,6 +2669,7 @@ function OptimisationScreen({ user, userProfile, onBack }) {
           </div>
         </div>
       </div>
+      <StickyFooter onBack={onBack}/>
       </>
     );
   }
@@ -2813,10 +2833,6 @@ function ProfileScreen({ user, profile, onSave, onCancel, onLogout, onDeleted })
   const [ville,     setVille]     = useState(profile?.ville || '');
   const [tel,       setTel]       = useState(profile?.telephone || '');
   const [email,     setEmail]     = useState(user?.email || '');
-  const [hc1Start,  setHc1Start]  = useState(profile?.heure_debut_hc1?.slice(0,5) || '');
-  const [hc1End,    setHc1End]    = useState(profile?.heure_fin_hc1?.slice(0,5) || '');
-  const [hc2Start,  setHc2Start]  = useState(profile?.heure_debut_hc2?.slice(0,5) || '');
-  const [hc2End,    setHc2End]    = useState(profile?.heure_fin_hc2?.slice(0,5) || '');
   const [loading,   setLoading]   = useState(false);
   const [error,     setError]     = useState(null);
   const [showDelete, setShowDelete] = useState(false);
@@ -2837,10 +2853,6 @@ function ProfileScreen({ user, profile, onSave, onCancel, onLogout, onDeleted })
       code_postal:    cp.trim() || null,
       ville:          ville.trim() || null,
       telephone:      tel.trim() || null,
-      heure_debut_hc1: hc1Start || null,
-      heure_fin_hc1:   hc1End   || null,
-      heure_debut_hc2: hc2Start || null,
-      heure_fin_hc2:   hc2End   || null,
     }).eq('id', user.id);
     if (err) { setError(err.message); setLoading(false); return; }
     if (email.trim() && email.trim() !== user.email) {
@@ -2849,9 +2861,7 @@ function ProfileScreen({ user, profile, onSave, onCancel, onLogout, onDeleted })
     setLoading(false);
     onSave({ prenom:prenom.trim(), nom:nom.trim(), pseudo:pseudo.trim()||null,
              adresse_ligne1:adresse.trim()||null, code_postal:cp.trim()||null,
-             ville:ville.trim()||null, telephone:tel.trim()||null,
-             heure_debut_hc1:hc1Start||null, heure_fin_hc1:hc1End||null,
-             heure_debut_hc2:hc2Start||null, heure_fin_hc2:hc2End||null });
+             ville:ville.trim()||null, telephone:tel.trim()||null });
   };
 
   const handleDeleteConfirm = async () => {
@@ -2907,29 +2917,6 @@ function ProfileScreen({ user, profile, onSave, onCancel, onLogout, onDeleted })
           <div className="inp-group">
             <label className="inp-label">Email</label>
             <input className="inp" type="email" value={email} onChange={e=>setEmail(e.target.value)}/>
-          </div>
-          <div style={{fontSize:11,color:'rgba(255,255,255,.45)',fontWeight:700,textTransform:'uppercase',letterSpacing:.5,marginTop:4}}>
-            Plages heures creuses (compteur Linky)
-          </div>
-          <div className="inp-row">
-            <div className="inp-group">
-              <label className="inp-label">Début HC 1</label>
-              <input className="inp" type="time" value={hc1Start} onChange={e=>setHc1Start(e.target.value)}/>
-            </div>
-            <div className="inp-group">
-              <label className="inp-label">Fin HC 1</label>
-              <input className="inp" type="time" value={hc1End} onChange={e=>setHc1End(e.target.value)}/>
-            </div>
-          </div>
-          <div className="inp-row">
-            <div className="inp-group">
-              <label className="inp-label">Début HC 2</label>
-              <input className="inp" type="time" value={hc2Start} onChange={e=>setHc2Start(e.target.value)}/>
-            </div>
-            <div className="inp-group">
-              <label className="inp-label">Fin HC 2</label>
-              <input className="inp" type="time" value={hc2End} onChange={e=>setHc2End(e.target.value)}/>
-            </div>
           </div>
           {error && <div className="auth-error">{error}</div>}
         </div>
@@ -3214,10 +3201,10 @@ function SpotPricesScreen({ onBack }) {
   const fmtDate = (ts) => ts ? new Date(ts).toLocaleString('fr-FR',{day:'2-digit',month:'2-digit',year:'2-digit',hour:'2-digit',minute:'2-digit'}) : '—';
 
   return (
+    <>
     <div className="screen fade-in">
       {/* Header compact */}
-      <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:6}}>
-        <button className="back-btn" style={{position:'static',margin:0,padding:'4px 10px',fontSize:12}} onClick={onBack}>← Retour</button>
+      <div style={{display:'flex',alignItems:'center',justifyContent:'flex-end',marginBottom:6}}>
         <span style={{fontSize:13,fontWeight:800,color:'white',letterSpacing:.5}}>
           Prix <span style={{color:'var(--green)'}}>spot</span>
         </span>
@@ -3341,6 +3328,8 @@ function SpotPricesScreen({ onBack }) {
         </div>
       )}
     </div>
+    <StickyFooter onBack={onBack}/>
+    </>
   );
 }
 
@@ -3511,7 +3500,6 @@ function AccMapScreen({ user, userProfile, onBack, onJoin, onCreate }) {
       {/* ── Top bar: compact header + eligibility ── */}
       <div style={{ flexShrink:0, padding:'10px 14px 8px', background:'linear-gradient(180deg,#0a1628 80%,transparent)', position:'relative', zIndex:2 }}>
         <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:6 }}>
-          <button className="back-btn" onClick={onBack} style={{ position:'static', margin:0 }}>← Retour</button>
           <div>
             <div style={{ fontSize:8, letterSpacing:'.6px', color:'rgba(125,217,64,.8)', fontWeight:700, textTransform:'uppercase' }}>Simulation</div>
             <div style={{ fontSize:15, fontWeight:900, color:'white', lineHeight:1.1 }}>Autoconsommation <span className="accent">collective</span></div>
@@ -3651,10 +3639,8 @@ function AccResultScreen({ state, onBack }) {
             : 'Nous analysons le potentiel solaire de votre zone et identifions les voisins intéressés. Minimum 3 foyers pour créer une boucle.'}
         </div>
       </div>
-      <div style={{ marginTop:16 }}>
-        <button className="btn btn-yes" style={{ width:'100%' }} onClick={onBack}>← Retour au menu</button>
-      </div>
     </div>
+    <StickyFooter onBack={onBack}/>
   );
 }
 
@@ -3669,20 +3655,20 @@ function BoxSimScreen({ user, userProfile, onBack }) {
     const siteId = localStorage.getItem('starvolt_active_site_id');
     if (!siteId) { setLoading(false); return; }
     Promise.all([
-      sb.from('sites').select('id,conso_profil,tarif_id').eq('id', siteId).maybeSingle(),
+      sb.from('sites').select('id,conso_profil,tarif_id,heure_debut_hc1,heure_fin_hc1,heure_debut_hc2,heure_fin_hc2').eq('id', siteId).maybeSingle(),
       sb.from('tarifs_electricite').select('*'),
       sb.rpc('get_spot_json'),
       sb.from('parametres_nationaux').select('*').eq('id', 1).maybeSingle(),
     ]).then(([{ data: site }, { data: tariffs }, { data: spotRows }, { data: nat }]) => {
       if (!site?.conso_profil) { setLoading(false); return; }
       const curTariff = site.tarif_id ? (tariffs || []).find(t => t.id === site.tarif_id) : null;
-      const { kwh_hc, kwh_hp } = calcHcHp(site.conso_profil, userProfile);
+      const { kwh_hc, kwh_hp } = calcHcHp(site.conso_profil, site);
       const kwh_total = kwh_hc + kwh_hp;
       let bill = null;
       if (curTariff?.tarif_dynamique) {
         setIsDynamic(true);
         if (spotRows && nat) {
-          const r = calcDynamicCost(curTariff, site.conso_profil, buildSpotMap(spotRows), nat, userProfile);
+          const r = calcDynamicCost(curTariff, site.conso_profil, buildSpotMap(spotRows), nat, site);
           bill = r?.total || null;
         }
       } else if (curTariff) {
@@ -3703,7 +3689,6 @@ function BoxSimScreen({ user, userProfile, onBack }) {
   if (chosen) {
     return (
       <>
-      <BackBtn onBack={onBack}/>
       <div className="screen fade-in">
         <Fireworks final/>
         <div style={{ textAlign:'center', marginBottom:16 }}>
@@ -3754,6 +3739,7 @@ function BoxSimScreen({ user, userProfile, onBack }) {
           </div>
         </div>
       </div>
+      <StickyFooter onBack={onBack}/>
       </>
     );
   }
@@ -3855,20 +3841,20 @@ function SolarSimScreen({ user, userProfile, onBack }) {
     const siteId = localStorage.getItem('starvolt_active_site_id');
     if (!siteId) { setLoading(false); return; }
     Promise.all([
-      sb.from('sites').select('id,conso_profil,tarif_id').eq('id', siteId).maybeSingle(),
+      sb.from('sites').select('id,conso_profil,tarif_id,heure_debut_hc1,heure_fin_hc1,heure_debut_hc2,heure_fin_hc2').eq('id', siteId).maybeSingle(),
       sb.from('tarifs_electricite').select('*'),
       sb.rpc('get_spot_json'),
       sb.from('parametres_nationaux').select('*').eq('id', 1).maybeSingle(),
     ]).then(([{ data: site }, { data: tariffs }, { data: spotRows }, { data: nat }]) => {
       if (!site?.conso_profil) { setLoading(false); return; }
       const curTariff = site.tarif_id ? (tariffs || []).find(t => t.id === site.tarif_id) : null;
-      const { kwh_hc, kwh_hp } = calcHcHp(site.conso_profil, userProfile);
+      const { kwh_hc, kwh_hp } = calcHcHp(site.conso_profil, site);
       const kwh_total = kwh_hc + kwh_hp;
       let bill = null;
       if (curTariff?.tarif_dynamique) {
         setIsDynamic(true);
         if (spotRows && nat) {
-          const r = calcDynamicCost(curTariff, site.conso_profil, buildSpotMap(spotRows), nat, userProfile);
+          const r = calcDynamicCost(curTariff, site.conso_profil, buildSpotMap(spotRows), nat, site);
           bill = r?.total || null;
         }
       } else if (curTariff) {
@@ -3895,7 +3881,6 @@ function SolarSimScreen({ user, userProfile, onBack }) {
     const withBox = chosen === 'solar_box';
     return (
       <>
-      <BackBtn onBack={onBack}/>
       <div className="screen fade-in">
         <Fireworks final/>
         <div style={{ textAlign:'center', marginBottom:16 }}>
@@ -3962,6 +3947,7 @@ function SolarSimScreen({ user, userProfile, onBack }) {
           </div>
         </div>
       </div>
+      <StickyFooter onBack={onBack}/>
       </>
     );
   }
@@ -4057,7 +4043,6 @@ function SolarSimScreen({ user, userProfile, onBack }) {
 function AdminScreen({ onTariffs, onUsers, onSpot, onAcc, onBack }) {
   return (
     <>
-    <BackBtn onBack={onBack}/>
     <div className="screen fade-in">
       <div className="auth-header">
         <div className="welcome-tag" style={{color:'#ffb340'}}>Administration</div>
@@ -4098,6 +4083,7 @@ function AdminScreen({ onTariffs, onUsers, onSpot, onAcc, onBack }) {
         </button>
       </div>
     </div>
+    <StickyFooter onBack={onBack}/>
     </>
   );
 }
@@ -4143,15 +4129,10 @@ function AdminTariffsScreen({ onEdit, onNew, onBack }) {
           ))}
         </div>
       )}
-      <div style={{position:'fixed',bottom:0,left:0,right:0,padding:'24px 16px 22px',background:'linear-gradient(to top, rgba(5,65,78,1) 65%, rgba(5,65,78,.92) 85%, transparent)',zIndex:200}}>
-        <div style={{maxWidth:520,margin:'0 auto',display:'flex',gap:10}}>
-          <button className="btn btn-sec" style={{flex:'0 0 auto',fontSize:13,padding:'12px 16px',minWidth:90}} onClick={onBack}>← Retour</button>
-          <button className="btn btn-sec" style={{flex:1,fontSize:13}} onClick={onNew}>+ Nouveau tarif</button>
-          <button className="btn btn-sec" style={{flex:1,fontSize:13,color:'#5de0f5',borderColor:'rgba(8,145,178,.4)'}}
-            onClick={()=>alert('Import prix spot — à venir')}>⚡ Importer</button>
-        </div>
-      </div>
     </div>
+    <StickyFooter row onBack={onBack}>
+      <button className="btn btn-sec" style={{fontSize:13}} onClick={onNew}>+ Nouveau tarif</button>
+    </StickyFooter>
   );
 }
 
@@ -4431,7 +4412,6 @@ function AdminUsersScreen({ onBack }) {
 
   return (
     <>
-    <BackBtn onBack={onBack}/>
     <div className="screen fade-in">
       <div className="auth-header">
         <div className="welcome-tag" style={{color:'#ffb340'}}>Administration</div>
@@ -4451,6 +4431,7 @@ function AdminUsersScreen({ onBack }) {
         </div>
       )}
     </div>
+    <StickyFooter onBack={onBack}/>
     </>
   );
 }
@@ -4477,7 +4458,7 @@ function App() {
 
   const fetchProfile = useCallback(async (userId) => {
     const { data } = await sb.from('profiles')
-      .select('prenom, nom, pseudo, adresse_ligne1, code_postal, ville, telephone, heure_debut_hc1, heure_fin_hc1, heure_debut_hc2, heure_fin_hc2, active_site_id')
+      .select('prenom, nom, pseudo, adresse_ligne1, code_postal, ville, telephone, active_site_id')
       .eq('id', userId).single();
     if (data) {
       setProfile(data);
