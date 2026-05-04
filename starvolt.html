@@ -2555,6 +2555,7 @@ function OptimisationScreen({ user, userProfile, onBack }) {
   const [activeId] = useState(() => localStorage.getItem('starvolt_active_site_id'));
   const [tariffs,  setTariffs]  = useState([]);
   const [loading,  setLoading]  = useState(true);
+  const [chosen,   setChosen]   = useState(false);
 
   const [spotMap,   setSpotMap]   = useState(null);
   const [natParams, setNatParams] = useState(null);
@@ -2600,9 +2601,47 @@ function OptimisationScreen({ user, userProfile, onBack }) {
   const fmtE = (v) => `${fmt(v)} €`;
   const fmtPrixKwh = (total) => kwh_total > 0 ? `${(total / kwh_total * 100).toFixed(1)} c€/kWh` : null;
 
+  if (chosen) {
+    return (
+      <>
+      <BackBtn onBack={onBack}/>
+      <div className="screen fade-in">
+        <Fireworks final/>
+        <div style={{ textAlign:'center', marginBottom:20, marginTop:8 }}>
+          <div style={{ fontSize:52, marginBottom:8 }}>⚡</div>
+          <div style={{ fontSize:22, fontWeight:900, color:'white', lineHeight:1.2, marginBottom:8 }}>Changement lancé !</div>
+          <div style={{ fontSize:14, color:'rgba(255,255,255,.6)', lineHeight:1.6 }}>
+            Votre demande de changement de fournisseur est enregistrée. Un conseiller vous contacte sous 48h.
+          </div>
+        </div>
+        {heroSaving > 0 && (
+          <div className="card" style={{ padding:'16px', marginBottom:12, textAlign:'center', background:'rgba(125,217,64,.09)', border:'1.5px solid rgba(125,217,64,.4)' }}>
+            <div style={{ fontSize:11, color:'rgba(255,255,255,.45)', textTransform:'uppercase', letterSpacing:'.5px', marginBottom:4 }}>Économies estimées</div>
+            <div style={{ fontSize:36, fontWeight:900, color:'#7dd940', lineHeight:1 }}>-{heroSaving.toLocaleString('fr-FR')} €<span style={{fontSize:18}}>/an</span></div>
+            {ranked[0] && <div style={{ fontSize:12, color:'rgba(255,255,255,.45)', marginTop:6 }}>En passant sur le tarif <strong style={{color:'#7dd940'}}>{ranked[0].t.nom}</strong></div>}
+          </div>
+        )}
+        <div className="card" style={{ padding:'14px 16px', background:'rgba(125,217,64,.06)', border:'1px solid rgba(125,217,64,.2)' }}>
+          <div style={{ fontWeight:700, fontSize:13, color:'#7dd940', marginBottom:6 }}>✦ Prochaine étape</div>
+          <div style={{ fontSize:12, color:'rgba(255,255,255,.55)', lineHeight:1.6 }}>
+            Nous vérifions votre éligibilité et préparons votre dossier de changement. Aucune démarche de votre côté — on s'occupe de tout.
+          </div>
+        </div>
+      </div>
+      </>
+    );
+  }
+
   return (
     <>
-    <BackBtn onBack={onBack}/>
+    <StickyFooter onBack={onBack}>
+      {!loading && heroSaving > 0 && (
+        <button className="btn btn-yes"
+          onClick={() => { confetti({ particleCount:120, spread:70, origin:{y:.6} }); setChosen(true); }}>
+          ⚡ Je change de fournisseur
+        </button>
+      )}
+    </StickyFooter>
     <div className="screen fade-in">
       <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:12, marginTop:4 }}>
         <img src="/optimisation.png" alt="" style={{ width:32, height:32, objectFit:'contain', mixBlendMode:'screen', opacity:.85 }}/>
