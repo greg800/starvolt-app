@@ -1034,7 +1034,7 @@ function Logo({ width = 135 }) {
 }
 
 // ─── Top Bar ──────────────────────────────────
-function TopBar({ name, avatarName, showName, onLogout, logoOnly = false, onLogoClick, onProfileClick, isAdmin, onAdmin }) {
+function TopBar({ name, avatarName, showName, logoOnly = false, onLogoClick, onProfileClick, isAdmin, onAdmin }) {
   const src = avatarName || name || '';
   const initials = src.trim().split(/\s+/).map(w => w[0]?.toUpperCase() || '').join('').slice(0, 2);
   return (
@@ -1053,9 +1053,6 @@ function TopBar({ name, avatarName, showName, onLogout, logoOnly = false, onLogo
               <div className="user-chip-av">{initials}</div>
               <span>{name}</span>
             </div>
-          )}
-          {onLogout && (
-            <button className="top-bar-logout" onClick={onLogout}>Quitter</button>
           )}
         </div>
       )}
@@ -2038,8 +2035,9 @@ function MaConsoScreen({ user, userProfile, onBack }) {
       sb.from('tarifs_electricite').select('id,nom').order('nom')
     ]);
     setSites(s||[]);setTariffs(t||[]);
-    const stored=localStorage.getItem('starvolt_active_site_id');
-    const valid=stored&&s?.find(x=>x.id===stored)?stored:(s?.length?s[0].id:null);
+    // Priorité : DB restaurée dans userProfile (login) > localStorage > 1er site
+    const stored = userProfile?.active_site_id || localStorage.getItem('starvolt_active_site_id');
+    const valid = stored && s?.find(x=>x.id===stored) ? stored : (s?.length ? s[0].id : null);
     persistActiveSite(valid);
   };
   useEffect(()=>{load();},[]);
@@ -4689,7 +4687,6 @@ function App() {
         avatarName={avatarName}
         showName={!isAuthScreen && showNameChip}
         logoOnly={isAuthScreen}
-        onLogout={user && !isHome && state.screen !== 'PROFILE' ? handleLogout : null}
         onLogoClick={() => user ? goTo('HOME_LOGGED_IN') : goTo('WELCOME')}
         onProfileClick={user ? () => goTo('PROFILE') : null}
         isAdmin={isAdmin}
