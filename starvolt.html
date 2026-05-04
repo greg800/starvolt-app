@@ -1187,10 +1187,12 @@ function BillMeter({ bill, initialBill }) {
   );
 }
 
-// ─── BackButton ───────────────────────────────
-const BackBtn = ({ onBack }) => (
-  <button className="back-btn" onClick={onBack}>← Retour</button>
-);
+// ─── BackButton (portal → hors de tout transform ancestor) ──
+const BackBtn = ({ onBack }) =>
+  ReactDOM.createPortal(
+    <button className="back-btn" onClick={onBack}>← Retour</button>,
+    document.body
+  );
 
 // ─── SCREENS ──────────────────────────────────
 
@@ -2075,10 +2077,12 @@ function MaConsoScreen({ user, userProfile, onBack }) {
   };
 
   if(sites===null)return(
-    <div className="screen fade-in">
-      <button className="back-btn" onClick={onBack}>← Retour</button>
-      <div style={{textAlign:'center',padding:40,color:'rgba(255,255,255,.5)'}}>Chargement…</div>
-    </div>
+    <>
+      <div className="screen fade-in">
+        <div style={{textAlign:'center',padding:40,color:'rgba(255,255,255,.5)'}}>Chargement…</div>
+      </div>
+      <BackBtn onBack={onBack}/>
+    </>
   );
 
   // Default address from profile for first site
@@ -2272,6 +2276,8 @@ function SimulationsScreen({ onACC, onBox, onSolar, onOptimisation, onBack, user
   const [accSaving, setAccSaving] = useState(null);
   const [boxSaving,   setBoxSaving]   = useState(null);
   const [solarSaving, setSolarSaving] = useState(null);
+  const [bestTariffName, setBestTariffName] = useState(null);
+  const [changedTariff, setChangedTariff] = useState(false);
 
   useEffect(() => {
     if (!user) return;
@@ -2294,7 +2300,9 @@ function SimulationsScreen({ onACC, onBox, onSolar, onOptimisation, onBack, user
         const ranked = tariffs.map(t=>({t,result:calcTariffCost(t,kwh_hc,kwh_hp)})).filter(({result})=>result!==null).sort((a,b)=>a.result.total-b.result.total);
         if (ranked.length) {
           const cur = site.tarif_id ? ranked.find(r=>r.t.id===site.tarif_id) : null;
-          setMaxSaving(cur ? Math.round(cur.result.total - ranked[0].result.total) : null);
+          const saving = cur ? Math.round(cur.result.total - ranked[0].result.total) : null;
+          setMaxSaving(saving);
+          if (saving > 0) setBestTariffName(ranked[0].t.nom);
 
           // Box saving: 140€ flex + 10% (HC/HP) or 20% (dynamic) of current bill
           const curTariff = site.tarif_id ? tariffs.find(t => t.id === site.tarif_id) : null;
@@ -2324,9 +2332,43 @@ function SimulationsScreen({ onACC, onBox, onSolar, onOptimisation, onBack, user
     });
   }, [user?.id]);
 
+  if (changedTariff) {
+    return (
+      <>
+      <BackBtn onBack={onBack}/>
+      <div className="screen fade-in">
+        <Fireworks final/>
+        <div style={{ textAlign:'center', marginBottom:20, marginTop:8 }}>
+          <div style={{ fontSize:52, marginBottom:8 }}>⚡</div>
+          <div style={{ fontSize:22, fontWeight:900, color:'white', lineHeight:1.2, marginBottom:8 }}>
+            Changement lancé !
+          </div>
+          <div style={{ fontSize:14, color:'rgba(255,255,255,.6)', lineHeight:1.6 }}>
+            Votre demande de changement de fournisseur est enregistrée.
+            Un conseiller vous contacte sous 48h.
+          </div>
+        </div>
+        {maxSaving > 0 && (
+          <div className="card" style={{ padding:'16px', marginBottom:12, textAlign:'center', background:'rgba(125,217,64,.09)', border:'1.5px solid rgba(125,217,64,.4)' }}>
+            <div style={{ fontSize:11, color:'rgba(255,255,255,.45)', textTransform:'uppercase', letterSpacing:'.5px', marginBottom:4 }}>Économies estimées</div>
+            <div style={{ fontSize:36, fontWeight:900, color:'#7dd940', lineHeight:1 }}>-{maxSaving.toLocaleString('fr-FR')} €<span style={{fontSize:18}}>/an</span></div>
+            {bestTariffName && <div style={{ fontSize:12, color:'rgba(255,255,255,.45)', marginTop:6 }}>En passant sur le tarif <strong style={{color:'#7dd940'}}>{bestTariffName}</strong></div>}
+          </div>
+        )}
+        <div className="card" style={{ padding:'14px 16px', background:'rgba(125,217,64,.06)', border:'1px solid rgba(125,217,64,.2)' }}>
+          <div style={{ fontWeight:700, fontSize:13, color:'#7dd940', marginBottom:6 }}>✦ Prochaine étape</div>
+          <div style={{ fontSize:12, color:'rgba(255,255,255,.55)', lineHeight:1.6 }}>
+            Nous vérifions votre éligibilité et préparons votre dossier de changement. Aucune démarche de votre côté — on s'occupe de tout.
+          </div>
+        </div>
+      </div>
+      </>
+    );
+  }
+
   return (
+    <>
     <div className="screen fade-in">
-      <button className="back-btn" onClick={onBack}>← Retour</button>
       <div className="sim-header">
         <div className="welcome-tag">Vos leviers d'économie</div>
         <h1 className="welcome-title">Simulations<br/><span className="accent">d'économie</span></h1>
@@ -2380,6 +2422,15 @@ function SimulationsScreen({ onACC, onBox, onSolar, onOptimisation, onBack, user
         </button>
       </div>
     </div>
+    <StickyFooter row onBack={onBack}>
+      {hasConso && maxSaving > 0 && (
+        <button className="btn btn-yes" style={{fontSize:12, padding:'12px 10px'}}
+          onClick={() => { confetti({ particleCount:120, spread:70, origin:{y:.6} }); setChangedTariff(true); }}>
+          ⚡ Je change de fournisseur
+        </button>
+      )}
+    </StickyFooter>
+    </>
   );
 }
 
@@ -2544,8 +2595,9 @@ function OptimisationScreen({ user, userProfile, onBack }) {
   const fmtPrixKwh = (total) => kwh_total > 0 ? `${(total / kwh_total * 100).toFixed(1)} c€/kWh` : null;
 
   return (
+    <>
+    <BackBtn onBack={onBack}/>
     <div className="screen fade-in">
-      <button className="back-btn" onClick={onBack}>← Retour</button>
       <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:12, marginTop:4 }}>
         <img src="/optimisation.png" alt="" style={{ width:32, height:32, objectFit:'contain', mixBlendMode:'screen', opacity:.85 }}/>
         <div>
@@ -2680,6 +2732,7 @@ function OptimisationScreen({ user, userProfile, onBack }) {
         </>
       )}
     </div>
+    </>
   );
 }
 
@@ -3582,9 +3635,10 @@ function BoxSimScreen({ user, userProfile, onBack }) {
 
   if (chosen) {
     return (
+      <>
+      <BackBtn onBack={onBack}/>
       <div className="screen fade-in">
         <Fireworks final/>
-        <button className="back-btn" onClick={onBack}>← Retour</button>
         <div style={{ textAlign:'center', marginBottom:16 }}>
           <div style={{ fontSize:38, marginBottom:4 }}>{chosen === 'buy' ? '📦' : '🎁'}</div>
           <div style={{ fontSize:22, fontWeight:900, color:'white', lineHeight:1.2 }}>
@@ -3633,6 +3687,7 @@ function BoxSimScreen({ user, userProfile, onBack }) {
           </div>
         </div>
       </div>
+      </>
     );
   }
 
@@ -3772,9 +3827,10 @@ function SolarSimScreen({ user, userProfile, onBack }) {
   if (chosen) {
     const withBox = chosen === 'solar_box';
     return (
+      <>
+      <BackBtn onBack={onBack}/>
       <div className="screen fade-in">
         <Fireworks final/>
-        <button className="back-btn" onClick={onBack}>← Retour</button>
         <div style={{ textAlign:'center', marginBottom:16 }}>
           <div style={{ fontSize:38, marginBottom:4 }}>☀️</div>
           <div style={{ fontSize:22, fontWeight:900, color:'white', lineHeight:1.2 }}>
@@ -3839,6 +3895,7 @@ function SolarSimScreen({ user, userProfile, onBack }) {
           </div>
         </div>
       </div>
+      </>
     );
   }
 
@@ -3932,8 +3989,9 @@ function SolarSimScreen({ user, userProfile, onBack }) {
 // ─── AdminScreen ──────────────────────────────
 function AdminScreen({ onTariffs, onUsers, onSpot, onAcc, onBack }) {
   return (
+    <>
+    <BackBtn onBack={onBack}/>
     <div className="screen fade-in">
-      <button className="back-btn" onClick={onBack}>← Retour</button>
       <div className="auth-header">
         <div className="welcome-tag" style={{color:'#ffb340'}}>Administration</div>
         <h1 className="welcome-title">Menu<br/><span className="accent">admin</span></h1>
@@ -3973,6 +4031,7 @@ function AdminScreen({ onTariffs, onUsers, onSpot, onAcc, onBack }) {
         </button>
       </div>
     </div>
+    </>
   );
 }
 
@@ -4304,8 +4363,9 @@ function AdminUsersScreen({ onBack }) {
   }, []);
 
   return (
+    <>
+    <BackBtn onBack={onBack}/>
     <div className="screen fade-in">
-      <button className="back-btn" onClick={onBack}>← Retour</button>
       <div className="auth-header">
         <div className="welcome-tag" style={{color:'#ffb340'}}>Administration</div>
         <h1 className="welcome-title">Utilisateurs<br/><span className="accent">({users.length})</span></h1>
@@ -4324,6 +4384,7 @@ function AdminUsersScreen({ onBack }) {
         </div>
       )}
     </div>
+    </>
   );
 }
 
