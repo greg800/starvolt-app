@@ -177,7 +177,7 @@
     .screen {
       width: 100%; max-width: 520px;
       display: flex; flex-direction: column;
-      gap: 0;
+      gap: 0; padding-bottom: 70px;
     }
 
     @keyframes fadeUp {
@@ -326,14 +326,16 @@
        BACK BUTTON
        ============================================= */
     .back-btn {
-      display: inline-flex; align-items: center; gap: 5px;
-      background: none; border: none;
-      color: rgba(255,255,255,.55);
-      font-family: var(--font); font-size: 12.5px; font-weight: 600;
-      cursor: pointer; padding: 0; margin-bottom: 10px;
+      position: fixed; bottom: 0; left: 0; right: 0; z-index: 100;
+      display: flex; align-items: center; justify-content: center; gap: 6px;
+      background: rgba(5,65,78,.97); border: none; border-top: 1px solid rgba(255,255,255,.09);
+      backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+      color: rgba(255,255,255,.5);
+      font-family: var(--font); font-size: 13px; font-weight: 600;
+      cursor: pointer; padding: 14px 16px 20px; margin: 0; width: 100%;
       transition: color .2s;
     }
-    .back-btn:hover { color: white; }
+    .back-btn:hover { color: rgba(255,255,255,.9); }
 
     /* =============================================
        WELCOME
@@ -1062,9 +1064,14 @@ function TopBar({ name, avatarName, showName, onLogout, logoOnly = false, onLogo
 }
 
 // ─── Sticky Footer ────────────────────────────
-function StickyFooter({ row = false, children }) {
+function StickyFooter({ row = false, onBack, children }) {
   return (
     <div className="sticky-footer">
+      {onBack && (
+        <button onClick={onBack} style={{ background:'none', border:'none', cursor:'pointer', color:'rgba(255,255,255,.4)', fontSize:12, fontWeight:600, padding:'0 0 10px', display:'block', width:'100%', textAlign:'center', fontFamily:'inherit', letterSpacing:'.2px' }}>
+          ← Retour
+        </button>
+      )}
       <div className={`sticky-footer-inner${row ? ' row' : ''}`}>{children}</div>
     </div>
   );
@@ -2559,20 +2566,27 @@ function OptimisationScreen({ user, userProfile, onBack }) {
             <div style={{ fontSize:10, color:'rgba(125,217,64,.7)', fontWeight:700, marginBottom:10, display:'flex', alignItems:'center', gap:4 }}>
               <span>✦</span> Site utilisé pour tous les calculs
             </div>
-            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8 }}>
-              <div style={{ background:'rgba(255,255,255,.06)', borderRadius:8, padding:'10px 8px', textAlign:'center' }}>
-                <div style={{ fontSize:22, fontWeight:900, color:'#7dd940', lineHeight:1 }}>
+            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:6 }}>
+              <div style={{ background:'rgba(255,255,255,.06)', borderRadius:8, padding:'10px 6px', textAlign:'center' }}>
+                <div style={{ fontSize:18, fontWeight:900, color:'#7dd940', lineHeight:1 }}>
                   {currentRanked ? fmtE(currentRanked.result.total) : '—'}
                 </div>
-                <div style={{ fontSize:9, color:'rgba(255,255,255,.45)', marginTop:3, fontWeight:700 }}>FACTURE ANNUELLE</div>
-                {!currentRanked && <div style={{ fontSize:9, color:'rgba(255,200,50,.55)', marginTop:2 }}>Tarif non sélectionné</div>}
+                <div style={{ fontSize:8, color:'rgba(255,255,255,.45)', marginTop:3, fontWeight:700 }}>FACTURE ANNUELLE</div>
+                {!currentRanked && <div style={{ fontSize:8, color:'rgba(255,200,50,.55)', marginTop:2 }}>Tarif non défini</div>}
               </div>
-              <div style={{ background:'rgba(255,255,255,.06)', borderRadius:8, padding:'10px 8px', textAlign:'center' }}>
-                <div style={{ fontSize:22, fontWeight:900, lineHeight:1, color: hasHC ? '#5de0f5' : 'rgba(255,255,255,.3)' }}>
+              <div style={{ background:'rgba(255,255,255,.06)', borderRadius:8, padding:'10px 6px', textAlign:'center' }}>
+                <div style={{ fontSize:18, fontWeight:900, lineHeight:1, color: hasHC ? '#5de0f5' : 'rgba(255,255,255,.3)' }}>
                   {hasHC ? `${kwh_total > 0 ? Math.round(kwh_hc / kwh_total * 100) : 0}%` : '—'}
                 </div>
-                <div style={{ fontSize:9, color:'rgba(255,255,255,.45)', marginTop:3, fontWeight:700 }}>CONSO HEURES CREUSES</div>
-                {!hasHC && <div style={{ fontSize:9, color:'rgba(255,200,50,.55)', marginTop:2 }}>Plages HC non définies</div>}
+                <div style={{ fontSize:8, color:'rgba(255,255,255,.45)', marginTop:3, fontWeight:700 }}>HEURES CREUSES</div>
+                {!hasHC && <div style={{ fontSize:8, color:'rgba(255,200,50,.55)', marginTop:2 }}>Plages HC non définies</div>}
+              </div>
+              <div style={{ background:'rgba(255,255,255,.06)', borderRadius:8, padding:'10px 6px', textAlign:'center' }}>
+                <div style={{ fontSize:18, fontWeight:900, lineHeight:1, color: currentRanked ? 'rgba(255,200,80,.9)' : 'rgba(255,255,255,.3)' }}>
+                  {currentRanked && kwh_total > 0 ? `${(currentRanked.result.total / kwh_total * 100).toFixed(1)}` : '—'}
+                </div>
+                <div style={{ fontSize:8, color:'rgba(255,255,255,.45)', marginTop:3, fontWeight:700 }}>C€/kWh MOYEN</div>
+                {currentRanked && kwh_total > 0 && <div style={{ fontSize:8, color:'rgba(255,255,255,.3)', marginTop:2 }}>TTC toutes taxes</div>}
               </div>
             </div>
           </div>
@@ -3079,7 +3093,7 @@ function SpotPricesScreen({ onBack }) {
     <div className="screen fade-in">
       {/* Header compact */}
       <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:6}}>
-        <button className="back-btn" style={{margin:0}} onClick={onBack}>← Retour</button>
+        <button className="back-btn" style={{position:'static',margin:0,padding:'4px 10px',fontSize:12}} onClick={onBack}>← Retour</button>
         <span style={{fontSize:13,fontWeight:800,color:'white',letterSpacing:.5}}>
           Prix <span style={{color:'var(--green)'}}>spot</span>
         </span>
@@ -3484,7 +3498,6 @@ function AccResultScreen({ state, onBack }) {
   return (
     <div className="screen fade-in">
       <Fireworks final/>
-      <button className="back-btn" onClick={onBack}>← Retour</button>
       <div style={{ textAlign:'center', marginBottom:20, marginTop:8 }}>
         <div style={{ fontSize:52, marginBottom:8 }}>{isJoin ? '🤝' : '⭐'}</div>
         <div style={{ fontSize:22, fontWeight:900, color:'white', lineHeight:1.2, marginBottom:8 }}>
@@ -3622,7 +3635,6 @@ function BoxSimScreen({ user, userProfile, onBack }) {
   return (
     <>
       <div className="screen fade-in">
-        <button className="back-btn" onClick={onBack}>← Retour</button>
         <div style={{ fontSize:9, letterSpacing:'.6px', color:'rgba(125,217,64,.8)', fontWeight:700, textTransform:'uppercase', marginBottom:2 }}>Simulation</div>
         <div style={{ fontSize:18, fontWeight:900, color:'white', lineHeight:1.1, marginBottom:14 }}>La Box <span className="accent">Comwatt</span></div>
 
@@ -3692,7 +3704,7 @@ function BoxSimScreen({ user, userProfile, onBack }) {
       </div>
 
       {!loading && (
-        <StickyFooter row>
+        <StickyFooter row onBack={onBack}>
           <button className="btn btn-no" style={{fontSize:12, padding:'12px 8px'}} onClick={() => { localStorage.setItem('starvolt_box_chosen','free'); setChosen('free'); }}>
             🎁 Je veux une box gratuite
           </button>
@@ -3829,7 +3841,6 @@ function SolarSimScreen({ user, userProfile, onBack }) {
   return (
     <>
       <div className="screen fade-in">
-        <button className="back-btn" onClick={onBack}>← Retour</button>
         <div style={{ fontSize:9, letterSpacing:'.6px', color:'rgba(125,217,64,.8)', fontWeight:700, textTransform:'uppercase', marginBottom:2 }}>Simulation</div>
         <div style={{ fontSize:18, fontWeight:900, color:'white', lineHeight:1.1, marginBottom:14 }}>Le solaire <span className="accent">chez vous</span></div>
 
@@ -3894,13 +3905,13 @@ function SolarSimScreen({ user, userProfile, onBack }) {
 
       {!loading && (
         hasBox ? (
-          <StickyFooter>
+          <StickyFooter onBack={onBack}>
             <button className="btn btn-yes" onClick={() => setChosen('solar_box')}>
               ☀️ Je veux des panneaux solaires
             </button>
           </StickyFooter>
         ) : (
-          <StickyFooter row>
+          <StickyFooter row onBack={onBack}>
             <button className="btn btn-no" style={{fontSize:12, padding:'12px 8px'}} onClick={() => setChosen('solar_only')}>
               ☀️ Solaire seul
             </button>
@@ -3976,7 +3987,6 @@ function AdminTariffsScreen({ onEdit, onNew, onBack }) {
 
   return (
     <div className="screen fade-in">
-      <button className="back-btn" onClick={onBack}>← Retour</button>
       <div className="auth-header">
         <div className="welcome-tag" style={{color:'#ffb340'}}>Administration</div>
         <h1 className="welcome-title">Tarifs<br/><span className="accent">d'électricité</span></h1>
@@ -4003,11 +4013,14 @@ function AdminTariffsScreen({ onEdit, onNew, onBack }) {
           ))}
         </div>
       )}
-      <div style={{position:'fixed',bottom:0,left:0,right:0,padding:'16px',background:'linear-gradient(to top, rgba(5,65,78,1) 65%, transparent)',zIndex:200}}>
-        <div style={{maxWidth:520,margin:'0 auto',display:'flex',gap:10}}>
-          <button className="btn btn-sec" style={{flex:1,fontSize:13}} onClick={onNew}>+ Nouveau tarif</button>
-          <button className="btn btn-sec" style={{flex:1,fontSize:13,color:'#5de0f5',borderColor:'rgba(8,145,178,.4)'}}
-            onClick={()=>alert('Import prix spot — à venir')}>⚡ Importer prix spot</button>
+      <div style={{position:'fixed',bottom:0,left:0,right:0,padding:'10px 16px 16px',background:'rgba(5,65,78,.97)',borderTop:'1px solid rgba(255,255,255,.09)',backdropFilter:'blur(14px)',zIndex:200}}>
+        <div style={{maxWidth:520,margin:'0 auto'}}>
+          <button onClick={onBack} style={{background:'none',border:'none',cursor:'pointer',color:'rgba(255,255,255,.4)',fontSize:12,fontWeight:600,padding:'0 0 8px',display:'block',width:'100%',textAlign:'center',fontFamily:'inherit'}}>← Retour</button>
+          <div style={{display:'flex',gap:10}}>
+            <button className="btn btn-sec" style={{flex:1,fontSize:13}} onClick={onNew}>+ Nouveau tarif</button>
+            <button className="btn btn-sec" style={{flex:1,fontSize:13,color:'#5de0f5',borderColor:'rgba(8,145,178,.4)'}}
+              onClick={()=>alert('Import prix spot — à venir')}>⚡ Importer prix spot</button>
+          </div>
         </div>
       </div>
     </div>
@@ -4102,7 +4115,6 @@ function AdminTariffEditScreen({ tariff, onSave, onDelete, onBack }) {
   return (
     <>
       <div className="screen fade-in">
-        <button className="back-btn" onClick={onBack}>← Retour</button>
         <div className="auth-header">
           <div className="welcome-tag" style={{color:'#ffb340'}}>Administration</div>
           <h1 className="welcome-title">{isNew ? 'Nouveau' : 'Modifier'}<br/><span className="accent">tarif</span></h1>
@@ -4161,7 +4173,6 @@ function AdminAccScreen({ onEdit, onNew, onBack }) {
 
   return (
     <div className="screen fade-in">
-      <button className="back-btn" onClick={onBack}>← Retour</button>
       <div className="auth-header">
         <div className="welcome-tag" style={{color:'#ffb340'}}>Administration</div>
         <h1 className="welcome-title">Sites <span className="accent">ACC</span></h1>
@@ -4185,7 +4196,7 @@ function AdminAccScreen({ onEdit, onNew, onBack }) {
           ))}
         </div>
       )}
-      <StickyFooter>
+      <StickyFooter onBack={onBack}>
         <button className="btn btn-yes" onClick={onNew}>+ Ajouter un site ACC</button>
       </StickyFooter>
     </div>
@@ -4245,7 +4256,6 @@ function AdminAccEditScreen({ site, onSave, onDelete, onBack }) {
   return (
     <>
       <div className="screen fade-in">
-        <button className="back-btn" onClick={onBack}>← Retour</button>
         <div className="auth-header">
           <div className="welcome-tag" style={{color:'#ffb340'}}>Administration</div>
           <h1 className="welcome-title">{isNew?'Nouveau':'Modifier'}<br/><span className="accent">site ACC</span></h1>
