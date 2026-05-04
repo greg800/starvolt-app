@@ -4104,6 +4104,7 @@ function AdminTariffsScreen({ onEdit, onNew, onBack }) {
   const fmt = (ts) => ts ? new Date(ts).toLocaleDateString('fr-FR', {day:'2-digit',month:'2-digit',year:'2-digit'}) : '—';
 
   return (
+    <>
     <div className="screen fade-in">
       <div className="auth-header">
         <div className="welcome-tag" style={{color:'#ffb340'}}>Administration</div>
@@ -4135,6 +4136,7 @@ function AdminTariffsScreen({ onEdit, onNew, onBack }) {
     <StickyFooter row onBack={onBack}>
       <button className="btn btn-sec" style={{fontSize:13}} onClick={onNew}>+ Nouveau tarif</button>
     </StickyFooter>
+    </>
   );
 }
 
