@@ -4465,8 +4465,8 @@ function AdminUsersScreen({ onBack }) {
       </div>
 
       {loading ? <div style={{textAlign:'center',padding:40}}><div className="spinner" style={{margin:'0 auto'}}/></div> : (
-        <div style={{overflowX:'auto', padding:'0 4px'}}>
-          <table style={{width:'100%', borderCollapse:'collapse', fontSize:13}}>
+        <div style={{overflowX:'auto', padding:'0 16px'}}>
+          <table style={{width:'100%', minWidth:780, borderCollapse:'collapse', fontSize:13}}>
             <thead>
               <tr>
                 {cols.map(c => (
@@ -4501,13 +4501,12 @@ function AdminUsersScreen({ onBack }) {
                       }}>
                       <option value="user">Utilisateur</option>
                       <option value="admin">Admin</option>
-                      <option value="demo">Démo</option>
                     </select>
                   </td>
                   <td style={{padding:'10px 10px'}}>
                     {confirmDel === u.id ? (
-                      <div style={{display:'flex',gap:6,alignItems:'center'}}>
-                        <span style={{fontSize:11,color:'rgba(255,100,100,.8)'}}>Confirmer ?</span>
+                      <div style={{display:'flex',gap:6,alignItems:'center',whiteSpace:'nowrap'}}>
+                        <span style={{fontSize:11,color:'#fff',fontWeight:600}}>Confirmer ?</span>
                         <button onClick={() => handleDelete(u.id)} style={{
                           background:'#ef4444', border:'none', borderRadius:5,
                           color:'#fff', fontSize:11, padding:'3px 8px', cursor:'pointer'
@@ -4519,9 +4518,9 @@ function AdminUsersScreen({ onBack }) {
                       </div>
                     ) : (
                       <button onClick={() => setConfirmDel(u.id)} style={{
-                        background:'rgba(239,68,68,.15)', border:'1px solid rgba(239,68,68,.3)',
-                        borderRadius:6, color:'#ef4444', fontSize:12,
-                        padding:'4px 10px', cursor:'pointer'
+                        background:'rgba(255,255,255,.08)', border:'1px solid rgba(255,255,255,.2)',
+                        borderRadius:6, color:'#fff', fontSize:14,
+                        padding:'4px 10px', cursor:'pointer', lineHeight:1
                       }}>🗑</button>
                     )}
                   </td>
