@@ -952,6 +952,9 @@ const sb = supabase.createClient(
   'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhreGtod2VncWthcGRic2lzeHd2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc0MjY4NjksImV4cCI6MjA5MzAwMjg2OX0.9-_oHRJfwXZkl3bRYDMb5K56UzB8O1NOfa5QfrXFfkQ'
 );
 
+// Capturer le hash AVANT que Supabase le nettoie (pour détecter type=recovery)
+const initialHash = window.location.hash;
+
 // ─── Eligibility ───────────────────────────────
 const ELIGIBLE_CODES = new Set(["01240","01250","01300","01480","04200","04410","05400","07170","07240","07400","07430","07580","07700","09100","09210","09350","09420","09700","11160","11170","11200","11270","11350","11400","11410","11420","11800","12130","13120","13160","13410","13660","13760","13880","15170","15250","15600","16290","16360","17240","17570","17770","19270","24250","26110","26150","26160","26210","26390","26400","26410","26450","30190","30200","30250","30340","30350","30610","30750","31370","31420","31460","31560","32300","32350","32380","32390","33610","33770","34290","34460","34480","34550","34630","38110","38118","38122","38150","38260","38350","38440","38450","38460","38510","38550","38560","38590","38650","38690","38710","38760","38770","38780","38840","38930","40200","40310","40400","43270","43300","43380","43580","46090","46150","46230","46300","46310","47430","47440","63160","63220","63420","63750","63890","64410","65140","65190","65200","65370","66300","66500","66700","73190","74270","82100","82210","82230","82290","82400","83670","84100","84200","84270","84380","84420","84480"]);
 
@@ -4592,10 +4595,9 @@ function App() {
 
   useEffect(() => {
     sb.auth.getSession().then(({ data: { session } }) => {
-      // Si c'est un lien de récupération de mot de passe, laisser
-      // onAuthStateChange gérer via PASSWORD_RECOVERY — ne pas naviguer vers HOME
-      const isRecovery = window.location.hash.includes('type=recovery');
-      if (isRecovery) return; // onAuthStateChange prendra la main
+      // Si c'est un lien de récupération, onAuthStateChange gère via PASSWORD_RECOVERY
+      // On utilise initialHash (capturé avant que Supabase nettoie l'URL)
+      if (initialHash.includes('type=recovery')) return;
       if (session?.user) {
         setUser(session.user);
         fetchProfile(session.user.id);
