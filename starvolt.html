@@ -1606,9 +1606,20 @@ function AuthSignupScreen({ onGoToLogin, onSignedUp, onDemoImported }) {
     if (err) { setError(err.message); setLoading(false); return; }
     if (data.user) {
       await sb.from('profiles').insert({ id: data.user.id, prenom: prenom.trim(), nom: nom.trim() });
-      // Copie les sites témoins sur ce nouveau compte
+      // Copie les sites témoins + définit le 1er comme site actif
+      // (évite d'avoir à passer par MaConsoScreen avant que les simulations fonctionnent)
       try {
         await sb.rpc('import_demo_sites', { target_user_id: data.user.id });
+        const { data: demoSites } = await sb.from('sites')
+          .select('id')
+          .eq('user_id', data.user.id)
+          .order('created_at')
+          .limit(1);
+        const firstId = demoSites?.[0]?.id;
+        if (firstId) {
+          localStorage.setItem('starvolt_active_site_id', firstId);
+          sb.from('profiles').update({ active_site_id: firstId }).eq('id', data.user.id);
+        }
         onDemoImported?.();
       } catch(e) { console.warn('import_demo_sites failed', e); }
     }
