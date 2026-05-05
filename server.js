@@ -18,9 +18,26 @@ const mime = {
 };
 
 http.createServer((req, res) => {
-  const url  = req.url === '/' ? '/starvolt.html' : req.url;
-  const file = path.join(__dirname, url);
+  const reqPath = req.url.split('?')[0]; // ignore query string
 
+  // / → redirect vers /app
+  if (reqPath === '/') {
+    res.writeHead(301, { Location: '/app' });
+    return res.end();
+  }
+
+  // /app et /app/ → servir starvolt.html
+  if (reqPath === '/app' || reqPath === '/app/') {
+    fs.readFile(path.join(__dirname, 'starvolt.html'), (err, data) => {
+      if (err) { res.writeHead(404); return res.end('Not found'); }
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+      res.end(data);
+    });
+    return;
+  }
+
+  // Tous les autres chemins → fichiers statiques (sw.js, manifest, images…)
+  const file = path.join(__dirname, reqPath);
   fs.readFile(file, (err, data) => {
     if (err) { res.writeHead(404); return res.end('Not found'); }
     const ext = path.extname(file);
