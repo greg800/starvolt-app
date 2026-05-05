@@ -4592,6 +4592,10 @@ function App() {
 
   useEffect(() => {
     sb.auth.getSession().then(({ data: { session } }) => {
+      // Si c'est un lien de récupération de mot de passe, laisser
+      // onAuthStateChange gérer via PASSWORD_RECOVERY — ne pas naviguer vers HOME
+      const isRecovery = window.location.hash.includes('type=recovery');
+      if (isRecovery) return; // onAuthStateChange prendra la main
       if (session?.user) {
         setUser(session.user);
         fetchProfile(session.user.id);
