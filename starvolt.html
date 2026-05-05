@@ -4454,7 +4454,7 @@ function AdminUsersScreen({ onBack }) {
 
   const fmtDate = (d) => d ? new Date(d).toLocaleDateString('fr-FR') : '—';
 
-  const cols = ['Prénom Nom', 'Email', 'Inscription', 'Dernière co.', 'Connexions', 'Rôle', ''];
+  const cols = ['', 'Prénom Nom', 'Email', 'Inscription', 'Dernière co.', 'Connexions', 'Rôle'];
 
   return (
     <>
@@ -4482,9 +4482,30 @@ function AdminUsersScreen({ onBack }) {
             <tbody>
               {users.map((u) => (
                 <tr key={u.id} style={{borderBottom:'1px solid rgba(255,255,255,.06)'}}>
+                  <td style={{padding:'10px 8px', width:40}}>
+                    {confirmDel === u.id ? (
+                      <div style={{display:'flex',gap:5,alignItems:'center',whiteSpace:'nowrap'}}>
+                        <span style={{fontSize:11,color:'#fff',fontWeight:600}}>Confirmer ?</span>
+                        <button onClick={() => handleDelete(u.id)} style={{
+                          background:'#ef4444', border:'none', borderRadius:5,
+                          color:'#fff', fontSize:11, padding:'3px 8px', cursor:'pointer'
+                        }}>Oui</button>
+                        <button onClick={() => setConfirmDel(null)} style={{
+                          background:'rgba(255,255,255,.15)', border:'none', borderRadius:5,
+                          color:'#fff', fontSize:11, padding:'3px 8px', cursor:'pointer'
+                        }}>Non</button>
+                      </div>
+                    ) : (
+                      <button onClick={() => setConfirmDel(u.id)} style={{
+                        background:'transparent', border:'none',
+                        color:'#fff', fontSize:16, padding:'2px 4px',
+                        cursor:'pointer', lineHeight:1, opacity:.7
+                      }}>🗑</button>
+                    )}
+                  </td>
                   <td style={{padding:'10px 10px', whiteSpace:'nowrap'}}>
-                    <span style={{fontWeight:600}}>{u.prenom || '—'} {u.nom || ''}</span>
-                    {u.pseudo && <span style={{color:'rgba(255,255,255,.4)', fontSize:11}}> ({u.pseudo})</span>}
+                    <span style={{fontWeight:600, color:'#fff'}}>{u.prenom || '—'} {u.nom || ''}</span>
+                    {u.pseudo && <span style={{color:'rgba(125,217,64,.9)', fontSize:11}}> ({u.pseudo})</span>}
                   </td>
                   <td style={{padding:'10px 10px', color:'rgba(125,217,64,.8)'}}>{u.email}</td>
                   <td style={{padding:'10px 10px', whiteSpace:'nowrap', color:'rgba(255,255,255,.5)'}}>{fmtDate(u.created_at)}</td>
@@ -4502,27 +4523,6 @@ function AdminUsersScreen({ onBack }) {
                       <option value="user">Utilisateur</option>
                       <option value="admin">Admin</option>
                     </select>
-                  </td>
-                  <td style={{padding:'10px 10px'}}>
-                    {confirmDel === u.id ? (
-                      <div style={{display:'flex',gap:6,alignItems:'center',whiteSpace:'nowrap'}}>
-                        <span style={{fontSize:11,color:'#fff',fontWeight:600}}>Confirmer ?</span>
-                        <button onClick={() => handleDelete(u.id)} style={{
-                          background:'#ef4444', border:'none', borderRadius:5,
-                          color:'#fff', fontSize:11, padding:'3px 8px', cursor:'pointer'
-                        }}>Oui</button>
-                        <button onClick={() => setConfirmDel(null)} style={{
-                          background:'rgba(255,255,255,.1)', border:'none', borderRadius:5,
-                          color:'#fff', fontSize:11, padding:'3px 8px', cursor:'pointer'
-                        }}>Non</button>
-                      </div>
-                    ) : (
-                      <button onClick={() => setConfirmDel(u.id)} style={{
-                        background:'rgba(255,255,255,.08)', border:'1px solid rgba(255,255,255,.2)',
-                        borderRadius:6, color:'#fff', fontSize:14,
-                        padding:'4px 10px', cursor:'pointer', lineHeight:1
-                      }}>🗑</button>
-                    )}
                   </td>
                 </tr>
               ))}
