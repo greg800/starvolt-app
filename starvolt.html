@@ -4431,32 +4431,104 @@ function AdminAccEditScreen({ site, onSave, onDelete, onBack }) {
 
 // ─── AdminUsersScreen ─────────────────────────
 function AdminUsersScreen({ onBack }) {
-  const [users,   setUsers]   = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [users,      setUsers]      = useState([]);
+  const [loading,    setLoading]    = useState(true);
+  const [confirmDel, setConfirmDel] = useState(null); // id à supprimer
 
-  useEffect(() => {
-    sb.rpc('get_all_users')
-      .then(({ data }) => { setUsers(data || []); setLoading(false); });
-  }, []);
+  const load = () => {
+    setLoading(true);
+    sb.rpc('get_all_users').then(({ data }) => { setUsers(data || []); setLoading(false); });
+  };
+  useEffect(() => { load(); }, []);
+
+  const handleRoleChange = async (userId, newRole) => {
+    await sb.from('profiles').update({ role: newRole }).eq('id', userId);
+    setUsers(u => u.map(x => x.id === userId ? { ...x, role: newRole } : x));
+  };
+
+  const handleDelete = async (userId) => {
+    await sb.rpc('admin_delete_user', { target_user_id: userId });
+    setConfirmDel(null);
+    load();
+  };
+
+  const fmtDate = (d) => d ? new Date(d).toLocaleDateString('fr-FR') : '—';
+
+  const cols = ['Prénom Nom', 'Email', 'Inscription', 'Dernière co.', 'Connexions', 'Rôle', ''];
 
   return (
     <>
-    <div className="screen fade-in">
+    <div className="screen fade-in" style={{padding:'0 0 80px'}}>
       <div className="auth-header">
         <div className="welcome-tag" style={{color:'#ffb340'}}>Administration</div>
         <h1 className="welcome-title">Utilisateurs<br/><span className="accent">({users.length})</span></h1>
       </div>
+
       {loading ? <div style={{textAlign:'center',padding:40}}><div className="spinner" style={{margin:'0 auto'}}/></div> : (
-        <div style={{display:'flex',flexDirection:'column',gap:8}}>
-          {users.map((u,i) => (
-            <div key={i} className="tariff-row-item" style={{cursor:'default'}}>
-              <div>
-                <div className="tariff-row-name">{u.prenom || '—'} {u.nom || ''} {u.pseudo ? `(${u.pseudo})` : ''}</div>
-                <div className="tariff-row-meta" style={{color:'rgba(125,217,64,.6)'}}>{u.email}</div>
-                <div className="tariff-row-meta">Inscrit le {u.created_at ? new Date(u.created_at).toLocaleDateString('fr-FR') : '—'}</div>
-              </div>
-            </div>
-          ))}
+        <div style={{overflowX:'auto', padding:'0 4px'}}>
+          <table style={{width:'100%', borderCollapse:'collapse', fontSize:13}}>
+            <thead>
+              <tr>
+                {cols.map(c => (
+                  <th key={c} style={{
+                    textAlign:'left', padding:'8px 10px',
+                    color:'rgba(255,255,255,.4)', fontWeight:600,
+                    borderBottom:'1px solid rgba(255,255,255,.08)',
+                    whiteSpace:'nowrap'
+                  }}>{c}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {users.map((u) => (
+                <tr key={u.id} style={{borderBottom:'1px solid rgba(255,255,255,.06)'}}>
+                  <td style={{padding:'10px 10px', whiteSpace:'nowrap'}}>
+                    <span style={{fontWeight:600}}>{u.prenom || '—'} {u.nom || ''}</span>
+                    {u.pseudo && <span style={{color:'rgba(255,255,255,.4)', fontSize:11}}> ({u.pseudo})</span>}
+                  </td>
+                  <td style={{padding:'10px 10px', color:'rgba(125,217,64,.8)'}}>{u.email}</td>
+                  <td style={{padding:'10px 10px', whiteSpace:'nowrap', color:'rgba(255,255,255,.5)'}}>{fmtDate(u.created_at)}</td>
+                  <td style={{padding:'10px 10px', whiteSpace:'nowrap', color:'rgba(255,255,255,.5)'}}>{fmtDate(u.last_sign_in_at)}</td>
+                  <td style={{padding:'10px 10px', textAlign:'center', color:'rgba(255,255,255,.7)'}}>{u.login_count ?? '—'}</td>
+                  <td style={{padding:'10px 10px'}}>
+                    <select
+                      value={u.role || 'user'}
+                      onChange={e => handleRoleChange(u.id, e.target.value)}
+                      style={{
+                        background:'rgba(255,255,255,.08)', border:'1px solid rgba(255,255,255,.15)',
+                        borderRadius:6, color:'#fff', padding:'4px 8px', fontSize:12,
+                        cursor:'pointer', fontFamily:'inherit'
+                      }}>
+                      <option value="user">Utilisateur</option>
+                      <option value="admin">Admin</option>
+                      <option value="demo">Démo</option>
+                    </select>
+                  </td>
+                  <td style={{padding:'10px 10px'}}>
+                    {confirmDel === u.id ? (
+                      <div style={{display:'flex',gap:6,alignItems:'center'}}>
+                        <span style={{fontSize:11,color:'rgba(255,100,100,.8)'}}>Confirmer ?</span>
+                        <button onClick={() => handleDelete(u.id)} style={{
+                          background:'#ef4444', border:'none', borderRadius:5,
+                          color:'#fff', fontSize:11, padding:'3px 8px', cursor:'pointer'
+                        }}>Oui</button>
+                        <button onClick={() => setConfirmDel(null)} style={{
+                          background:'rgba(255,255,255,.1)', border:'none', borderRadius:5,
+                          color:'#fff', fontSize:11, padding:'3px 8px', cursor:'pointer'
+                        }}>Non</button>
+                      </div>
+                    ) : (
+                      <button onClick={() => setConfirmDel(u.id)} style={{
+                        background:'rgba(239,68,68,.15)', border:'1px solid rgba(239,68,68,.3)',
+                        borderRadius:6, color:'#ef4444', fontSize:12,
+                        padding:'4px 10px', cursor:'pointer'
+                      }}>🗑</button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       )}
     </div>
