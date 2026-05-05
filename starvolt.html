@@ -3522,45 +3522,57 @@ function AccMapScreen({ user, userProfile, onBack, onJoin, onCreate }) {
   return (
     <div style={{ position:'fixed', inset:0, zIndex:200, display:'flex', flexDirection:'column', background:'#0a1628', overflow:'hidden' }} className="fade-in">
 
-      {/* ── Top bar: compact header + eligibility ── */}
-      <div style={{ flexShrink:0, padding:'10px 14px 8px', background:'linear-gradient(180deg,#0a1628 80%,transparent)', position:'relative', zIndex:2 }}>
-        <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:6 }}>
-          <div>
-            <div style={{ fontSize:8, letterSpacing:'.6px', color:'rgba(125,217,64,.8)', fontWeight:700, textTransform:'uppercase' }}>Simulation</div>
-            <div style={{ fontSize:15, fontWeight:900, color:'white', lineHeight:1.1 }}>Autoconsommation <span className="accent">collective</span></div>
+      {/* ── Top bar ── */}
+      <div style={{ flexShrink:0, padding:'14px 16px 12px', background:'#0a1628', position:'relative', zIndex:2 }}>
+
+        {/* Titre + accroche */}
+        <div style={{ marginBottom:12 }}>
+          <div style={{ fontSize:9, letterSpacing:'.8px', color:'rgba(125,217,64,.85)', fontWeight:700, textTransform:'uppercase', marginBottom:4 }}>Autoconsommation collective</div>
+          <div style={{ fontSize:20, fontWeight:900, color:'white', lineHeight:1.15, marginBottom:6 }}>
+            Payez l'électricité <span className="accent">2× moins cher</span><br/>de 9h à 18h, tous les jours
+          </div>
+          <div style={{ fontSize:12, color:'rgba(255,255,255,.55)', lineHeight:1.5 }}>
+            En rejoignant une boucle ACC locale, vous achetez directement l'énergie solaire produite près de chez vous — à{' '}
+            <span style={{ color:'#7dd940', fontWeight:700 }}>{((accPriceKwh||0.09)*100).toFixed(0)} c€/kWh</span>{' '}
+            au lieu du tarif EDF heures pleines.
           </div>
         </div>
 
-        {/* Compact eligibility result */}
+        {/* Résultat éligibilité */}
+        {loading && (
+          <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+            <div className="spinner" style={{ width:14, height:14 }}/>
+            <div style={{ fontSize:11, color:'rgba(255,255,255,.4)' }}>Chargement…</div>
+          </div>
+        )}
         {!loading && activeSite && (eligible ? (
-          <div style={{ background:'rgba(22,163,74,.15)', border:'1.5px solid rgba(22,163,74,.5)', borderRadius:10, padding:'8px 12px', display:'flex', alignItems:'center', gap:10 }}>
-            <div style={{ fontSize:22, lineHeight:1 }}>✅</div>
+          <div style={{ background:'rgba(22,163,74,.15)', border:'1.5px solid rgba(22,163,74,.45)', borderRadius:12, padding:'10px 14px', display:'flex', alignItems:'center', gap:12 }}>
+            <div style={{ fontSize:26, lineHeight:1 }}>✅</div>
             <div style={{ flex:1 }}>
-              <div style={{ fontWeight:800, fontSize:13, color:'#4ade80', lineHeight:1.2 }}>{activeSite.nom} — éligible ACC</div>
-              {eligibleSite?.nom && <div style={{ fontSize:10, color:'rgba(255,255,255,.5)', marginTop:1 }}>{eligibleSite.nom} · {eligibleSite.puissance_pv ? eligibleSite.puissance_pv + ' kWc' : ''}</div>}
+              <div style={{ fontWeight:800, fontSize:14, color:'#4ade80', lineHeight:1.2 }}>{activeSite.nom} — zone éligible !</div>
+              {eligibleSite?.nom && <div style={{ fontSize:11, color:'rgba(255,255,255,.45)', marginTop:2 }}>{eligibleSite.nom}{eligibleSite.puissance_pv ? ' · ' + eligibleSite.puissance_pv + ' kWc' : ''}</div>}
             </div>
             {accSavings > 0 && (
               <div style={{ textAlign:'right', flexShrink:0 }}>
-                <div style={{ fontSize:18, fontWeight:900, color:'#7dd940', lineHeight:1 }}>-{accSavings.toLocaleString('fr-FR')} €</div>
-                <div style={{ fontSize:9, color:'rgba(255,255,255,.4)' }}>/an estimé</div>
+                <div style={{ fontSize:22, fontWeight:900, color:'#7dd940', lineHeight:1 }}>-{accSavings.toLocaleString('fr-FR')} €</div>
+                <div style={{ fontSize:10, color:'rgba(255,255,255,.4)' }}>/an estimé</div>
               </div>
             )}
           </div>
         ) : (
-          <div style={{ background:'rgba(245,158,11,.08)', border:'1px solid rgba(245,158,11,.35)', borderRadius:10, padding:'8px 12px', display:'flex', alignItems:'center', gap:10 }}>
-            <div style={{ fontSize:20, lineHeight:1 }}>⏳</div>
+          <div style={{ background:'rgba(245,158,11,.08)', border:'1px solid rgba(245,158,11,.35)', borderRadius:12, padding:'10px 14px', display:'flex', alignItems:'center', gap:12 }}>
+            <div style={{ fontSize:24, lineHeight:1 }}>⏳</div>
             <div>
-              <div style={{ fontWeight:700, fontSize:13, color:'#fbbf24', lineHeight:1.2 }}>{activeSite.code_postal} — zone non encore disponible</div>
-              <div style={{ fontSize:10, color:'rgba(255,255,255,.4)', marginTop:1 }}>Starvolt déploie progressivement. Vous serez notifié dès l'ouverture.</div>
+              <div style={{ fontWeight:700, fontSize:14, color:'#fbbf24', lineHeight:1.2 }}>{activeSite.code_postal} — pas encore disponible</div>
+              <div style={{ fontSize:11, color:'rgba(255,255,255,.4)', marginTop:3, lineHeight:1.4 }}>Starvolt déploie progressivement. Vous serez notifié dès l'ouverture d'une boucle près de chez vous.</div>
             </div>
           </div>
         ))}
         {!loading && !activeSite && (
-          <div style={{ background:'rgba(255,255,255,.05)', borderRadius:10, padding:'8px 12px', fontSize:12, color:'rgba(255,255,255,.5)' }}>
-            Configurez un site dans « Ma conso » pour voir l'éligibilité.
+          <div style={{ background:'rgba(255,255,255,.05)', borderRadius:12, padding:'10px 14px', fontSize:13, color:'rgba(255,255,255,.45)' }}>
+            Configurez un site dans « Ma conso » pour voir votre éligibilité.
           </div>
         )}
-        {loading && <div style={{ display:'flex', alignItems:'center', gap:8, padding:'4px 0' }}><div className="spinner" style={{ width:16, height:16 }}/><div style={{ fontSize:11, color:'rgba(255,255,255,.4)' }}>Chargement…</div></div>}
       </div>
 
       {/* ── Map: fills remaining height ── */}
