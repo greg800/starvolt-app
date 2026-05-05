@@ -1582,7 +1582,7 @@ function InstallBanner() {
 }
 
 // ─── AuthSignupScreen ─────────────────────────
-function AuthSignupScreen({ onGoToLogin, onSignedUp }) {
+function AuthSignupScreen({ onGoToLogin, onSignedUp, onDemoImported }) {
   const [prenom,  setPrenom]  = useState('');
   const [nom,     setNom]     = useState('');
   const [email,   setEmail]   = useState('');
@@ -1606,6 +1606,11 @@ function AuthSignupScreen({ onGoToLogin, onSignedUp }) {
     if (err) { setError(err.message); setLoading(false); return; }
     if (data.user) {
       await sb.from('profiles').insert({ id: data.user.id, prenom: prenom.trim(), nom: nom.trim() });
+      // Copie les sites témoins sur ce nouveau compte
+      try {
+        await sb.rpc('import_demo_sites', { target_user_id: data.user.id });
+        onDemoImported?.();
+      } catch(e) { console.warn('import_demo_sites failed', e); }
     }
     if (!data.session) setCheckEmail(true);
     setLoading(false);
@@ -4442,6 +4447,37 @@ function AdminUsersScreen({ onBack }) {
   );
 }
 
+// ─── Popup sites témoins ─────────────────────
+function DemoSitesPopup({ onClose }) {
+  return (
+    <div style={{
+      position:'fixed',inset:0,zIndex:9999,
+      background:'rgba(0,0,0,.65)',
+      display:'flex',alignItems:'center',justifyContent:'center',
+      padding:24
+    }}>
+      <div style={{
+        background:'#0f2a35',borderRadius:18,padding:'28px 24px',
+        maxWidth:360,width:'100%',
+        border:'1px solid rgba(255,255,255,.15)',
+        boxShadow:'0 8px 40px rgba(0,0,0,.5)'
+      }}>
+        <div style={{fontSize:36,textAlign:'center',marginBottom:14}}>☀️</div>
+        <p style={{
+          color:'rgba(255,255,255,.9)',lineHeight:1.6,
+          marginBottom:24,textAlign:'center',fontSize:15
+        }}>
+          Nous avons chargé sur ce compte <strong style={{color:'#7fe0c2'}}>2 profils de charge de test</strong> pour la démo.<br/><br/>
+          À remplacer par votre profil réel au plus tôt — en manuel aujourd'hui, puis automatiquement via Linky bientôt.
+        </p>
+        <button className="btn btn-primary" style={{width:'100%'}} onClick={onClose}>
+          OK, j'ai compris
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ─── MAIN APP — Machine d'états ──────────────
 
 const INIT = {
@@ -4460,6 +4496,7 @@ function App() {
   const [user,        setUser]       = useState(null);
   const [profile,     setProfile]    = useState(null);
   const [authLoading, setAuthLoading]= useState(true);
+  const [showDemoPopup, setShowDemoPopup] = useState(false);
   const pendingProfileRef            = useRef(null);
 
   const fetchProfile = useCallback(async (userId) => {
@@ -4620,7 +4657,8 @@ function App() {
       case 'AUTH_SIGNUP':
         return <AuthSignupScreen
           onGoToLogin={()=>goTo('AUTH_LOGIN')}
-          onSignedUp={(p)=>{ pendingProfileRef.current = {...p, pseudo:null, adresse_ligne1:null, code_postal:null, ville:null, telephone:null}; }}/>;
+          onSignedUp={(p)=>{ pendingProfileRef.current = {...p, pseudo:null, adresse_ligne1:null, code_postal:null, ville:null, telephone:null}; }}
+          onDemoImported={()=>setShowDemoPopup(true)}/>;
 
       case 'AUTH_LOGIN':
         return <AuthLoginScreen onGoToSignup={()=>goTo('AUTH_SIGNUP')}/>;
@@ -4707,6 +4745,7 @@ function App() {
         {['»','»','»','»'].map((c,i)=><span key={i}>{c}</span>)}
       </div>
       {render()}
+      {showDemoPopup && <DemoSitesPopup onClose={()=>setShowDemoPopup(false)}/>}
       {isHome && (
         <StickyFooter row>
           <button className="btn-home" onClick={()=>goTo('MA_CONSO')}>
