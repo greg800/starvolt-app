@@ -3604,24 +3604,27 @@ function AccMapScreen({ user, userProfile, onBack, onJoin, onCreate }) {
         )}
       </div>
 
-      {/* ── Sticky footer buttons ── */}
+      {/* ── Sticky footer ── */}
       {!loading && (
-        <div style={{ flexShrink:0, padding:'10px 12px', background:'rgba(10,22,40,.97)', borderTop:'1px solid rgba(255,255,255,.08)', display:'flex', gap:8, position:'relative', zIndex:1000 }}>
-          {activeSite && eligible ? (
-            <button className="btn btn-yes" style={{ flex:2, fontSize:13, padding:'12px 8px' }}
+        <div style={{ flexShrink:0, padding:'10px 14px', background:'rgba(10,22,40,.97)', borderTop:'1px solid rgba(255,255,255,.08)', display:'flex', alignItems:'center', gap:10, position:'relative', zIndex:1000 }}>
+          <button onClick={onBack} style={{
+            background:'transparent', border:'1px solid rgba(255,255,255,.2)',
+            borderRadius:20, color:'rgba(255,255,255,.7)', fontSize:12,
+            padding:'7px 14px', cursor:'pointer', whiteSpace:'nowrap', flexShrink:0
+          }}>← Retour</button>
+          <div style={{ flex:1 }}/>
+          {activeSite && eligible && (
+            <button className="btn btn-yes" style={{ fontSize:13, padding:'11px 18px' }}
               onClick={() => onJoin({ accSavings, accPriceKwh, eligibleSite, activeSite })}>
               🤝 Rejoindre cette boucle
             </button>
-          ) : activeSite ? (
-            <button className="btn btn-yes" style={{ flex:2, fontSize:12, padding:'12px 6px' }}
+          )}
+          {activeSite && !eligible && (
+            <button className="btn btn-yes" style={{ fontSize:12, padding:'11px 14px' }}
               onClick={() => onCreate({ activeSite })}>
-              ⭐ Créer votre propre boucle ACC
+              ⭐ Créer votre boucle ACC
             </button>
-          ) : null}
-          <button className="btn btn-no" style={{ flex:1, fontSize:12, padding:'12px 6px' }}
-            onClick={onBack}>
-            ← Menu
-          </button>
+          )}
         </div>
       )}
     </div>
@@ -4651,6 +4654,7 @@ function App() {
   const [showDemoPopup, setShowDemoPopup] = useState(false);
   const pendingProfileRef            = useRef(null);
 
+  // Charge le profil, hydrate le site actif, et retourne l'écran cible
   const fetchProfile = useCallback(async (userId) => {
     const { data } = await sb.from('profiles')
       .select('prenom, nom, pseudo, adresse_ligne1, code_postal, ville, telephone, active_site_id')
@@ -4658,10 +4662,8 @@ function App() {
     if (data) {
       setProfile(data);
       if (data.active_site_id) {
-        // DB est la source de vérité
         localStorage.setItem('starvolt_active_site_id', data.active_site_id);
       } else if (!localStorage.getItem('starvolt_active_site_id')) {
-        // Rien en DB ni en localStorage → prendre le 1er site disponible
         const { data: sites } = await sb.from('sites').select('id').eq('user_id', userId).order('created_at').limit(1);
         const firstId = sites?.[0]?.id;
         if (firstId) {
@@ -4670,24 +4672,31 @@ function App() {
         }
       }
     }
+    // Détermine l'écran cible : SIMULATIONS si conso disponible, sinon HOME
+    const siteId = localStorage.getItem('starvolt_active_site_id');
+    if (siteId) {
+      const { data: site } = await sb.from('sites').select('conso_profil').eq('id', siteId).maybeSingle();
+      if (site?.conso_profil) return 'SIMULATIONS';
+    }
+    return 'HOME_LOGGED_IN';
   }, []);
 
   useEffect(() => {
     sb.auth.getSession().then(({ data: { session } }) => {
-      // Si c'est un lien de récupération, onAuthStateChange gère via PASSWORD_RECOVERY
-      // On utilise initialHash (capturé avant que Supabase nettoie l'URL)
       if (initialHash.includes('type=recovery')) return;
       if (session?.user) {
         setUser(session.user);
-        fetchProfile(session.user.id);
-        setState(s => ({ ...s, screen: 'HOME_LOGGED_IN' }));
+        fetchProfile(session.user.id).then(screen => {
+          setState(s => ({ ...s, screen }));
+          setAuthLoading(false);
+        });
+      } else {
+        setAuthLoading(false);
       }
-      setAuthLoading(false);
     });
 
     const { data: { subscription } } = sb.auth.onAuthStateChange((event, session) => {
       if (event === 'PASSWORD_RECOVERY') {
-        // L'utilisateur arrive depuis le lien email de réinitialisation
         setUser(session?.user || null);
         setState(s => ({ ...s, screen: 'RESET_PASSWORD' }));
         setHistory([]);
@@ -4700,9 +4709,10 @@ function App() {
           setProfile(pendingProfileRef.current);
           pendingProfileRef.current = null;
         }
-        fetchProfile(session.user.id);
-        setState(s => ({ ...s, screen: 'HOME_LOGGED_IN' }));
-        setHistory([]);
+        fetchProfile(session.user.id).then(screen => {
+          setState(s => ({ ...s, screen }));
+          setHistory([]);
+        });
       }
       if (event === 'SIGNED_OUT') {
         setUser(null); setProfile(null);
