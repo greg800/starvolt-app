@@ -4657,9 +4657,17 @@ function App() {
       .eq('id', userId).single();
     if (data) {
       setProfile(data);
-      // Restaure le site actif depuis la DB (prioritaire sur localStorage)
       if (data.active_site_id) {
+        // DB est la source de vérité
         localStorage.setItem('starvolt_active_site_id', data.active_site_id);
+      } else if (!localStorage.getItem('starvolt_active_site_id')) {
+        // Rien en DB ni en localStorage → prendre le 1er site disponible
+        const { data: sites } = await sb.from('sites').select('id').eq('user_id', userId).order('created_at').limit(1);
+        const firstId = sites?.[0]?.id;
+        if (firstId) {
+          localStorage.setItem('starvolt_active_site_id', firstId);
+          sb.from('profiles').update({ active_site_id: firstId }).eq('id', userId);
+        }
       }
     }
   }, []);
