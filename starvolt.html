@@ -4731,12 +4731,15 @@ function App() {
   }, [state]);
 
   const goBack = useCallback(() => {
-    if (!history.length) return;
+    if (!history.length) {
+      if (user) setState(s => ({ ...s, screen: 'HOME_LOGGED_IN' }));
+      return;
+    }
     const prev = history[history.length - 1];
     setHistory(h => h.slice(0,-1));
     setState(prev);
     window.scrollTo({ top:0, behavior:'smooth' });
-  }, [history]);
+  }, [history, user]);
 
   const handleLogout = async () => { await sb.auth.signOut(); };
 
