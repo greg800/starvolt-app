@@ -1702,7 +1702,11 @@ function AuthLoginScreen({ onGoToSignup }) {
   const handleReset = async () => {
     if (!email.trim()) { setError("Entrez votre email d'abord."); return; }
     setLoading(true); setError(null);
-    await sb.auth.resetPasswordForEmail(email.trim());
+    const appUrl = window.location.origin + window.location.pathname;
+    const { error: err } = await sb.auth.resetPasswordForEmail(email.trim(), {
+      redirectTo: appUrl,
+    });
+    if (err) { setError(err.message); setLoading(false); return; }
     setResetOk(true); setLoading(false);
   };
 
@@ -4458,6 +4462,69 @@ function AdminUsersScreen({ onBack }) {
   );
 }
 
+// ─── ResetPasswordScreen ─────────────────────
+function ResetPasswordScreen({ onDone }) {
+  const [pwd,     setPwd]     = useState('');
+  const [pwd2,    setPwd2]    = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error,   setError]   = useState(null);
+  const [ok,      setOk]      = useState(false);
+
+  const handle = async () => {
+    if (pwd.length < 6)        { setError('6 caractères minimum.'); return; }
+    if (pwd !== pwd2)          { setError('Les mots de passe ne correspondent pas.'); return; }
+    setLoading(true); setError(null);
+    const { error: err } = await sb.auth.updateUser({ password: pwd });
+    if (err) { setError(err.message); setLoading(false); return; }
+    setOk(true); setLoading(false);
+  };
+
+  if (ok) return (
+    <>
+      <div className="screen fade-in">
+        <div className="auth-header">
+          <h1 className="welcome-title">Mot de passe<br/><span className="accent">mis à jour ✦</span></h1>
+          <p className="welcome-sub" style={{marginTop:12}}>
+            Votre nouveau mot de passe est actif.
+          </p>
+        </div>
+      </div>
+      <StickyFooter>
+        <button className="btn btn-yes" onClick={onDone}>Accéder à mon espace →</button>
+      </StickyFooter>
+    </>
+  );
+
+  return (
+    <>
+      <div className="screen fade-in">
+        <div className="auth-header">
+          <div className="welcome-tag">Réinitialisation</div>
+          <h1 className="welcome-title">Nouveau<br/><span className="accent">mot de passe</span></h1>
+        </div>
+        <div className="form-card">
+          <div className="inp-group">
+            <label className="inp-label">Nouveau mot de passe</label>
+            <input className="inp" type="password" value={pwd}
+              onChange={e=>setPwd(e.target.value)} placeholder="6 caractères minimum"/>
+          </div>
+          <div className="inp-group">
+            <label className="inp-label">Confirmer</label>
+            <input className="inp" type="password" value={pwd2}
+              onChange={e=>setPwd2(e.target.value)} placeholder="Même mot de passe"/>
+          </div>
+          {error && <div className="auth-error">{error}</div>}
+        </div>
+      </div>
+      <StickyFooter>
+        <button className="btn btn-yes" onClick={handle} disabled={loading}>
+          {loading ? 'Enregistrement…' : 'Enregistrer mon mot de passe →'}
+        </button>
+      </StickyFooter>
+    </>
+  );
+}
+
 // ─── Popup sites témoins ─────────────────────
 function DemoSitesPopup({ onClose }) {
   return (
@@ -4534,6 +4601,14 @@ function App() {
     });
 
     const { data: { subscription } } = sb.auth.onAuthStateChange((event, session) => {
+      if (event === 'PASSWORD_RECOVERY') {
+        // L'utilisateur arrive depuis le lien email de réinitialisation
+        setUser(session?.user || null);
+        setState(s => ({ ...s, screen: 'RESET_PASSWORD' }));
+        setHistory([]);
+        setAuthLoading(false);
+        return;
+      }
       if (event === 'SIGNED_IN' && session?.user) {
         setUser(session.user);
         if (pendingProfileRef.current) {
@@ -4673,6 +4748,9 @@ function App() {
 
       case 'AUTH_LOGIN':
         return <AuthLoginScreen onGoToSignup={()=>goTo('AUTH_SIGNUP')}/>;
+
+      case 'RESET_PASSWORD':
+        return <ResetPasswordScreen onDone={()=>{ fetchProfile(user?.id); setState(s=>({...s,screen:'HOME_LOGGED_IN'})); setHistory([]); }}/>;
 
       case 'WELCOME':
         return <WelcomeScreen
