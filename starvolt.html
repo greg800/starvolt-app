@@ -842,7 +842,12 @@
     .sim-text { flex: 1; }
     .sim-title { font-size: 15px; font-weight: 700; margin-bottom: 2px; }
     .sim-sub { font-size: 11.5px; color: rgba(255,255,255,.5); }
-    .sim-arrow { font-size: 18px; color: var(--green); flex-shrink: 0; }
+    .sim-sub.green { font-size: 15px; }
+    .sim-arrow { font-size: 26px; color: var(--green); flex-shrink: 0; font-weight: 900; animation: arrowPulse 1.4s ease-in-out infinite; }
+    @keyframes arrowPulse {
+      0%, 100% { transform: translateX(0);   opacity: 1; }
+      50%       { transform: translateX(5px); opacity: .6; }
+    }
 
     /* ══ MA CONSO ══════════════════════════════════════════════════ */
     .coming-soon { text-align: center; padding: 48px 24px; }
@@ -2390,7 +2395,7 @@ function SimulationsScreen({ onACC, onBox, onSolar, onOptimisation, onBack, user
           const curBill = cur?.result?.total || (kwh_total * 0.18);
           const bSav = Math.round(140 + curBill * (isDynamic ? 0.20 : 0.10));
           if (bSav > 0) setBoxSaving(bSav);
-          setSolarSaving(Math.round(curBill * 0.50));
+          setSolarSaving(Math.round(curBill * 0.80));
         }
       }
 
@@ -2460,7 +2465,7 @@ function SimulationsScreen({ onACC, onBox, onSolar, onOptimisation, onBack, user
             <div className="sim-text">
               <div className="sim-title">Optimisation fournisseur</div>
               {maxSaving !== null && maxSaving > 0
-                ? <div className="sim-sub" style={{color:'#7dd940',fontWeight:700}}>Jusqu'à -{maxSaving.toLocaleString('fr-FR')} €/an d'économie</div>
+                ? <div className="sim-sub green" style={{color:'#7dd940',fontWeight:700}}>Jusqu'à -{maxSaving.toLocaleString('fr-FR')} €/an d'économie</div>
                 : <div className="sim-sub">Comparez tous les tarifs sur votre conso réelle</div>
               }
             </div>
@@ -2472,7 +2477,7 @@ function SimulationsScreen({ onACC, onBox, onSolar, onOptimisation, onBack, user
           <div className="sim-text">
             <div className="sim-title">Économiser avec l'ACC</div>
             {accSaving !== null && accSaving > 0
-              ? <div className="sim-sub" style={{color:'#7dd940',fontWeight:700}}>Jusqu'à -{accSaving.toLocaleString('fr-FR')} €/an d'économie</div>
+              ? <div className="sim-sub green" style={{color:'#7dd940',fontWeight:700}}>Jusqu'à -{accSaving.toLocaleString('fr-FR')} €/an d'économie</div>
               : <div className="sim-sub">Autoconsommation collective locale</div>
             }
           </div>
@@ -2483,7 +2488,7 @@ function SimulationsScreen({ onACC, onBox, onSolar, onOptimisation, onBack, user
           <div className="sim-text">
             <div className="sim-title">Économiser plus avec la Box</div>
             {boxSaving !== null
-              ? <div className="sim-sub" style={{color:'#7dd940',fontWeight:700}}>Jusqu'à -{boxSaving.toLocaleString('fr-FR')} €/an d'économie</div>
+              ? <div className="sim-sub green" style={{color:'#7dd940',fontWeight:700}}>Jusqu'à -{boxSaving.toLocaleString('fr-FR')} €/an d'économie</div>
               : <div className="sim-sub">Pilotage intelligent de votre consommation</div>
             }
           </div>
@@ -2494,7 +2499,7 @@ function SimulationsScreen({ onACC, onBox, onSolar, onOptimisation, onBack, user
           <div className="sim-text">
             <div className="sim-title">Économiser avec le solaire</div>
             {solarSaving !== null && solarSaving > 0
-              ? <div className="sim-sub" style={{color:'#7dd940',fontWeight:700}}>Jusqu'à -{solarSaving.toLocaleString('fr-FR')} €/an d'économie</div>
+              ? <div className="sim-sub green" style={{color:'#7dd940',fontWeight:700}}>Jusqu'à -{solarSaving.toLocaleString('fr-FR')} €/an d'économie</div>
               : <div className="sim-sub">Panneaux solaires + batterie</div>
             }
           </div>
@@ -2553,7 +2558,7 @@ function calcTariffCost(tariff, kwh_hc, kwh_hp, dynamicCtx = null) {
   const abo = tariff.abo_annuel || 0;
   const hp  = tariff.prix_hp || 0;
   const hc  = tariff.prix_hc != null ? tariff.prix_hc : hp;
-  return { total: abo + kwh_hp * hp + kwh_hc * hc, abo, hp_cost: kwh_hp * hp, hc_cost: kwh_hc * hc, is_base: tariff.prix_hc == null };
+  return { total: abo + kwh_hp * hp + kwh_hc * hc, abo, hp_cost: kwh_hp * hp, hc_cost: kwh_hc * hc, is_base: tariff.prix_hc == null || tariff.prix_hc === tariff.prix_hp };
 }
 
 // ─── Helpers TURPE / TTC / Spot ───────────────
@@ -4053,6 +4058,7 @@ function SolarSimScreen({ user, userProfile, onBack }) {
           {/* ── 2. Énergie potagère ── */}
           <div className="card" style={{ padding:'18px 16px', marginBottom:12 }}>
             <div style={{ display:'flex', alignItems:'center', gap:16 }}>
+              <img src="/energie-potagere.png" alt="Énergie potagère" style={{ width:64, height:64, flexShrink:0, filter:'brightness(0) invert(1)', objectFit:'contain' }}/>
               <div style={{ flex:1 }}>
                 <div style={{ fontSize:16, fontWeight:800, color:'white', marginBottom:8, lineHeight:1.3 }}>
                   L'énergie <span className="accent">potagère</span>
@@ -4061,7 +4067,6 @@ function SolarSimScreen({ user, userProfile, onBack }) {
                   Installation simple et rapide afin de rejoindre la famille des petits producteurs qui échangent l'électricité entre eux — c'est ce que nous appelons <strong style={{color:'white'}}>l'énergie potagère</strong>.
                 </div>
               </div>
-              <img src="/energie-potagere.png" alt="Énergie potagère" style={{ width:64, height:64, flexShrink:0, filter:'brightness(0) invert(1)', objectFit:'contain' }}/>
             </div>
           </div>
 
