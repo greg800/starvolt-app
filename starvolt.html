@@ -3802,42 +3802,62 @@ function BoxSimScreen({ user, userProfile, onBack }) {
   return (
     <>
       <div className="screen fade-in">
-        <div style={{ fontSize:9, letterSpacing:'.6px', color:'rgba(125,217,64,.8)', fontWeight:700, textTransform:'uppercase', marginBottom:2 }}>Simulation</div>
-        <div style={{ fontSize:18, fontWeight:900, color:'white', lineHeight:1.1, marginBottom:14 }}>La Box <span className="accent">Comwatt</span></div>
+
+        {/* ── 1. Titre ── */}
+        <div style={{ marginBottom:20, marginTop:4 }}>
+          <div style={{ fontSize:9, letterSpacing:'.8px', color:'rgba(125,217,64,.85)', fontWeight:700, textTransform:'uppercase', marginBottom:6 }}>Simulation</div>
+          <div style={{ fontSize:20, fontWeight:900, color:'white', lineHeight:1.2 }}>
+            Gagnez{' '}
+            {totalGain > 0
+              ? <span className="accent">{totalGain.toLocaleString('fr-FR')} €/an</span>
+              : <span className="accent">jusqu'à 280 €/an</span>
+            }{' '}
+            avec le pilotage des consommations avec la Box Comwatt
+          </div>
+        </div>
 
         {loading ? (
           <div style={{ textAlign:'center', padding:40 }}><div className="spinner" style={{ margin:'0 auto' }}/></div>
         ) : (<>
-          {/* Box image */}
-          <div className="card" style={{ padding:'14px 16px 10px', marginBottom:10, textAlign:'center' }}>
-            <img src="/comwatt-box.png" alt="Box Comwatt" style={{ width:'100%', maxWidth:200, borderRadius:12, marginBottom:10 }}/>
-            <div style={{ fontSize:13, fontWeight:700, color:'white', marginBottom:4 }}>Box Comwatt · Pilotage intelligent</div>
-            <div style={{ fontSize:11, color:'rgba(255,255,255,.45)' }}>Se branche sur votre tableau électrique en 30 min.</div>
+
+          {/* ── 2. Box Comwatt ── */}
+          <div className="card" style={{ padding:'18px 16px', marginBottom:12, textAlign:'center' }}>
+            <img src="/comwatt-box.png" alt="Box Comwatt" style={{ width:'100%', maxWidth:180, borderRadius:12, marginBottom:12 }}/>
+            <div style={{ fontSize:16, fontWeight:800, color:'white', marginBottom:6 }}>Box Comwatt</div>
+            <div style={{ fontSize:14, color:'rgba(255,255,255,.6)', lineHeight:1.55 }}>
+              La box Comwatt s'installe en 30 minutes et permet une gestion intelligente de vos consommations électriques.
+            </div>
           </div>
 
-          {/* Flex gains */}
-          <div className="card" style={{ padding:'14px 16px', marginBottom:8, background:'rgba(125,217,64,.06)', border:'1px solid rgba(125,217,64,.25)' }}>
-            <div style={{ display:'flex', alignItems:'flex-start', gap:12 }}>
-              <div style={{ fontSize:28, flexShrink:0 }}>💰</div>
+          {/* ── 3. Flexibilité ── */}
+          <div className="card" style={{ padding:'18px 16px', marginBottom:12, background:'rgba(125,217,64,.06)', border:'1px solid rgba(125,217,64,.25)' }}>
+            <div style={{ display:'flex', alignItems:'flex-start', gap:14 }}>
+              <img src="/flex.png" alt="Flexibilité" style={{ width:52, height:52, flexShrink:0, filter:'brightness(0) invert(1)', objectFit:'contain' }}/>
               <div>
-                <div style={{ fontWeight:800, fontSize:14, color:'#7dd940', marginBottom:4 }}>+140 €/an de cagnotte flexibilité</div>
-                <div style={{ fontSize:12, color:'rgba(255,255,255,.6)', lineHeight:1.5 }}>
-                  La box rend des services au réseau électrique en adaptant votre consommation aux besoins du réseau.
-                  En contrepartie, <strong style={{color:'white'}}>Starvolt crédite 140 €/an</strong> sur votre cagnotte flexibilité.
+                <div style={{ fontWeight:900, fontSize:17, color:'white', marginBottom:6 }}>
+                  Gagnez <span style={{color:'#7dd940'}}>{flexGain} €</span> grâce à la flexibilité
+                </div>
+                <div style={{ fontSize:14, color:'rgba(255,255,255,.65)', lineHeight:1.55 }}>
+                  La box adapte votre consommation aux besoins du réseau électrique national.
+                  En contrepartie, <strong style={{color:'white'}}>Starvolt vous crédite 140 €/an</strong> sur votre cagnotte flexibilité.
                 </div>
               </div>
             </div>
           </div>
 
-          {/* Shift gains */}
-          <div className="card" style={{ padding:'14px 16px', marginBottom:8, background:'rgba(56,189,248,.05)', border:'1px solid rgba(56,189,248,.2)' }}>
-            <div style={{ display:'flex', alignItems:'flex-start', gap:12 }}>
-              <div style={{ fontSize:28, flexShrink:0 }}>⚡</div>
+          {/* ── 4. Déplacement des consommations ── */}
+          <div className="card" style={{ padding:'18px 16px', marginBottom:12, background:'rgba(56,189,248,.05)', border:'1px solid rgba(56,189,248,.2)' }}>
+            <div style={{ display:'flex', alignItems:'flex-start', gap:14 }}>
+              <img src="/water-heater.png" alt="Déplacement conso" style={{ width:52, height:52, flexShrink:0, filter:'brightness(0) invert(1)', objectFit:'contain' }}/>
               <div>
-                <div style={{ fontWeight:800, fontSize:14, color:'#38bdf8', marginBottom:4 }}>
-                  {shiftGain !== null ? `-${shiftGain.toLocaleString('fr-FR')} €/an` : 'Jusqu\'à -20%'} sur votre facture
+                <div style={{ fontWeight:900, fontSize:17, color:'white', marginBottom:6 }}>
+                  Gagnez{' '}
+                  <span style={{color:'#38bdf8'}}>
+                    {shiftGain !== null ? `${shiftGain.toLocaleString('fr-FR')} €` : "jusqu'à 20%"}
+                  </span>{' '}
+                  grâce au déplacement des consommations
                 </div>
-                <div style={{ fontSize:12, color:'rgba(255,255,255,.6)', lineHeight:1.5 }}>
+                <div style={{ fontSize:14, color:'rgba(255,255,255,.65)', lineHeight:1.55 }}>
                   La box déplace automatiquement vos consommations (chauffe-eau, lave-linge, charge VE) vers les heures les moins chères.
                   {isDynamic ? ' Avec votre tarif dynamique, le gain peut atteindre 20% de votre facture.' : ' Gain estimé à 10% de votre facture.'}
                 </div>
@@ -3845,37 +3865,38 @@ function BoxSimScreen({ user, userProfile, onBack }) {
             </div>
           </div>
 
-          {/* Investment */}
-          <div className="card" style={{ padding:'14px 16px', marginBottom:8 }}>
-            <div style={{ fontWeight:700, fontSize:13, color:'white', marginBottom:10 }}>Votre investissement</div>
-            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8 }}>
-              <div style={{ background:'rgba(255,255,255,.06)', borderRadius:10, padding:'12px 10px', textAlign:'center' }}>
-                <div style={{ fontSize:22, fontWeight:900, color:'white' }}>550 €</div>
-                <div style={{ fontSize:10, color:'rgba(255,255,255,.45)', marginTop:2, fontWeight:700 }}>ACHAT DIRECT</div>
-                <div style={{ fontSize:10, color:'rgba(255,255,255,.35)', marginTop:4 }}>Rentabilisé en {shiftGain && totalGain > 0 ? Math.ceil(550 / totalGain) + ' an' + (Math.ceil(550/totalGain)>1?'s':'') : '< 4 ans'}</div>
+          {/* ── 5. Choix ── */}
+          <div className="card" style={{ padding:'18px 16px', marginBottom:8 }}>
+            <div style={{ fontWeight:900, fontSize:17, color:'white', marginBottom:14, lineHeight:1.3 }}>
+              Gagnez de l'argent dès à présent ou dans 3 ans — c'est à vous de choisir
+            </div>
+            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
+              <div style={{ background:'rgba(255,255,255,.07)', borderRadius:12, padding:'16px 12px', textAlign:'center' }}>
+                <div style={{ fontSize:26, fontWeight:900, color:'white', marginBottom:4 }}>550 €</div>
+                <div style={{ fontSize:14, color:'white', fontWeight:700, marginBottom:6 }}>Achat direct</div>
+                <div style={{ fontSize:13, color:'rgba(255,255,255,.55)', lineHeight:1.45 }}>
+                  Rentabilisé en {shiftGain && totalGain > 0 ? Math.ceil(550 / totalGain) + ' an' + (Math.ceil(550/totalGain)>1?'s':'') : '< 4 ans'} grâce aux économies
+                </div>
               </div>
-              <div style={{ background:'rgba(125,217,64,.1)', borderRadius:10, padding:'12px 10px', textAlign:'center', border:'1.5px solid rgba(125,217,64,.35)' }}>
-                <div style={{ fontSize:22, fontWeight:900, color:'#7dd940' }}>Gratuite</div>
-                <div style={{ fontSize:10, color:'rgba(125,217,64,.7)', marginTop:2, fontWeight:700 }}>BOX OFFERTE</div>
-                <div style={{ fontSize:10, color:'rgba(255,255,255,.35)', marginTop:4 }}>Cagnotte flex reversée à Starvolt pendant 3 ans</div>
+              <div style={{ background:'rgba(125,217,64,.12)', borderRadius:12, padding:'16px 12px', textAlign:'center', border:'1.5px solid rgba(125,217,64,.4)' }}>
+                <div style={{ fontSize:26, fontWeight:900, color:'#7dd940', marginBottom:4 }}>Gratuite</div>
+                <div style={{ fontSize:14, color:'white', fontWeight:700, marginBottom:6 }}>Box offerte</div>
+                <div style={{ fontSize:13, color:'rgba(255,255,255,.55)', lineHeight:1.45 }}>
+                  Votre cagnotte flex est reversée à Starvolt pendant 3 ans
+                </div>
               </div>
             </div>
           </div>
 
-          {currentBill && (
-            <div style={{ textAlign:'center', marginBottom:8, fontSize:11, color:'rgba(255,255,255,.35)' }}>
-              Économies totales estimées : <strong style={{color:'#7dd940'}}>-{totalGain.toLocaleString('fr-FR')} €/an</strong>
-            </div>
-          )}
         </>)}
       </div>
 
       {!loading && (
         <StickyFooter row onBack={onBack}>
-          <button className="btn btn-no" style={{fontSize:12, padding:'12px 8px'}} onClick={() => { localStorage.setItem('starvolt_box_chosen','free'); setChosen('free'); }}>
-            🎁 Je veux une box gratuite
+          <button className="btn btn-no" style={{fontSize:13, padding:'12px 8px'}} onClick={() => { localStorage.setItem('starvolt_box_chosen','free'); setChosen('free'); }}>
+            🎁 Box gratuite
           </button>
-          <button className="btn btn-yes" style={{fontSize:12, padding:'12px 8px'}} onClick={() => { localStorage.setItem('starvolt_box_chosen','buy'); setChosen('buy'); }}>
+          <button className="btn btn-yes" style={{fontSize:13, padding:'12px 8px'}} onClick={() => { localStorage.setItem('starvolt_box_chosen','buy'); setChosen('buy'); }}>
             📦 J'achète à 550 €
           </button>
         </StickyFooter>
