@@ -3539,10 +3539,10 @@ function AccMapScreen({ user, userProfile, onBack, onJoin, onCreate }) {
   const accSavings = Math.max(0, Math.round(kwh918 * (priceRef - accPriceKwh)));
 
   return (
-    <div style={{ position:'fixed', inset:0, zIndex:200, display:'flex', flexDirection:'column', background:'#0a1628', overflow:'hidden' }} className="fade-in">
+    <div style={{ position:'fixed', inset:0, zIndex:200, display:'flex', flexDirection:'column', background:'linear-gradient(145deg, #065060 0%, #0a9b8c 50%, #0b8264 100%)', overflow:'hidden' }} className="fade-in">
 
       {/* ── Top bar ── */}
-      <div style={{ flexShrink:0, padding:'70px 16px 12px', background:'#0a1628', position:'relative', zIndex:2 }}>
+      <div style={{ flexShrink:0, padding:'70px 16px 12px', background:'transparent', position:'relative', zIndex:2 }}>
 
         {/* Titre + accroche */}
         <div style={{ marginBottom:12 }}>
@@ -3600,7 +3600,7 @@ function AccMapScreen({ user, userProfile, onBack, onJoin, onCreate }) {
 
         {/* Geocoding spinner overlay */}
         {!loading && activeSite && !siteLatLng && (
-          <div style={{ position:'absolute', bottom:80, left:'50%', transform:'translateX(-50%)', zIndex:10, background:'rgba(10,22,40,.85)', borderRadius:20, padding:'6px 14px', display:'flex', alignItems:'center', gap:6 }}>
+          <div style={{ position:'absolute', bottom:80, left:'50%', transform:'translateX(-50%)', zIndex:10, background:'rgba(5,65,78,.85)', borderRadius:20, padding:'6px 14px', display:'flex', alignItems:'center', gap:6 }}>
             <div className="spinner" style={{ width:12, height:12 }}/>
             <div style={{ fontSize:11, color:'rgba(255,255,255,.6)' }}>Géolocalisation en cours…</div>
           </div>
@@ -3608,7 +3608,7 @@ function AccMapScreen({ user, userProfile, onBack, onJoin, onCreate }) {
 
         {/* Nearby count badge */}
         {siteLatLng && (
-          <div style={{ position:'absolute', top:10, right:10, zIndex:10, background:'rgba(10,22,40,.85)', borderRadius:8, padding:'5px 10px' }}>
+          <div style={{ position:'absolute', top:10, right:10, zIndex:10, background:'rgba(5,65,78,.85)', borderRadius:8, padding:'5px 10px' }}>
             <div style={{ fontSize:10, color:'rgba(255,255,255,.5)', letterSpacing:.2 }}>Dans 20 km</div>
             <div style={{ fontSize:16, fontWeight:900, color:'#7dd940', lineHeight:1.1 }}>{nearbyAcc.length} site{nearbyAcc.length!==1?'s':''} ACC</div>
           </div>
@@ -3616,7 +3616,7 @@ function AccMapScreen({ user, userProfile, onBack, onJoin, onCreate }) {
 
         {/* Popup card floating over map */}
         {popup && (
-          <div style={{ position:'absolute', bottom:80, left:12, right:12, zIndex:20, background:'rgba(10,22,40,.95)', border:'1.5px solid rgba(125,217,64,.4)', borderRadius:12, padding:'12px 14px', boxShadow:'0 4px 24px rgba(0,0,0,.5)' }}>
+          <div style={{ position:'absolute', bottom:80, left:12, right:12, zIndex:20, background:'rgba(5,65,78,.95)', border:'1.5px solid rgba(125,217,64,.4)', borderRadius:12, padding:'12px 14px', boxShadow:'0 4px 24px rgba(0,0,0,.5)' }}>
             <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start' }}>
               <div>
                 <div style={{ fontWeight:800, fontSize:14, color:'white' }}>☀️ {popup.nom || 'Site ACC'}</div>
@@ -3637,7 +3637,7 @@ function AccMapScreen({ user, userProfile, onBack, onJoin, onCreate }) {
 
       {/* ── Sticky footer ── */}
       {!loading && (
-        <div style={{ flexShrink:0, padding:'10px 14px', background:'rgba(10,22,40,.97)', borderTop:'1px solid rgba(255,255,255,.08)', display:'flex', alignItems:'center', gap:10, position:'relative', zIndex:1000 }}>
+        <div style={{ flexShrink:0, padding:'10px 14px', background:'rgba(5,65,78,.97)', borderTop:'1px solid rgba(255,255,255,.08)', display:'flex', alignItems:'center', gap:10, position:'relative', zIndex:1000 }}>
           <button onClick={onBack} style={{
             background:'transparent', border:'1px solid rgba(255,255,255,.2)',
             borderRadius:20, color:'rgba(255,255,255,.7)', fontSize:12,
@@ -3836,7 +3836,7 @@ function BoxSimScreen({ user, userProfile, onBack }) {
           </div>
 
           {/* ── 3. Flexibilité ── */}
-          <div className="card" style={{ padding:'18px 16px', marginBottom:12, background:'rgba(125,217,64,.06)', border:'1px solid rgba(125,217,64,.25)' }}>
+          <div className="card" style={{ padding:'18px 16px', marginBottom:12, border:'1px solid rgba(125,217,64,.3)' }}>
             <div style={{ display:'flex', alignItems:'flex-start', gap:14 }}>
               <img src="/flex.png" alt="Flexibilité" style={{ width:52, height:52, flexShrink:0, filter:'brightness(0) invert(1)', objectFit:'contain' }}/>
               <div>
@@ -3852,7 +3852,7 @@ function BoxSimScreen({ user, userProfile, onBack }) {
           </div>
 
           {/* ── 4. Déplacement des consommations ── */}
-          <div className="card" style={{ padding:'18px 16px', marginBottom:12, background:'rgba(56,189,248,.05)', border:'1px solid rgba(56,189,248,.2)' }}>
+          <div className="card" style={{ padding:'18px 16px', marginBottom:12, border:'1px solid rgba(56,189,248,.3)' }}>
             <div style={{ display:'flex', alignItems:'flex-start', gap:14 }}>
               <img src="/water-heater.png" alt="Déplacement conso" style={{ width:52, height:52, flexShrink:0, filter:'brightness(0) invert(1)', objectFit:'contain' }}/>
               <div>
@@ -4071,7 +4071,7 @@ function SolarSimScreen({ user, userProfile, onBack }) {
           </div>
 
           {/* ── 3. Panneaux solaires + batterie (-50%) ── */}
-          <div className="card" style={{ padding:'18px 16px', marginBottom:12, background:'rgba(255,215,0,.05)', border:'1px solid rgba(255,215,0,.3)' }}>
+          <div className="card" style={{ padding:'18px 16px', marginBottom:12, border:'1px solid rgba(255,215,0,.35)' }}>
             <div style={{ display:'flex', alignItems:'flex-start', gap:14 }}>
               <div style={{ display:'flex', flexDirection:'column', alignItems:'center', gap:4, flexShrink:0 }}>
                 <img src="/maison.png" alt="Solaire" style={{ width:40, height:40, filter:'brightness(0) invert(1)', objectFit:'contain' }}/>
@@ -4093,7 +4093,7 @@ function SolarSimScreen({ user, userProfile, onBack }) {
           </div>
 
           {/* ── 4. Solaire + batterie + Box Comwatt (-80%) ── */}
-          <div className="card" style={{ padding:'18px 16px', marginBottom:12, background:'rgba(125,217,64,.07)', border:'1.5px solid rgba(125,217,64,.4)' }}>
+          <div className="card" style={{ padding:'18px 16px', marginBottom:12, border:'1.5px solid rgba(125,217,64,.4)' }}>
             <div style={{ display:'flex', alignItems:'flex-start', gap:14 }}>
               <div style={{ display:'flex', flexDirection:'column', alignItems:'center', gap:4, flexShrink:0 }}>
                 <img src="/maison.png" alt="Solaire" style={{ width:36, height:36, filter:'brightness(0) invert(1)', objectFit:'contain' }}/>
