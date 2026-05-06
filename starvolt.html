@@ -2259,7 +2259,7 @@ function MaConsoScreen({ user, userProfile, onBack }) {
               <div style={{color:'#ff6b6b',fontSize:12,padding:'7px 12px',background:'rgba(255,50,50,.1)',borderRadius:8,marginBottom:8}}>⚠️ {importMsg.text}</div>
             )}
             {importMsg?.type==='ok'&&(
-              <div style={{color:'#7dd940',fontSize:12,padding:'7px 12px',background:'rgba(125,217,64,.08)',borderRadius:8,marginBottom:8}}>
+              <div style={{color:'#7dd940',fontSize:12,padding:'7px 12px',background:'rgba(255,255,255,.05)',borderRadius:8,marginBottom:8}}>
                 ✅ {importMsg.kwh.toLocaleString('fr-FR')} kWh/an{importMsg.gaps>0?` · ${importMsg.gaps} trou(s) rebouché(s)`:''}
               </div>
             )}
@@ -2433,13 +2433,13 @@ function SimulationsScreen({ onACC, onBox, onSolar, onOptimisation, onBack, user
           </div>
         </div>
         {maxSaving > 0 && (
-          <div className="card" style={{ padding:'16px', marginBottom:12, textAlign:'center', background:'rgba(125,217,64,.09)', border:'1.5px solid rgba(125,217,64,.4)' }}>
+          <div className="card" style={{ padding:'16px', marginBottom:12, textAlign:'center', border:'1.5px solid rgba(125,217,64,.4)' }}>
             <div style={{ fontSize:11, color:'rgba(255,255,255,.45)', textTransform:'uppercase', letterSpacing:'.5px', marginBottom:4 }}>Économies estimées</div>
             <div style={{ fontSize:36, fontWeight:900, color:'#7dd940', lineHeight:1 }}>-{maxSaving.toLocaleString('fr-FR')} €<span style={{fontSize:18}}>/an</span></div>
             {bestTariffName && <div style={{ fontSize:12, color:'rgba(255,255,255,.45)', marginTop:6 }}>En passant sur le tarif <strong style={{color:'#7dd940'}}>{bestTariffName}</strong></div>}
           </div>
         )}
-        <div className="card" style={{ padding:'14px 16px', background:'rgba(125,217,64,.06)', border:'1px solid rgba(125,217,64,.2)' }}>
+        <div className="card" style={{ padding:'14px 16px', border:'1px solid rgba(125,217,64,.2)' }}>
           <div style={{ fontWeight:700, fontSize:13, color:'#7dd940', marginBottom:6 }}>✦ Prochaine étape</div>
           <div style={{ fontSize:12, color:'rgba(255,255,255,.55)', lineHeight:1.6 }}>
             Nous vérifions votre éligibilité et préparons votre dossier de changement. Aucune démarche de votre côté — on s'occupe de tout.
@@ -2686,13 +2686,13 @@ function OptimisationScreen({ user, userProfile, onBack }) {
           </div>
         </div>
         {heroSaving > 0 && (
-          <div className="card" style={{ padding:'16px', marginBottom:12, textAlign:'center', background:'rgba(125,217,64,.09)', border:'1.5px solid rgba(125,217,64,.4)' }}>
+          <div className="card" style={{ padding:'16px', marginBottom:12, textAlign:'center', border:'1.5px solid rgba(125,217,64,.4)' }}>
             <div style={{ fontSize:11, color:'rgba(255,255,255,.45)', textTransform:'uppercase', letterSpacing:'.5px', marginBottom:4 }}>Économies estimées</div>
             <div style={{ fontSize:36, fontWeight:900, color:'#7dd940', lineHeight:1 }}>-{heroSaving.toLocaleString('fr-FR')} €<span style={{fontSize:18}}>/an</span></div>
             {ranked[0] && <div style={{ fontSize:12, color:'rgba(255,255,255,.45)', marginTop:6 }}>En passant sur le tarif <strong style={{color:'#7dd940'}}>{ranked[0].t.nom}</strong></div>}
           </div>
         )}
-        <div className="card" style={{ padding:'14px 16px', background:'rgba(125,217,64,.06)', border:'1px solid rgba(125,217,64,.2)' }}>
+        <div className="card" style={{ padding:'14px 16px', border:'1px solid rgba(125,217,64,.2)' }}>
           <div style={{ fontWeight:700, fontSize:13, color:'#7dd940', marginBottom:6 }}>✦ Prochaine étape</div>
           <div style={{ fontSize:12, color:'rgba(255,255,255,.55)', lineHeight:1.6 }}>
             Nous vérifions votre éligibilité et préparons votre dossier de changement. Aucune démarche de votre côté — on s'occupe de tout.
@@ -2784,7 +2784,7 @@ function OptimisationScreen({ user, userProfile, onBack }) {
 
           {/* ── 3. Notre conseil ── */}
           {heroSaving !== null && heroSaving > 0 && (
-            <div className="card" style={{ padding:'18px 16px', marginBottom:14, background:'rgba(125,217,64,.08)', border:'2px solid rgba(125,217,64,.4)' }}>
+            <div className="card" style={{ padding:'18px 16px', marginBottom:14, border:'2px solid rgba(125,217,64,.4)' }}>
               <div style={{ fontSize:12, color:'rgba(125,217,64,.75)', fontWeight:700, textTransform:'uppercase', letterSpacing:'.5px', marginBottom:8 }}>Notre conseil</div>
               <div style={{ fontSize:16, color:'white', lineHeight:1.6 }}>
                 Passer de <span style={{color:'white', fontWeight:700}}>{currentRanked.t.nom}</span> à{' '}
@@ -3565,7 +3565,7 @@ function AccMapScreen({ user, userProfile, onBack, onJoin, onCreate }) {
           </div>
         )}
         {!loading && activeSite && (eligible ? (
-          <div style={{ background:'rgba(22,163,74,.15)', border:'1.5px solid rgba(22,163,74,.45)', borderRadius:12, padding:'10px 14px', display:'flex', alignItems:'center', gap:12 }}>
+          <div style={{ background:'rgba(255,255,255,.05)', border:'1.5px solid rgba(22,163,74,.45)', borderRadius:12, padding:'10px 14px', display:'flex', alignItems:'center', gap:12 }}>
             <div style={{ fontSize:26, lineHeight:1 }}>✅</div>
             <div style={{ flex:1 }}>
               <div style={{ fontWeight:800, fontSize:14, color:'#4ade80', lineHeight:1.2 }}>{activeSite.nom} — zone éligible !</div>
@@ -3579,7 +3579,7 @@ function AccMapScreen({ user, userProfile, onBack, onJoin, onCreate }) {
             )}
           </div>
         ) : (
-          <div style={{ background:'rgba(245,158,11,.08)', border:'1px solid rgba(245,158,11,.35)', borderRadius:12, padding:'10px 14px', display:'flex', alignItems:'center', gap:12 }}>
+          <div style={{ background:'rgba(255,255,255,.05)', border:'1px solid rgba(245,158,11,.35)', borderRadius:12, padding:'10px 14px', display:'flex', alignItems:'center', gap:12 }}>
             <div style={{ fontSize:24, lineHeight:1 }}>⏳</div>
             <div>
               <div style={{ fontWeight:700, fontSize:14, color:'#fbbf24', lineHeight:1.2 }}>{activeSite.code_postal} — pas encore disponible</div>
@@ -3683,7 +3683,7 @@ function AccResultScreen({ state, onBack }) {
         </div>
       </div>
       {isJoin && accSavings > 0 && (
-        <div className="card" style={{ padding:'16px', marginBottom:12, textAlign:'center', background:'rgba(125,217,64,.09)', border:'1.5px solid rgba(125,217,64,.4)' }}>
+        <div className="card" style={{ padding:'16px', marginBottom:12, textAlign:'center', border:'1.5px solid rgba(125,217,64,.4)' }}>
           <div style={{ fontSize:11, color:'rgba(255,255,255,.45)', textTransform:'uppercase', letterSpacing:'.5px', marginBottom:4 }}>Économies estimées dès maintenant</div>
           <div style={{ fontSize:36, fontWeight:900, color:'#7dd940', lineHeight:1 }}>-{accSavings.toLocaleString('fr-FR')} €<span style={{fontSize:18}}>/an</span></div>
           <div style={{ fontSize:11, color:'rgba(255,255,255,.35)', marginTop:4 }}>
@@ -3691,7 +3691,7 @@ function AccResultScreen({ state, onBack }) {
           </div>
         </div>
       )}
-      <div className="card" style={{ padding:'14px 16px', background:'rgba(125,217,64,.06)', border:'1px solid rgba(125,217,64,.2)' }}>
+      <div className="card" style={{ padding:'14px 16px', border:'1px solid rgba(125,217,64,.2)' }}>
         <div style={{ fontWeight:700, fontSize:13, color:'#7dd940', marginBottom:6 }}>✦ Prochaine étape</div>
         <div style={{ fontSize:12, color:'rgba(255,255,255,.55)', lineHeight:1.6 }}>
           {isJoin
@@ -3779,7 +3779,7 @@ function BoxSimScreen({ user, userProfile, onBack }) {
                 <div style={{ fontSize:10, color:'rgba(255,255,255,.35)', marginTop:3 }}>APRÈS BOX</div>
               </div>
             </div>
-            <div style={{ marginTop:12, background:'rgba(125,217,64,.1)', borderRadius:8, padding:'8px 12px' }}>
+            <div style={{ marginTop:12, background:'rgba(255,255,255,.05)', borderRadius:8, padding:'8px 12px' }}>
               <div style={{ fontSize:11, color:'rgba(255,255,255,.5)', marginBottom:2 }}>Économies annuelles estimées</div>
               <div style={{ fontSize:24, fontWeight:900, color:'#7dd940' }}>-{totalGain.toLocaleString('fr-FR')} €/an</div>
               <div style={{ fontSize:10, color:'rgba(255,255,255,.35)', marginTop:2 }}>
@@ -3793,7 +3793,7 @@ function BoxSimScreen({ user, userProfile, onBack }) {
             )}
           </div>
         )}
-        <div className="card" style={{ padding:'14px 16px', background:'rgba(125,217,64,.06)', border:'1px solid rgba(125,217,64,.25)' }}>
+        <div className="card" style={{ padding:'14px 16px', border:'1px solid rgba(125,217,64,.25)' }}>
           <div style={{ fontWeight:700, fontSize:13, color:'#7dd940', marginBottom:6 }}>✦ Prochaine étape</div>
           <div style={{ fontSize:12, color:'rgba(255,255,255,.6)' }}>
             Un conseiller Starvolt vous contacte sous 48h pour planifier l'installation. Préparez votre numéro de compteur Linky.
@@ -3884,7 +3884,7 @@ function BoxSimScreen({ user, userProfile, onBack }) {
                   Rentabilisé en {shiftGain && totalGain > 0 ? Math.ceil(550 / totalGain) + ' an' + (Math.ceil(550/totalGain)>1?'s':'') : '< 4 ans'} grâce aux économies
                 </div>
               </div>
-              <div style={{ background:'rgba(125,217,64,.12)', borderRadius:12, padding:'16px 12px', textAlign:'center', border:'1.5px solid rgba(125,217,64,.4)' }}>
+              <div style={{ background:'rgba(255,255,255,.05)', borderRadius:12, padding:'16px 12px', textAlign:'center', border:'1.5px solid rgba(125,217,64,.4)' }}>
                 <div style={{ fontSize:26, fontWeight:900, color:'#7dd940', marginBottom:4 }}>Gratuite</div>
                 <div style={{ fontSize:14, color:'white', fontWeight:700, marginBottom:6 }}>Box offerte</div>
                 <div style={{ fontSize:13, color:'rgba(255,255,255,.55)', lineHeight:1.45 }}>
@@ -3993,7 +3993,7 @@ function SolarSimScreen({ user, userProfile, onBack }) {
                 <div style={{ fontSize:10, color:'rgba(255,255,255,.35)', marginTop:3 }}>APRÈS SOLAIRE{withBox ? ' + BOX' : ''}</div>
               </div>
             </div>
-            <div style={{ background:'rgba(125,217,64,.1)', borderRadius:8, padding:'10px 12px', marginBottom: withBox ? 10 : 0 }}>
+            <div style={{ background:'rgba(255,255,255,.05)', borderRadius:8, padding:'10px 12px', marginBottom: withBox ? 10 : 0 }}>
               <div style={{ fontSize:11, color:'rgba(255,255,255,.5)', marginBottom:2 }}>Économies grâce au solaire</div>
               <div style={{ fontSize:24, fontWeight:900, color:'#7dd940' }}>-{finalSolarSaving?.toLocaleString('fr-FR')} €/an</div>
               <div style={{ fontSize:10, color:'rgba(255,255,255,.35)', marginTop:2 }}>
@@ -4001,7 +4001,7 @@ function SolarSimScreen({ user, userProfile, onBack }) {
               </div>
             </div>
             {withBox && (
-              <div style={{ background:'rgba(56,189,248,.08)', borderRadius:8, padding:'10px 12px', border:'1px solid rgba(56,189,248,.2)' }}>
+              <div style={{ background:'rgba(255,255,255,.05)', borderRadius:8, padding:'10px 12px', border:'1px solid rgba(56,189,248,.2)' }}>
                 <div style={{ fontSize:11, color:'rgba(255,255,255,.5)', marginBottom:2 }}>Économies supplémentaires avec la Box</div>
                 <div style={{ fontSize:20, fontWeight:900, color:'#38bdf8' }}>+{boxTotal.toLocaleString('fr-FR')} €/an</div>
                 <div style={{ fontSize:10, color:'rgba(255,255,255,.35)', marginTop:2 }}>
@@ -4013,7 +4013,7 @@ function SolarSimScreen({ user, userProfile, onBack }) {
         )}
 
         {withBox && currentBill && (
-          <div className="card" style={{ padding:'14px 16px', marginBottom:10, background:'rgba(125,217,64,.06)', border:'1px solid rgba(125,217,64,.25)', textAlign:'center' }}>
+          <div className="card" style={{ padding:'14px 16px', marginBottom:10, border:'1px solid rgba(125,217,64,.25)', textAlign:'center' }}>
             <div style={{ fontSize:13, color:'rgba(255,255,255,.5)', marginBottom:4 }}>Total économies annuelles estimées</div>
             <div style={{ fontSize:30, fontWeight:900, color:'#7dd940' }}>
               -{(finalSolarSaving + boxTotal).toLocaleString('fr-FR')} €/an
@@ -4022,7 +4022,7 @@ function SolarSimScreen({ user, userProfile, onBack }) {
           </div>
         )}
 
-        <div className="card" style={{ padding:'14px 16px', background:'rgba(125,217,64,.06)', border:'1px solid rgba(125,217,64,.25)' }}>
+        <div className="card" style={{ padding:'14px 16px', border:'1px solid rgba(125,217,64,.25)' }}>
           <div style={{ fontWeight:700, fontSize:13, color:'#7dd940', marginBottom:6 }}>✦ Prochaine étape</div>
           <div style={{ fontSize:12, color:'rgba(255,255,255,.6)' }}>
             Notre expert réalise une étude de votre toiture et dimensionne votre installation. Gratuit et sans engagement.
