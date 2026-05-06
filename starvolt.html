@@ -2699,6 +2699,9 @@ function OptimisationScreen({ user, userProfile, onBack }) {
     );
   }
 
+  const pctHC = hasHC && kwh_total > 0 ? Math.round(kwh_hc / kwh_total * 100) : null;
+  const prixMoyenKwh = currentRanked && kwh_total > 0 ? (currentRanked.result.total / kwh_total * 100).toFixed(1) : null;
+
   return (
     <>
     <StickyFooter onBack={onBack}>
@@ -2710,127 +2713,141 @@ function OptimisationScreen({ user, userProfile, onBack }) {
       )}
     </StickyFooter>
     <div className="screen fade-in">
-      <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:12, marginTop:4 }}>
-        <img src="/optimisation.png" alt="" style={{ width:32, height:32, objectFit:'contain', mixBlendMode:'screen', opacity:.85 }}/>
-        <div>
-          <div style={{ fontSize:9, letterSpacing:'.6px', color:'rgba(125,217,64,.8)', fontWeight:700, textTransform:'uppercase' }}>Comparatif</div>
-          <div style={{ fontSize:18, fontWeight:900, color:'white', lineHeight:1.1 }}>Optimisation <span className="accent">fournisseur</span></div>
-        </div>
+
+      {/* ── 1. Titre principal ── */}
+      <div style={{ marginBottom:20, marginTop:4 }}>
+        <div style={{ fontSize:9, letterSpacing:'.8px', color:'rgba(125,217,64,.85)', fontWeight:700, textTransform:'uppercase', marginBottom:6 }}>Optimisation fournisseur</div>
+        {!loading && heroSaving > 0 ? (
+          <div style={{ fontSize:20, fontWeight:900, color:'white', lineHeight:1.2 }}>
+            Gagnez <span className="accent">{heroSaving.toLocaleString('fr-FR')} €</span> par an avec<br/>l'optimisation fournisseur Starvolt
+          </div>
+        ) : (
+          <div style={{ fontSize:20, fontWeight:900, color:'white', lineHeight:1.2 }}>
+            Trouvez le tarif <span className="accent">le moins cher</span><br/>pour votre consommation
+          </div>
+        )}
       </div>
 
-      {loading && <div style={{ textAlign:'center', padding:40, color:'rgba(255,255,255,.5)' }}>Chargement…</div>}
+      {loading && <div style={{ textAlign:'center', padding:40 }}><div className="spinner" style={{margin:'0 auto'}}/></div>}
 
       {!loading && sites?.length === 0 && (
-        <div className="card" style={{ textAlign:'center', padding:'24px 20px' }}>
-          <div style={{ color:'rgba(255,255,255,.6)', fontSize:13 }}>Aucun profil de consommation trouvé.<br/>Importez d'abord vos données dans « Ma conso ».</div>
+        <div className="card" style={{ textAlign:'center', padding:'28px 20px' }}>
+          <div style={{ fontSize:16, color:'rgba(255,255,255,.6)', lineHeight:1.6 }}>Aucun profil de consommation.<br/>Importez d'abord vos données dans « Ma conso ».</div>
         </div>
       )}
 
       {!loading && site && (
         <>
-          {/* Site summary */}
-          <div className="card" style={{ padding:'12px 14px', marginBottom:10 }}>
-            <div style={{ fontWeight:800, fontSize:13, color:'white', marginBottom:2 }}>{site.nom}</div>
-            <div style={{ fontSize:10, color:'rgba(125,217,64,.7)', fontWeight:700, marginBottom:10, display:'flex', alignItems:'center', gap:4 }}>
-              <span>✦</span> Site utilisé pour tous les calculs
-            </div>
-            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:6 }}>
-              <div style={{ background:'rgba(255,255,255,.06)', borderRadius:8, padding:'10px 6px', textAlign:'center' }}>
-                <div style={{ fontSize:18, fontWeight:900, color:'#7dd940', lineHeight:1 }}>
+          {/* ── 2. Votre conso actuelle ── */}
+          <div className="card" style={{ padding:'18px 16px', marginBottom:14 }}>
+            <div style={{ fontSize:12, color:'rgba(125,217,64,.75)', fontWeight:700, textTransform:'uppercase', letterSpacing:'.5px', marginBottom:4 }}>Votre conso actuelle</div>
+            <div style={{ fontSize:17, fontWeight:900, color:'white', marginBottom:14 }}>Site : {site.nom}</div>
+
+            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
+              {/* Fournisseur actuel */}
+              <div style={{ background:'rgba(255,255,255,.06)', borderRadius:10, padding:'14px 12px' }}>
+                <div style={{ fontSize:12, color:'rgba(255,255,255,.45)', marginBottom:6, fontWeight:600 }}>Fournisseur actuel</div>
+                <div style={{ fontSize:16, fontWeight:900, color:'white', lineHeight:1.2 }}>
+                  {currentRanked ? currentRanked.t.nom : <span style={{color:'rgba(255,200,50,.6)'}}>Non défini</span>}
+                </div>
+              </div>
+              {/* % HC */}
+              <div style={{ background:'rgba(255,255,255,.06)', borderRadius:10, padding:'14px 12px' }}>
+                <div style={{ fontSize:12, color:'rgba(255,255,255,.45)', marginBottom:6, fontWeight:600 }}>Heures creuses</div>
+                <div style={{ fontSize:28, fontWeight:900, color: pctHC != null ? '#5de0f5' : 'rgba(255,255,255,.3)', lineHeight:1 }}>
+                  {pctHC != null ? `${pctHC} %` : '—'}
+                </div>
+                {pctHC == null && <div style={{ fontSize:12, color:'rgba(255,200,50,.55)', marginTop:4 }}>Plages HC non définies</div>}
+              </div>
+              {/* Facture annuelle */}
+              <div style={{ background:'rgba(255,255,255,.06)', borderRadius:10, padding:'14px 12px' }}>
+                <div style={{ fontSize:12, color:'rgba(255,255,255,.45)', marginBottom:6, fontWeight:600 }}>Facture annuelle TTC</div>
+                <div style={{ fontSize:28, fontWeight:900, color:'#7dd940', lineHeight:1 }}>
                   {currentRanked ? fmtE(currentRanked.result.total) : '—'}
                 </div>
-                <div style={{ fontSize:8, color:'rgba(255,255,255,.45)', marginTop:3, fontWeight:700 }}>FACTURE ANNUELLE</div>
-                {!currentRanked && <div style={{ fontSize:8, color:'rgba(255,200,50,.55)', marginTop:2 }}>Tarif non défini</div>}
               </div>
-              <div style={{ background:'rgba(255,255,255,.06)', borderRadius:8, padding:'10px 6px', textAlign:'center' }}>
-                <div style={{ fontSize:18, fontWeight:900, lineHeight:1, color: hasHC ? '#5de0f5' : 'rgba(255,255,255,.3)' }}>
-                  {hasHC ? `${kwh_total > 0 ? Math.round(kwh_hc / kwh_total * 100) : 0}%` : '—'}
+              {/* Prix moyen kWh */}
+              <div style={{ background:'rgba(255,255,255,.06)', borderRadius:10, padding:'14px 12px' }}>
+                <div style={{ fontSize:12, color:'rgba(255,255,255,.45)', marginBottom:6, fontWeight:600 }}>Prix moyen TTC</div>
+                <div style={{ fontSize:28, fontWeight:900, color:'rgba(255,200,80,.9)', lineHeight:1 }}>
+                  {prixMoyenKwh ? `${prixMoyenKwh}` : '—'}
                 </div>
-                <div style={{ fontSize:8, color:'rgba(255,255,255,.45)', marginTop:3, fontWeight:700 }}>HEURES CREUSES</div>
-                {!hasHC && <div style={{ fontSize:8, color:'rgba(255,200,50,.55)', marginTop:2 }}>Plages HC non définies</div>}
-              </div>
-              <div style={{ background:'rgba(255,255,255,.06)', borderRadius:8, padding:'10px 6px', textAlign:'center' }}>
-                <div style={{ fontSize:18, fontWeight:900, lineHeight:1, color: currentRanked ? 'rgba(255,200,80,.9)' : 'rgba(255,255,255,.3)' }}>
-                  {currentRanked && kwh_total > 0 ? `${(currentRanked.result.total / kwh_total * 100).toFixed(1)}` : '—'}
-                </div>
-                <div style={{ fontSize:8, color:'rgba(255,255,255,.45)', marginTop:3, fontWeight:700 }}>C€/kWh MOYEN</div>
-                {currentRanked && kwh_total > 0 && <div style={{ fontSize:8, color:'rgba(255,255,255,.3)', marginTop:2 }}>TTC toutes taxes</div>}
+                {prixMoyenKwh && <div style={{ fontSize:13, color:'rgba(255,255,255,.4)', marginTop:2 }}>c€/kWh</div>}
               </div>
             </div>
           </div>
 
-          {/* Hero savings */}
+          {/* ── 3. Notre conseil ── */}
           {heroSaving !== null && heroSaving > 0 && (
-            <div className="card" style={{ padding:'18px 16px', marginBottom:12, background:'rgba(125,217,64,.08)', border:'2px solid rgba(125,217,64,.45)', textAlign:'center' }}>
-              <div style={{ fontSize:11, color:'rgba(255,255,255,.5)', letterSpacing:'.4px', textTransform:'uppercase', marginBottom:4 }}>En changeant de tarif</div>
-              <div style={{ fontSize:40, fontWeight:900, color:'#7dd940', lineHeight:1, letterSpacing:'-1px' }}>
-                -{heroSaving.toLocaleString('fr-FR')} €<span style={{fontSize:22, fontWeight:700}}>/an</span>
+            <div className="card" style={{ padding:'18px 16px', marginBottom:14, background:'rgba(125,217,64,.08)', border:'2px solid rgba(125,217,64,.4)' }}>
+              <div style={{ fontSize:12, color:'rgba(125,217,64,.75)', fontWeight:700, textTransform:'uppercase', letterSpacing:'.5px', marginBottom:8 }}>Notre conseil</div>
+              <div style={{ fontSize:16, color:'white', lineHeight:1.55, marginBottom:12 }}>
+                Passer de <span style={{color:'rgba(255,160,60,.9)', fontWeight:700}}>{currentRanked.t.nom}</span> à{' '}
+                <span style={{color:'#7dd940', fontWeight:700}}>{ranked[0].t.nom}</span> — ce qui vous ferait gagner{' '}
+                <span style={{color:'#7dd940', fontWeight:900, fontSize:18}}>{heroSaving.toLocaleString('fr-FR')} € TTC</span> par an,
+                sans aucune perte de confort et en un clic.
               </div>
-              <div style={{ fontSize:12, color:'rgba(255,255,255,.55)', marginTop:8 }}>
-                <span style={{color:'rgba(255,150,50,.8)'}}>{currentRanked.t.nom}</span>
-                {' '}→ <span style={{color:'#7dd940', fontWeight:700}}>{ranked[0].t.nom}</span>
-              </div>
+              <button className="btn btn-yes" style={{width:'100%'}}
+                onClick={() => { confetti({ particleCount:120, spread:70, origin:{y:.6} }); setChosen(true); }}>
+                ⚡ Je change maintenant
+              </button>
             </div>
           )}
 
-          {/* Ranking */}
-          <div style={{ fontWeight:700, fontSize:12, color:'rgba(255,255,255,.5)', letterSpacing:'.5px', textTransform:'uppercase', marginBottom:6, paddingLeft:2 }}>
-            {ranked.length} tarif{ranked.length > 1 ? 's' : ''} classé{ranked.length > 1 ? 's' : ''} du moins cher au plus cher
+          {/* ── 4. Notre comparatif ── */}
+          <div style={{ fontSize:14, fontWeight:700, color:'rgba(255,255,255,.55)', letterSpacing:'.4px', textTransform:'uppercase', marginBottom:10, paddingLeft:2 }}>
+            Notre comparatif · {ranked.length} offre{ranked.length > 1 ? 's' : ''}
           </div>
 
           {ranked.length === 0 && (
-            <div className="card" style={{ textAlign:'center', padding:'20px', color:'rgba(255,255,255,.5)', fontSize:13 }}>
-              Aucun tarif statique disponible. Ajoutez des tarifs dans l'admin.
+            <div className="card" style={{ textAlign:'center', padding:'20px', color:'rgba(255,255,255,.5)', fontSize:14 }}>
+              Aucun tarif disponible.
             </div>
           )}
 
-          <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
+          <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
             {ranked.map(({ t, result }, idx) => {
               const medals = ['🥇','🥈','🥉'];
               const rank = medals[idx] || `#${idx + 1}`;
-              const saving = idx > 0 ? result.total - ranked[0].result.total : null;
+              const saving = idx > 0 ? Math.round(result.total - ranked[0].result.total) : null;
               const prixKwh = kwh_total > 0 ? (result.total / kwh_total * 100).toFixed(1) : null;
               const isCurrent = t.id === site?.tarif_id;
               return (
                 <div key={t.id} className="card" style={{
-                  padding:'10px 12px',
-                  border: isCurrent ? '1.5px solid rgba(125,217,64,.5)' : idx === 0 ? '1.5px solid rgba(125,217,64,.3)' : '1px solid rgba(255,255,255,.08)',
+                  padding:'16px',
+                  border: isCurrent ? '2px solid rgba(125,217,64,.55)' : idx === 0 ? '1.5px solid rgba(125,217,64,.3)' : '1px solid rgba(255,255,255,.08)',
                   background: isCurrent ? 'rgba(125,217,64,.07)' : idx === 0 ? 'rgba(125,217,64,.04)' : undefined,
                 }}>
-                  <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
-                    <div style={{ display:'flex', alignItems:'center', gap:7, flex:1, minWidth:0 }}>
-                      <span style={{ fontSize:17, flexShrink:0 }}>{rank}</span>
-                      <div style={{ minWidth:0 }}>
-                        <div style={{ fontWeight:800, fontSize:13, color:'white', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{t.nom}</div>
-                        <div style={{ fontSize:10, color: result.is_dynamic ? 'rgba(125,217,64,.55)' : 'rgba(255,255,255,.38)', marginTop:1 }}>
-                          {result.is_dynamic ? `Dynamique · Abo ${fmtE(result.abo)}` : result.is_base ? `Tarif base · Abo ${fmtE(result.abo)}` : `HC+HP · Abo ${fmtE(result.abo)}`}
-                        </div>
+                  <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start' }}>
+                    <div style={{ flex:1, minWidth:0 }}>
+                      <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:4 }}>
+                        <span style={{ fontSize:20 }}>{rank}</span>
+                        <div style={{ fontWeight:800, fontSize:16, color:'white' }}>{t.nom}</div>
                       </div>
+                      <div style={{ fontSize:14, color: result.is_dynamic ? 'rgba(125,217,64,.6)' : 'rgba(255,255,255,.4)' }}>
+                        {result.is_dynamic ? 'Tarif dynamique' : result.is_base ? 'Tarif base' : 'Tarif HC/HP'}{' · '}Abo {fmtE(result.abo)}/an
+                      </div>
+                      {isCurrent && <div style={{ marginTop:5, fontSize:13, color:'rgba(125,217,64,.8)', fontWeight:700 }}>✦ Votre tarif actuel</div>}
+                      {saving !== null && saving > 0 && (
+                        <div style={{ marginTop:5, fontSize:14, color:'rgba(255,140,40,.8)' }}>
+                          +{fmtE(saving)}/an vs le moins cher
+                        </div>
+                      )}
                     </div>
-                    <div style={{ textAlign:'right', flexShrink:0, marginLeft:10 }}>
-                      <div style={{ fontSize:20, fontWeight:900, color: idx === 0 ? '#7dd940' : 'white', lineHeight:1 }}>{fmtE(result.total)}</div>
-                      <div style={{ fontSize:10, color:'rgba(255,255,255,.38)', lineHeight:1.2 }}>/an</div>
-                      {prixKwh && <div style={{ fontSize:16, fontWeight:800, color: idx === 0 ? '#7dd940' : 'rgba(255,255,255,.7)', marginTop:2 }}>{prixKwh} c€/kWh</div>}
+                    <div style={{ textAlign:'right', flexShrink:0, marginLeft:14 }}>
+                      <div style={{ fontSize:24, fontWeight:900, color: idx === 0 ? '#7dd940' : 'white', lineHeight:1 }}>{fmtE(result.total)}</div>
+                      <div style={{ fontSize:13, color:'rgba(255,255,255,.4)', marginBottom:4 }}>/an TTC</div>
+                      {prixKwh && <div style={{ fontSize:18, fontWeight:800, color: idx === 0 ? '#7dd940' : 'rgba(255,255,255,.65)' }}>{prixKwh} c€/kWh</div>}
                     </div>
                   </div>
                   {result.is_dynamic && (result.avg_ete_ceur != null || result.avg_hiver_ceur != null) && (
-                    <div style={{ display:'flex', gap:6, marginTop:6, paddingTop:6, borderTop:'1px solid rgba(255,255,255,.07)' }}>
+                    <div style={{ display:'flex', gap:8, marginTop:12, paddingTop:12, borderTop:'1px solid rgba(255,255,255,.08)' }}>
                       {[['☀️ Été', result.avg_ete_ceur], ['❄️ Hiver', result.avg_hiver_ceur]].filter(([,v])=>v!=null).map(([lbl,val])=>(
-                        <div key={lbl} style={{ flex:1, background:'rgba(255,255,255,.05)', borderRadius:6, padding:'4px 6px', textAlign:'center' }}>
-                          <div style={{ fontSize:13, fontWeight:800, color:'rgba(125,217,64,.9)' }}>{val.toFixed(1)} c€/kWh</div>
-                          <div style={{ fontSize:9, color:'rgba(255,255,255,.38)', fontWeight:700 }}>{lbl.toUpperCase()}</div>
+                        <div key={lbl} style={{ flex:1, background:'rgba(255,255,255,.05)', borderRadius:8, padding:'10px', textAlign:'center' }}>
+                          <div style={{ fontSize:18, fontWeight:800, color:'rgba(125,217,64,.9)' }}>{val.toFixed(1)} c€/kWh</div>
+                          <div style={{ fontSize:13, color:'rgba(255,255,255,.4)', marginTop:2 }}>{lbl}</div>
                         </div>
                       ))}
-                    </div>
-                  )}
-                  {saving !== null && saving > 0 && (
-                    <div style={{ marginTop:4, fontSize:10, color:'rgba(255,140,40,.75)', textAlign:'right' }}>
-                      +{fmtE(saving)} vs le moins cher
-                    </div>
-                  )}
-                  {isCurrent && (
-                    <div style={{ marginTop:4, fontSize:10, color:'rgba(125,217,64,.7)', textAlign:'right', fontWeight:700 }}>
-                      ✦ Tarif actuel
                     </div>
                   )}
                 </div>
@@ -2838,8 +2855,8 @@ function OptimisationScreen({ user, userProfile, onBack }) {
             })}
           </div>
 
-          <div style={{ fontSize:10, color:'rgba(255,255,255,.3)', textAlign:'center', marginTop:12, paddingBottom:8 }}>
-            Calculs basés sur votre profil annuel · Tarifs dynamiques et batterie virtuelle à venir
+          <div style={{ fontSize:13, color:'rgba(255,255,255,.3)', textAlign:'center', marginTop:16, paddingBottom:8, lineHeight:1.5 }}>
+            Calculs basés sur votre profil de consommation annuel
           </div>
         </>
       )}
