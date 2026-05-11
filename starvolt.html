@@ -2754,55 +2754,57 @@ function OptimisationScreen({ user, userProfile, onBack }) {
             <div style={{ fontSize:12, color:'rgba(125,217,64,.75)', fontWeight:700, textTransform:'uppercase', letterSpacing:'.5px', marginBottom:4 }}>Votre conso actuelle</div>
             <div style={{ fontSize:17, fontWeight:900, color:'white', marginBottom:14 }}>Site : {site.nom}</div>
 
-            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
-              {/* Fournisseur actuel */}
-              <div style={{ background:'rgba(255,255,255,.06)', borderRadius:10, padding:'14px 12px' }}>
-                <div style={{ fontSize:12, color:'rgba(255,255,255,.45)', marginBottom:6, fontWeight:600 }}>Fournisseur actuel</div>
-                <div style={{ fontSize:16, fontWeight:900, color:'white', lineHeight:1.2 }}>
-                  {currentRanked ? currentRanked.t.nom : <span style={{color:'rgba(255,200,50,.6)'}}>Non défini</span>}
-                </div>
+            {/* Fournisseur — ligne full width */}
+            <div style={{ background:'rgba(255,255,255,.06)', borderRadius:10, padding:'11px 14px', marginBottom:10, display:'flex', justifyContent:'space-between', alignItems:'center', gap:8 }}>
+              <div style={{ fontSize:11, color:'rgba(255,255,255,.4)', fontWeight:600, textTransform:'uppercase', letterSpacing:'.3px', flexShrink:0 }}>Fournisseur actuel</div>
+              <div style={{ fontSize:15, fontWeight:900, color:'white', textAlign:'right' }}>
+                {currentRanked ? currentRanked.t.nom : <span style={{color:'rgba(255,200,50,.6)'}}>Non défini</span>}
               </div>
-              {/* % HC + puissance */}
-              <div style={{ background:'rgba(255,255,255,.06)', borderRadius:10, padding:'14px 12px' }}>
-                <div style={{ fontSize:12, color:'rgba(255,255,255,.45)', marginBottom:6, fontWeight:600 }}>Heures creuses</div>
-                <div style={{ fontSize:28, fontWeight:900, color: pctHC != null ? '#5de0f5' : 'rgba(255,255,255,.3)', lineHeight:1 }}>
+            </div>
+
+            {/* 4 métriques — grille 2×2 */}
+            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8, marginBottom:10 }}>
+              <div style={{ background:'rgba(255,255,255,.06)', borderRadius:10, padding:'12px 12px' }}>
+                <div style={{ fontSize:10, color:'rgba(255,255,255,.4)', fontWeight:600, textTransform:'uppercase', letterSpacing:'.3px', marginBottom:4 }}>Conso annuelle</div>
+                <div style={{ fontSize:20, fontWeight:900, color:'white', lineHeight:1 }}>{kwh_total > 0 ? fmtKwh(kwh_total) : '—'}</div>
+              </div>
+              <div style={{ background:'rgba(255,255,255,.06)', borderRadius:10, padding:'12px 12px' }}>
+                <div style={{ fontSize:10, color:'rgba(255,255,255,.4)', fontWeight:600, textTransform:'uppercase', letterSpacing:'.3px', marginBottom:4 }}>Heures creuses</div>
+                <div style={{ fontSize:20, fontWeight:900, color: pctHC != null ? '#5de0f5' : 'rgba(255,255,255,.3)', lineHeight:1 }}>
                   {pctHC != null ? `${pctHC} %` : '—'}
                 </div>
-                {pctHC == null && <div style={{ fontSize:12, color:'rgba(255,200,50,.55)', marginTop:4 }}>Plages HC non définies</div>}
-                <div style={{ height:1, background:'rgba(255,255,255,.08)', margin:'10px 0' }}/>
-                <div style={{ marginBottom:6 }}>
-                  <div style={{ fontSize:10, color:'rgba(255,255,255,.35)', fontWeight:600, textTransform:'uppercase', letterSpacing:'.3px', marginBottom:2 }}>Conso actuelle</div>
-                  <div style={{ fontSize:13, fontWeight:800, color:'white' }}>{kwh_total > 0 ? fmtKwh(kwh_total) : '—'}</div>
-                </div>
-                {maxPuissanceKw != null && (
-                  <div style={{ marginBottom:6 }}>
-                    <div style={{ fontSize:10, color:'rgba(255,255,255,.35)', fontWeight:600, textTransform:'uppercase', letterSpacing:'.3px', marginBottom:2 }}>Puissance max observée</div>
-                    <div style={{ fontSize:13, fontWeight:800, color:'white' }}>{maxPuissanceKw.toFixed(1)} kW</div>
-                  </div>
-                )}
-                {puissanceSouscrite != null && (
-                  <div>
-                    <div style={{ fontSize:10, color:'rgba(255,255,255,.35)', fontWeight:600, textTransform:'uppercase', letterSpacing:'.3px', marginBottom:2 }}>Puissance souscrite nécessaire</div>
-                    <div style={{ fontSize:16, fontWeight:900, color:'#5de0f5' }}>{puissanceSouscrite} kW</div>
-                  </div>
-                )}
+                {pctHC == null && <div style={{ fontSize:10, color:'rgba(255,200,50,.55)', marginTop:3 }}>Plages non définies</div>}
               </div>
-              {/* Facture annuelle */}
-              <div style={{ background:'rgba(255,255,255,.06)', borderRadius:10, padding:'14px 12px' }}>
-                <div style={{ fontSize:12, color:'rgba(255,255,255,.45)', marginBottom:6, fontWeight:600 }}>Facture annuelle TTC</div>
-                <div style={{ fontSize:28, fontWeight:900, color:'#7dd940', lineHeight:1 }}>
+              <div style={{ background:'rgba(255,255,255,.06)', borderRadius:10, padding:'12px 12px' }}>
+                <div style={{ fontSize:10, color:'rgba(255,255,255,.4)', fontWeight:600, textTransform:'uppercase', letterSpacing:'.3px', marginBottom:4 }}>Facture annuelle TTC</div>
+                <div style={{ fontSize:20, fontWeight:900, color:'#7dd940', lineHeight:1 }}>
                   {currentRanked ? fmtE(currentRanked.result.total) : '—'}
                 </div>
               </div>
-              {/* Prix moyen kWh */}
-              <div style={{ background:'rgba(255,255,255,.06)', borderRadius:10, padding:'14px 12px' }}>
-                <div style={{ fontSize:12, color:'rgba(255,255,255,.45)', marginBottom:6, fontWeight:600 }}>Prix moyen TTC</div>
-                <div style={{ fontSize:28, fontWeight:900, color:'rgba(255,200,80,.9)', lineHeight:1 }}>
+              <div style={{ background:'rgba(255,255,255,.06)', borderRadius:10, padding:'12px 12px' }}>
+                <div style={{ fontSize:10, color:'rgba(255,255,255,.4)', fontWeight:600, textTransform:'uppercase', letterSpacing:'.3px', marginBottom:4 }}>Prix moyen TTC</div>
+                <div style={{ fontSize:20, fontWeight:900, color:'rgba(255,200,80,.9)', lineHeight:1 }}>
                   {prixMoyenKwh ? `${prixMoyenKwh}` : '—'}
                 </div>
-                {prixMoyenKwh && <div style={{ fontSize:13, color:'rgba(255,255,255,.4)', marginTop:2 }}>c€/kWh</div>}
+                {prixMoyenKwh && <div style={{ fontSize:11, color:'rgba(255,255,255,.35)', marginTop:3 }}>c€/kWh</div>}
               </div>
             </div>
+
+            {/* Bloc puissance */}
+            {puissanceSouscrite != null && (
+              <div style={{ background:'rgba(93,224,245,.07)', border:'1px solid rgba(93,224,245,.18)', borderRadius:10, padding:'14px 14px', display:'flex', gap:0 }}>
+                {maxPuissanceKw != null && (
+                  <div style={{ flex:1, borderRight:'1px solid rgba(93,224,245,.15)', paddingRight:14 }}>
+                    <div style={{ fontSize:10, color:'rgba(93,224,245,.55)', fontWeight:600, textTransform:'uppercase', letterSpacing:'.3px', marginBottom:4 }}>Puissance max observée</div>
+                    <div style={{ fontSize:20, fontWeight:900, color:'rgba(255,255,255,.75)', lineHeight:1 }}>{maxPuissanceKw.toFixed(1)} kW</div>
+                  </div>
+                )}
+                <div style={{ flex:1, paddingLeft: maxPuissanceKw != null ? 14 : 0 }}>
+                  <div style={{ fontSize:10, color:'rgba(93,224,245,.55)', fontWeight:600, textTransform:'uppercase', letterSpacing:'.3px', marginBottom:4 }}>Puissance souscrite nécessaire</div>
+                  <div style={{ fontSize:24, fontWeight:900, color:'#5de0f5', lineHeight:1 }}>{puissanceSouscrite} kW</div>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* ── 3. Notre conseil ── */}
