@@ -2146,7 +2146,7 @@ function computeEnergyBalance(conso, prodNorm, pvKwc, batPowerW, batCapKwh) {
   const batCapWh = (batCapKwh || 0) * 1000;
   const batPowWh = batPowerW || 0;
   let batState = 0;
-  const monthly = Array.from({length:12}, () => ({on_site:0, grid_buy:0, injection:0}));
+  const monthly = Array.from({length:12}, () => ({on_site:0, grid_buy:0, injection:0, via_bat:0}));
   const hourly = new Array(8784);
   for (let m = 1; m <= 12; m++) {
     for (let d = 1; d <= PROF_DAYS[m-1]; d++) {
@@ -2155,7 +2155,7 @@ function computeEnergyBalance(conso, prodNorm, pvKwc, batPowerW, batCapKwh) {
         const consoWh = conso[idx] || 0;
         const prodWh = (prodNorm[idx] || 0) * pvKwc;
         const bal = prodWh - consoWh;
-        let onSite, gridBuy, injection;
+        let onSite, gridBuy, injection, viaBat = 0;
         if (bal >= 0) {
           let charge = 0;
           if (batCapWh > 0) { charge = Math.min(bal, batPowWh, batCapWh - batState); batState += charge; }
@@ -2163,11 +2163,11 @@ function computeEnergyBalance(conso, prodNorm, pvKwc, batPowerW, batCapKwh) {
         } else {
           let discharge = 0;
           if (batState > 0) { discharge = Math.min(-bal, batPowWh, batState); batState -= discharge; }
-          gridBuy = (-bal) - discharge; injection = 0; onSite = prodWh + discharge;
+          gridBuy = (-bal) - discharge; injection = 0; onSite = prodWh + discharge; viaBat = discharge;
         }
-        const os = onSite/1000, gb = gridBuy/1000, inj = injection/1000;
-        hourly[idx] = {on_site:os, grid_buy:gb, injection:inj, m, d, h};
-        monthly[m-1].on_site += os; monthly[m-1].grid_buy += gb; monthly[m-1].injection += inj;
+        const os = onSite/1000, gb = gridBuy/1000, inj = injection/1000, vb = viaBat/1000;
+        hourly[idx] = {on_site:os, grid_buy:gb, injection:inj, via_bat:vb, m, d, h};
+        monthly[m-1].on_site += os; monthly[m-1].grid_buy += gb; monthly[m-1].injection += inj; monthly[m-1].via_bat += vb;
       }
     }
   }
@@ -2185,12 +2185,13 @@ function EnergyBalanceChart({ balance, level, selMonth, selDay, setLevel, setSel
     if (level === 'month') return balance.monthly;
     if (level === 'day') {
       const days = PROF_DAYS[selMonth - 1];
-      const daily = Array.from({length:days}, () => ({on_site:0, grid_buy:0, injection:0}));
+      const daily = Array.from({length:days}, () => ({on_site:0, grid_buy:0, injection:0, via_bat:0}));
       balance.hourly.forEach(pt => {
         if (pt && pt.m === selMonth) {
           daily[pt.d-1].on_site += pt.on_site;
           daily[pt.d-1].grid_buy += pt.grid_buy;
           daily[pt.d-1].injection += pt.injection;
+          daily[pt.d-1].via_bat += pt.via_bat||0;
         }
       });
       return daily;
@@ -2198,7 +2199,7 @@ function EnergyBalanceChart({ balance, level, selMonth, selDay, setLevel, setSel
     if (level === 'hour') {
       return Array.from({length:24}, (_, hIdx) => {
         const pt = balance.hourly[profIdx(selMonth, selDay, hIdx)];
-        return pt || {on_site:0, grid_buy:0, injection:0};
+        return pt || {on_site:0, grid_buy:0, injection:0, via_bat:0};
       });
     }
     return [];
@@ -2247,7 +2248,7 @@ function EnergyBalanceChart({ balance, level, selMonth, selDay, setLevel, setSel
     ctx.scale(dpr, dpr);
     ctx.clearRect(0, 0, W, H);
 
-    const LEGEND_H = 56, ML = 46, MR = 8, MT = LEGEND_H + 4, MB = 24;
+    const LEGEND_H = 74, ML = 46, MR = 8, MT = LEGEND_H + 4, MB = 24;
     const cW = W - ML - MR, cH = H - MT - MB;
     const n = chartData.length;
 
@@ -2256,7 +2257,7 @@ function EnergyBalanceChart({ balance, level, selMonth, selDay, setLevel, setSel
     const unitScale = maxRaw >= 100 ? 0.001 : 1;
     const unitLabel = maxRaw >= 100 ? 'MWh' : 'kWh';
 
-    const data = chartData.map(m => ({s: m.on_site*unitScale, g: m.grid_buy*unitScale, i: m.injection*unitScale}));
+    const data = chartData.map(m => ({s: m.on_site*unitScale, g: m.grid_buy*unitScale, i: m.injection*unitScale, b: (m.via_bat||0)*unitScale}));
     const maxPos = Math.max(...data.map(m => m.s + m.g), 0.001);
     const maxNeg = Math.max(...data.map(m => m.i), 0.001);
     const posRatio = Math.min(Math.max(maxPos / (maxPos + maxNeg), 0.38), 0.82);
@@ -2293,7 +2294,9 @@ function EnergyBalanceChart({ balance, level, selMonth, selDay, setLevel, setSel
     data.forEach((m, i) => {
       const x = ML + i * bTW + bPad;
       newBars.push({x, w: bW});
-      if (m.s > 0) { ctx.fillStyle = '#f0a050'; ctx.fillRect(x, zeroY - m.s * scalePos, bW, m.s * scalePos); }
+      const sDirect = m.s - m.b;
+      if (sDirect > 0) { ctx.fillStyle = '#f0a050'; ctx.fillRect(x, zeroY - sDirect * scalePos, bW, sDirect * scalePos); }
+      if (m.b > 0) { ctx.fillStyle = '#ffd098'; ctx.fillRect(x, zeroY - m.s * scalePos, bW, m.b * scalePos); }
       if (m.g > 0) { ctx.fillStyle = '#d0d0d0'; ctx.fillRect(x, zeroY - (m.s + m.g) * scalePos, bW, m.g * scalePos - 1); }
       if (m.i > 0) { ctx.fillStyle = '#f0e86a'; ctx.fillRect(x, zeroY + 2, bW, m.i * scaleNeg - 2); }
     });
@@ -2314,7 +2317,7 @@ function EnergyBalanceChart({ balance, level, selMonth, selDay, setLevel, setSel
     }
 
     // Légende (3 lignes)
-    [{color:'#f0a050',label:'Prod & conso sur place'},{color:'#d0d0d0',label:'Achat réseau'},{color:'#f0e86a',label:'Injection réseau'}]
+    [{color:'#f0a050',label:'Direct solaire sur place'},{color:'#ffd098',label:'Batterie sur place'},{color:'#d0d0d0',label:'Achat réseau'},{color:'#f0e86a',label:'Injection réseau'}]
       .forEach((it, i) => {
         const ly = 3 + i * 18;
         ctx.fillStyle = it.color; ctx.fillRect(ML, ly + 2, 13, 12);
