@@ -2436,6 +2436,13 @@ function MonSiteScreen({ user, userProfile, onBack }) {
       }).catch(()=>saveProfil(profilsGeo[0].id));
   },[activeId,prodProfils.length]);
 
+  // Charger les données du profil de production sélectionné
+  useEffect(()=>{
+    if(!prodProfilId){setProdProfilData(null);setBalance(null);return;}
+    sb.from('profils_production').select('profil').eq('id',prodProfilId).single()
+      .then(({data})=>setProdProfilData(data?.profil||null));
+  },[prodProfilId]);
+
   // Calculer le bilan énergétique dès que les données sont prêtes
   useEffect(()=>{
     if(!site?.conso_profil||!prodProfilData){setBalance(null);return;}
