@@ -1083,12 +1083,11 @@ function TopBar({ name, avatarName, showName, logoOnly = false, onLogoClick, onP
       {!logoOnly && (
         <div style={{display:'flex',alignItems:'center',gap:8}}>
           {isAdmin && onAdmin && (
-            <button className="admin-badge" onClick={onAdmin}>⚙️ Admin</button>
+            <button className="admin-badge" onClick={onAdmin}>⚙️</button>
           )}
           {onPanier && (
             <button className="cart-btn" onClick={onPanier}>
               <span style={{fontSize:16}}>🛒</span>
-              <span>Panier</span>
               {cartCount > 0 && <span className="cart-badge">{cartCount}</span>}
             </button>
           )}
@@ -3484,7 +3483,7 @@ function SpotPricesScreen({ onBack }) {
 }
 
 // ─── AccMapScreen ─────────────────────────────
-function AccMapScreen({ user, userProfile, onBack, onJoin, onCreate }) {
+function AccMapScreen({ user, userProfile, onBack, onJoin, onCreate, onPanier }) {
   const [accSites,    setAccSites]    = useState(null);
   const [activeSite,  setActiveSite]  = useState(null);
   const [activeTariff,setActiveTariff]= useState(null);
@@ -3750,18 +3749,22 @@ function AccMapScreen({ user, userProfile, onBack, onJoin, onCreate }) {
             padding:'7px 14px', cursor:'pointer', whiteSpace:'nowrap', flexShrink:0
           }}>← Retour</button>
           <div style={{ flex:1 }}/>
-          {activeSite && eligible && (
+          {localStorage.getItem('starvolt_acc_chosen') === 'true' ? (
+            <button className="btn btn-yes" style={{ fontSize:13, padding:'11px 18px' }}
+              onClick={onPanier}>
+              🛒 Boucle déjà rejointe — voir le panier
+            </button>
+          ) : activeSite && eligible ? (
             <button className="btn btn-yes" style={{ fontSize:13, padding:'11px 18px' }}
               onClick={() => onJoin({ accSavings, accPriceKwh, eligibleSite, activeSite })}>
               🤝 Rejoindre cette boucle
             </button>
-          )}
-          {activeSite && !eligible && (
+          ) : activeSite && !eligible ? (
             <button className="btn btn-yes" style={{ fontSize:12, padding:'11px 14px' }}
               onClick={() => onCreate({ activeSite })}>
               ⭐ Créer votre boucle ACC
             </button>
-          )}
+          ) : null}
         </div>
       )}
     </div>
@@ -4268,12 +4271,13 @@ function SolarSimScreen({ user, userProfile, onBack, onPanier, onCartUpdate }) {
 }
 
 // ─── CartItemCard ─────────────────────────────
-function CartItemCard({ emoji, imgSrc, title, subtitle, saving, investment, color, onRemove }) {
+function CartItemCard({ emoji, imgSrc, title, subtitle, saving, investment, color, onRemove, onClick }) {
   const c = color || '#7dd940';
   return (
-    <div style={{
+    <div onClick={onClick} style={{
       background:'rgba(255,255,255,.06)', borderRadius:14, padding:'18px 16px',
       marginBottom:12, border:`1.5px solid ${c}44`,
+      cursor: onClick ? 'pointer' : undefined,
     }}>
       <div style={{display:'flex',alignItems:'flex-start',gap:12}}>
         <div style={{flexShrink:0,width:40,height:40,display:'flex',alignItems:'center',justifyContent:'center',paddingTop:2}}>
@@ -4289,7 +4293,7 @@ function CartItemCard({ emoji, imgSrc, title, subtitle, saving, investment, colo
             </div>
           )}
         </div>
-        <button onClick={onRemove} style={{
+        <button onClick={e => { e.stopPropagation(); onRemove(); }} style={{
           flexShrink:0, background:'rgba(255,255,255,.1)', border:'1px solid rgba(255,255,255,.25)',
           borderRadius:8, color:'rgba(255,255,255,.8)', fontSize:16, fontFamily:'inherit',
           fontWeight:700, padding:'6px 11px', cursor:'pointer', lineHeight:1, marginTop:1
@@ -4300,7 +4304,7 @@ function CartItemCard({ emoji, imgSrc, title, subtitle, saving, investment, colo
 }
 
 // ─── PanierScreen ─────────────────────────────
-function PanierScreen({ user, onBack }) {
+function PanierScreen({ user, onBack, onGoTo }) {
   const [loading,     setLoading]     = useState(true);
   const [currentBill, setCurrentBill] = useState(null);
   const [isDynamic,   setIsDynamic]   = useState(false);
@@ -4544,23 +4548,27 @@ function PanierScreen({ user, onBack }) {
       {items.optimisation && (
         <CartItemCard imgSrc="/optimisation.png" title="Optimisation fournisseur"
           subtitle={(() => { const n = localStorage.getItem('starvolt_optimisation_tariff_nom'); return n ? `Passage chez ${n} — sans frais` : 'Changement de tarif électricité — sans frais'; })()}
-          saving={savings.optimisation} investment={0} color="#7dd940" onRemove={()=>removeItem('optimisation')}/>
+          saving={savings.optimisation} investment={0} color="#7dd940" onRemove={()=>removeItem('optimisation')}
+          onClick={()=>onGoTo&&onGoTo('OPTIMISATION')}/>
       )}
       {items.acc && (
         <CartItemCard imgSrc="/acc.png" title="Autoconsommation collective" subtitle="Énergie solaire locale à prix réduit — sans frais"
-          saving={savings.acc} investment={0} color="#7dd940" onRemove={()=>removeItem('acc')}/>
+          saving={savings.acc} investment={0} color="#7dd940" onRemove={()=>removeItem('acc')}
+          onClick={()=>onGoTo&&onGoTo('ACC_MAP')}/>
       )}
       {items.box && (
         <CartItemCard imgSrc="/comwatt-box.png" title="Box Comwatt"
           subtitle={boxChoice==='buy' ? 'Achat direct — 550 €' : 'Box gratuite — cagnotte reversée 3 ans'}
           saving={savings.box} investment={investments.box}
-          color="#7dd940" onRemove={()=>removeItem('box')}/>
+          color="#7dd940" onRemove={()=>removeItem('box')}
+          onClick={()=>onGoTo&&onGoTo('BOX_SIM')}/>
       )}
       {items.solar && (
         <CartItemCard imgSrc="/maison.png" title="Installation solaire"
           subtitle={solarChoice==='solar_box' ? 'Panneaux + batterie + Box Comwatt' : 'Panneaux solaires + batterie'}
           saving={savings.solar} investment={13000}
-          color="#fbbf24" onRemove={()=>removeItem('solar')}/>
+          color="#fbbf24" onRemove={()=>removeItem('solar')}
+          onClick={()=>onGoTo&&onGoTo('SOLAR_SIM')}/>
       )}
 
       {itemsCount === 0 && !loading && (
@@ -5349,7 +5357,7 @@ function App() {
       }
 
       case 'PANIER':
-        return <PanierScreen user={user} onBack={()=>goTo('SIMULATIONS')}/>;
+        return <PanierScreen user={user} onBack={()=>goTo('SIMULATIONS')} onGoTo={goTo}/>;
 
       case 'BOX_SIM':
         return <BoxSimScreen user={user} userProfile={profile} onBack={goBack} onPanier={()=>goTo('PANIER')} onCartUpdate={updateCart}/>;
@@ -5363,10 +5371,11 @@ function App() {
       case 'ACC_MAP':
         return <AccMapScreen user={user} userProfile={profile} onBack={goBack}
           onJoin={(data) => { localStorage.setItem('starvolt_acc_chosen','true'); updateCart(); goTo('ACC_RESULT', { ...data, accAction:'join' }); }}
-          onCreate={(data) => { localStorage.setItem('starvolt_acc_chosen','true'); updateCart(); goTo('ACC_RESULT', { ...data, accAction:'create' }); }}/>;
+          onCreate={(data) => { localStorage.setItem('starvolt_acc_chosen','true'); updateCart(); goTo('ACC_RESULT', { ...data, accAction:'create' }); }}
+          onPanier={()=>goTo('PANIER')}/>;
 
       case 'ACC_RESULT':
-        return <AccResultScreen state={state} onBack={goBack} onPanier={()=>goTo('PANIER')}/>;
+        return <AccResultScreen state={state} onBack={()=>goTo('SIMULATIONS')} onPanier={()=>goTo('PANIER')}/>;
 
       case 'AUTH_SIGNUP':
         return <AuthSignupScreen
