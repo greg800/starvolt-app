@@ -1961,6 +1961,38 @@ async function processConsoXLS(buf) {
   return{profile,annualKwh,gapsPatched,error:null};
 }
 
+// ─── processProductionXLS ────────────────────────────────────────────
+// Fichier : 4 colonnes (mois, jour, heure, puissance W/kWc), 8760 lignes (année non bissextile)
+// Retourne profil 8784 éléments (W/kWc), Feb 29 = copie de Feb 28
+async function processProductionXLS(buf) {
+  const wb = XLSX.read(new Uint8Array(buf), { type:'array', raw:false });
+  const ws = wb.Sheets[wb.SheetNames[0]];
+  const rows = XLSX.utils.sheet_to_json(ws, { header:1, raw:false, defval:null });
+
+  const profile = new Float32Array(8784).fill(0);
+  let count = 0;
+  for (let i = 1; i < rows.length; i++) {
+    const r = rows[i];
+    if (!r || r[0] === null) continue;
+    const m = parseInt(r[0]), d = parseInt(r[1]), h = parseInt(r[2]);
+    const pw = parseFloat(String(r[3]).replace(',','.'));
+    if (isNaN(m) || isNaN(d) || isNaN(h) || isNaN(pw)) continue;
+    if (m < 1 || m > 12 || d < 1 || d > 31 || h < 0 || h > 23) continue;
+    const idx = profIdx(m, d, h);
+    if (idx >= 0 && idx < 8784) { profile[idx] = pw; count++; }
+  }
+  if (count < 100) return { error: 'Fichier invalide ou trop peu de données (< 100 lignes valides)' };
+
+  for (let h = 0; h < 24; h++) {
+    const i29 = profIdx(2, 29, h), i28 = profIdx(2, 28, h);
+    if (!profile[i29]) profile[i29] = profile[i28];
+  }
+
+  const maxKwc = Math.max(...profile);
+  const annualKwh = Array.from(profile).reduce((s, v) => s + v, 0) / 1000;
+  return { profile: Array.from(profile), maxKwc, annualKwh, error: null };
+}
+
 // ─── Conso heatmap colors (10 déciles, vert clair → marron foncé) ──
 const CONSO_COLORS=['#c8f0c0','#9ed870','#70c048','#a8b830','#d0a018','#c87828','#b05018','#8c3010','#651a08','#3d0802'];
 function consoColor(val,thresholds){
@@ -2103,8 +2135,8 @@ function SiteFormCard({initial={},onSave,onCancel}){
   );
 }
 
-// ─── MaConsoScreen ───────────────────────────
-function MaConsoScreen({ user, userProfile, onBack }) {
+// ─── MonSiteScreen ────────────────────────────
+function MonSiteScreen({ user, userProfile, onBack }) {
   const[sites,setSites]=useState(null);
   const[activeId,setActiveId]=useState(null);
   const[tariffs,setTariffs]=useState([]);
@@ -2115,6 +2147,9 @@ function MaConsoScreen({ user, userProfile, onBack }) {
   const[showGaps,setShowGaps]=useState(false);
   const[showDeleteConfirm,setShowDeleteConfirm]=useState(false);
   const[importingDemo,setImportingDemo]=useState(false);
+  const[pvKwc,setPvKwc]=useState('');
+  const[batW,setBatW]=useState('');
+  const[batKwh,setBatKwh]=useState('');
   const fileRef=useRef(null);
 
   const handleImportDemo=async()=>{
@@ -2152,6 +2187,12 @@ function MaConsoScreen({ user, userProfile, onBack }) {
   useEffect(()=>{load();},[]);
 
   const site=sites?.find(s=>s.id===activeId)||null;
+
+  useEffect(()=>{
+    setPvKwc(site?.puissance_pv_kwc != null ? String(site.puissance_pv_kwc) : '');
+    setBatW(site?.batterie_puissance_w != null ? String(site.batterie_puissance_w) : '');
+    setBatKwh(site?.batterie_capacite_kwh != null ? String(site.batterie_capacite_kwh) : '');
+  },[activeId]);
 
   const updateSite=async(updates)=>{
     await sb.from('sites').update(updates).eq('id',activeId);
@@ -2214,7 +2255,7 @@ function MaConsoScreen({ user, userProfile, onBack }) {
         <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:10,marginTop:4}}>
           <div>
             <div style={{fontSize:9,letterSpacing:'.6px',color:'rgba(125,217,64,.8)',fontWeight:700,textTransform:'uppercase'}}>Énergie</div>
-            <div style={{fontSize:18,fontWeight:900,color:'white',lineHeight:1.1}}>Ma <span className="accent">conso</span></div>
+            <div style={{fontSize:18,fontWeight:900,color:'white',lineHeight:1.1}}>Mon <span className="accent">site</span></div>
           </div>
           <div style={{display:'flex',alignItems:'center',gap:6}}>
             {site&&!showAdd&&!editMode&&(
@@ -2344,6 +2385,51 @@ function MaConsoScreen({ user, userProfile, onBack }) {
                 <ConsoHeatmapCanvas profile={site.conso_profil}/>
               </div>
             )}
+
+            {/* Production / Stockage / Box */}
+            <div className="card" style={{padding:'14px 16px',marginBottom:8}}>
+              <div style={{fontWeight:800,fontSize:13,color:'white',marginBottom:10,display:'flex',alignItems:'center',gap:6}}>
+                <span>☀️</span> Ma production, mon stockage et ma box
+              </div>
+              <div style={{display:'flex',flexDirection:'column',gap:10}}>
+                <div>
+                  <label style={{fontSize:10,color:'rgba(255,255,255,.45)',fontWeight:700,letterSpacing:'.5px',display:'block',marginBottom:4}}>PUISSANCE PV (kWc)</label>
+                  <input className="inp" type="number" min="0" step="0.5" placeholder="6" value={pvKwc}
+                    onChange={e=>setPvKwc(e.target.value)}
+                    onBlur={()=>{ const v=parseFloat(pvKwc); updateSite({puissance_pv_kwc: isNaN(v)?null:v}); }}/>
+                </div>
+                <div style={{display:'flex',gap:8}}>
+                  <div style={{flex:1}}>
+                    <label style={{fontSize:10,color:'rgba(255,255,255,.45)',fontWeight:700,letterSpacing:'.5px',display:'block',marginBottom:4}}>BATTERIE — PUISSANCE (W)</label>
+                    <input className="inp" type="number" min="0" step="100" placeholder="ex : 3000" value={batW}
+                      onChange={e=>setBatW(e.target.value)}
+                      onBlur={()=>{ const v=parseFloat(batW); updateSite({batterie_puissance_w: isNaN(v)?null:v}); }}/>
+                  </div>
+                  <div style={{flex:1}}>
+                    <label style={{fontSize:10,color:'rgba(255,255,255,.45)',fontWeight:700,letterSpacing:'.5px',display:'block',marginBottom:4}}>CAPACITÉ (kWh)</label>
+                    <input className="inp" type="number" min="0" step="0.5" placeholder="ex : 10" value={batKwh}
+                      onChange={e=>setBatKwh(e.target.value)}
+                      onBlur={()=>{ const v=parseFloat(batKwh); updateSite({batterie_capacite_kwh: isNaN(v)?null:v}); }}/>
+                  </div>
+                </div>
+                <div>
+                  <label style={{fontSize:10,color:'rgba(255,255,255,.45)',fontWeight:700,letterSpacing:'.5px',display:'block',marginBottom:6}}>BOX ÉNERGIE</label>
+                  {localStorage.getItem('starvolt_box_chosen') ? (
+                    <div style={{display:'flex',alignItems:'center',gap:8,background:'rgba(125,217,64,.1)',border:'1px solid rgba(125,217,64,.35)',borderRadius:10,padding:'8px 12px'}}>
+                      <img src="/comwatt-box.png" style={{width:28,height:28,objectFit:'contain',mixBlendMode:'screen'}}/>
+                      <div>
+                        <div style={{fontWeight:700,color:'#7dd940',fontSize:13}}>Box Comwatt ✓</div>
+                        <div style={{fontSize:11,color:'rgba(255,255,255,.5)'}}>
+                          {localStorage.getItem('starvolt_box_chosen')==='free' ? 'Option gratuite (cagnotte 3 ans)' : 'Achat direct 550 €'}
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div style={{fontSize:12,color:'rgba(255,255,255,.35)',padding:'8px 0'}}>Aucune box — disponible dans les simulations d'économie</div>
+                  )}
+                </div>
+              </div>
+            </div>
 
             {/* Delete confirmation */}
             {showDeleteConfirm&&(
@@ -4591,8 +4677,152 @@ function PanierScreen({ user, onBack, onGoTo }) {
   );
 }
 
+// ─── AdminProductionScreen ────────────────────
+function AdminProductionScreen({ onBack }) {
+  const [profils, setProfils] = useState(null);
+  const [importing, setImporting] = useState(false);
+  const [importStep, setImportStep] = useState(null); // null | 'form'
+  const [parsedData, setParsedData] = useState(null);
+  const [nom, setNom] = useState('');
+  const [adresse, setAdresse] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [importMsg, setImportMsg] = useState(null);
+  const [deleteConfirm, setDeleteConfirm] = useState(null);
+  const fileRef = useRef(null);
+
+  const load = async () => {
+    const { data } = await sb.from('profils_production').select('*').order('created_at', { ascending: false });
+    setProfils(data || []);
+  };
+  useEffect(() => { load(); }, []);
+
+  const handleFile = async (e) => {
+    const file = e.target.files?.[0]; if (!file) return;
+    setImporting(true); setImportMsg(null);
+    try {
+      const result = await processProductionXLS(await file.arrayBuffer());
+      if (result.error) { setImportMsg({ type:'err', text: result.error }); return; }
+      setParsedData(result);
+      setNom(''); setAdresse('');
+      setImportStep('form');
+    } catch(err) { setImportMsg({ type:'err', text: String(err) }); }
+    finally { setImporting(false); if (fileRef.current) fileRef.current.value = ''; }
+  };
+
+  const handleSave = async () => {
+    if (!nom.trim() || !parsedData) return;
+    setSaving(true);
+    let lat = null, lon = null;
+    if (adresse.trim()) {
+      try {
+        const r = await fetch(`https://api-adresse.data.gouv.fr/search/?q=${encodeURIComponent(adresse.trim())}&limit=1`);
+        const j = await r.json();
+        if (j.features?.[0]) { [lon, lat] = j.features[0].geometry.coordinates; }
+      } catch(_) {}
+    }
+    await sb.from('profils_production').insert({
+      nom: nom.trim(),
+      adresse: adresse.trim() || null,
+      latitude: lat,
+      longitude: lon,
+      profil: parsedData.profile,
+    });
+    setImportStep(null); setParsedData(null);
+    setImportMsg({ type:'ok', text: `Profil "${nom.trim()}" importé (${Math.round(parsedData.annualKwh)} kWh/an·kWc, max ${Math.round(parsedData.maxKwc)} W/kWc)` });
+    setSaving(false);
+    await load();
+  };
+
+  const handleDelete = async (id) => {
+    await sb.from('profils_production').delete().eq('id', id);
+    setDeleteConfirm(null);
+    await load();
+  };
+
+  return (
+    <>
+    <div className="screen fade-in">
+      <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:10,marginTop:4}}>
+        <div>
+          <div style={{fontSize:9,letterSpacing:'.6px',color:'rgba(125,217,64,.8)',fontWeight:700,textTransform:'uppercase'}}>Administration</div>
+          <div style={{fontSize:18,fontWeight:900,color:'white',lineHeight:1.1}}>Production <span className="accent">solaire</span></div>
+        </div>
+        <button className="btn btn-sec" style={{fontSize:11,padding:'6px 12px',borderRadius:8}} onClick={()=>fileRef.current?.click()} disabled={importing||importStep==='form'}>
+          {importing ? '⏳' : '☀️'} {importing ? 'Lecture…' : 'Importer un profil'}
+        </button>
+        <input ref={fileRef} type="file" accept=".xlsx,.xls" style={{display:'none'}} onChange={handleFile}/>
+      </div>
+
+      {importMsg?.type==='err' && (
+        <div style={{color:'#ff6b6b',fontSize:12,padding:'7px 12px',background:'rgba(255,50,50,.1)',borderRadius:8,marginBottom:8}}>⚠️ {importMsg.text}</div>
+      )}
+      {importMsg?.type==='ok' && (
+        <div style={{color:'#7dd940',fontSize:12,padding:'7px 12px',background:'rgba(255,255,255,.05)',borderRadius:8,marginBottom:8}}>✅ {importMsg.text}</div>
+      )}
+
+      {importStep === 'form' && (
+        <div className="card" style={{padding:'14px 16px',marginBottom:12,border:'1px solid rgba(125,217,64,.3)'}}>
+          <div style={{fontWeight:800,color:'white',marginBottom:10}}>Nouveau profil — {Math.round(parsedData?.annualKwh||0)} kWh/an·kWc</div>
+          <label style={{fontSize:10,color:'rgba(255,255,255,.45)',fontWeight:700,letterSpacing:'.5px',display:'block',marginBottom:4}}>NOM DU PROFIL *</label>
+          <input className="inp" style={{marginBottom:10}} placeholder="ex : Montpellier plein sud" value={nom} onChange={e=>setNom(e.target.value)}/>
+          <label style={{fontSize:10,color:'rgba(255,255,255,.45)',fontWeight:700,letterSpacing:'.5px',display:'block',marginBottom:4}}>ADRESSE (pour géolocalisation)</label>
+          <input className="inp" style={{marginBottom:12}} placeholder="ex : 1 rue de la Paix, 34000 Montpellier" value={adresse} onChange={e=>setAdresse(e.target.value)}/>
+          <div style={{display:'flex',gap:8}}>
+            <button className="btn btn-primary" style={{flex:1,fontSize:13}} onClick={handleSave} disabled={saving||!nom.trim()}>
+              {saving ? '⏳ Enregistrement…' : '💾 Enregistrer'}
+            </button>
+            <button className="btn btn-sec" style={{fontSize:13}} onClick={()=>{setImportStep(null);setParsedData(null);}}>Annuler</button>
+          </div>
+        </div>
+      )}
+
+      {profils === null ? (
+        <div style={{textAlign:'center',padding:40}}><div className="spinner" style={{margin:'0 auto'}}/></div>
+      ) : profils.length === 0 && !importStep ? (
+        <div className="card" style={{textAlign:'center',padding:'24px 20px'}}>
+          <div style={{fontSize:32,marginBottom:10}}>☀️</div>
+          <div style={{color:'white',fontWeight:700,marginBottom:5}}>Aucun profil de production</div>
+          <div style={{color:'rgba(255,255,255,.55)',fontSize:13}}>Importez un fichier XLSX (colonnes : mois, jour, heure, puissance W/kWc).</div>
+        </div>
+      ) : (
+        <div style={{display:'flex',flexDirection:'column',gap:8,marginBottom:80}}>
+          {profils.map(p => (
+            <div key={p.id} className="card" style={{padding:'12px 14px'}}>
+              {deleteConfirm === p.id ? (
+                <div>
+                  <div style={{color:'#ff6b6b',fontWeight:700,marginBottom:6}}>⚠️ Supprimer « {p.nom} » ?</div>
+                  <div style={{display:'flex',gap:8}}>
+                    <button className="btn btn-no" style={{flex:1,fontSize:13}} onClick={()=>handleDelete(p.id)}>Supprimer</button>
+                    <button className="btn btn-sec" style={{flex:1,fontSize:13}} onClick={()=>setDeleteConfirm(null)}>Annuler</button>
+                  </div>
+                </div>
+              ) : (
+                <div style={{display:'flex',alignItems:'flex-start',justifyContent:'space-between',gap:10}}>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{fontWeight:800,fontSize:14,color:'white'}}>{p.nom}</div>
+                    {p.adresse && <div style={{fontSize:11,color:'rgba(255,255,255,.5)',marginTop:2}}>{p.adresse}</div>}
+                    {p.latitude && <div style={{fontSize:10,color:'rgba(125,217,64,.6)',marginTop:2}}>{p.latitude.toFixed(4)}, {p.longitude.toFixed(4)}</div>}
+                    {p.profil && (
+                      <div style={{fontSize:11,color:'rgba(255,255,255,.45)',marginTop:4}}>
+                        {Math.round(p.profil.reduce((s,v)=>s+v,0)/1000)} kWh/an·kWc · max {Math.round(Math.max(...p.profil))} W/kWc
+                      </div>
+                    )}
+                  </div>
+                  <button style={{background:'none',border:'none',color:'rgba(255,80,80,.6)',cursor:'pointer',fontSize:16,flexShrink:0,padding:'2px 4px'}} onClick={()=>setDeleteConfirm(p.id)}>🗑️</button>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+    <StickyFooter onBack={onBack}/>
+    </>
+  );
+}
+
 // ─── AdminScreen ──────────────────────────────
-function AdminScreen({ onTariffs, onUsers, onSpot, onAcc, onBack }) {
+function AdminScreen({ onTariffs, onUsers, onSpot, onAcc, onProduction, onBack }) {
   return (
     <>
     <div className="screen fade-in">
@@ -4622,6 +4852,14 @@ function AdminScreen({ onTariffs, onUsers, onSpot, onAcc, onBack }) {
           <div className="sim-text">
             <div className="sim-title">Gestion des sites en ACC</div>
             <div className="sim-sub">Sites photovoltaïques pour l'autoconsommation collective</div>
+          </div>
+          <span className="sim-arrow">→</span>
+        </button>
+        <button className="sim-btn" onClick={onProduction}>
+          <span className="sim-icon">🌤️</span>
+          <div className="sim-text">
+            <div className="sim-title">Production solaire</div>
+            <div className="sim-sub">Importer et gérer les profils de production PV</div>
           </div>
           <span className="sim-arrow">→</span>
         </button>
@@ -5296,7 +5534,11 @@ function App() {
           onSpot={()=>goTo('SPOT_PRICES')}
           onUsers={()=>goTo('ADMIN_USERS')}
           onAcc={()=>goTo('ADMIN_ACC')}
+          onProduction={()=>goTo('ADMIN_PRODUCTION')}
           onBack={goBack}/>;
+
+      case 'ADMIN_PRODUCTION':
+        return <AdminProductionScreen onBack={goBack}/>;
 
       case 'SPOT_PRICES':
         return <SpotPricesScreen onBack={goBack}/>;
@@ -5331,7 +5573,7 @@ function App() {
           onBack={goBack}/>;
 
       case 'MA_CONSO':
-        return <MaConsoScreen user={user} userProfile={profile} onBack={goBack}/>;
+        return <MonSiteScreen user={user} userProfile={profile} onBack={goBack}/>;
 
       case 'SIMULATIONS': {
         const base = { name: profile?.prenom||'', address:'Zone ACC', initialBill:2000, bill:2000, bravoItems:[], investment:0, eligible:true };
@@ -5472,8 +5714,8 @@ function App() {
       {isHome && (
         <StickyFooter row>
           <button className="btn-home" onClick={()=>goTo('MA_CONSO')}>
-            <span>Ma conso actuelle</span>
-            <span className="btn-home-sub">renseignée à 0 %</span>
+            <span>Mon site</span>
+            <span className="btn-home-sub">conso · production · box</span>
           </button>
           <button className="btn-home primary" onClick={()=>goTo('SIMULATIONS')}>
             <span>Simulations</span>
