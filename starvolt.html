@@ -153,6 +153,36 @@
       white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     }
 
+    .cart-btn {
+      position: relative;
+      background: rgba(255,255,255,.1);
+      border: 1px solid rgba(255,255,255,.2);
+      border-radius: 20px;
+      padding: 5px 12px 5px 8px;
+      display: flex; align-items: center; gap: 5px;
+      cursor: pointer; font-family: var(--font);
+      color: white; font-size: 12px; font-weight: 700;
+      transition: background .15s;
+    }
+    .cart-btn:hover { background: rgba(255,255,255,.16); }
+    .cart-badge {
+      position: absolute; top: -5px; right: -5px;
+      background: var(--green); color: #1a4500;
+      border-radius: 50%; width: 17px; height: 17px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 9px; font-weight: 900;
+    }
+    .panier-toggle {
+      width: 42px; height: 24px; border-radius: 12px;
+      border: none; cursor: pointer; position: relative;
+      transition: background .2s; flex-shrink: 0;
+    }
+    .panier-toggle-knob {
+      position: absolute; top: 3px;
+      width: 18px; height: 18px; border-radius: 50%;
+      background: white; transition: left .2s;
+    }
+
     /* =============================================
        STICKY FOOTER
        ============================================= */
@@ -1042,7 +1072,7 @@ function Logo({ width = 135 }) {
 }
 
 // ─── Top Bar ──────────────────────────────────
-function TopBar({ name, avatarName, showName, logoOnly = false, onLogoClick, onProfileClick, isAdmin, onAdmin }) {
+function TopBar({ name, avatarName, showName, logoOnly = false, onLogoClick, onProfileClick, isAdmin, onAdmin, onPanier, cartCount = 0 }) {
   const src = avatarName || name || '';
   const initials = src.trim().split(/\s+/).map(w => w[0]?.toUpperCase() || '').join('').slice(0, 2);
   return (
@@ -1054,6 +1084,13 @@ function TopBar({ name, avatarName, showName, logoOnly = false, onLogoClick, onP
         <div style={{display:'flex',alignItems:'center',gap:8}}>
           {isAdmin && onAdmin && (
             <button className="admin-badge" onClick={onAdmin}>⚙️ Admin</button>
+          )}
+          {onPanier && (
+            <button className="cart-btn" onClick={onPanier}>
+              <span style={{fontSize:16}}>🛒</span>
+              <span>Panier</span>
+              {cartCount > 0 && <span className="cart-badge">{cartCount}</span>}
+            </button>
           )}
           {showName && onProfileClick && (
             <div className="user-chip" onClick={onProfileClick}
@@ -2718,7 +2755,7 @@ function OptimisationScreen({ user, userProfile, onBack }) {
     <StickyFooter onBack={onBack}>
       {!loading && heroSaving > 0 && (
         <button className="btn btn-yes"
-          onClick={() => { confetti({ particleCount:120, spread:70, origin:{y:.6} }); setChosen(true); }}>
+          onClick={() => { confetti({ particleCount:120, spread:70, origin:{y:.6} }); setChosen(true); localStorage.setItem('starvolt_optimisation_chosen','true'); if(heroSaving>0) localStorage.setItem('starvolt_optimisation_saving',String(heroSaving)); }}>
           ⚡ Je change de fournisseur
         </button>
       )}
@@ -3202,6 +3239,7 @@ function SpotPricesScreen({ onBack }) {
       hc_fin1:        n.hc_fin1         ?? '',
       hc_debut2:      n.hc_debut2       ?? '',
       hc_fin2:        n.hc_fin2         ?? '',
+      taux_inflation_electricite: n.taux_inflation_electricite ?? 4,
     });
     setSaveNatMsg(null);
   };
@@ -3222,6 +3260,7 @@ function SpotPricesScreen({ onBack }) {
       hc_fin1:        intr(natForm.hc_fin1),
       hc_debut2:      intr(natForm.hc_debut2),
       hc_fin2:        intr(natForm.hc_fin2),
+      taux_inflation_electricite: num(natForm.taux_inflation_electricite),
       updated_at:     new Date().toISOString(),
     }, { onConflict: 'id' });
     setSavingNat(false);
@@ -3323,6 +3362,13 @@ function SpotPricesScreen({ onBack }) {
               <div style={{fontSize:10,color:'rgba(255,255,255,.45)',fontWeight:700,marginBottom:2}}>TVA (%)</div>
               <input className="inp" type="number" step="0.1" placeholder="20" value={String(natForm.tva)}
                 onChange={e=>setNatForm(p=>({...p,tva:e.target.value}))} style={{fontSize:13,padding:'6px 8px'}}/>
+            </div>
+          </div>
+          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:6,marginBottom:10}}>
+            <div>
+              <div style={{fontSize:10,color:'rgba(255,255,255,.45)',fontWeight:700,marginBottom:2}}>Hausse prix élec. (%/an)</div>
+              <input className="inp" type="number" step="0.5" min="0" max="20" placeholder="4" value={String(natForm.taux_inflation_electricite)}
+                onChange={e=>setNatForm(p=>({...p,taux_inflation_electricite:e.target.value}))} style={{fontSize:13,padding:'6px 8px'}}/>
             </div>
           </div>
           <div style={{fontSize:11,color:'rgba(255,217,64,.75)',fontWeight:700,marginBottom:6}}>Plages HC (pour heatmap TTC)</div>
@@ -3924,10 +3970,10 @@ function BoxSimScreen({ user, userProfile, onBack }) {
 
       {!loading && (
         <StickyFooter row onBack={onBack}>
-          <button className="btn btn-no" style={{fontSize:13, padding:'12px 8px'}} onClick={() => { localStorage.setItem('starvolt_box_chosen','free'); setChosen('free'); }}>
+          <button className="btn btn-no" style={{fontSize:13, padding:'12px 8px'}} onClick={() => { localStorage.setItem('starvolt_box_chosen','free'); if(totalGain>0) localStorage.setItem('starvolt_box_saving',String(Math.round(totalGain))); setChosen('free'); }}>
             🎁 Box gratuite
           </button>
-          <button className="btn btn-yes" style={{fontSize:13, padding:'12px 8px'}} onClick={() => { localStorage.setItem('starvolt_box_chosen','buy'); setChosen('buy'); }}>
+          <button className="btn btn-yes" style={{fontSize:13, padding:'12px 8px'}} onClick={() => { localStorage.setItem('starvolt_box_chosen','buy'); if(totalGain>0) localStorage.setItem('starvolt_box_saving',String(Math.round(totalGain))); setChosen('buy'); }}>
             📦 J'achète à 550 €
           </button>
         </StickyFooter>
@@ -4151,21 +4197,314 @@ function SolarSimScreen({ user, userProfile, onBack }) {
       {!loading && (
         hasBox ? (
           <StickyFooter onBack={onBack}>
-            <button className="btn btn-yes" onClick={() => setChosen('solar_box')}>
+            <button className="btn btn-yes" onClick={() => { localStorage.setItem('starvolt_solar_chosen','solar_box'); if(solarBoxSaving) localStorage.setItem('starvolt_solar_saving',String(solarBoxSaving)); setChosen('solar_box'); }}>
               ☀️ Je veux des panneaux solaires
             </button>
           </StickyFooter>
         ) : (
           <StickyFooter row onBack={onBack}>
-            <button className="btn btn-no" style={{fontSize:13, padding:'12px 8px'}} onClick={() => setChosen('solar_only')}>
+            <button className="btn btn-no" style={{fontSize:13, padding:'12px 8px'}} onClick={() => { localStorage.setItem('starvolt_solar_chosen','solar_only'); if(solarOnlySaving) localStorage.setItem('starvolt_solar_saving',String(solarOnlySaving)); setChosen('solar_only'); }}>
               ☀️ Solaire + batterie
             </button>
-            <button className="btn btn-yes" style={{fontSize:13, padding:'12px 8px'}} onClick={() => setChosen('solar_box')}>
+            <button className="btn btn-yes" style={{fontSize:13, padding:'12px 8px'}} onClick={() => { localStorage.setItem('starvolt_solar_chosen','solar_box'); if(solarBoxSaving) localStorage.setItem('starvolt_solar_saving',String(solarBoxSaving)); setChosen('solar_box'); }}>
               ☀️ + Box Comwatt
             </button>
           </StickyFooter>
         )
       )}
+    </>
+  );
+}
+
+// ─── CartItemCard ─────────────────────────────
+function CartItemCard({ emoji, title, subtitle, selected, onToggle, saving, investment, roiYears, color }) {
+  const c = color || '#7dd940';
+  return (
+    <div style={{
+      background:'rgba(255,255,255,.05)', borderRadius:14, padding:'14px 16px', marginBottom:10,
+      border: selected ? `1.5px solid ${c}55` : '1px solid rgba(255,255,255,.08)',
+      transition:'border .2s'
+    }}>
+      <div style={{display:'flex',alignItems:'center',gap:12}}>
+        <div style={{fontSize:26,flexShrink:0,width:36,textAlign:'center'}}>{emoji}</div>
+        <div style={{flex:1,minWidth:0}}>
+          <div style={{fontSize:15,fontWeight:800,color:'white',marginBottom:2}}>{title}</div>
+          <div style={{fontSize:12,color:'rgba(255,255,255,.4)',marginBottom: saving>0?4:0}}>{subtitle}</div>
+          {saving > 0 && (
+            <div style={{display:'flex',gap:8,flexWrap:'wrap',alignItems:'center'}}>
+              <span style={{fontSize:13,fontWeight:800,color:c}}>-{saving.toLocaleString('fr-FR')} €/an</span>
+              {investment > 0 && <span style={{fontSize:11,color:'rgba(255,255,255,.35)'}}>invest. {investment.toLocaleString('fr-FR')} €</span>}
+              {roiYears && <span style={{fontSize:11,color:'rgba(255,200,100,.75)',fontWeight:700}}>ROI {roiYears} an{roiYears>1?'s':''}</span>}
+            </div>
+          )}
+          {saving === 0 && <div style={{fontSize:11,color:'rgba(255,255,255,.3)',fontStyle:'italic'}}>Calcul indisponible — importez vos données</div>}
+        </div>
+        <button className="panier-toggle" onClick={onToggle}
+          style={{background: selected ? c : 'rgba(255,255,255,.15)'}}>
+          <div className="panier-toggle-knob" style={{left: selected ? 21 : 3}}/>
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ─── PanierScreen ─────────────────────────────
+function PanierScreen({ user, onBack, onValider }) {
+  const [loading,     setLoading]     = useState(true);
+  const [currentBill, setCurrentBill] = useState(null);
+  const [isDynamic,   setIsDynamic]   = useState(false);
+  const [taux,        setTaux]        = useState(4);
+  const [savings,     setSavings]     = useState({ optimisation:0, acc:0, box:0, solar:0 });
+  const [validated,   setValidated]   = useState(false);
+  const [selected,    setSelected]    = useState(() => ({
+    optimisation: !!localStorage.getItem('starvolt_optimisation_chosen'),
+    acc:          localStorage.getItem('starvolt_acc_chosen') === 'true',
+    box:          !!localStorage.getItem('starvolt_box_chosen'),
+    solar:        !!localStorage.getItem('starvolt_solar_chosen'),
+  }));
+
+  const boxChoice   = localStorage.getItem('starvolt_box_chosen');
+  const solarChoice = localStorage.getItem('starvolt_solar_chosen');
+
+  const investments = { optimisation:0, acc:0, box: boxChoice==='buy' ? 550 : 0, solar:13000 };
+
+  useEffect(() => {
+    const siteId = localStorage.getItem('starvolt_active_site_id');
+    if (!siteId) { setLoading(false); return; }
+    Promise.all([
+      sb.from('sites').select('id,conso_profil,tarif_id,heure_debut_hc1,heure_fin_hc1,heure_debut_hc2,heure_fin_hc2').eq('id', siteId).maybeSingle(),
+      sb.from('tarifs_electricite').select('*'),
+      sb.rpc('get_spot_json'),
+      sb.from('parametres_nationaux').select('*').eq('id',1).maybeSingle(),
+    ]).then(([{ data:site }, { data:tariffs }, { data:spotRows }, { data:nat }]) => {
+      if (!site?.conso_profil) { setLoading(false); return; }
+      if (nat?.taux_inflation_electricite) setTaux(Number(nat.taux_inflation_electricite));
+
+      const { kwh_hc, kwh_hp } = calcHcHp(site.conso_profil, site);
+      const kwh_total = kwh_hc + kwh_hp;
+      const curTariff = site.tarif_id ? (tariffs||[]).find(t=>t.id===site.tarif_id) : null;
+
+      let bill = null; let isDyn = false;
+      if (curTariff?.tarif_dynamique) {
+        isDyn = true; setIsDynamic(true);
+        if (spotRows && nat) {
+          const r = calcDynamicCost(curTariff, site.conso_profil, buildSpotMap(spotRows), nat, site);
+          bill = r?.total || null;
+        }
+      } else if (curTariff) {
+        bill = calcTariffCost(curTariff, kwh_hc, kwh_hp)?.total || null;
+      }
+      if (!bill && kwh_total > 0) bill = Math.round(kwh_total * 0.18);
+      bill = bill ? Math.round(bill) : null;
+      setCurrentBill(bill);
+
+      if (bill) {
+        // Optimisation
+        let optSav = parseInt(localStorage.getItem('starvolt_optimisation_saving')||'0');
+        if (!optSav && tariffs?.length) {
+          const ranked = tariffs.map(t=>({t,result:calcTariffCost(t,kwh_hc,kwh_hp)})).filter(({result})=>result!==null).sort((a,b)=>a.result.total-b.result.total);
+          const cur = site.tarif_id ? ranked.find(r=>r.t.id===site.tarif_id) : null;
+          optSav = cur ? Math.max(0, Math.round(cur.result.total - ranked[0].result.total)) : 0;
+        }
+        // ACC
+        let accSav = parseInt(localStorage.getItem('starvolt_acc_saving')||'0');
+        if (!accSav && site.conso_profil) {
+          let kwh918 = 0;
+          for (let m=1;m<=12;m++) for (let d=1;d<=PROF_DAYS[m-1];d++) for (let h=9;h<18;h++) kwh918 += (site.conso_profil[profIdx(m,d,h)]||0)/1000;
+          const priceRef = curTariff?.prix_hp || 0.24;
+          accSav = Math.max(0, Math.round(kwh918 * (priceRef - 0.11)));
+        }
+        // Box
+        let boxSav = parseInt(localStorage.getItem('starvolt_box_saving')||'0');
+        if (!boxSav) boxSav = Math.round(140 + bill * (isDyn ? 0.20 : 0.10));
+        // Solar
+        let solSav = parseInt(localStorage.getItem('starvolt_solar_saving')||'0');
+        if (!solSav) solSav = solarChoice === 'solar_box' ? Math.round(bill * 0.80) : Math.round(bill * 0.50);
+
+        setSavings({ optimisation: optSav, acc: accSav, box: boxSav, solar: solSav });
+      }
+      setLoading(false);
+    });
+  }, []);
+
+  const toggleItem = (key) => {
+    setSelected(s => {
+      const newVal = !s[key];
+      if (key === 'acc') localStorage.setItem('starvolt_acc_chosen', String(newVal));
+      if (key === 'optimisation') { if(!newVal) localStorage.removeItem('starvolt_optimisation_chosen'); }
+      if (key === 'box') { if(!newVal) localStorage.removeItem('starvolt_box_chosen'); }
+      if (key === 'solar') { if(!newVal) localStorage.removeItem('starvolt_solar_chosen'); }
+      return { ...s, [key]: newVal };
+    });
+  };
+
+  const clearPanier = () => {
+    localStorage.removeItem('starvolt_optimisation_chosen');
+    localStorage.removeItem('starvolt_optimisation_saving');
+    localStorage.removeItem('starvolt_solar_chosen');
+    localStorage.removeItem('starvolt_solar_saving');
+    localStorage.removeItem('starvolt_box_chosen');
+    localStorage.removeItem('starvolt_box_saving');
+    localStorage.removeItem('starvolt_acc_chosen');
+    setSelected({ optimisation:false, acc:false, box:false, solar:false });
+  };
+
+  const projYear  = (n, bill) => bill ? Math.round(bill * Math.pow(1 + taux/100, n)) : 0;
+  const projCum   = (bill) => { let s=0; for(let n=1;n<=10;n++) s += bill ? bill * Math.pow(1+taux/100, n) : 0; return Math.round(s); };
+
+  const totalAnnualSaving = Object.entries(selected).filter(([,v])=>v).reduce((s,[k])=>s+(savings[k]||0),0);
+  const totalInvestment   = Object.entries(selected).filter(([,v])=>v).reduce((s,[k])=>s+(investments[k]||0),0);
+  const billedAfter       = currentBill ? Math.max(0, currentBill - totalAnnualSaving) : null;
+  const roiGlobal         = totalInvestment > 0 && totalAnnualSaving > 0 ? Math.ceil(totalInvestment / totalAnnualSaving) : null;
+  const gainNet10         = currentBill ? Math.max(0, projCum(currentBill) - projCum(billedAfter) - totalInvestment) : 0;
+
+  if (validated) {
+    return (
+      <>
+      <div className="screen fade-in">
+        <Fireworks final/>
+        <div style={{textAlign:'center',marginBottom:20}}>
+          <div style={{fontSize:42,marginBottom:8}}>🛒</div>
+          <div style={{fontSize:22,fontWeight:900,color:'white',lineHeight:1.2}}>Projet validé !</div>
+          <div style={{fontSize:14,color:'rgba(255,255,255,.5)',marginTop:8,lineHeight:1.6}}>
+            Un conseiller Starvolt vous contacte<br/>sous 48h pour finaliser votre projet.
+          </div>
+        </div>
+        {gainNet10 > 0 && (
+          <div className="card" style={{padding:'18px 16px',textAlign:'center',border:'1.5px solid rgba(125,217,64,.4)',marginBottom:12}}>
+            <div style={{fontSize:12,color:'rgba(255,255,255,.4)',marginBottom:4}}>Gain net estimé sur 10 ans</div>
+            <div style={{fontSize:34,fontWeight:900,color:'#7dd940'}}>{gainNet10.toLocaleString('fr-FR')} €</div>
+            {roiGlobal && <div style={{fontSize:12,color:'rgba(255,255,255,.4)',marginTop:4}}>Retour sur investissement en {roiGlobal} an{roiGlobal>1?'s':''}</div>}
+          </div>
+        )}
+        <div className="card" style={{padding:'14px 16px',border:'1px solid rgba(125,217,64,.2)'}}>
+          <div style={{fontWeight:700,fontSize:13,color:'#7dd940',marginBottom:6}}>✦ Prochaine étape</div>
+          <div style={{fontSize:12,color:'rgba(255,255,255,.6)',lineHeight:1.6}}>
+            Étude personnalisée gratuite et sans engagement. Nous analysons votre profil de consommation et vous proposons un plan d'action sur mesure.
+          </div>
+        </div>
+      </div>
+      <StickyFooter onBack={onBack}/>
+      </>
+    );
+  }
+
+  const itemsCount = Object.values(selected).filter(Boolean).length;
+
+  return (
+    <>
+    <div className="screen fade-in">
+      <div style={{marginBottom:20,marginTop:4}}>
+        <div style={{fontSize:9,letterSpacing:'.8px',color:'rgba(125,217,64,.85)',fontWeight:700,textTransform:'uppercase',marginBottom:6}}>Mon projet Starvolt</div>
+        <div style={{fontSize:22,fontWeight:900,color:'white',lineHeight:1.2}}>
+          Votre <span className="accent">panier</span><br/>énergétique
+        </div>
+      </div>
+
+      {loading && <div style={{textAlign:'center',padding:40}}><div className="spinner" style={{margin:'0 auto'}}/></div>}
+
+      {!loading && !currentBill && (
+        <div className="card" style={{textAlign:'center',padding:'28px 20px',marginBottom:12}}>
+          <div style={{fontSize:32,marginBottom:8}}>📊</div>
+          <div style={{fontSize:15,fontWeight:700,color:'white',marginBottom:6}}>Aucune donnée de conso</div>
+          <div style={{fontSize:13,color:'rgba(255,255,255,.5)',lineHeight:1.6}}>Importez vos données Enedis dans « Ma conso » pour calculer vos économies.</div>
+        </div>
+      )}
+
+      {!loading && currentBill && (
+        <>
+          {/* Situation actuelle */}
+          <div className="card" style={{padding:'18px 16px',marginBottom:12}}>
+            <div style={{fontSize:11,color:'rgba(125,217,64,.75)',fontWeight:700,textTransform:'uppercase',letterSpacing:'.5px',marginBottom:12}}>Situation actuelle</div>
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:12}}>
+              <div style={{fontSize:13,color:'rgba(255,255,255,.6)'}}>Facture annuelle</div>
+              <div style={{fontSize:20,fontWeight:900,color:'white'}}>{currentBill.toLocaleString('fr-FR')} €</div>
+            </div>
+            <div style={{background:'rgba(239,68,68,.07)',borderRadius:10,padding:'12px 14px',border:'1px solid rgba(239,68,68,.2)'}}>
+              <div style={{fontSize:10,color:'rgba(255,140,100,.7)',fontWeight:700,textTransform:'uppercase',letterSpacing:'.3px',marginBottom:8}}>Sans action — hausse {taux}%/an</div>
+              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8}}>
+                <div style={{textAlign:'center'}}>
+                  <div style={{fontSize:11,color:'rgba(255,255,255,.35)',marginBottom:3}}>Dans 10 ans</div>
+                  <div style={{fontSize:17,fontWeight:900,color:'#fca5a5'}}>{projYear(10,currentBill).toLocaleString('fr-FR')} €/an</div>
+                </div>
+                <div style={{textAlign:'center'}}>
+                  <div style={{fontSize:11,color:'rgba(255,255,255,.35)',marginBottom:3}}>Cumulé 10 ans</div>
+                  <div style={{fontSize:17,fontWeight:900,color:'#fca5a5'}}>{projCum(currentBill).toLocaleString('fr-FR')} €</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Comparatif panier */}
+          {totalAnnualSaving > 0 && (
+            <div className="card" style={{padding:'18px 16px',marginBottom:12,border:'1.5px solid rgba(125,217,64,.3)'}}>
+              <div style={{fontSize:11,color:'rgba(125,217,64,.75)',fontWeight:700,textTransform:'uppercase',letterSpacing:'.5px',marginBottom:12}}>Impact de votre panier</div>
+              <div style={{display:'grid',gridTemplateColumns:'2fr 1fr 1fr',gap:'4px 8px',marginBottom:12}}>
+                <div style={{fontSize:10,color:'rgba(255,255,255,.3)',fontWeight:700}}></div>
+                <div style={{fontSize:10,color:'rgba(255,140,100,.7)',fontWeight:700,textAlign:'center'}}>Sans action</div>
+                <div style={{fontSize:10,color:'#7dd940',fontWeight:700,textAlign:'center'}}>Avec panier</div>
+                {[[1,'Année 1'],[5,'Année 5'],[10,'Année 10']].map(([n,lbl])=>(
+                  <React.Fragment key={n}>
+                    <div style={{fontSize:12,color:'rgba(255,255,255,.55)',padding:'3px 0'}}>{lbl}</div>
+                    <div style={{fontSize:13,fontWeight:700,color:'#fca5a5',textAlign:'center',padding:'3px 0'}}>{projYear(n,currentBill).toLocaleString('fr-FR')} €</div>
+                    <div style={{fontSize:13,fontWeight:700,color:'#7dd940',textAlign:'center',padding:'3px 0'}}>{projYear(n,billedAfter).toLocaleString('fr-FR')} €</div>
+                  </React.Fragment>
+                ))}
+                <div style={{fontSize:12,color:'rgba(255,255,255,.55)',fontWeight:700,padding:'3px 0'}}>Cumulé 10 ans</div>
+                <div style={{fontSize:13,fontWeight:700,color:'#fca5a5',textAlign:'center',padding:'3px 0'}}>{projCum(currentBill).toLocaleString('fr-FR')} €</div>
+                <div style={{fontSize:13,fontWeight:700,color:'#7dd940',textAlign:'center',padding:'3px 0'}}>{(projCum(billedAfter)+totalInvestment).toLocaleString('fr-FR')} €</div>
+              </div>
+              <div style={{background:'rgba(125,217,64,.1)',borderRadius:10,padding:'14px',textAlign:'center',border:'1px solid rgba(125,217,64,.2)'}}>
+                <div style={{fontSize:11,color:'rgba(255,255,255,.45)',marginBottom:4}}>Gain net estimé sur 10 ans</div>
+                <div style={{fontSize:28,fontWeight:900,color:'#7dd940'}}>{gainNet10.toLocaleString('fr-FR')} €</div>
+                {roiGlobal && <div style={{fontSize:11,color:'rgba(255,200,100,.7)',marginTop:4,fontWeight:700}}>Retour sur investissement : {roiGlobal} an{roiGlobal>1?'s':''}</div>}
+              </div>
+            </div>
+          )}
+        </>
+      )}
+
+      {/* Actions */}
+      <div style={{fontSize:11,color:'rgba(255,255,255,.35)',fontWeight:700,textTransform:'uppercase',letterSpacing:'.5px',marginBottom:10,marginTop:4}}>Vos actions</div>
+
+      <CartItemCard emoji="⚡" title="Optimisation fournisseur" subtitle="Changement de tarif électricité — sans frais"
+        selected={selected.optimisation} onToggle={()=>toggleItem('optimisation')}
+        saving={savings.optimisation} investment={0} color="#7dd940"/>
+
+      <CartItemCard emoji="☀️" title="Autoconsommation collective" subtitle="Énergie solaire locale à prix réduit — sans frais"
+        selected={selected.acc} onToggle={()=>toggleItem('acc')}
+        saving={savings.acc} investment={0} color="#7dd940"/>
+
+      <CartItemCard emoji="📦" title="Box Comwatt"
+        subtitle={boxChoice==='buy' ? 'Achat 550 € · Pilotage intelligent' : boxChoice==='free' ? 'Box gratuite (cagnotte 3 ans)' : 'Pilotage intelligent de la conso'}
+        selected={selected.box} onToggle={()=>toggleItem('box')}
+        saving={savings.box} investment={investments.box}
+        roiYears={investments.box>0 && savings.box>0 ? Math.ceil(investments.box/savings.box) : null}
+        color="#7dd940"/>
+
+      <CartItemCard emoji="🏠" title="Installation solaire"
+        subtitle={solarChoice==='solar_box' ? 'Panneaux + batterie + Box — ~13 000 €' : 'Panneaux solaires + batterie — ~13 000 €'}
+        selected={selected.solar} onToggle={()=>toggleItem('solar')}
+        saving={savings.solar} investment={13000}
+        roiYears={savings.solar>0 ? Math.ceil(13000/savings.solar) : null}
+        color="#fbbf24"/>
+
+      <div style={{height:110}}/>
+    </div>
+
+    <StickyFooter row onBack={onBack}>
+      <button onClick={clearPanier} style={{
+        flexShrink:0, background:'rgba(255,255,255,.07)', border:'1px solid rgba(255,255,255,.15)',
+        borderRadius:10, color:'rgba(255,255,255,.55)', fontSize:12, fontWeight:700,
+        fontFamily:'inherit', padding:'12px 14px', cursor:'pointer'
+      }}>
+        🗑 Vider
+      </button>
+      <button className="btn btn-yes" style={{flex:1, fontSize:13}}
+        onClick={() => { confetti({particleCount:150,spread:80,origin:{y:.6}}); setValidated(true); }}>
+        {itemsCount > 0 ? `Valider mon projet (${itemsCount} action${itemsCount>1?'s':''}) →` : 'Valider mon projet →'}
+      </button>
+    </StickyFooter>
     </>
   );
 }
@@ -4922,6 +5261,9 @@ function App() {
           onBack={goBack}/>;
       }
 
+      case 'PANIER':
+        return <PanierScreen user={user} onBack={goBack}/>;
+
       case 'BOX_SIM':
         return <BoxSimScreen user={user} userProfile={profile} onBack={goBack}/>;
 
@@ -5016,6 +5358,12 @@ function App() {
   const chipLabel = profile ? (profile.pseudo || profile.prenom || '') : state.name;
   const avatarName = profile ? `${profile.prenom || ''} ${profile.nom || ''}`.trim() : state.name;
   const showNameChip = profile ? true : state.screen !== 'WELCOME';
+  const cartCount = user ? [
+    localStorage.getItem('starvolt_optimisation_chosen'),
+    localStorage.getItem('starvolt_acc_chosen') === 'true' ? 'true' : null,
+    localStorage.getItem('starvolt_box_chosen'),
+    localStorage.getItem('starvolt_solar_chosen'),
+  ].filter(Boolean).length : 0;
 
   return (
     <div className="app">
@@ -5028,6 +5376,8 @@ function App() {
         onProfileClick={user ? () => goTo('PROFILE') : null}
         isAdmin={isAdmin}
         onAdmin={()=>goTo('ADMIN')}
+        onPanier={user && state.screen !== 'PANIER' ? ()=>goTo('PANIER') : null}
+        cartCount={cartCount}
       />
       <div className="chevrons-deco" aria-hidden="true">
         {['»','»','»','»'].map((c,i)=><span key={i}>{c}</span>)}
