@@ -2419,16 +2419,21 @@ function MonSiteScreen({ user, userProfile, onBack }) {
     const profilsGeo=prodProfils.filter(p=>p.latitude&&p.longitude);
     if(profilsGeo.length===0){setProdProfilId(prodProfils[0].id);return;}
     const q=`${site.adresse_ligne1||''} ${site.code_postal||''} ${site.ville||''}`.trim();
-    if(!q){setProdProfilId(profilsGeo[0].id);return;}
+    const saveProfil=(id)=>{
+      setProdProfilId(id);
+      setSites(prev=>prev.map(s=>s.id===activeId?{...s,profil_production_id:id}:s));
+      sb.from('sites').update({profil_production_id:id}).eq('id',activeId);
+    };
+    if(!q){saveProfil(profilsGeo[0].id);return;}
     fetch(`https://api-adresse.data.gouv.fr/search/?q=${encodeURIComponent(q)}&limit=1`)
       .then(r=>r.json()).then(geo=>{
-        const feat=geo.features?.[0]; if(!feat)return;
+        const feat=geo.features?.[0];
+        if(!feat){saveProfil(profilsGeo[0].id);return;}
         const[lon,lat]=feat.geometry.coordinates;
         let best=profilsGeo[0],bestD=haversine(lat,lon,best.latitude,best.longitude);
         profilsGeo.forEach(p=>{const d=haversine(lat,lon,p.latitude,p.longitude);if(d<bestD){bestD=d;best=p;}});
-        setProdProfilId(best.id);
-        updateSite({profil_production_id:best.id});
-      }).catch(()=>{});
+        saveProfil(best.id);
+      }).catch(()=>saveProfil(profilsGeo[0].id));
   },[activeId,prodProfils.length]);
 
   // Calculer le bilan énergétique dès que les données sont prêtes
