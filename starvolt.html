@@ -693,6 +693,7 @@
     @media (min-width: 768px) {
       .app { padding: 80px 24px 120px; }
       .screen { max-width: 560px; }
+      .screen-wide { max-width: none; }
       .welcome-title { font-size: 42px; }
       .bill-num { font-size: 96px; }
       .card { padding: 30px 26px; }
@@ -2002,7 +2003,7 @@ function consoColor(val,thresholds){
 }
 
 // ─── ConsoHeatmapCanvas ───────────────────────
-function ConsoHeatmapCanvas({profile}){
+function ConsoHeatmapCanvas({profile, months}){
   const wrapperRef=useRef(null),canvasRef=useRef(null);
   const thresholds=useMemo(()=>{
     const nz=profile.filter(v=>v>0).sort((a,b)=>a-b);
@@ -2012,8 +2013,9 @@ function ConsoHeatmapCanvas({profile}){
   const draw=useCallback((containerW)=>{
     if(!canvasRef.current||containerW<10)return;
     const canvas=canvasRef.current,ctx=canvas.getContext('2d'),dpr=window.devicePixelRatio||1;
+    const activeMonths=months||[1,2,3,4,5,6,7,8,9,10,11,12];
     const days=[];
-    for(let m=1;m<=12;m++)for(let d=1;d<=PROF_DAYS[m-1];d++)days.push({mois:m,jour:d});
+    for(let m=1;m<=12;m++)if(activeMonths.includes(m))for(let d=1;d<=PROF_DAYS[m-1];d++)days.push({mois:m,jour:d});
     const LBL_W=26,HDR_H=16,CELL_H=3;
     const CELL_W=Math.max(4,Math.floor((containerW-LBL_W)/24));
     const W=LBL_W+24*CELL_W,H=HDR_H+days.length*CELL_H;
@@ -2039,7 +2041,7 @@ function ConsoHeatmapCanvas({profile}){
       }
     });
     if(pm)drawML(pm,ms,days.length);
-  },[profile,thresholds]);
+  },[profile,thresholds,months]);
 
   useEffect(()=>{
     if(!wrapperRef.current)return;
@@ -2225,6 +2227,16 @@ function EnergyBalanceChart({ balance }) {
     else if (level === 'day') { setLevel('month'); setSelMonth(null); setSelDay(null); }
   };
 
+  const handlePrev = () => {
+    if (level === 'day') { const m = selMonth > 1 ? selMonth - 1 : 12; setSelMonth(m); }
+    else if (level === 'hour') { const d = selDay > 1 ? selDay - 1 : PROF_DAYS[selMonth-1]; setSelDay(d); }
+  };
+
+  const handleNext = () => {
+    if (level === 'day') { const m = selMonth < 12 ? selMonth + 1 : 1; setSelMonth(m); }
+    else if (level === 'hour') { const d = selDay < PROF_DAYS[selMonth-1] ? selDay + 1 : 1; setSelDay(d); }
+  };
+
   useEffect(() => {
     const canvas = canvasRef.current, wrapper = wrapperRef.current;
     if (!canvas || !wrapper || !chartData.length) return;
@@ -2313,17 +2325,30 @@ function EnergyBalanceChart({ balance }) {
 
   const ctxLabel = level === 'day' ? `Mois ${selMonth}` : level === 'hour' ? `${selDay}/${selMonth}` : null;
 
+  const navBtnStyle = {
+    position:'absolute', zIndex:2, background:'rgba(255,255,255,.15)',
+    border:'1px solid rgba(255,255,255,.35)', borderRadius:'50%',
+    width:28, height:28, cursor:'pointer', color:'white',
+    fontSize:15, lineHeight:'26px', textAlign:'center', padding:0
+  };
+
   return (
     <div ref={wrapperRef} style={{position:'relative', width:'100%'}}>
       {level !== 'month' && (
-        <button onClick={zoomOut} title="Zoom arrière" style={{
-          position:'absolute', top:58, right:4, zIndex:2,
-          background:'rgba(0,0,0,.35)', border:'1px solid rgba(255,255,255,.3)',
-          borderRadius:'50%', width:26, height:26, cursor:'pointer',
-          color:'white', fontSize:14, lineHeight:'24px', textAlign:'center', padding:0
-        }}>🔍<span style={{fontSize:10,verticalAlign:'middle'}}>−</span></button>
+        <button onClick={handlePrev} title="Période précédente" style={{...navBtnStyle, top:4, left:4}}>←</button>
+      )}
+      {level !== 'month' && (
+        <button onClick={handleNext} title="Période suivante" style={{...navBtnStyle, top:4, right:4}}>→</button>
       )}
       <canvas ref={canvasRef} style={{display:'block', cursor: level!=='hour'?'crosshair':'default'}} onDoubleClick={handleDblClick}/>
+      {level !== 'month' && (
+        <button onClick={zoomOut} title="Zoom arrière" style={{
+          position:'absolute', bottom:28, left:4, zIndex:2,
+          background:'white', border:'none',
+          borderRadius:'50%', width:26, height:26, cursor:'pointer',
+          color:'#333', fontSize:13, lineHeight:'24px', textAlign:'center', padding:0, fontWeight:700
+        }}>⊖</button>
+      )}
       {ctxLabel && <div style={{textAlign:'center',fontSize:11,color:'rgba(255,255,255,.45)',marginTop:2}}>{ctxLabel}</div>}
     </div>
   );
@@ -2348,6 +2373,7 @@ function MonSiteScreen({ user, userProfile, onBack }) {
   const[prodProfilId,setProdProfilId]=useState('');
   const[prodProfilData,setProdProfilData]=useState(null);
   const[balance,setBalance]=useState(null);
+  const[heatmapExpanded,setHeatmapExpanded]=useState(false);
   const fileRef=useRef(null);
 
   const handleImportDemo=async()=>{
@@ -2366,7 +2392,7 @@ function MonSiteScreen({ user, userProfile, onBack }) {
     const[{data:s},{data:t},{data:pp}]=await Promise.all([
       sb.from('sites').select('*').eq('user_id',user.id).order('created_at'),
       sb.from('tarifs_electricite').select('id,nom').order('nom'),
-      sb.from('profils_production').select('id,nom').order('nom'),
+      sb.from('profils_production').select('id,nom,latitude,longitude').order('nom'),
     ]);
     setSites(s||[]); setTariffs(t||[]); setProdProfils(pp||[]);
     const stored=userProfile?.active_site_id||localStorage.getItem('starvolt_active_site_id');
@@ -2386,12 +2412,24 @@ function MonSiteScreen({ user, userProfile, onBack }) {
     setProdProfilData(null); setBalance(null);
   },[activeId]);
 
-  // Charger les données du profil de production sélectionné
+  // Auto-sélection du profil de production le plus proche par GPS
   useEffect(()=>{
-    if(!prodProfilId){setProdProfilData(null);setBalance(null);return;}
-    sb.from('profils_production').select('profil').eq('id',prodProfilId).single()
-      .then(({data})=>setProdProfilData(data?.profil||null));
-  },[prodProfilId]);
+    if(!site||prodProfils.length===0)return;
+    if(site.profil_production_id){setProdProfilId(site.profil_production_id);return;}
+    const profilsGeo=prodProfils.filter(p=>p.latitude&&p.longitude);
+    if(profilsGeo.length===0){setProdProfilId(prodProfils[0].id);return;}
+    const q=`${site.adresse_ligne1||''} ${site.code_postal||''} ${site.ville||''}`.trim();
+    if(!q){setProdProfilId(profilsGeo[0].id);return;}
+    fetch(`https://api-adresse.data.gouv.fr/search/?q=${encodeURIComponent(q)}&limit=1`)
+      .then(r=>r.json()).then(geo=>{
+        const feat=geo.features?.[0]; if(!feat)return;
+        const[lon,lat]=feat.geometry.coordinates;
+        let best=profilsGeo[0],bestD=haversine(lat,lon,best.latitude,best.longitude);
+        profilsGeo.forEach(p=>{const d=haversine(lat,lon,p.latitude,p.longitude);if(d<bestD){bestD=d;best=p;}});
+        setProdProfilId(best.id);
+        updateSite({profil_production_id:best.id});
+      }).catch(()=>{});
+  },[activeId,prodProfils.length]);
 
   // Calculer le bilan énergétique dès que les données sont prêtes
   useEffect(()=>{
@@ -2432,7 +2470,7 @@ function MonSiteScreen({ user, userProfile, onBack }) {
 
   return(
     <>
-      <div className="screen fade-in">
+      <div className="screen screen-wide fade-in">
         {/* Titre */}
         <div style={{marginBottom:10,marginTop:4}}>
           <div style={{fontSize:9,letterSpacing:'.6px',color:'rgba(125,217,64,.8)',fontWeight:700,textTransform:'uppercase'}}>Énergie</div>
@@ -2526,8 +2564,11 @@ function MonSiteScreen({ user, userProfile, onBack }) {
                 {/* Heatmap */}
                 {site.conso_profil?.length===8784&&(
                   <div>
-                    <div style={{fontWeight:700,fontSize:11,color:'rgba(255,255,255,.5)',marginBottom:5}}>Heatmap · heures (0–23h) × jours (jan–déc)</div>
-                    <ConsoHeatmapCanvas profile={site.conso_profil}/>
+                    <div style={{fontWeight:700,fontSize:11,color:'rgba(255,255,255,.5)',marginBottom:5}}>Heatmap · heures (0–23h) × jours</div>
+                    <ConsoHeatmapCanvas profile={site.conso_profil} months={heatmapExpanded?undefined:[1]}/>
+                    <button onClick={()=>setHeatmapExpanded(v=>!v)} style={{background:'none',border:'none',cursor:'pointer',color:'rgba(255,255,255,.45)',fontSize:11,padding:'6px 0 0',display:'flex',alignItems:'center',gap:4}}>
+                      {heatmapExpanded?'▲ Replier':'▼ Voir toute l\'année'}
+                    </button>
                   </div>
                 )}
               </div>
@@ -2545,13 +2586,12 @@ function MonSiteScreen({ user, userProfile, onBack }) {
                   {prodProfils.length===0?(
                     <div style={{fontSize:12,color:'rgba(255,255,255,.35)',padding:'6px 0'}}>Aucun profil disponible — importez via Admin → Production solaire</div>
                   ):(
-                    <select className="inp inp-sel" style={{fontSize:13,padding:'8px 36px 8px 12px'}} value={prodProfilId||''} onChange={e=>{
-                      const id=e.target.value; setProdProfilId(id);
-                      updateSite({profil_production_id:id||null});
-                    }}>
-                      <option value=''>— Sélectionner un profil —</option>
-                      {prodProfils.map(p=><option key={p.id} value={p.id}>{p.nom}</option>)}
-                    </select>
+                    <div style={{display:'flex',alignItems:'center',gap:6,background:'rgba(255,255,255,.05)',borderRadius:8,padding:'8px 12px'}}>
+                      <span style={{fontSize:13,color:'rgba(125,217,64,.9)',fontWeight:700}}>📍</span>
+                      <span style={{fontSize:13,color:'white',fontWeight:600}}>
+                        {prodProfils.find(p=>p.id===prodProfilId)?.nom||'Détection en cours…'}
+                      </span>
+                    </div>
                   )}
                 </div>
                 {/* kWc */}
