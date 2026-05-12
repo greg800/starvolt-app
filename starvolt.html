@@ -3989,29 +3989,6 @@ function BoxSimScreen({ user, userProfile, onBack, onPanier, onCartUpdate }) {
             </div>
           </div>
 
-          {/* ── 5. Choix ── */}
-          <div className="card" style={{ padding:'18px 16px', marginBottom:8 }}>
-            <div style={{ fontWeight:900, fontSize:17, color:'white', marginBottom:14, lineHeight:1.3 }}>
-              Gagnez de l'argent dès à présent ou dans 3 ans — c'est à vous de choisir
-            </div>
-            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
-              <div style={{ background:'rgba(255,255,255,.07)', borderRadius:12, padding:'16px 12px', textAlign:'center' }}>
-                <div style={{ fontSize:26, fontWeight:900, color:'white', marginBottom:4 }}>550 €</div>
-                <div style={{ fontSize:14, color:'white', fontWeight:700, marginBottom:6 }}>Achat direct</div>
-                <div style={{ fontSize:13, color:'rgba(255,255,255,.55)', lineHeight:1.45 }}>
-                  Rentabilisé en {shiftGain && totalGain > 0 ? Math.ceil(550 / totalGain) + ' an' + (Math.ceil(550/totalGain)>1?'s':'') : '< 4 ans'} grâce aux économies
-                </div>
-              </div>
-              <div style={{ background:'rgba(255,255,255,.05)', borderRadius:12, padding:'16px 12px', textAlign:'center', border:'1.5px solid rgba(125,217,64,.4)' }}>
-                <div style={{ fontSize:26, fontWeight:900, color:'#7dd940', marginBottom:4 }}>Gratuite</div>
-                <div style={{ fontSize:14, color:'white', fontWeight:700, marginBottom:6 }}>Box offerte</div>
-                <div style={{ fontSize:13, color:'rgba(255,255,255,.55)', lineHeight:1.45 }}>
-                  Votre cagnotte flex est reversée à Starvolt pendant 3 ans
-                </div>
-              </div>
-            </div>
-          </div>
-
         </>)}
       </div>
 
@@ -4020,14 +3997,22 @@ function BoxSimScreen({ user, userProfile, onBack, onPanier, onCartUpdate }) {
           <button className="btn btn-yes" onClick={onPanier}>🛒 Voir le panier →</button>
         </StickyFooter>
       ) : (
-        <StickyFooter row onBack={onBack}>
-          <button className="btn btn-no" style={{fontSize:13, padding:'12px 8px'}} onClick={() => { localStorage.setItem('starvolt_box_chosen','free'); if(totalGain>0) localStorage.setItem('starvolt_box_saving',String(Math.round(totalGain))); setChosen('free'); setJustConfirmed(true); if(onCartUpdate) onCartUpdate(); }}>
-            🎁 Box gratuite
-          </button>
-          <button className="btn btn-yes" style={{fontSize:13, padding:'12px 8px'}} onClick={() => { localStorage.setItem('starvolt_box_chosen','buy'); if(totalGain>0) localStorage.setItem('starvolt_box_saving',String(Math.round(totalGain))); setChosen('buy'); setJustConfirmed(true); if(onCartUpdate) onCartUpdate(); }}>
-            📦 J'achète à 550 €
-          </button>
-        </StickyFooter>
+        <div className="sticky-footer">
+          <div className="sticky-footer-inner row">
+            <button onClick={onBack} style={{ flexGrow:0, flexShrink:0, background:'rgba(255,255,255,.06)', border:'1px solid rgba(255,255,255,.12)', borderRadius:10, color:'rgba(255,255,255,.5)', fontSize:11, fontWeight:600, fontFamily:'inherit', padding:'10px 12px', cursor:'pointer', whiteSpace:'nowrap' }}>← Retour</button>
+            <button onClick={() => { localStorage.setItem('starvolt_box_chosen','free'); if(totalGain>0) localStorage.setItem('starvolt_box_saving',String(Math.round(totalGain))); setChosen('free'); setJustConfirmed(true); if(onCartUpdate) onCartUpdate(); }}
+              style={{ flex:1, background:'rgba(255,255,255,.07)', border:'2px solid rgba(125,217,64,.55)', borderRadius:14, color:'white', padding:'13px 8px', cursor:'pointer', fontFamily:'inherit', textAlign:'center', lineHeight:1.3 }}>
+              <div style={{ fontSize:17, fontWeight:900, color:'#7dd940', marginBottom:3 }}>🎁 Box gratuite</div>
+              <div style={{ fontSize:12, color:'rgba(255,255,255,.75)' }}>Cagnotte reversée 3 ans</div>
+            </button>
+            <button onClick={() => { localStorage.setItem('starvolt_box_chosen','buy'); if(totalGain>0) localStorage.setItem('starvolt_box_saving',String(Math.round(totalGain))); setChosen('buy'); setJustConfirmed(true); if(onCartUpdate) onCartUpdate(); }}
+              style={{ flex:1, background:'rgba(255,255,255,.07)', border:'2px solid rgba(255,215,0,.4)', borderRadius:14, color:'white', padding:'13px 8px', cursor:'pointer', fontFamily:'inherit', textAlign:'center', lineHeight:1.3 }}>
+              <div style={{ fontSize:17, fontWeight:900, color:'#fbbf24', marginBottom:2 }}>📦 Acheter</div>
+              <div style={{ fontSize:18, fontWeight:900, color:'white', marginBottom:2 }}>550 €</div>
+              <div style={{ fontSize:12, color:'rgba(255,255,255,.75)' }}>Rentabilisé en {shiftGain && totalGain > 0 ? Math.ceil(550/totalGain) + ' an' + (Math.ceil(550/totalGain)>1?'s':'') : '< 4 ans'}</div>
+            </button>
+          </div>
+        </div>
       ))}
     </>
   );
@@ -4247,7 +4232,7 @@ function SolarSimScreen({ user, userProfile, onBack, onPanier, onCartUpdate }) {
             {chosen ? (
             <button className="btn btn-yes" onClick={onPanier}>🛒 Voir le panier →</button>
           ) : (
-            <button className="btn btn-yes" onClick={() => { localStorage.setItem('starvolt_solar_chosen','solar_box'); if(solarBoxSaving) localStorage.setItem('starvolt_solar_saving',String(solarBoxSaving)); setChosen('solar_box'); setJustConfirmed(true); if(onCartUpdate) onCartUpdate(); }}>
+            <button className="btn btn-yes" onClick={() => { localStorage.setItem('starvolt_solar_chosen','solar_box'); if(solarBoxSaving) localStorage.setItem('starvolt_solar_saving',String(solarBoxSaving)); localStorage.removeItem('starvolt_box_chosen'); localStorage.removeItem('starvolt_box_saving'); setChosen('solar_box'); setJustConfirmed(true); if(onCartUpdate) onCartUpdate(); }}>
               ☀️ Je veux des panneaux solaires
             </button>
           )}
@@ -4258,10 +4243,10 @@ function SolarSimScreen({ user, userProfile, onBack, onPanier, onCartUpdate }) {
           </StickyFooter>
         ) : (
           <StickyFooter row onBack={onBack}>
-            <button className="btn btn-no" style={{fontSize:13, padding:'12px 8px'}} onClick={() => { localStorage.setItem('starvolt_solar_chosen','solar_only'); if(solarOnlySaving) localStorage.setItem('starvolt_solar_saving',String(solarOnlySaving)); setChosen('solar_only'); setJustConfirmed(true); if(onCartUpdate) onCartUpdate(); }}>
+            <button className="btn btn-no" style={{fontSize:13, padding:'12px 8px'}} onClick={() => { localStorage.setItem('starvolt_solar_chosen','solar_only'); if(solarOnlySaving) localStorage.setItem('starvolt_solar_saving',String(solarOnlySaving)); localStorage.removeItem('starvolt_box_chosen'); localStorage.removeItem('starvolt_box_saving'); setChosen('solar_only'); setJustConfirmed(true); if(onCartUpdate) onCartUpdate(); }}>
               ☀️ Solaire + batterie
             </button>
-            <button className="btn btn-yes" style={{fontSize:13, padding:'12px 8px'}} onClick={() => { localStorage.setItem('starvolt_solar_chosen','solar_box'); if(solarBoxSaving) localStorage.setItem('starvolt_solar_saving',String(solarBoxSaving)); setChosen('solar_box'); setJustConfirmed(true); if(onCartUpdate) onCartUpdate(); }}>
+            <button className="btn btn-yes" style={{fontSize:13, padding:'12px 8px'}} onClick={() => { localStorage.setItem('starvolt_solar_chosen','solar_box'); if(solarBoxSaving) localStorage.setItem('starvolt_solar_saving',String(solarBoxSaving)); localStorage.removeItem('starvolt_box_chosen'); localStorage.removeItem('starvolt_box_saving'); setChosen('solar_box'); setJustConfirmed(true); if(onCartUpdate) onCartUpdate(); }}>
               ☀️ + Box Comwatt
             </button>
           </StickyFooter>
