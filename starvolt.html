@@ -2704,7 +2704,7 @@ function OptimisationScreen({ user, userProfile, onBack, onPanier, onCartUpdate 
     .sort((a, b) => a.result.total - b.result.total);
 
   const currentRanked = site?.tarif_id ? ranked.find(r => r.t.id === site.tarif_id) : null;
-  const effectiveSelectedId = selectedTariffId || (ranked.length > 0 ? ranked[0].t.id : null);
+  const effectiveSelectedId = selectedTariffId || savedTariffId || (ranked.length > 0 ? ranked[0].t.id : null);
   const selectedRanked = effectiveSelectedId ? ranked.find(r => r.t.id === effectiveSelectedId) : ranked[0];
   const heroSaving = currentRanked && selectedRanked && currentRanked.t.id !== effectiveSelectedId
     ? Math.max(0, Math.round(currentRanked.result.total - selectedRanked.result.total))
@@ -2744,7 +2744,9 @@ function OptimisationScreen({ user, userProfile, onBack, onPanier, onCartUpdate 
           </div>
         </div>
       </div>
-      <StickyFooter onBack={onBack}/>
+      <StickyFooter row onBack={onBack}>
+        <button className="btn btn-yes" onClick={onPanier}>🛒 Voir mon panier →</button>
+      </StickyFooter>
       </>
     );
   }
@@ -3912,7 +3914,9 @@ function BoxSimScreen({ user, userProfile, onBack, onPanier, onCartUpdate }) {
           </div>
         </div>
       </div>
-      <StickyFooter onBack={onBack}/>
+      <StickyFooter row onBack={onBack}>
+        <button className="btn btn-yes" onClick={onPanier}>🛒 Voir mon panier →</button>
+      </StickyFooter>
       </>
     );
   }
@@ -4146,7 +4150,9 @@ function SolarSimScreen({ user, userProfile, onBack, onPanier, onCartUpdate }) {
           </div>
         </div>
       </div>
-      <StickyFooter onBack={onBack}/>
+      <StickyFooter row onBack={onBack}>
+        <button className="btn btn-yes" onClick={onPanier}>🛒 Voir mon panier →</button>
+      </StickyFooter>
       </>
     );
   }
