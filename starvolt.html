@@ -3998,22 +3998,20 @@ function BoxSimScreen({ user, userProfile, onBack, onPanier }) {
         </>)}
       </div>
 
-      {!loading && (
-        {chosen ? (
-          <StickyFooter row onBack={onBack}>
-            <button className="btn btn-yes" onClick={onPanier}>🛒 Voir le panier →</button>
-          </StickyFooter>
-        ) : (
-          <StickyFooter row onBack={onBack}>
-            <button className="btn btn-no" style={{fontSize:13, padding:'12px 8px'}} onClick={() => { localStorage.setItem('starvolt_box_chosen','free'); if(totalGain>0) localStorage.setItem('starvolt_box_saving',String(Math.round(totalGain))); setChosen('free'); setJustConfirmed(true); }}>
-              🎁 Box gratuite
-            </button>
-            <button className="btn btn-yes" style={{fontSize:13, padding:'12px 8px'}} onClick={() => { localStorage.setItem('starvolt_box_chosen','buy'); if(totalGain>0) localStorage.setItem('starvolt_box_saving',String(Math.round(totalGain))); setChosen('buy'); setJustConfirmed(true); }}>
-              📦 J'achète à 550 €
-            </button>
-          </StickyFooter>
-        )}
-      )}
+      {!loading && (chosen ? (
+        <StickyFooter row onBack={onBack}>
+          <button className="btn btn-yes" onClick={onPanier}>🛒 Voir le panier →</button>
+        </StickyFooter>
+      ) : (
+        <StickyFooter row onBack={onBack}>
+          <button className="btn btn-no" style={{fontSize:13, padding:'12px 8px'}} onClick={() => { localStorage.setItem('starvolt_box_chosen','free'); if(totalGain>0) localStorage.setItem('starvolt_box_saving',String(Math.round(totalGain))); setChosen('free'); setJustConfirmed(true); }}>
+            🎁 Box gratuite
+          </button>
+          <button className="btn btn-yes" style={{fontSize:13, padding:'12px 8px'}} onClick={() => { localStorage.setItem('starvolt_box_chosen','buy'); if(totalGain>0) localStorage.setItem('starvolt_box_saving',String(Math.round(totalGain))); setChosen('buy'); setJustConfirmed(true); }}>
+            📦 J'achète à 550 €
+          </button>
+        </StickyFooter>
+      ))}
     </>
   );
 }
