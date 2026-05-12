@@ -2136,55 +2136,98 @@ function SiteFormCard({initial={},onSave,onCancel}){
 }
 
 // ─── computeEnergyBalance ─────────────────────
-// Simule heure par heure sur 8784h (année bissextile)
-// Retourne 12 objets { on_site, grid_buy, injection } en kWh
+// Retourne { monthly[12], hourly[8784] } en kWh
 function computeEnergyBalance(conso, prodNorm, pvKwc, batPowerW, batCapKwh) {
   const batCapWh = (batCapKwh || 0) * 1000;
   const batPowWh = batPowerW || 0;
   let batState = 0;
   const monthly = Array.from({length:12}, () => ({on_site:0, grid_buy:0, injection:0}));
+  const hourly = new Array(8784);
   for (let m = 1; m <= 12; m++) {
     for (let d = 1; d <= PROF_DAYS[m-1]; d++) {
       for (let h = 0; h < 24; h++) {
         const idx = profIdx(m, d, h);
         const consoWh = conso[idx] || 0;
         const prodWh = (prodNorm[idx] || 0) * pvKwc;
-        const balance = prodWh - consoWh;
+        const bal = prodWh - consoWh;
         let onSite, gridBuy, injection;
-        if (balance >= 0) {
+        if (bal >= 0) {
           let charge = 0;
-          if (batCapWh > 0) {
-            charge = Math.min(balance, batPowWh, batCapWh - batState);
-            batState += charge;
-          }
-          injection = balance - charge;
-          gridBuy = 0;
-          onSite = consoWh;
+          if (batCapWh > 0) { charge = Math.min(bal, batPowWh, batCapWh - batState); batState += charge; }
+          injection = bal - charge; gridBuy = 0; onSite = consoWh;
         } else {
           let discharge = 0;
-          if (batState > 0) {
-            discharge = Math.min(-balance, batPowWh, batState);
-            batState -= discharge;
-          }
-          gridBuy = (-balance) - discharge;
-          injection = 0;
-          onSite = prodWh + discharge;
+          if (batState > 0) { discharge = Math.min(-bal, batPowWh, batState); batState -= discharge; }
+          gridBuy = (-bal) - discharge; injection = 0; onSite = prodWh + discharge;
         }
-        monthly[m-1].on_site += onSite / 1000;
-        monthly[m-1].grid_buy += gridBuy / 1000;
-        monthly[m-1].injection += injection / 1000;
+        const os = onSite/1000, gb = gridBuy/1000, inj = injection/1000;
+        hourly[idx] = {on_site:os, grid_buy:gb, injection:inj, m, d, h};
+        monthly[m-1].on_site += os; monthly[m-1].grid_buy += gb; monthly[m-1].injection += inj;
       }
     }
   }
-  return monthly;
+  return {monthly, hourly};
 }
 
 // ─── EnergyBalanceChart ───────────────────────
-function EnergyBalanceChart({ monthly }) {
+function EnergyBalanceChart({ balance }) {
   const wrapperRef = useRef(null), canvasRef = useRef(null);
+  const [level, setLevel] = useState('month');
+  const [selMonth, setSelMonth] = useState(null);
+  const [selDay, setSelDay] = useState(null);
+  const barsRef = useRef([]);
+
+  // Données à afficher selon le niveau de zoom
+  const chartData = useMemo(() => {
+    if (!balance) return [];
+    if (level === 'month') return balance.monthly;
+    if (level === 'day') {
+      const days = PROF_DAYS[selMonth - 1];
+      const daily = Array.from({length:days}, () => ({on_site:0, grid_buy:0, injection:0}));
+      balance.hourly.forEach(pt => {
+        if (pt && pt.m === selMonth) {
+          daily[pt.d-1].on_site += pt.on_site;
+          daily[pt.d-1].grid_buy += pt.grid_buy;
+          daily[pt.d-1].injection += pt.injection;
+        }
+      });
+      return daily;
+    }
+    if (level === 'hour') {
+      return Array.from({length:24}, (_, hIdx) => {
+        const pt = balance.hourly[profIdx(selMonth, selDay, hIdx)];
+        return pt || {on_site:0, grid_buy:0, injection:0};
+      });
+    }
+    return [];
+  }, [balance, level, selMonth, selDay]);
+
+  const xLabels = useMemo(() => {
+    if (level === 'month') return Array.from({length:12}, (_, i) => String(i+1));
+    if (level === 'day') return Array.from({length: PROF_DAYS[selMonth-1]}, (_, i) => String(i+1));
+    return Array.from({length:24}, (_, i) => i + 'h');
+  }, [level, selMonth]);
+
+  const handleDblClick = (e) => {
+    if (level === 'hour') return;
+    const canvas = canvasRef.current; if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    const dpr = window.devicePixelRatio || 1;
+    const cx = (e.clientX - rect.left) * (canvas.width / dpr) / rect.width;
+    const idx = barsRef.current.findIndex(b => cx >= b.x && cx <= b.x + b.w);
+    if (idx === -1) return;
+    if (level === 'month') { setSelMonth(idx + 1); setLevel('day'); }
+    else if (level === 'day') { setSelDay(idx + 1); setLevel('hour'); }
+  };
+
+  const zoomOut = () => {
+    if (level === 'hour') setLevel('day');
+    else if (level === 'day') { setLevel('month'); setSelMonth(null); setSelDay(null); }
+  };
+
   useEffect(() => {
     const canvas = canvasRef.current, wrapper = wrapperRef.current;
-    if (!canvas || !wrapper || !monthly) return;
+    if (!canvas || !wrapper || !chartData.length) return;
     const W = Math.max(wrapper.clientWidth, 200), H = 240, dpr = window.devicePixelRatio || 1;
     canvas.width = W * dpr; canvas.height = H * dpr;
     canvas.style.width = W + 'px'; canvas.style.height = H + 'px';
@@ -2192,79 +2235,98 @@ function EnergyBalanceChart({ monthly }) {
     ctx.scale(dpr, dpr);
     ctx.clearRect(0, 0, W, H);
 
-    // Légende : 3 lignes à gauche, valeurs en MWh
-    const LEGEND_H = 54;
-    const ML = 42, MR = 8, MT = LEGEND_H + 4, MB = 22;
+    const LEGEND_H = 56, ML = 46, MR = 8, MT = LEGEND_H + 4, MB = 24;
     const cW = W - ML - MR, cH = H - MT - MB;
+    const n = chartData.length;
 
-    // Convertir kWh → MWh
-    const mm = monthly.map(m => ({ s: m.on_site/1000, g: m.grid_buy/1000, i: m.injection/1000 }));
-    const maxPos = Math.max(...mm.map(m => m.s + m.g), 0.01);
-    const maxNeg = Math.max(...mm.map(m => m.i), 0.01);
-    const posRatio = Math.min(Math.max(maxPos / (maxPos + maxNeg), 0.38), 0.80);
+    // Unité adaptative
+    const maxRaw = Math.max(...chartData.map(m => m.on_site + m.grid_buy), 0.001);
+    const unitScale = maxRaw >= 100 ? 0.001 : 1;
+    const unitLabel = maxRaw >= 100 ? 'MWh' : 'kWh';
+
+    const data = chartData.map(m => ({s: m.on_site*unitScale, g: m.grid_buy*unitScale, i: m.injection*unitScale}));
+    const maxPos = Math.max(...data.map(m => m.s + m.g), 0.001);
+    const maxNeg = Math.max(...data.map(m => m.i), 0.001);
+    const posRatio = Math.min(Math.max(maxPos / (maxPos + maxNeg), 0.38), 0.82);
     const zeroY = MT + cH * posRatio;
     const scalePos = (cH * posRatio) / maxPos;
     const scaleNeg = (cH * (1 - posRatio)) / maxNeg;
 
-    // Grille positive (3 lignes)
-    ctx.font = '9px sans-serif'; ctx.lineWidth = 1;
+    // Grille
+    ctx.lineWidth = 1;
     [1/3, 2/3, 1].forEach(f => {
-      const v = maxPos * f;
-      const y = zeroY - v * scalePos;
+      const v = maxPos * f, y = zeroY - v * scalePos;
       ctx.strokeStyle = 'rgba(255,255,255,.09)';
       ctx.beginPath(); ctx.moveTo(ML, y); ctx.lineTo(W - MR, y); ctx.stroke();
-      ctx.fillStyle = 'rgba(255,255,255,.5)'; ctx.textAlign = 'right';
-      ctx.fillText(v.toFixed(1), ML - 4, y + 3);
+      ctx.fillStyle = 'rgba(255,255,255,.7)'; ctx.font = '12px sans-serif'; ctx.textAlign = 'right';
+      ctx.fillText(v.toFixed(1), ML - 4, y + 4);
     });
-    // Grille négative (1 ligne)
     const vn = maxNeg * 0.65, yn = zeroY + vn * scaleNeg;
     ctx.strokeStyle = 'rgba(255,255,255,.09)';
     ctx.beginPath(); ctx.moveTo(ML, yn); ctx.lineTo(W - MR, yn); ctx.stroke();
-    ctx.fillStyle = 'rgba(255,255,255,.5)'; ctx.textAlign = 'right';
-    ctx.fillText('-' + vn.toFixed(1), ML - 4, yn + 3);
+    ctx.fillStyle = 'rgba(255,255,255,.7)'; ctx.textAlign = 'right';
+    ctx.fillText('-'+vn.toFixed(1), ML - 4, yn + 4);
 
     // Axe zéro
     ctx.strokeStyle = 'rgba(255,165,0,.55)'; ctx.lineWidth = 1.5;
     ctx.beginPath(); ctx.moveTo(ML, zeroY); ctx.lineTo(W - MR, zeroY); ctx.stroke();
 
-    // Label axe MWh
-    ctx.save(); ctx.fillStyle = 'rgba(255,255,255,.35)'; ctx.font = '9px sans-serif'; ctx.textAlign = 'center';
-    ctx.translate(13, MT + cH / 2); ctx.rotate(-Math.PI / 2); ctx.fillText('MWh', 0, 0); ctx.restore();
+    // Label axe Y
+    ctx.save(); ctx.fillStyle = 'rgba(255,255,255,.55)'; ctx.font = '12px sans-serif'; ctx.textAlign = 'center';
+    ctx.translate(14, MT + cH / 2); ctx.rotate(-Math.PI/2); ctx.fillText(unitLabel, 0, 0); ctx.restore();
 
-    // Barres
-    const bTW = cW / 12, bPad = Math.max(2.5, bTW * 0.16), bW = bTW - bPad * 2;
-    mm.forEach((m, i) => {
+    // Barres + positions pour le drill-down
+    const bTW = cW / n, bPad = Math.max(2, bTW * 0.14), bW = bTW - bPad * 2;
+    const newBars = [];
+    data.forEach((m, i) => {
       const x = ML + i * bTW + bPad;
-      // Orange : autoconso (base)
+      newBars.push({x, w: bW});
       if (m.s > 0) { ctx.fillStyle = '#e07830'; ctx.fillRect(x, zeroY - m.s * scalePos, bW, m.s * scalePos); }
-      // Gris : achat réseau (empilé, avec petit espace)
-      if (m.g > 0) {
-        const gap = 1;
-        ctx.fillStyle = '#909090';
-        ctx.fillRect(x, zeroY - (m.s + m.g) * scalePos, bW, m.g * scalePos - gap);
-      }
-      // Jaune clair : injection (en dessous, avec petit espace)
+      if (m.g > 0) { ctx.fillStyle = '#d0d0d0'; ctx.fillRect(x, zeroY - (m.s + m.g) * scalePos, bW, m.g * scalePos - 1); }
       if (m.i > 0) { ctx.fillStyle = '#f0e86a'; ctx.fillRect(x, zeroY + 2, bW, m.i * scaleNeg - 2); }
-      // Numéro mois
-      ctx.fillStyle = 'rgba(255,255,255,.55)'; ctx.font = '10px sans-serif'; ctx.textAlign = 'center';
-      ctx.fillText(i + 1, x + bW / 2, H - 4);
+    });
+    barsRef.current = newBars;
+
+    // Labels axe X
+    const lblFont = n <= 24 ? '12px sans-serif' : n <= 31 ? '11px sans-serif' : '10px sans-serif';
+    ctx.fillStyle = 'rgba(255,255,255,.75)'; ctx.font = lblFont; ctx.textAlign = 'center';
+    xLabels.forEach((lbl, i) => {
+      if (n > 24 && i % 2 !== 0) return;
+      ctx.fillText(lbl, ML + i * bTW + bTW / 2, H - 4);
     });
 
-    // Légende (3 lignes, espacées)
-    const items = [
-      {color:'#e07830', label:'Prod & conso sur place'},
-      {color:'#909090', label:'Achat réseau'},
-      {color:'#f0e86a', label:'Injection réseau'},
-    ];
-    ctx.font = '10px sans-serif';
-    items.forEach((it, i) => {
-      const ly = 4 + i * 17;
-      ctx.fillStyle = it.color; ctx.fillRect(ML, ly + 2, 13, 11);
-      ctx.fillStyle = 'rgba(255,255,255,.8)'; ctx.textAlign = 'left';
-      ctx.fillText(it.label, ML + 18, ly + 11);
-    });
-  }, [monthly]);
-  return <div ref={wrapperRef} style={{width:'100%'}}><canvas ref={canvasRef} style={{display:'block'}}/></div>;
+    // Indice de niveau
+    if (level !== 'hour') {
+      ctx.fillStyle = 'rgba(255,255,255,.3)'; ctx.font = '11px sans-serif'; ctx.textAlign = 'right';
+      ctx.fillText('double-clic pour zoomer', W - MR, MT - 4);
+    }
+
+    // Légende (3 lignes)
+    [{color:'#e07830',label:'Prod & conso sur place'},{color:'#d0d0d0',label:'Achat réseau'},{color:'#f0e86a',label:'Injection réseau'}]
+      .forEach((it, i) => {
+        const ly = 3 + i * 18;
+        ctx.fillStyle = it.color; ctx.fillRect(ML, ly + 2, 13, 12);
+        ctx.fillStyle = 'rgba(255,255,255,.85)'; ctx.font = '11px sans-serif'; ctx.textAlign = 'left';
+        ctx.fillText(it.label, ML + 18, ly + 12);
+      });
+  }, [chartData, xLabels, level]);
+
+  const ctxLabel = level === 'day' ? `Mois ${selMonth}` : level === 'hour' ? `${selDay}/${selMonth}` : null;
+
+  return (
+    <div ref={wrapperRef} style={{position:'relative', width:'100%'}}>
+      {level !== 'month' && (
+        <button onClick={zoomOut} title="Zoom arrière" style={{
+          position:'absolute', top:58, right:4, zIndex:2,
+          background:'rgba(0,0,0,.35)', border:'1px solid rgba(255,255,255,.3)',
+          borderRadius:'50%', width:26, height:26, cursor:'pointer',
+          color:'white', fontSize:14, lineHeight:'24px', textAlign:'center', padding:0
+        }}>🔍<span style={{fontSize:10,verticalAlign:'middle'}}>−</span></button>
+      )}
+      <canvas ref={canvasRef} style={{display:'block', cursor: level!=='hour'?'crosshair':'default'}} onDoubleClick={handleDblClick}/>
+      {ctxLabel && <div style={{textAlign:'center',fontSize:11,color:'rgba(255,255,255,.45)',marginTop:2}}>{ctxLabel}</div>}
+    </div>
+  );
 }
 
 // ─── MonSiteScreen ────────────────────────────
@@ -2285,7 +2347,7 @@ function MonSiteScreen({ user, userProfile, onBack }) {
   const[batKwh,setBatKwh]=useState('');
   const[prodProfilId,setProdProfilId]=useState('');
   const[prodProfilData,setProdProfilData]=useState(null);
-  const[monthlyBalance,setMonthlyBalance]=useState(null);
+  const[balance,setBalance]=useState(null);
   const fileRef=useRef(null);
 
   const handleImportDemo=async()=>{
@@ -2321,21 +2383,21 @@ function MonSiteScreen({ user, userProfile, onBack }) {
     setBatW(site?.batterie_puissance_w!=null?String(site.batterie_puissance_w/1000):'');
     setBatKwh(site?.batterie_capacite_kwh!=null?String(site.batterie_capacite_kwh):'');
     setProdProfilId(site?.profil_production_id||'');
-    setProdProfilData(null); setMonthlyBalance(null);
+    setProdProfilData(null); setBalance(null);
   },[activeId]);
 
   // Charger les données du profil de production sélectionné
   useEffect(()=>{
-    if(!prodProfilId){setProdProfilData(null);setMonthlyBalance(null);return;}
+    if(!prodProfilId){setProdProfilData(null);setBalance(null);return;}
     sb.from('profils_production').select('profil').eq('id',prodProfilId).single()
       .then(({data})=>setProdProfilData(data?.profil||null));
   },[prodProfilId]);
 
   // Calculer le bilan énergétique dès que les données sont prêtes
   useEffect(()=>{
-    if(!site?.conso_profil||!prodProfilData){setMonthlyBalance(null);return;}
+    if(!site?.conso_profil||!prodProfilData){setBalance(null);return;}
     const kw=pvKwc===''?6:(parseFloat(pvKwc)||0), bw=(parseFloat(batW)||0)*1000, bk=parseFloat(batKwh)||0;
-    setMonthlyBalance(computeEnergyBalance(site.conso_profil,prodProfilData,kw,bw,bk));
+    setBalance(computeEnergyBalance(site.conso_profil,prodProfilData,kw,bw,bk));
   },[site?.conso_profil,prodProfilData,pvKwc,batW,batKwh]);
 
   const updateSite=async(updates)=>{ await sb.from('sites').update(updates).eq('id',activeId); await load(); };
@@ -2535,14 +2597,14 @@ function MonSiteScreen({ user, userProfile, onBack }) {
                     💡 Puissance batterie très faible ({batW} kW). Une batterie domestique est typiquement entre 3 et 10 kW.
                   </div>
                 )}
-                {monthlyBalance&&(
+                {balance&&(
                   <div style={{marginTop:4}}>
                     <div style={{fontWeight:700,fontSize:11,color:'rgba(255,255,255,.5)',marginBottom:6}}>Bilan énergétique mensuel</div>
-                    <EnergyBalanceChart monthly={monthlyBalance}/>
+                    <EnergyBalanceChart balance={balance}/>
                     {(()=>{
-                      const autoconso = monthlyBalance.reduce((s,m)=>s+m.on_site,0);
-                      const achat = monthlyBalance.reduce((s,m)=>s+m.grid_buy,0);
-                      const injection = monthlyBalance.reduce((s,m)=>s+m.injection,0);
+                      const autoconso = balance.monthly.reduce((s,m)=>s+m.on_site,0);
+                      const achat = balance.monthly.reduce((s,m)=>s+m.grid_buy,0);
+                      const injection = balance.monthly.reduce((s,m)=>s+m.injection,0);
                       const fmt = v => (v/1000).toFixed(1) + ' MWh/an';
                       return (
                         <div style={{display:'flex',flexDirection:'column',gap:0,marginTop:10,borderRadius:10,overflow:'hidden',border:'1px solid rgba(255,255,255,.08)'}}>
@@ -2561,7 +2623,7 @@ function MonSiteScreen({ user, userProfile, onBack }) {
                     })()}
                   </div>
                 )}
-                {prodProfilId&&!monthlyBalance&&site?.conso_profil&&(
+                {prodProfilId&&!balance&&site?.conso_profil&&(
                   <div style={{textAlign:'center',padding:'10px 0',color:'rgba(255,255,255,.35)',fontSize:12}}>Calcul du bilan…</div>
                 )}
                 {prodProfilId&&!site?.conso_profil&&(
