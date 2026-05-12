@@ -2704,13 +2704,13 @@ function OptimisationScreen({ user, userProfile, onBack, onPanier, onCartUpdate 
     .sort((a, b) => a.result.total - b.result.total);
 
   const currentRanked = site?.tarif_id ? ranked.find(r => r.t.id === site.tarif_id) : null;
+  const alreadyChosen = !!localStorage.getItem('starvolt_optimisation_chosen');
+  const savedTariffId = localStorage.getItem('starvolt_optimisation_tariff_id');
   const effectiveSelectedId = selectedTariffId || savedTariffId || (ranked.length > 0 ? ranked[0].t.id : null);
   const selectedRanked = effectiveSelectedId ? ranked.find(r => r.t.id === effectiveSelectedId) : ranked[0];
   const heroSaving = currentRanked && selectedRanked && currentRanked.t.id !== effectiveSelectedId
     ? Math.max(0, Math.round(currentRanked.result.total - selectedRanked.result.total))
     : null;
-  const alreadyChosen = !!localStorage.getItem('starvolt_optimisation_chosen');
-  const savedTariffId = localStorage.getItem('starvolt_optimisation_tariff_id');
   const isNewSelection = alreadyChosen && effectiveSelectedId && effectiveSelectedId !== savedTariffId;
   const showPanier = alreadyChosen && !isNewSelection;
 
