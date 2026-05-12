@@ -2660,7 +2660,7 @@ function calcDynamicCost(tariff, consoProfile, spotMap, natParams, userProfile) 
 }
 
 // ─── OptimisationScreen ───────────────────────
-function OptimisationScreen({ user, userProfile, onBack, onPanier }) {
+function OptimisationScreen({ user, userProfile, onBack, onPanier, onCartUpdate }) {
   const [sites,           setSites]           = useState(null);
   const [activeId]                            = useState(() => localStorage.getItem('starvolt_active_site_id'));
   const [tariffs,         setTariffs]         = useState([]);
@@ -2771,6 +2771,8 @@ function OptimisationScreen({ user, userProfile, onBack, onPanier }) {
           localStorage.setItem('starvolt_optimisation_chosen','true');
           localStorage.setItem('starvolt_optimisation_tariff_id', effectiveSelectedId);
           localStorage.setItem('starvolt_optimisation_saving', String(heroSaving));
+          if (selectedRanked) localStorage.setItem('starvolt_optimisation_tariff_nom', selectedRanked.t.nom);
+          if (onCartUpdate) onCartUpdate();
         }}>
           ⚡ {isNewSelection ? 'Valider ce changement' : 'Je change de fournisseur'}
         </button>
@@ -2892,6 +2894,7 @@ function OptimisationScreen({ user, userProfile, onBack, onPanier }) {
               const prixKwh = kwh_total > 0 ? (result.total / kwh_total * 100).toFixed(1) : null;
               const isCurrent = t.id === site?.tarif_id;
               const isSelected = t.id === effectiveSelectedId;
+              const gainVsCurrent = currentRanked && !isCurrent ? Math.round(currentRanked.result.total - result.total) : null;
               return (
                 <div key={t.id} className="card" onClick={() => setSelectedTariffId(t.id)} style={{
                   padding:'16px', cursor:'pointer',
@@ -2921,6 +2924,11 @@ function OptimisationScreen({ user, userProfile, onBack, onPanier }) {
                       <div style={{ fontSize:24, fontWeight:900, color: idx === 0 ? '#7dd940' : 'white', lineHeight:1 }}>{fmtE(result.total)}</div>
                       <div style={{ fontSize:17, color:'rgba(255,255,255,.4)', marginBottom:4 }}>/an TTC</div>
                       {prixKwh && <div style={{ fontSize:18, fontWeight:800, color: idx === 0 ? '#7dd940' : 'rgba(255,255,255,.65)' }}>{prixKwh} c€/kWh</div>}
+                      {gainVsCurrent !== null && gainVsCurrent !== 0 && (
+                        <div style={{ fontSize:22, fontWeight:900, marginTop:6, color: gainVsCurrent > 0 ? '#7dd940' : '#fca5a5' }}>
+                          {gainVsCurrent > 0 ? `−${fmtGrand(gainVsCurrent)} €/an` : `+${fmtGrand(Math.abs(gainVsCurrent))} €/an`}
+                        </div>
+                      )}
                     </div>
                   </div>
                   {result.is_dynamic && (result.avg_ete_ceur != null || result.avg_hiver_ceur != null) && (
@@ -3806,7 +3814,7 @@ function AccResultScreen({ state, onBack, onPanier }) {
 }
 
 // ─── BoxSimScreen ─────────────────────────────
-function BoxSimScreen({ user, userProfile, onBack, onPanier }) {
+function BoxSimScreen({ user, userProfile, onBack, onPanier, onCartUpdate }) {
   const [loading,      setLoading]      = useState(true);
   const [currentBill,  setCurrentBill]  = useState(null);
   const [isDynamic,    setIsDynamic]    = useState(false);
@@ -4004,10 +4012,10 @@ function BoxSimScreen({ user, userProfile, onBack, onPanier }) {
         </StickyFooter>
       ) : (
         <StickyFooter row onBack={onBack}>
-          <button className="btn btn-no" style={{fontSize:13, padding:'12px 8px'}} onClick={() => { localStorage.setItem('starvolt_box_chosen','free'); if(totalGain>0) localStorage.setItem('starvolt_box_saving',String(Math.round(totalGain))); setChosen('free'); setJustConfirmed(true); }}>
+          <button className="btn btn-no" style={{fontSize:13, padding:'12px 8px'}} onClick={() => { localStorage.setItem('starvolt_box_chosen','free'); if(totalGain>0) localStorage.setItem('starvolt_box_saving',String(Math.round(totalGain))); setChosen('free'); setJustConfirmed(true); if(onCartUpdate) onCartUpdate(); }}>
             🎁 Box gratuite
           </button>
-          <button className="btn btn-yes" style={{fontSize:13, padding:'12px 8px'}} onClick={() => { localStorage.setItem('starvolt_box_chosen','buy'); if(totalGain>0) localStorage.setItem('starvolt_box_saving',String(Math.round(totalGain))); setChosen('buy'); setJustConfirmed(true); }}>
+          <button className="btn btn-yes" style={{fontSize:13, padding:'12px 8px'}} onClick={() => { localStorage.setItem('starvolt_box_chosen','buy'); if(totalGain>0) localStorage.setItem('starvolt_box_saving',String(Math.round(totalGain))); setChosen('buy'); setJustConfirmed(true); if(onCartUpdate) onCartUpdate(); }}>
             📦 J'achète à 550 €
           </button>
         </StickyFooter>
@@ -4017,7 +4025,7 @@ function BoxSimScreen({ user, userProfile, onBack, onPanier }) {
 }
 
 // ─── SolarSimScreen ───────────────────────────
-function SolarSimScreen({ user, userProfile, onBack, onPanier }) {
+function SolarSimScreen({ user, userProfile, onBack, onPanier, onCartUpdate }) {
   const [loading,      setLoading]      = useState(true);
   const [currentBill,  setCurrentBill]  = useState(null);
   const [isDynamic,    setIsDynamic]    = useState(false);
@@ -4235,7 +4243,7 @@ function SolarSimScreen({ user, userProfile, onBack, onPanier }) {
             {chosen ? (
             <button className="btn btn-yes" onClick={onPanier}>🛒 Voir le panier →</button>
           ) : (
-            <button className="btn btn-yes" onClick={() => { localStorage.setItem('starvolt_solar_chosen','solar_box'); if(solarBoxSaving) localStorage.setItem('starvolt_solar_saving',String(solarBoxSaving)); setChosen('solar_box'); setJustConfirmed(true); }}>
+            <button className="btn btn-yes" onClick={() => { localStorage.setItem('starvolt_solar_chosen','solar_box'); if(solarBoxSaving) localStorage.setItem('starvolt_solar_saving',String(solarBoxSaving)); setChosen('solar_box'); setJustConfirmed(true); if(onCartUpdate) onCartUpdate(); }}>
               ☀️ Je veux des panneaux solaires
             </button>
           )}
@@ -4246,10 +4254,10 @@ function SolarSimScreen({ user, userProfile, onBack, onPanier }) {
           </StickyFooter>
         ) : (
           <StickyFooter row onBack={onBack}>
-            <button className="btn btn-no" style={{fontSize:13, padding:'12px 8px'}} onClick={() => { localStorage.setItem('starvolt_solar_chosen','solar_only'); if(solarOnlySaving) localStorage.setItem('starvolt_solar_saving',String(solarOnlySaving)); setChosen('solar_only'); setJustConfirmed(true); }}>
+            <button className="btn btn-no" style={{fontSize:13, padding:'12px 8px'}} onClick={() => { localStorage.setItem('starvolt_solar_chosen','solar_only'); if(solarOnlySaving) localStorage.setItem('starvolt_solar_saving',String(solarOnlySaving)); setChosen('solar_only'); setJustConfirmed(true); if(onCartUpdate) onCartUpdate(); }}>
               ☀️ Solaire + batterie
             </button>
-            <button className="btn btn-yes" style={{fontSize:13, padding:'12px 8px'}} onClick={() => { localStorage.setItem('starvolt_solar_chosen','solar_box'); if(solarBoxSaving) localStorage.setItem('starvolt_solar_saving',String(solarBoxSaving)); setChosen('solar_box'); setJustConfirmed(true); }}>
+            <button className="btn btn-yes" style={{fontSize:13, padding:'12px 8px'}} onClick={() => { localStorage.setItem('starvolt_solar_chosen','solar_box'); if(solarBoxSaving) localStorage.setItem('starvolt_solar_saving',String(solarBoxSaving)); setChosen('solar_box'); setJustConfirmed(true); if(onCartUpdate) onCartUpdate(); }}>
               ☀️ + Box Comwatt
             </button>
           </StickyFooter>
@@ -4260,7 +4268,7 @@ function SolarSimScreen({ user, userProfile, onBack, onPanier }) {
 }
 
 // ─── CartItemCard ─────────────────────────────
-function CartItemCard({ emoji, title, subtitle, saving, investment, color, onRemove }) {
+function CartItemCard({ emoji, imgSrc, title, subtitle, saving, investment, color, onRemove }) {
   const c = color || '#7dd940';
   return (
     <div style={{
@@ -4268,7 +4276,9 @@ function CartItemCard({ emoji, title, subtitle, saving, investment, color, onRem
       marginBottom:12, border:`1.5px solid ${c}44`,
     }}>
       <div style={{display:'flex',alignItems:'flex-start',gap:12}}>
-        <div style={{fontSize:30,flexShrink:0,width:40,textAlign:'center',paddingTop:2}}>{emoji}</div>
+        <div style={{flexShrink:0,width:40,height:40,display:'flex',alignItems:'center',justifyContent:'center',paddingTop:2}}>
+          {imgSrc ? <img src={imgSrc} style={{width:36,height:36,objectFit:'contain',mixBlendMode:'screen'}}/> : <span style={{fontSize:30}}>{emoji}</span>}
+        </div>
         <div style={{flex:1,minWidth:0}}>
           <div style={{fontSize:18,fontWeight:800,color:'white',marginBottom:5}}>{title}</div>
           <div style={{fontSize:16,color:'rgba(255,255,255,.85)',marginBottom:saving>0?10:0,lineHeight:1.4}}>{subtitle}</div>
@@ -4491,7 +4501,7 @@ function PanierScreen({ user, onBack }) {
               <div style={{display:'grid',gridTemplateColumns:'2fr 1fr 1fr',gap:'6px 8px',marginBottom:14}}>
                 <div></div>
                 <div style={{fontSize:14,color:'rgba(255,150,110,.9)',fontWeight:700,textAlign:'center'}}>Sans action</div>
-                <div style={{fontSize:14,color:'#7dd940',fontWeight:700,textAlign:'center'}}>Avec panier</div>
+                <div style={{fontSize:14,color:'#7dd940',fontWeight:700,textAlign:'center'}}>Passer à l'action</div>
                 {[[1,'Année 1'],[10,'Année 10'],[25,'Année 25']].map(([n,lbl])=>(
                   <React.Fragment key={n}>
                     <div style={{fontSize:16,color:'rgba(255,255,255,.85)',padding:'4px 0'}}>{lbl}</div>
@@ -4532,21 +4542,22 @@ function PanierScreen({ user, onBack }) {
       )}
 
       {items.optimisation && (
-        <CartItemCard emoji="⚡" title="Optimisation fournisseur" subtitle="Changement de tarif électricité — sans frais"
+        <CartItemCard imgSrc="/optimisation.png" title="Optimisation fournisseur"
+          subtitle={(() => { const n = localStorage.getItem('starvolt_optimisation_tariff_nom'); return n ? `Passage chez ${n} — sans frais` : 'Changement de tarif électricité — sans frais'; })()}
           saving={savings.optimisation} investment={0} color="#7dd940" onRemove={()=>removeItem('optimisation')}/>
       )}
       {items.acc && (
-        <CartItemCard emoji="☀️" title="Autoconsommation collective" subtitle="Énergie solaire locale à prix réduit — sans frais"
+        <CartItemCard imgSrc="/acc.png" title="Autoconsommation collective" subtitle="Énergie solaire locale à prix réduit — sans frais"
           saving={savings.acc} investment={0} color="#7dd940" onRemove={()=>removeItem('acc')}/>
       )}
       {items.box && (
-        <CartItemCard emoji="📦" title="Box Comwatt"
+        <CartItemCard imgSrc="/comwatt-box.png" title="Box Comwatt"
           subtitle={boxChoice==='buy' ? 'Achat direct — 550 €' : 'Box gratuite — cagnotte reversée 3 ans'}
           saving={savings.box} investment={investments.box}
           color="#7dd940" onRemove={()=>removeItem('box')}/>
       )}
       {items.solar && (
-        <CartItemCard emoji="🏠" title="Installation solaire"
+        <CartItemCard imgSrc="/maison.png" title="Installation solaire"
           subtitle={solarChoice==='solar_box' ? 'Panneaux + batterie + Box Comwatt' : 'Panneaux solaires + batterie'}
           saving={savings.solar} investment={13000}
           color="#fbbf24" onRemove={()=>removeItem('solar')}/>
@@ -5166,7 +5177,9 @@ function App() {
   const [profile,     setProfile]    = useState(null);
   const [authLoading, setAuthLoading]= useState(true);
   const [showDemoPopup, setShowDemoPopup] = useState(false);
+  const [cartVersion, setCartVersion]= useState(0);
   const pendingProfileRef            = useRef(null);
+  const updateCart = () => setCartVersion(v => v + 1);
 
   // Charge le profil, hydrate le site actif, et retourne l'écran cible
   const fetchProfile = useCallback(async (userId) => {
@@ -5339,18 +5352,18 @@ function App() {
         return <PanierScreen user={user} onBack={()=>goTo('SIMULATIONS')}/>;
 
       case 'BOX_SIM':
-        return <BoxSimScreen user={user} userProfile={profile} onBack={goBack} onPanier={()=>goTo('PANIER')}/>;
+        return <BoxSimScreen user={user} userProfile={profile} onBack={goBack} onPanier={()=>goTo('PANIER')} onCartUpdate={updateCart}/>;
 
       case 'SOLAR_SIM':
-        return <SolarSimScreen user={user} userProfile={profile} onBack={goBack} onPanier={()=>goTo('PANIER')}/>;
+        return <SolarSimScreen user={user} userProfile={profile} onBack={goBack} onPanier={()=>goTo('PANIER')} onCartUpdate={updateCart}/>;
 
       case 'OPTIMISATION':
-        return <OptimisationScreen user={user} userProfile={profile} onBack={goBack} onPanier={()=>goTo('PANIER')}/>;
+        return <OptimisationScreen user={user} userProfile={profile} onBack={goBack} onPanier={()=>goTo('PANIER')} onCartUpdate={updateCart}/>;
 
       case 'ACC_MAP':
         return <AccMapScreen user={user} userProfile={profile} onBack={goBack}
-          onJoin={(data) => { localStorage.setItem('starvolt_acc_chosen','true'); goTo('ACC_RESULT', { ...data, accAction:'join' }); }}
-          onCreate={(data) => { localStorage.setItem('starvolt_acc_chosen','true'); goTo('ACC_RESULT', { ...data, accAction:'create' }); }}/>;
+          onJoin={(data) => { localStorage.setItem('starvolt_acc_chosen','true'); updateCart(); goTo('ACC_RESULT', { ...data, accAction:'join' }); }}
+          onCreate={(data) => { localStorage.setItem('starvolt_acc_chosen','true'); updateCart(); goTo('ACC_RESULT', { ...data, accAction:'create' }); }}/>;
 
       case 'ACC_RESULT':
         return <AccResultScreen state={state} onBack={goBack} onPanier={()=>goTo('PANIER')}/>;
