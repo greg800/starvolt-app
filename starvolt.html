@@ -2175,11 +2175,8 @@ function computeEnergyBalance(conso, prodNorm, pvKwc, batPowerW, batCapKwh) {
 }
 
 // ─── EnergyBalanceChart ───────────────────────
-function EnergyBalanceChart({ balance }) {
+function EnergyBalanceChart({ balance, level, selMonth, selDay, setLevel, setSelMonth, setSelDay }) {
   const wrapperRef = useRef(null), canvasRef = useRef(null);
-  const [level, setLevel] = useState('month');
-  const [selMonth, setSelMonth] = useState(null);
-  const [selDay, setSelDay] = useState(null);
   const barsRef = useRef([]);
 
   // Données à afficher selon le niveau de zoom
@@ -2296,7 +2293,7 @@ function EnergyBalanceChart({ balance }) {
     data.forEach((m, i) => {
       const x = ML + i * bTW + bPad;
       newBars.push({x, w: bW});
-      if (m.s > 0) { ctx.fillStyle = '#e07830'; ctx.fillRect(x, zeroY - m.s * scalePos, bW, m.s * scalePos); }
+      if (m.s > 0) { ctx.fillStyle = '#f0a050'; ctx.fillRect(x, zeroY - m.s * scalePos, bW, m.s * scalePos); }
       if (m.g > 0) { ctx.fillStyle = '#d0d0d0'; ctx.fillRect(x, zeroY - (m.s + m.g) * scalePos, bW, m.g * scalePos - 1); }
       if (m.i > 0) { ctx.fillStyle = '#f0e86a'; ctx.fillRect(x, zeroY + 2, bW, m.i * scaleNeg - 2); }
     });
@@ -2317,7 +2314,7 @@ function EnergyBalanceChart({ balance }) {
     }
 
     // Légende (3 lignes)
-    [{color:'#e07830',label:'Prod & conso sur place'},{color:'#d0d0d0',label:'Achat réseau'},{color:'#f0e86a',label:'Injection réseau'}]
+    [{color:'#f0a050',label:'Prod & conso sur place'},{color:'#d0d0d0',label:'Achat réseau'},{color:'#f0e86a',label:'Injection réseau'}]
       .forEach((it, i) => {
         const ly = 3 + i * 18;
         ctx.fillStyle = it.color; ctx.fillRect(ML, ly + 2, 13, 12);
@@ -2377,6 +2374,9 @@ function MonSiteScreen({ user, userProfile, onBack }) {
   const[prodProfilData,setProdProfilData]=useState(null);
   const[balance,setBalance]=useState(null);
   const[heatmapExpanded,setHeatmapExpanded]=useState(false);
+  const[chartLevel,setChartLevel]=useState('month');
+  const[chartMonth,setChartMonth]=useState(null);
+  const[chartDay,setChartDay]=useState(null);
   const fileRef=useRef(null);
 
   const handleImportDemo=async()=>{
@@ -2451,6 +2451,7 @@ function MonSiteScreen({ user, userProfile, onBack }) {
     if(!site?.conso_profil||!prodProfilData){setBalance(null);return;}
     const kw=pvKwc===''?6:(parseFloat(pvKwc)||0), bw=(parseFloat(batW)||0)*1000, bk=parseFloat(batKwh)||0;
     setBalance(computeEnergyBalance(site.conso_profil,prodProfilData,kw,bw,bk));
+    setChartLevel('month'); setChartMonth(null); setChartDay(null);
   },[site?.conso_profil,prodProfilData,pvKwc,batW,batKwh]);
 
   const updateSite=async(updates)=>{ await sb.from('sites').update(updates).eq('id',activeId); await load(); };
@@ -2658,21 +2659,29 @@ function MonSiteScreen({ user, userProfile, onBack }) {
                 {balance&&(
                   <div style={{marginTop:4}}>
                     <div style={{fontWeight:700,fontSize:11,color:'rgba(255,255,255,.5)',marginBottom:6}}>Bilan énergétique mensuel</div>
-                    <EnergyBalanceChart balance={balance}/>
+                    <EnergyBalanceChart balance={balance} level={chartLevel} selMonth={chartMonth} selDay={chartDay} setLevel={setChartLevel} setSelMonth={setChartMonth} setSelDay={setChartDay}/>
                     {(()=>{
-                      const autoconso = balance.monthly.reduce((s,m)=>s+m.on_site,0);
-                      const achat = balance.monthly.reduce((s,m)=>s+m.grid_buy,0);
-                      const injection = balance.monthly.reduce((s,m)=>s+m.injection,0);
+                      // Agrégation selon le niveau de zoom du graphique
+                      let pts;
+                      if(chartLevel==='month') pts=balance.monthly;
+                      else if(chartLevel==='day') pts=balance.hourly.filter(p=>p&&p.m===chartMonth);
+                      else pts=balance.hourly.filter(p=>p&&p.m===chartMonth&&p.d===chartDay);
+                      const autoconso = pts.reduce((s,m)=>s+m.on_site,0);
+                      const achat = pts.reduce((s,m)=>s+m.grid_buy,0);
+                      const injection = pts.reduce((s,m)=>s+m.injection,0);
                       const prod = autoconso + injection;
                       const conso = autoconso + achat;
                       const tauxAutoconso = prod > 0 ? Math.round(autoconso / prod * 100) : 0;
                       const tauxAutoprod = conso > 0 ? Math.round(autoconso / conso * 100) : 0;
-                      const fmt = v => (v/1000).toFixed(1) + ' MWh/an';
+                      const unit = (autoconso+achat) >= 100 ? 'MWh' : 'kWh';
+                      const scale = unit==='MWh' ? 0.001 : 1;
+                      const period = chartLevel==='hour' ? `${chartDay}/${chartMonth}` : chartLevel==='day' ? `Mois ${chartMonth}` : 'Année';
+                      const fmt = v => (v*scale).toFixed(unit==='MWh'?1:0) + ' ' + unit;
                       return (<>
                         {/* KPI taux */}
                         <div style={{display:'flex',gap:8,marginTop:10}}>
                           {[
-                            {label:'Taux d\'autoconsommation', value:tauxAutoconso, desc:'Production consommée sur place', color:'#e07830'},
+                            {label:'Taux d\'autoconsommation', value:tauxAutoconso, desc:'Production consommée sur place', color:'#f0a050'},
                             {label:'Taux d\'autoproduction', value:tauxAutoprod, desc:'Conso couverte par la prod locale', color:'#7dd940'},
                           ].map(({label,value,desc,color})=>(
                             <div key={label} style={{flex:1,background:'rgba(255,255,255,.04)',border:'1px solid rgba(255,255,255,.08)',borderRadius:10,padding:'12px 14px',textAlign:'center'}}>
@@ -2682,10 +2691,11 @@ function MonSiteScreen({ user, userProfile, onBack }) {
                             </div>
                           ))}
                         </div>
-                        {/* Détail MWh */}
-                        <div className="energy-summary" style={{display:'flex',flexDirection:'column',gap:0,marginTop:8,borderRadius:10,overflow:'hidden',border:'1px solid rgba(255,255,255,.08)'}}>
+                        {/* Détail énergie — période affichée */}
+                        <div style={{fontSize:10,color:'rgba(255,255,255,.35)',fontWeight:700,letterSpacing:'.5px',textTransform:'uppercase',marginTop:8,marginBottom:3}}>{period}</div>
+                        <div className="energy-summary" style={{display:'flex',flexDirection:'column',gap:0,borderRadius:10,overflow:'hidden',border:'1px solid rgba(255,255,255,.08)'}}>
                           {[
-                            {color:'#e07830', bg:'rgba(224,120,48,.1)', label:'Produite et consommée sur place', value:fmt(autoconso)},
+                            {color:'#f0a050', bg:'rgba(240,160,80,.1)', label:'Produite et consommée sur place', value:fmt(autoconso)},
                             {color:'#d0d0d0', bg:'rgba(208,208,208,.07)', label:'Achetée au réseau', value:fmt(achat)},
                             {color:'#f0e86a', bg:'rgba(240,232,106,.08)', label:'Injectée dans le réseau', value:fmt(injection)},
                           ].map(({color,bg,label,value})=>(
