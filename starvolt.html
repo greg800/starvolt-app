@@ -2432,7 +2432,9 @@ function SimulationsScreen({ onACC, onBox, onSolar, onOptimisation, onBack, user
           const curBill = cur?.result?.total || (kwh_total * 0.18);
           const bSav = Math.round(140 + curBill * (isDynamic ? 0.20 : 0.10));
           if (bSav > 0) setBoxSaving(bSav);
-          setSolarSaving(Math.round(curBill * 0.80));
+          const accSavEst = (() => { let k=0; for(let m=1;m<=12;m++) for(let d=1;d<=PROF_DAYS[m-1];d++) for(let h=9;h<18;h++) k+=(site.conso_profil[profIdx(m,d,h)]||0)/1000; return Math.max(0,Math.round(k*((site.tarif_id?tariffs.find(t=>t.id===site.tarif_id)?.prix_hp||0.24:0.24)-0.11))); })();
+          const adjBillSolar = Math.max(0, curBill - (saving||0) - accSavEst);
+          setSolarSaving(Math.round(adjBillSolar * 0.70));
         }
       }
 
@@ -4035,6 +4037,7 @@ function BoxSimScreen({ user, userProfile, onBack, onPanier, onCartUpdate }) {
 function SolarSimScreen({ user, userProfile, onBack, onPanier, onCartUpdate }) {
   const [loading,      setLoading]      = useState(true);
   const [currentBill,  setCurrentBill]  = useState(null);
+  const [adjustedBill, setAdjustedBill] = useState(null);
   const [isDynamic,    setIsDynamic]    = useState(false);
   const [chosen,       setChosen]       = useState(() => localStorage.getItem('starvolt_solar_chosen') || null);
   const [justConfirmed,setJustConfirmed]= useState(false);
@@ -4064,14 +4067,25 @@ function SolarSimScreen({ user, userProfile, onBack, onPanier, onCartUpdate }) {
         bill = calcTariffCost(curTariff, kwh_hc, kwh_hp)?.total || null;
       }
       if (!bill && kwh_total > 0) bill = Math.round(kwh_total * 0.18);
-      setCurrentBill(bill ? Math.round(bill) : null);
+      const roundedBill = bill ? Math.round(bill) : null;
+      // Facture ajustée = facture - économies déjà obtenues (optimisation + ACC)
+      const optiSavLS = parseInt(localStorage.getItem('starvolt_optimisation_saving')||'0');
+      let accSavComp = 0;
+      if (site.conso_profil) {
+        let kwh918 = 0;
+        for (let m=1;m<=12;m++) for (let d=1;d<=PROF_DAYS[m-1];d++) for (let h=9;h<18;h++) kwh918+=(site.conso_profil[profIdx(m,d,h)]||0)/1000;
+        accSavComp = Math.max(0, Math.round(kwh918*((curTariff?.prix_hp||0.24)-0.11)));
+      }
+      const adj = roundedBill ? Math.max(0, roundedBill - optiSavLS - accSavComp) : null;
+      setCurrentBill(roundedBill);
+      setAdjustedBill(adj || roundedBill);
       setLoading(false);
     });
   }, []);
 
-  // Gains solaires (50% panneaux+batterie seuls, 80% avec box en plus)
-  const solarOnlySaving = currentBill ? Math.round(currentBill * 0.50) : null;
-  const solarBoxSaving  = currentBill ? Math.round(currentBill * 0.80) : null;
+  // Gains solaires appliqués sur la facture ajustée (après opti + ACC)
+  const solarOnlySaving = adjustedBill ? Math.round(adjustedBill * 0.50) : null;
+  const solarBoxSaving  = adjustedBill ? Math.round(adjustedBill * 0.70) : null;
   // Gains box (rappel)
   const shiftPct  = isDynamic ? 0.20 : 0.10;
   const shiftGain = currentBill ? Math.round(currentBill * shiftPct) : null;
@@ -4118,28 +4132,9 @@ function SolarSimScreen({ user, userProfile, onBack, onPanier, onCartUpdate }) {
               <div style={{ fontSize:11, color:'rgba(255,255,255,.5)', marginBottom:2 }}>Économies grâce au solaire</div>
               <div style={{ fontSize:24, fontWeight:900, color:'#7dd940' }}>-{finalSolarSaving?.toLocaleString('fr-FR')} €/an</div>
               <div style={{ fontSize:10, color:'rgba(255,255,255,.35)', marginTop:2 }}>
-                {withBox ? '-80% de votre facture grâce au solaire + batterie + Box Comwatt' : '-50% de votre facture grâce aux panneaux solaires et à la batterie'}
+                {withBox ? '-70% de votre facture restante grâce au solaire + batterie + Box Comwatt' : '-50% de votre facture restante grâce aux panneaux solaires et à la batterie'}
               </div>
             </div>
-            {withBox && (
-              <div style={{ background:'rgba(255,255,255,.05)', borderRadius:8, padding:'10px 12px', border:'1px solid rgba(56,189,248,.2)' }}>
-                <div style={{ fontSize:11, color:'rgba(255,255,255,.5)', marginBottom:2 }}>Économies supplémentaires avec la Box</div>
-                <div style={{ fontSize:20, fontWeight:900, color:'#38bdf8' }}>+{boxTotal.toLocaleString('fr-FR')} €/an</div>
-                <div style={{ fontSize:10, color:'rgba(255,255,255,.35)', marginTop:2 }}>
-                  140 € cagnotte flexibilité + {shiftGain || 0} € déplacement des consommations
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-
-        {withBox && currentBill && (
-          <div className="card" style={{ padding:'14px 16px', marginBottom:10, border:'1px solid rgba(125,217,64,.25)', textAlign:'center' }}>
-            <div style={{ fontSize:13, color:'rgba(255,255,255,.5)', marginBottom:4 }}>Total économies annuelles estimées</div>
-            <div style={{ fontSize:30, fontWeight:900, color:'#7dd940' }}>
-              -{(finalSolarSaving + boxTotal).toLocaleString('fr-FR')} €/an
-            </div>
-            <div style={{ fontSize:10, color:'rgba(255,255,255,.35)', marginTop:4 }}>solaire + flexibilité + déplacement conso</div>
           </div>
         )}
 
@@ -4168,7 +4163,7 @@ function SolarSimScreen({ user, userProfile, onBack, onPanier, onCartUpdate }) {
             Gagnez{' '}
             {solarBoxSaving
               ? <span className="accent">{solarBoxSaving.toLocaleString('fr-FR')} €/an</span>
-              : <span className="accent">jusqu'à 80%</span>
+              : <span className="accent">jusqu'à 70%</span>
             }{' '}
             grâce au solaire et aux batteries Comwatt
           </div>
@@ -4209,7 +4204,7 @@ function SolarSimScreen({ user, userProfile, onBack, onPanier, onCartUpdate }) {
                   avec des panneaux solaires et une batterie
                 </div>
                 <div style={{ fontSize:14, color:'rgba(255,255,255,.65)', lineHeight:1.55 }}>
-                  Les panneaux solaires associés à une batterie couvrent jusqu'à <strong style={{color:'white'}}>50% de votre consommation annuelle</strong>. L'énergie produite est autoconsommée ou stockée pour le soir.
+                  Les panneaux solaires associés à une batterie couvrent jusqu'à <strong style={{color:'white'}}>50% de votre facture restante</strong>. L'énergie produite est autoconsommée ou stockée pour le soir.
                 </div>
               </div>
             </div>
@@ -4227,12 +4222,12 @@ function SolarSimScreen({ user, userProfile, onBack, onPanier, onCartUpdate }) {
                 <div style={{ fontWeight:900, fontSize:17, color:'white', marginBottom:6 }}>
                   Gagnez{' '}
                   <span style={{color:'#7dd940'}}>
-                    {solarBoxSaving !== null ? `${solarBoxSaving.toLocaleString('fr-FR')} €` : '80%'}
+                    {solarBoxSaving !== null ? `${solarBoxSaving.toLocaleString('fr-FR')} €` : '70%'}
                   </span>{' '}
                   avec solaire + batterie + Box Comwatt
                 </div>
                 <div style={{ fontSize:14, color:'rgba(255,255,255,.65)', lineHeight:1.55 }}>
-                  La Box Comwatt orchestre votre installation : flexibilité réseau, autoconsommation collective, optimisation tarifaire. Ensemble, ils réduisent votre facture de <strong style={{color:'white'}}>80%</strong>.
+                  La Box Comwatt orchestre votre installation : flexibilité réseau, autoconsommation collective, optimisation tarifaire. Ensemble, ils réduisent votre facture de <strong style={{color:'white'}}>70%</strong>.
                 </div>
                 {hasBox && (
                   <div style={{ marginTop:10, paddingTop:10, borderTop:'1px solid rgba(125,217,64,.2)', fontSize:13, color:'rgba(125,217,64,.85)', fontWeight:700 }}>
@@ -4382,8 +4377,11 @@ function PanierScreen({ user, onBack, onGoTo }) {
           if (!boxSav) boxSav = Math.round(140 + bill * shiftPctBox);
         }
         let solSav = parseInt(localStorage.getItem('starvolt_solar_saving')||'0');
-        if (!solSav) solSav = solarChoice === 'solar_box' ? Math.round(bill * 0.80) : Math.round(bill * 0.50);
-        setSavings({ optimisation: optSav, acc: accSav, box: boxSav, solar: solSav });
+        const adjBillSolar = Math.max(0, bill - optSav - accSav);
+        if (!solSav) solSav = solarChoice === 'solar_box' ? Math.round(adjBillSolar * 0.70) : Math.round(adjBillSolar * 0.50);
+        // Si solar_box choisi, la Box est comprise dans le 70% — ne pas compter ses économies en double
+        const effectiveBoxSav = (solarChoice === 'solar_box') ? 0 : boxSav;
+        setSavings({ optimisation: optSav, acc: accSav, box: effectiveBoxSav, solar: solSav });
       }
       setLoading(false);
     });
