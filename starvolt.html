@@ -2135,11 +2135,138 @@ function SiteFormCard({initial={},onSave,onCancel}){
   );
 }
 
+// ─── computeEnergyBalance ─────────────────────
+// Simule heure par heure sur 8784h (année bissextile)
+// Retourne 12 objets { on_site, grid_buy, injection } en kWh
+function computeEnergyBalance(conso, prodNorm, pvKwc, batPowerW, batCapKwh) {
+  const batCapWh = (batCapKwh || 0) * 1000;
+  const batPowWh = batPowerW || 0;
+  let batState = 0;
+  const monthly = Array.from({length:12}, () => ({on_site:0, grid_buy:0, injection:0}));
+  for (let m = 1; m <= 12; m++) {
+    for (let d = 1; d <= PROF_DAYS[m-1]; d++) {
+      for (let h = 0; h < 24; h++) {
+        const idx = profIdx(m, d, h);
+        const consoWh = conso[idx] || 0;
+        const prodWh = (prodNorm[idx] || 0) * pvKwc;
+        const balance = prodWh - consoWh;
+        let onSite, gridBuy, injection;
+        if (balance >= 0) {
+          let charge = 0;
+          if (batCapWh > 0) {
+            charge = Math.min(balance, batPowWh, batCapWh - batState);
+            batState += charge;
+          }
+          injection = balance - charge;
+          gridBuy = 0;
+          onSite = consoWh;
+        } else {
+          let discharge = 0;
+          if (batState > 0) {
+            discharge = Math.min(-balance, batPowWh, batState);
+            batState -= discharge;
+          }
+          gridBuy = (-balance) - discharge;
+          injection = 0;
+          onSite = prodWh + discharge;
+        }
+        monthly[m-1].on_site += onSite / 1000;
+        monthly[m-1].grid_buy += gridBuy / 1000;
+        monthly[m-1].injection += injection / 1000;
+      }
+    }
+  }
+  return monthly;
+}
+
+// ─── EnergyBalanceChart ───────────────────────
+function EnergyBalanceChart({ monthly }) {
+  const wrapperRef = useRef(null), canvasRef = useRef(null);
+  useEffect(() => {
+    const canvas = canvasRef.current, wrapper = wrapperRef.current;
+    if (!canvas || !wrapper || !monthly) return;
+    const W = wrapper.clientWidth, H = 230, dpr = window.devicePixelRatio || 1;
+    canvas.width = W * dpr; canvas.height = H * dpr;
+    canvas.style.width = W + 'px'; canvas.style.height = H + 'px';
+    const ctx = canvas.getContext('2d');
+    ctx.scale(dpr, dpr);
+    ctx.clearRect(0, 0, W, H);
+    const ML = 42, MR = 8, MT = 50, MB = 22;
+    const cW = W - ML - MR, cH = H - MT - MB;
+    const maxPos = Math.max(...monthly.map(m => m.on_site + m.grid_buy), 1);
+    const maxNeg = Math.max(...monthly.map(m => m.injection), 0.1);
+    const posRatio = Math.min(Math.max(maxPos / (maxPos + maxNeg), 0.35), 0.82);
+    const zeroY = MT + cH * posRatio;
+    const scalePos = (cH * posRatio) / maxPos;
+    const scaleNeg = (cH * (1 - posRatio)) / maxNeg;
+    // Grid lines
+    ctx.lineWidth = 1;
+    [0.25, 0.5, 0.75, 1].forEach(f => {
+      const v = Math.round(f * maxPos / 100) * 100 || Math.round(f * maxPos);
+      const y = zeroY - v * scalePos;
+      ctx.strokeStyle = 'rgba(255,255,255,.08)';
+      ctx.beginPath(); ctx.moveTo(ML, y); ctx.lineTo(W - MR, y); ctx.stroke();
+      ctx.fillStyle = 'rgba(255,255,255,.45)'; ctx.font = '9px sans-serif'; ctx.textAlign = 'right';
+      ctx.fillText(v, ML - 4, y + 3);
+    });
+    const negLabel = Math.round(maxNeg * 0.6 / 100) * 100 || Math.round(maxNeg * 0.6);
+    if (negLabel > 0) {
+      const yn = zeroY + negLabel * scaleNeg;
+      ctx.strokeStyle = 'rgba(255,255,255,.08)';
+      ctx.beginPath(); ctx.moveTo(ML, yn); ctx.lineTo(W - MR, yn); ctx.stroke();
+      ctx.fillStyle = 'rgba(255,255,255,.45)'; ctx.textAlign = 'right';
+      ctx.fillText(-negLabel, ML - 4, yn + 3);
+    }
+    // Zero axis
+    ctx.strokeStyle = 'rgba(255,165,0,.55)'; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.moveTo(ML, zeroY); ctx.lineTo(W - MR, zeroY); ctx.stroke();
+    // Bars
+    const barTotalW = cW / 12, barPad = Math.max(1.5, barTotalW * 0.14), barW = barTotalW - barPad * 2;
+    monthly.forEach((m, i) => {
+      const x = ML + i * barTotalW + barPad;
+      if (m.on_site > 0) {
+        ctx.fillStyle = '#e07830';
+        ctx.fillRect(x, zeroY - m.on_site * scalePos, barW, m.on_site * scalePos);
+      }
+      if (m.grid_buy > 0) {
+        ctx.fillStyle = '#909090';
+        ctx.fillRect(x, zeroY - (m.on_site + m.grid_buy) * scalePos, barW, m.grid_buy * scalePos);
+      }
+      if (m.injection > 0) {
+        ctx.fillStyle = '#f5f0a0';
+        ctx.fillRect(x, zeroY, barW, m.injection * scaleNeg);
+      }
+      ctx.fillStyle = '#e07830'; ctx.font = 'bold 10px sans-serif'; ctx.textAlign = 'center';
+      ctx.fillText(i + 1, x + barW / 2, H - 5);
+    });
+    ctx.fillStyle = '#e07830'; ctx.font = '10px sans-serif'; ctx.textAlign = 'center';
+    ctx.fillText('mois', W / 2, H);
+    // Legend
+    const items = [
+      {color:'#f5f0a0', label:'Injection réseau (kWh)'},
+      {color:'#909090', label:'Achat réseau (kWh)'},
+      {color:'#e07830', label:'Prod & conso sur place (kWh)'},
+    ];
+    let lx = ML, ly = 12;
+    ctx.font = '9px sans-serif';
+    items.forEach(it => {
+      const tw = ctx.measureText(it.label).width + 18;
+      if (lx + tw > W - MR && lx > ML) { lx = ML; ly += 14; }
+      ctx.fillStyle = it.color; ctx.fillRect(lx, ly - 9, 11, 10);
+      ctx.fillStyle = 'rgba(255,255,255,.75)';
+      ctx.fillText(it.label, lx + 14, ly);
+      lx += tw + 4;
+    });
+  }, [monthly]);
+  return <div ref={wrapperRef} style={{width:'100%'}}><canvas ref={canvasRef} style={{display:'block'}}/></div>;
+}
+
 // ─── MonSiteScreen ────────────────────────────
 function MonSiteScreen({ user, userProfile, onBack }) {
   const[sites,setSites]=useState(null);
   const[activeId,setActiveId]=useState(null);
   const[tariffs,setTariffs]=useState([]);
+  const[prodProfils,setProdProfils]=useState([]);
   const[showAdd,setShowAdd]=useState(false);
   const[editMode,setEditMode]=useState(false);
   const[importing,setImporting]=useState(false);
@@ -2147,168 +2274,134 @@ function MonSiteScreen({ user, userProfile, onBack }) {
   const[showGaps,setShowGaps]=useState(false);
   const[showDeleteConfirm,setShowDeleteConfirm]=useState(false);
   const[importingDemo,setImportingDemo]=useState(false);
-  const[pvKwc,setPvKwc]=useState('');
+  const[pvKwc,setPvKwc]=useState('6');
   const[batW,setBatW]=useState('');
   const[batKwh,setBatKwh]=useState('');
+  const[prodProfilId,setProdProfilId]=useState('');
+  const[prodProfilData,setProdProfilData]=useState(null);
+  const[monthlyBalance,setMonthlyBalance]=useState(null);
   const fileRef=useRef(null);
 
   const handleImportDemo=async()=>{
     setImportingDemo(true);
-    try{
-      await sb.rpc('import_demo_sites',{target_user_id:user.id});
-      await load();
-    }catch(e){console.error(e);}
-    finally{setImportingDemo(false);}
+    try{ await sb.rpc('import_demo_sites',{target_user_id:user.id}); await load(); }
+    catch(e){console.error(e);} finally{setImportingDemo(false);}
   };
 
-  // Sync site actif → localStorage + profiles.active_site_id en DB
-  const persistActiveSite = (id) => {
+  const persistActiveSite=(id)=>{
     setActiveId(id);
-    if (id) {
-      localStorage.setItem('starvolt_active_site_id', id);
-      sb.from('profiles').update({ active_site_id: id }).eq('id', user.id);
-    } else {
-      localStorage.removeItem('starvolt_active_site_id');
-      sb.from('profiles').update({ active_site_id: null }).eq('id', user.id);
-    }
+    if(id){ localStorage.setItem('starvolt_active_site_id',id); sb.from('profiles').update({active_site_id:id}).eq('id',user.id); }
+    else{ localStorage.removeItem('starvolt_active_site_id'); sb.from('profiles').update({active_site_id:null}).eq('id',user.id); }
   };
 
   const load=async()=>{
-    const[{data:s},{data:t}]=await Promise.all([
+    const[{data:s},{data:t},{data:pp}]=await Promise.all([
       sb.from('sites').select('*').eq('user_id',user.id).order('created_at'),
-      sb.from('tarifs_electricite').select('id,nom').order('nom')
+      sb.from('tarifs_electricite').select('id,nom').order('nom'),
+      sb.from('profils_production').select('id,nom').order('nom'),
     ]);
-    setSites(s||[]);setTariffs(t||[]);
-    // Priorité : DB restaurée dans userProfile (login) > localStorage > 1er site
-    const stored = userProfile?.active_site_id || localStorage.getItem('starvolt_active_site_id');
-    const valid = stored && s?.find(x=>x.id===stored) ? stored : (s?.length ? s[0].id : null);
+    setSites(s||[]); setTariffs(t||[]); setProdProfils(pp||[]);
+    const stored=userProfile?.active_site_id||localStorage.getItem('starvolt_active_site_id');
+    const valid=stored&&s?.find(x=>x.id===stored)?stored:(s?.length?s[0].id:null);
     persistActiveSite(valid);
   };
   useEffect(()=>{load();},[]);
 
   const site=sites?.find(s=>s.id===activeId)||null;
 
+  // Sync champs locaux quand on change de site
   useEffect(()=>{
-    setPvKwc(site?.puissance_pv_kwc != null ? String(site.puissance_pv_kwc) : '');
-    setBatW(site?.batterie_puissance_w != null ? String(site.batterie_puissance_w) : '');
-    setBatKwh(site?.batterie_capacite_kwh != null ? String(site.batterie_capacite_kwh) : '');
+    setPvKwc(site?.puissance_pv_kwc!=null?String(site.puissance_pv_kwc):'6');
+    setBatW(site?.batterie_puissance_w!=null?String(site.batterie_puissance_w):'');
+    setBatKwh(site?.batterie_capacite_kwh!=null?String(site.batterie_capacite_kwh):'');
+    setProdProfilId(site?.profil_production_id||'');
+    setProdProfilData(null); setMonthlyBalance(null);
   },[activeId]);
 
-  const updateSite=async(updates)=>{
-    await sb.from('sites').update(updates).eq('id',activeId);
-    await load();
-  };
+  // Charger les données du profil de production sélectionné
+  useEffect(()=>{
+    if(!prodProfilId){setProdProfilData(null);setMonthlyBalance(null);return;}
+    sb.from('profils_production').select('profil').eq('id',prodProfilId).single()
+      .then(({data})=>setProdProfilData(data?.profil||null));
+  },[prodProfilId]);
+
+  // Calculer le bilan énergétique dès que les données sont prêtes
+  useEffect(()=>{
+    if(!site?.conso_profil||!prodProfilData){setMonthlyBalance(null);return;}
+    const kw=parseFloat(pvKwc)||6, bw=parseFloat(batW)||0, bk=parseFloat(batKwh)||0;
+    setMonthlyBalance(computeEnergyBalance(site.conso_profil,prodProfilData,kw,bw,bk));
+  },[site?.conso_profil,prodProfilData,pvKwc,batW,batKwh]);
+
+  const updateSite=async(updates)=>{ await sb.from('sites').update(updates).eq('id',activeId); await load(); };
 
   const handleAddSite=async(data)=>{
     const{data:ns}=await sb.from('sites').insert({user_id:user.id,...data}).select().single();
-    setShowAdd(false);await load();
-    if(ns) persistActiveSite(ns.id);
+    setShowAdd(false); await load(); if(ns)persistActiveSite(ns.id);
   };
 
   const handleDeleteConfirmed=async()=>{
     await sb.from('sites').delete().eq('id',activeId);
-    persistActiveSite(null);
-    setEditMode(false);setShowDeleteConfirm(false);
-    await load();
+    persistActiveSite(null); setEditMode(false); setShowDeleteConfirm(false); await load();
   };
 
   const handleImport=async(e)=>{
-    const file=e.target.files?.[0];if(!file)return;
-    setImporting(true);setImportMsg(null);
+    const file=e.target.files?.[0]; if(!file)return;
+    setImporting(true); setImportMsg(null);
     try{
       const result=await processConsoXLS(await file.arrayBuffer());
       if(result.error){setImportMsg({type:'err',text:result.error});return;}
-      await updateSite({
-        conso_profil:Array.from(result.profile),
-        conso_annuelle_kwh:Math.round(result.annualKwh),
-        conso_imported_at:new Date().toISOString(),
-        conso_gaps:result.gapsPatched
-      });
+      await updateSite({conso_profil:Array.from(result.profile),conso_annuelle_kwh:Math.round(result.annualKwh),conso_imported_at:new Date().toISOString(),conso_gaps:result.gapsPatched});
       setImportMsg({type:'ok',kwh:Math.round(result.annualKwh),gaps:result.gapsPatched.length});
       setShowGaps(result.gapsPatched.length>0);
     }catch(err){setImportMsg({type:'err',text:String(err)});}
     finally{setImporting(false);if(fileRef.current)fileRef.current.value='';}
   };
 
-  if(sites===null)return(
-    <>
-      <div className="screen fade-in">
-        <div style={{textAlign:'center',padding:40,color:'rgba(255,255,255,.5)'}}>Chargement…</div>
-      </div>
-      <StickyFooter onBack={onBack}/>
-    </>
-  );
+  if(sites===null)return(<><div className="screen fade-in"><div style={{textAlign:'center',padding:40,color:'rgba(255,255,255,.5)'}}>Chargement…</div></div><StickyFooter onBack={onBack}/></>);
 
-  // Default address from profile for first site
-  const firstDefault=sites.length===0?{
-    adresse_ligne1:userProfile?.adresse_ligne1||'',
-    code_postal:userProfile?.code_postal||'',
-    ville:userProfile?.ville||''
-  }:{};
-
+  const firstDefault=sites.length===0?{adresse_ligne1:userProfile?.adresse_ligne1||'',code_postal:userProfile?.code_postal||'',ville:userProfile?.ville||''}:{};
   const showActions=!showAdd&&!editMode;
 
   return(
     <>
       <div className="screen fade-in">
-        {/* Compact header row */}
-        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:10,marginTop:4}}>
-          <div>
-            <div style={{fontSize:9,letterSpacing:'.6px',color:'rgba(125,217,64,.8)',fontWeight:700,textTransform:'uppercase'}}>Énergie</div>
-            <div style={{fontSize:18,fontWeight:900,color:'white',lineHeight:1.1}}>Mon <span className="accent">site</span></div>
-          </div>
-          <div style={{display:'flex',alignItems:'center',gap:6}}>
-            {site&&!showAdd&&!editMode&&(
-              <button className="btn btn-sec" style={{fontSize:11,padding:'6px 12px',borderRadius:8,whiteSpace:'nowrap'}} onClick={()=>fileRef.current?.click()} disabled={importing}>
-                {importing?'⏳':'📂'} {importing?'Traitement…':'Importer'}
-              </button>
-            )}
-          </div>
-          <input ref={fileRef} type="file" accept=".xlsx,.xls" style={{display:'none'}} onChange={handleImport}/>
+        {/* Titre */}
+        <div style={{marginBottom:10,marginTop:4}}>
+          <div style={{fontSize:9,letterSpacing:'.6px',color:'rgba(125,217,64,.8)',fontWeight:700,textTransform:'uppercase'}}>Énergie</div>
+          <div style={{fontSize:18,fontWeight:900,color:'white',lineHeight:1.1}}>Mon <span className="accent">site</span></div>
         </div>
 
-        {/* Site selector */}
-        {sites.length>1&&(
+        {/* Sélecteur de site (si plusieurs) */}
+        {sites.length>1&&!showAdd&&(
           <div style={{marginBottom:8}}>
             <select className="inp inp-sel" style={{fontSize:13,padding:'9px 36px 9px 12px'}} value={activeId||''} onChange={e=>{
-              const id=e.target.value;
-              persistActiveSite(id);
-              setEditMode(false);setImportMsg(null);setShowDeleteConfirm(false);
+              persistActiveSite(e.target.value); setEditMode(false); setImportMsg(null); setShowDeleteConfirm(false);
             }}>
               {sites.map(s=><option key={s.id} value={s.id}>{s.nom}</option>)}
             </select>
           </div>
         )}
 
-        {/* Add site form */}
         {showAdd&&<SiteFormCard initial={firstDefault} onSave={handleAddSite} onCancel={()=>setShowAdd(false)}/>}
 
-        {/* Empty state */}
         {sites.length===0&&!showAdd&&(
           <div className="card" style={{textAlign:'center',padding:'24px 20px'}}>
             <div style={{fontSize:32,marginBottom:10}}>🏠</div>
             <div style={{color:'white',fontWeight:700,marginBottom:5}}>Aucun site configuré</div>
-            <div style={{color:'rgba(255,255,255,.55)',fontSize:13,marginBottom:14}}>Ajoutez votre site pour importer votre profil de consommation.</div>
+            <div style={{color:'rgba(255,255,255,.55)',fontSize:13}}>Ajoutez votre site pour importer votre profil de consommation.</div>
           </div>
         )}
 
-        {/* Active site */}
         {site&&!showAdd&&(
           <>
-            {/* Site info / edit */}
+            {/* Info site */}
             {!editMode?(
               <div className="card" style={{padding:'10px 14px',marginBottom:8}}>
                 <div style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
                   <div style={{flex:1,minWidth:0}}>
                     <div style={{fontWeight:800,fontSize:14,color:'white'}}>{site.nom}</div>
-                    {(site.adresse_ligne1||site.ville)&&(
-                      <div style={{fontSize:11,color:'rgba(255,255,255,.5)',marginTop:2}}>
-                        {[site.adresse_ligne1,site.code_postal,site.ville].filter(Boolean).join(' ')}
-                      </div>
-                    )}
-                    <div style={{fontSize:10,color:'rgba(125,217,64,.7)',fontWeight:700,marginTop:5,display:'flex',alignItems:'center',gap:4}}>
-                      <span>✦</span> Ce site sera utilisé dans tous les calculs d'économie
-                    </div>
+                    {(site.adresse_ligne1||site.ville)&&<div style={{fontSize:11,color:'rgba(255,255,255,.5)',marginTop:2}}>{[site.adresse_ligne1,site.code_postal,site.ville].filter(Boolean).join(' ')}</div>}
+                    <div style={{fontSize:10,color:'rgba(125,217,64,.7)',fontWeight:700,marginTop:5,display:'flex',alignItems:'center',gap:4}}><span>✦</span> Ce site sera utilisé dans tous les calculs d'économie</div>
                   </div>
                   <button style={{background:'none',border:'none',color:'rgba(255,255,255,.4)',cursor:'pointer',fontSize:12,flexShrink:0}} onClick={()=>setEditMode(true)}>✏️</button>
                 </div>
@@ -2317,127 +2410,144 @@ function MonSiteScreen({ user, userProfile, onBack }) {
               <SiteFormCard initial={site} onSave={async d=>{await updateSite(d);setEditMode(false);}} onCancel={()=>setEditMode(false)}/>
             )}
 
-            {/* Tariff + PDL — compact */}
-            <div className="card" style={{padding:'10px 14px',marginBottom:8,display:'flex',flexDirection:'column',gap:8}}>
-              <div>
-                <label style={{fontSize:10,color:'rgba(255,255,255,.45)',fontWeight:700,letterSpacing:'.5px',display:'block',marginBottom:4}}>TARIF D'ÉLECTRICITÉ</label>
-                <select className="inp inp-sel" style={{fontSize:13,padding:'8px 36px 8px 12px'}} value={site.tarif_id||''} onChange={e=>updateSite({tarif_id:e.target.value||null})}>
-                  <option value=''>— Sélectionner —</option>
-                  {tariffs.map(t=><option key={t.id} value={t.id}>{t.nom}</option>)}
-                </select>
+            {/* ── Tuile Ma conso ── */}
+            <div className="card" style={{padding:0,marginBottom:8,overflow:'hidden'}}>
+              <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'10px 14px 8px',borderBottom:'1px solid rgba(255,255,255,.07)'}}>
+                <div style={{fontWeight:800,fontSize:13,color:'white',display:'flex',alignItems:'center',gap:6}}>⚡ Ma conso</div>
+                <button className="btn btn-sec" style={{fontSize:11,padding:'5px 11px',borderRadius:8}} onClick={()=>fileRef.current?.click()} disabled={importing}>
+                  {importing?'⏳ Traitement…':'📂 Importer'}
+                </button>
+                <input ref={fileRef} type="file" accept=".xlsx,.xls" style={{display:'none'}} onChange={handleImport}/>
               </div>
-              <div>
-                <label style={{fontSize:10,color:'rgba(255,255,255,.45)',fontWeight:700,letterSpacing:'.5px',display:'block',marginBottom:4}}>PDL (optionnel)</label>
-                <PDLInput value={site.pdl||''} onSave={v=>updateSite({pdl:v})}/>
+              <div style={{padding:'10px 14px 12px',display:'flex',flexDirection:'column',gap:8}}>
+                {/* Tarif + PDL */}
+                <div>
+                  <label style={{fontSize:10,color:'rgba(255,255,255,.45)',fontWeight:700,letterSpacing:'.5px',display:'block',marginBottom:4}}>TARIF D'ÉLECTRICITÉ</label>
+                  <select className="inp inp-sel" style={{fontSize:13,padding:'8px 36px 8px 12px'}} value={site.tarif_id||''} onChange={e=>updateSite({tarif_id:e.target.value||null})}>
+                    <option value=''>— Sélectionner —</option>
+                    {tariffs.map(t=><option key={t.id} value={t.id}>{t.nom}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label style={{fontSize:10,color:'rgba(255,255,255,.45)',fontWeight:700,letterSpacing:'.5px',display:'block',marginBottom:4}}>PDL (optionnel)</label>
+                  <PDLInput value={site.pdl||''} onSave={v=>updateSite({pdl:v})}/>
+                </div>
+                {/* Messages import */}
+                {importMsg?.type==='err'&&<div style={{color:'#ff6b6b',fontSize:12,padding:'6px 10px',background:'rgba(255,50,50,.1)',borderRadius:8}}>⚠️ {importMsg.text}</div>}
+                {importMsg?.type==='ok'&&<div style={{color:'#7dd940',fontSize:12,padding:'6px 10px',background:'rgba(255,255,255,.05)',borderRadius:8}}>✅ {importMsg.kwh.toLocaleString('fr-FR')} kWh/an{importMsg.gaps>0?` · ${importMsg.gaps} trou(s) rebouché(s)`:''}</div>}
+                {/* Stats conso */}
+                {site.conso_annuelle_kwh?(
+                  <div>
+                    <div style={{display:'flex',alignItems:'baseline',gap:6,marginBottom:2}}>
+                      <span style={{fontSize:28,fontWeight:900,color:'white'}}>{Math.round(site.conso_annuelle_kwh).toLocaleString('fr-FR')}</span>
+                      <span style={{fontSize:13,color:'rgba(255,255,255,.6)',fontWeight:600}}>kWh/an</span>
+                      <span style={{fontSize:10,color:'rgba(255,255,255,.35)',marginLeft:4}}>· importé le {new Date(site.conso_imported_at).toLocaleDateString('fr-FR',{day:'numeric',month:'short',year:'numeric'})}</span>
+                    </div>
+                    {site.conso_gaps?.length>0&&(
+                      <>
+                        <button style={{background:'none',border:'none',color:'rgba(255,255,255,.45)',fontSize:11,cursor:'pointer',padding:'2px 0'}} onClick={()=>setShowGaps(!showGaps)}>
+                          {showGaps?'▼':'▶'} {site.conso_gaps.length} trou{site.conso_gaps.length>1?'s':''} rebouché{site.conso_gaps.length>1?'s':''}
+                        </button>
+                        {showGaps&&<div style={{display:'flex',flexDirection:'column',gap:4,marginTop:6}}>{site.conso_gaps.map((g,idx)=><div key={idx} className="gap-item"><span>{formatGapDate(g.start)} → {formatGapDate(g.end)}</span><span style={{color:'rgba(255,255,255,.4)',fontSize:10}}>{g.hours}h · {g.method}</span></div>)}</div>}
+                      </>
+                    )}
+                  </div>
+                ):(
+                  <div style={{color:'rgba(255,255,255,.4)',fontSize:12,textAlign:'center',padding:'6px 0'}}>Aucune donnée — importez un fichier XLS Enedis</div>
+                )}
+                {/* Heatmap */}
+                {site.conso_profil?.length===8784&&(
+                  <div>
+                    <div style={{fontWeight:700,fontSize:11,color:'rgba(255,255,255,.5)',marginBottom:5}}>Heatmap · heures (0–23h) × jours (jan–déc)</div>
+                    <ConsoHeatmapCanvas profile={site.conso_profil}/>
+                  </div>
+                )}
               </div>
             </div>
 
-            {/* Conso stats */}
-            {importMsg?.type==='err'&&(
-              <div style={{color:'#ff6b6b',fontSize:12,padding:'7px 12px',background:'rgba(255,50,50,.1)',borderRadius:8,marginBottom:8}}>⚠️ {importMsg.text}</div>
-            )}
-            {importMsg?.type==='ok'&&(
-              <div style={{color:'#7dd940',fontSize:12,padding:'7px 12px',background:'rgba(255,255,255,.05)',borderRadius:8,marginBottom:8}}>
-                ✅ {importMsg.kwh.toLocaleString('fr-FR')} kWh/an{importMsg.gaps>0?` · ${importMsg.gaps} trou(s) rebouché(s)`:''}
+            {/* ── Tuile Ma production, mon stockage et ma box ── */}
+            <div className="card" style={{padding:0,marginBottom:8,overflow:'hidden'}}>
+              <div style={{padding:'10px 14px 8px',borderBottom:'1px solid rgba(255,255,255,.07)'}}>
+                <div style={{fontWeight:800,fontSize:13,color:'white',display:'flex',alignItems:'center',gap:6}}>☀️ Ma production, mon stockage et ma box</div>
               </div>
-            )}
-
-            {site.conso_annuelle_kwh?(
-              <div className="card" style={{padding:'10px 14px',marginBottom:8}}>
-                <div style={{display:'flex',alignItems:'baseline',gap:6,marginBottom:2}}>
-                  <span style={{fontSize:28,fontWeight:900,color:'white'}}>{Math.round(site.conso_annuelle_kwh).toLocaleString('fr-FR')}</span>
-                  <span style={{fontSize:13,color:'rgba(255,255,255,.6)',fontWeight:600}}>kWh/an</span>
-                  <span style={{fontSize:10,color:'rgba(255,255,255,.35)',marginLeft:4}}>
-                    · importé le {new Date(site.conso_imported_at).toLocaleDateString('fr-FR',{day:'numeric',month:'short',year:'numeric'})}
-                  </span>
+              <div style={{padding:'10px 14px 12px',display:'flex',flexDirection:'column',gap:10}}>
+                {/* Profil de production */}
+                <div>
+                  <label style={{fontSize:10,color:'rgba(255,255,255,.45)',fontWeight:700,letterSpacing:'.5px',display:'block',marginBottom:4}}>PROFIL DE PRODUCTION</label>
+                  {prodProfils.length===0?(
+                    <div style={{fontSize:12,color:'rgba(255,255,255,.35)',padding:'6px 0'}}>Aucun profil disponible — importez via Admin → Production solaire</div>
+                  ):(
+                    <select className="inp inp-sel" style={{fontSize:13,padding:'8px 36px 8px 12px'}} value={prodProfilId||''} onChange={e=>{
+                      const id=e.target.value; setProdProfilId(id);
+                      updateSite({profil_production_id:id||null});
+                    }}>
+                      <option value=''>— Sélectionner un profil —</option>
+                      {prodProfils.map(p=><option key={p.id} value={p.id}>{p.nom}</option>)}
+                    </select>
+                  )}
                 </div>
-                {site.conso_gaps?.length>0&&(
-                  <>
-                    <button style={{background:'none',border:'none',color:'rgba(255,255,255,.45)',fontSize:11,cursor:'pointer',padding:'2px 0'}}
-                      onClick={()=>setShowGaps(!showGaps)}>
-                      {showGaps?'▼':'▶'} {site.conso_gaps.length} trou{site.conso_gaps.length>1?'s':''} rebouché{site.conso_gaps.length>1?'s':''}
-                    </button>
-                    {showGaps&&(
-                      <div style={{display:'flex',flexDirection:'column',gap:4,marginTop:6}}>
-                        {site.conso_gaps.map((g,idx)=>(
-                          <div key={idx} className="gap-item">
-                            <span>{formatGapDate(g.start)} → {formatGapDate(g.end)}</span>
-                            <span style={{color:'rgba(255,255,255,.4)',fontSize:10}}>{g.hours}h · {g.method}</span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </>
-                )}
-              </div>
-            ):(
-              <div className="card" style={{padding:'10px 14px',marginBottom:8}}>
-                <div style={{color:'rgba(255,255,255,.4)',fontSize:12,textAlign:'center',padding:'8px 0'}}>
-                  Aucune donnée — importez un fichier XLS (2 colonnes : horodate ISO, puissance W)
-                </div>
-              </div>
-            )}
-
-            {/* Heatmap */}
-            {site.conso_profil?.length===8784&&(
-              <div className="card" style={{padding:'10px 14px',marginBottom:8}}>
-                <div style={{fontWeight:700,fontSize:12,color:'rgba(255,255,255,.7)',marginBottom:6}}>Heatmap · heures (0–23h) × jours (jan–déc)</div>
-                <ConsoHeatmapCanvas profile={site.conso_profil}/>
-              </div>
-            )}
-
-            {/* Production / Stockage / Box */}
-            <div className="card" style={{padding:'14px 16px',marginBottom:8}}>
-              <div style={{fontWeight:800,fontSize:13,color:'white',marginBottom:10,display:'flex',alignItems:'center',gap:6}}>
-                <span>☀️</span> Ma production, mon stockage et ma box
-              </div>
-              <div style={{display:'flex',flexDirection:'column',gap:10}}>
+                {/* kWc */}
                 <div>
                   <label style={{fontSize:10,color:'rgba(255,255,255,.45)',fontWeight:700,letterSpacing:'.5px',display:'block',marginBottom:4}}>PUISSANCE PV (kWc)</label>
                   <input className="inp" type="number" min="0" step="0.5" placeholder="6" value={pvKwc}
                     onChange={e=>setPvKwc(e.target.value)}
-                    onBlur={()=>{ const v=parseFloat(pvKwc); updateSite({puissance_pv_kwc: isNaN(v)?null:v}); }}/>
+                    onBlur={()=>{const v=parseFloat(pvKwc);updateSite({puissance_pv_kwc:isNaN(v)?null:v});}}/>
                 </div>
+                {/* Batterie */}
                 <div style={{display:'flex',gap:8}}>
                   <div style={{flex:1}}>
-                    <label style={{fontSize:10,color:'rgba(255,255,255,.45)',fontWeight:700,letterSpacing:'.5px',display:'block',marginBottom:4}}>BATTERIE — PUISSANCE (W)</label>
+                    <label style={{fontSize:10,color:'rgba(255,255,255,.45)',fontWeight:700,letterSpacing:'.5px',display:'block',marginBottom:4}}>BATTERIE PUISSANCE (W)</label>
                     <input className="inp" type="number" min="0" step="100" placeholder="ex : 3000" value={batW}
                       onChange={e=>setBatW(e.target.value)}
-                      onBlur={()=>{ const v=parseFloat(batW); updateSite({batterie_puissance_w: isNaN(v)?null:v}); }}/>
+                      onBlur={()=>{const v=parseFloat(batW);updateSite({batterie_puissance_w:isNaN(v)?null:v});}}/>
                   </div>
                   <div style={{flex:1}}>
                     <label style={{fontSize:10,color:'rgba(255,255,255,.45)',fontWeight:700,letterSpacing:'.5px',display:'block',marginBottom:4}}>CAPACITÉ (kWh)</label>
                     <input className="inp" type="number" min="0" step="0.5" placeholder="ex : 10" value={batKwh}
                       onChange={e=>setBatKwh(e.target.value)}
-                      onBlur={()=>{ const v=parseFloat(batKwh); updateSite({batterie_capacite_kwh: isNaN(v)?null:v}); }}/>
+                      onBlur={()=>{const v=parseFloat(batKwh);updateSite({batterie_capacite_kwh:isNaN(v)?null:v});}}/>
                   </div>
                 </div>
+                {/* Box */}
                 <div>
                   <label style={{fontSize:10,color:'rgba(255,255,255,.45)',fontWeight:700,letterSpacing:'.5px',display:'block',marginBottom:6}}>BOX ÉNERGIE</label>
-                  {localStorage.getItem('starvolt_box_chosen') ? (
+                  {localStorage.getItem('starvolt_box_chosen')?(
                     <div style={{display:'flex',alignItems:'center',gap:8,background:'rgba(125,217,64,.1)',border:'1px solid rgba(125,217,64,.35)',borderRadius:10,padding:'8px 12px'}}>
                       <img src="/comwatt-box.png" style={{width:28,height:28,objectFit:'contain',mixBlendMode:'screen'}}/>
                       <div>
                         <div style={{fontWeight:700,color:'#7dd940',fontSize:13}}>Box Comwatt ✓</div>
-                        <div style={{fontSize:11,color:'rgba(255,255,255,.5)'}}>
-                          {localStorage.getItem('starvolt_box_chosen')==='free' ? 'Option gratuite (cagnotte 3 ans)' : 'Achat direct 550 €'}
-                        </div>
+                        <div style={{fontSize:11,color:'rgba(255,255,255,.5)'}}>{localStorage.getItem('starvolt_box_chosen')==='free'?'Option gratuite (cagnotte 3 ans)':'Achat direct 550 €'}</div>
                       </div>
                     </div>
-                  ) : (
-                    <div style={{fontSize:12,color:'rgba(255,255,255,.35)',padding:'8px 0'}}>Aucune box — disponible dans les simulations d'économie</div>
+                  ):(
+                    <div style={{fontSize:12,color:'rgba(255,255,255,.35)',padding:'4px 0'}}>Aucune box — disponible dans les simulations d'économie</div>
                   )}
                 </div>
+                {/* Graphique bilan énergétique */}
+                {monthlyBalance&&(
+                  <div style={{marginTop:4}}>
+                    <div style={{fontWeight:700,fontSize:11,color:'rgba(255,255,255,.5)',marginBottom:6}}>Bilan énergétique mensuel</div>
+                    <EnergyBalanceChart monthly={monthlyBalance}/>
+                    <div style={{display:'flex',justifyContent:'space-between',marginTop:8,fontSize:11,color:'rgba(255,255,255,.5)'}}>
+                      <span>Autoconso : <strong style={{color:'#e07830'}}>{Math.round(monthlyBalance.reduce((s,m)=>s+m.on_site,0))} kWh/an</strong></span>
+                      <span>Injection : <strong style={{color:'#f5f0a0'}}>{Math.round(monthlyBalance.reduce((s,m)=>s+m.injection,0))} kWh/an</strong></span>
+                    </div>
+                  </div>
+                )}
+                {prodProfilId&&!monthlyBalance&&site?.conso_profil&&(
+                  <div style={{textAlign:'center',padding:'10px 0',color:'rgba(255,255,255,.35)',fontSize:12}}>Calcul du bilan…</div>
+                )}
+                {prodProfilId&&!site?.conso_profil&&(
+                  <div style={{fontSize:12,color:'rgba(255,200,80,.6)',padding:'6px 8px',background:'rgba(255,200,0,.06)',borderRadius:8}}>⚠️ Importez d'abord votre consommation pour voir le bilan</div>
+                )}
               </div>
             </div>
 
-            {/* Delete confirmation */}
+            {/* Suppression */}
             {showDeleteConfirm&&(
               <div className="card" style={{padding:'14px 16px',border:'1px solid rgba(255,80,80,.3)',marginBottom:8}}>
                 <div style={{color:'#ff6b6b',fontWeight:700,marginBottom:6}}>⚠️ Supprimer « {site.nom} » ?</div>
-                <div style={{fontSize:12,color:'rgba(255,255,255,.6)',marginBottom:12}}>
-                  Toutes les données de consommation associées seront supprimées définitivement.
-                </div>
+                <div style={{fontSize:12,color:'rgba(255,255,255,.6)',marginBottom:12}}>Toutes les données associées seront supprimées définitivement.</div>
                 <div style={{display:'flex',gap:8}}>
                   <button className="btn btn-no" style={{flex:1,fontSize:13}} onClick={handleDeleteConfirmed}>Supprimer</button>
                   <button className="btn btn-sec" style={{flex:1,fontSize:13}} onClick={()=>setShowDeleteConfirm(false)}>Annuler</button>
@@ -2448,28 +2558,17 @@ function MonSiteScreen({ user, userProfile, onBack }) {
         )}
       </div>
 
-      {/* Sticky footer — retour toujours visible, actions conditionnelles */}
       <StickyFooter row onBack={onBack}>
         {showActions&&sites.length===0&&(
           <>
-            <button className="btn btn-primary" style={{fontSize:13,flex:1}} onClick={()=>{setShowAdd(true);setEditMode(false);}}>
-              🏠 Créer mon site
-            </button>
-            <button className="btn btn-sec" style={{fontSize:13,flex:1}} disabled={importingDemo} onClick={handleImportDemo}>
-              {importingDemo?'⏳ Chargement…':'📂 Données témoins'}
-            </button>
+            <button className="btn btn-primary" style={{fontSize:13,flex:1}} onClick={()=>{setShowAdd(true);setEditMode(false);}}>🏠 Créer mon site</button>
+            <button className="btn btn-sec" style={{fontSize:13,flex:1}} disabled={importingDemo} onClick={handleImportDemo}>{importingDemo?'⏳ Chargement…':'📂 Données témoins'}</button>
           </>
         )}
         {showActions&&sites.length>0&&(
           <>
-            <button className="btn btn-primary" style={{fontSize:13}} onClick={()=>{setShowAdd(true);setEditMode(false);setShowDeleteConfirm(false);}}>
-              + Ajouter un site
-            </button>
-            {site&&!showDeleteConfirm&&(
-              <button className="btn btn-no" style={{fontSize:13}} onClick={()=>setShowDeleteConfirm(true)}>
-                🗑️ Supprimer
-              </button>
-            )}
+            <button className="btn btn-primary" style={{fontSize:13}} onClick={()=>{setShowAdd(true);setEditMode(false);setShowDeleteConfirm(false);}}>+ Ajouter un site</button>
+            {site&&!showDeleteConfirm&&<button className="btn btn-no" style={{fontSize:13}} onClick={()=>setShowDeleteConfirm(true)}>🗑️ Supprimer</button>}
           </>
         )}
       </StickyFooter>
