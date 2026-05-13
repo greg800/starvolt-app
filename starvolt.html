@@ -2468,14 +2468,15 @@ function MonSiteScreen({ user, userProfile, onBack }) {
   const site=sites?.find(s=>s.id===activeId)||null;
 
   // Sync champs locaux quand on change de site
+  // Règle : les useState('6'/'10'/'10') sont les defaults — on ne les écrase que si la DB a une valeur positive
   useEffect(()=>{
-    // Lire les defaults depuis la page solaire (ce que l'utilisateur a configuré là-bas)
-    const solarDef=(()=>{try{return JSON.parse(localStorage.getItem('starvolt_solar_defaults'))||{};}catch{return{};}})();
-    const defPv=solarDef.pvKwc||'6', defBat=solarDef.batKwh||'10', defTherm=solarDef.thermKwh||'10';
-    setPvKwc(site?.puissance_pv_kwc>0?String(site.puissance_pv_kwc):defPv);
-    setBatKwh(site?.batterie_capacite_kwh>0?String(site.batterie_capacite_kwh):defBat);
-    const lsGet=(k,def)=>{const v=localStorage.getItem(k);return v!==null&&v!==''&&Number(v)>0?v:def;};
-    setThermKwh(activeId?lsGet(`starvolt_therm_kwh_${activeId}`,defTherm):defTherm);
+    if(site?.puissance_pv_kwc>0) setPvKwc(String(site.puissance_pv_kwc));
+    else setPvKwc('6');
+    if(site?.batterie_capacite_kwh>0) setBatKwh(String(site.batterie_capacite_kwh));
+    else setBatKwh('10');
+    const savedTherm=activeId?localStorage.getItem(`starvolt_therm_kwh_${activeId}`):null;
+    if(savedTherm&&Number(savedTherm)>0) setThermKwh(savedTherm);
+    else setThermKwh('10');
     setProdProfilId(site?.profil_production_id||'');
     setProdProfilData(null); setBalance(null);
   },[activeId]);
