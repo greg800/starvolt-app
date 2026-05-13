@@ -2169,7 +2169,7 @@ function computeEnergyBalance(conso, prodNorm, pvKwc, batPowerW, batCapKwh, batL
   const thermPowWh = (thermPowerKw || 0) * 1000;
   const thermEff = 1 - Math.min(Math.max(thermLossPct||0,0),100)/100;
   let batState = 0, thermState = 0;
-  const monthly = Array.from({length:12}, () => ({on_site:0, grid_buy:0, injection:0, via_bat:0}));
+  const monthly = Array.from({length:12}, () => ({on_site:0, grid_buy:0, injection:0, via_bat:0, via_therm:0}));
   const hourly = new Array(8784);
   for (let m = 1; m <= 12; m++) {
     for (let d = 1; d <= PROF_DAYS[m-1]; d++) {
@@ -2178,29 +2178,30 @@ function computeEnergyBalance(conso, prodNorm, pvKwc, batPowerW, batCapKwh, batL
         const consoWh = conso[idx] || 0;
         const prodWh = (prodNorm[idx] || 0) * pvKwc;
         let surplus = prodWh - consoWh;
-        let viaBat = 0;
         if (surplus >= 0) {
-          if (batCapWh > 0 && batEff > 0) {
-            const room = batCapWh - batState;
-            const ci = Math.min(surplus, batPowWh, room > 0 ? room / batEff : 0);
-            batState += ci * batEff; surplus -= ci;
-          }
+          // Priorité : thermique d'abord, puis chimique
           if (thermCapWh > 0 && thermEff > 0) {
             const room = thermCapWh - thermState;
             const ci = Math.min(surplus, thermPowWh, room > 0 ? room / thermEff : 0);
             thermState += ci * thermEff; surplus -= ci;
           }
+          if (batCapWh > 0 && batEff > 0) {
+            const room = batCapWh - batState;
+            const ci = Math.min(surplus, batPowWh, room > 0 ? room / batEff : 0);
+            batState += ci * batEff; surplus -= ci;
+          }
           const os = consoWh/1000, inj = surplus/1000;
-          hourly[idx] = {on_site:os, grid_buy:0, injection:inj, via_bat:0, m, d, h};
+          hourly[idx] = {on_site:os, grid_buy:0, injection:inj, via_bat:0, via_therm:0, m, d, h};
           monthly[m-1].on_site += os; monthly[m-1].injection += inj;
         } else {
-          let need = -surplus;
-          if (batState > 0) { const d1=Math.min(need,batPowWh,batState); batState-=d1; need-=d1; viaBat+=d1; }
-          if (thermState > 0 && need > 0) { const d2=Math.min(need,thermPowWh,thermState); thermState-=d2; need-=d2; viaBat+=d2; }
-          const onSite=prodWh+viaBat;
-          const os=onSite/1000, gb=need/1000, vb=viaBat/1000;
-          hourly[idx] = {on_site:os, grid_buy:gb, injection:0, via_bat:vb, m, d, h};
-          monthly[m-1].on_site += os; monthly[m-1].grid_buy += gb; monthly[m-1].via_bat += vb;
+          let need = -surplus, viaBat = 0, viaTherm = 0;
+          // Décharge : thermique d'abord, puis chimique
+          if (thermState > 0) { const dt=Math.min(need,thermPowWh,thermState); thermState-=dt; need-=dt; viaTherm+=dt; }
+          if (batState > 0 && need > 0) { const db=Math.min(need,batPowWh,batState); batState-=db; need-=db; viaBat+=db; }
+          const onSite=prodWh+viaBat+viaTherm;
+          const os=onSite/1000, gb=need/1000, vb=viaBat/1000, vt=viaTherm/1000;
+          hourly[idx] = {on_site:os, grid_buy:gb, injection:0, via_bat:vb, via_therm:vt, m, d, h};
+          monthly[m-1].on_site += os; monthly[m-1].grid_buy += gb; monthly[m-1].via_bat += vb; monthly[m-1].via_therm += vt;
         }
       }
     }
@@ -2219,13 +2220,14 @@ function EnergyBalanceChart({ balance, level, selMonth, selDay, setLevel, setSel
     if (level === 'month') return balance.monthly;
     if (level === 'day') {
       const days = PROF_DAYS[selMonth - 1];
-      const daily = Array.from({length:days}, () => ({on_site:0, grid_buy:0, injection:0, via_bat:0}));
+      const daily = Array.from({length:days}, () => ({on_site:0, grid_buy:0, injection:0, via_bat:0, via_therm:0}));
       balance.hourly.forEach(pt => {
         if (pt && pt.m === selMonth) {
           daily[pt.d-1].on_site += pt.on_site;
           daily[pt.d-1].grid_buy += pt.grid_buy;
           daily[pt.d-1].injection += pt.injection;
           daily[pt.d-1].via_bat += pt.via_bat||0;
+          daily[pt.d-1].via_therm += pt.via_therm||0;
         }
       });
       return daily;
@@ -2233,7 +2235,7 @@ function EnergyBalanceChart({ balance, level, selMonth, selDay, setLevel, setSel
     if (level === 'hour') {
       return Array.from({length:24}, (_, hIdx) => {
         const pt = balance.hourly[profIdx(selMonth, selDay, hIdx)];
-        return pt || {on_site:0, grid_buy:0, injection:0, via_bat:0};
+        return pt || {on_site:0, grid_buy:0, injection:0, via_bat:0, via_therm:0};
       });
     }
     return [];
@@ -2282,7 +2284,7 @@ function EnergyBalanceChart({ balance, level, selMonth, selDay, setLevel, setSel
     ctx.scale(dpr, dpr);
     ctx.clearRect(0, 0, W, H);
 
-    const LEGEND_H = 74, ML = 46, MR = 8, MT = LEGEND_H + 4, MB = 24;
+    const LEGEND_H = 92, ML = 46, MR = 8, MT = LEGEND_H + 4, MB = 24;
     const cW = W - ML - MR, cH = H - MT - MB;
     const n = chartData.length;
 
@@ -2291,7 +2293,7 @@ function EnergyBalanceChart({ balance, level, selMonth, selDay, setLevel, setSel
     const unitScale = maxRaw >= 100 ? 0.001 : 1;
     const unitLabel = maxRaw >= 100 ? 'MWh' : 'kWh';
 
-    const data = chartData.map(m => ({s: m.on_site*unitScale, g: m.grid_buy*unitScale, i: m.injection*unitScale, b: (m.via_bat||0)*unitScale}));
+    const data = chartData.map(m => ({s: m.on_site*unitScale, g: m.grid_buy*unitScale, i: m.injection*unitScale, b: (m.via_bat||0)*unitScale, t: (m.via_therm||0)*unitScale}));
     const maxPos = Math.max(...data.map(m => m.s + m.g), 0.001);
     const maxNeg = Math.max(...data.map(m => m.i), 0.001);
     const posRatio = Math.min(Math.max(maxPos / (maxPos + maxNeg), 0.38), 0.82);
@@ -2305,13 +2307,13 @@ function EnergyBalanceChart({ balance, level, selMonth, selDay, setLevel, setSel
       const v = maxPos * f, y = zeroY - v * scalePos;
       ctx.strokeStyle = 'rgba(255,255,255,.09)';
       ctx.beginPath(); ctx.moveTo(ML, y); ctx.lineTo(W - MR, y); ctx.stroke();
-      ctx.fillStyle = 'rgba(255,255,255,.7)'; ctx.font = '12px sans-serif'; ctx.textAlign = 'right';
+      ctx.fillStyle = 'rgba(255,255,255,.75)'; ctx.font = '13px sans-serif'; ctx.textAlign = 'right';
       ctx.fillText(v.toFixed(1), ML - 4, y + 4);
     });
     const vn = maxNeg * 0.65, yn = zeroY + vn * scaleNeg;
     ctx.strokeStyle = 'rgba(255,255,255,.09)';
     ctx.beginPath(); ctx.moveTo(ML, yn); ctx.lineTo(W - MR, yn); ctx.stroke();
-    ctx.fillStyle = 'rgba(255,255,255,.7)'; ctx.textAlign = 'right';
+    ctx.fillStyle = 'rgba(255,255,255,.75)'; ctx.textAlign = 'right';
     ctx.fillText('-'+vn.toFixed(1), ML - 4, yn + 4);
 
     // Axe zéro
@@ -2319,7 +2321,7 @@ function EnergyBalanceChart({ balance, level, selMonth, selDay, setLevel, setSel
     ctx.beginPath(); ctx.moveTo(ML, zeroY); ctx.lineTo(W - MR, zeroY); ctx.stroke();
 
     // Label axe Y
-    ctx.save(); ctx.fillStyle = 'rgba(255,255,255,.55)'; ctx.font = '12px sans-serif'; ctx.textAlign = 'center';
+    ctx.save(); ctx.fillStyle = 'rgba(255,255,255,.6)'; ctx.font = '13px sans-serif'; ctx.textAlign = 'center';
     ctx.translate(14, MT + cH / 2); ctx.rotate(-Math.PI/2); ctx.fillText(unitLabel, 0, 0); ctx.restore();
 
     // Barres + positions pour le drill-down
@@ -2328,17 +2330,33 @@ function EnergyBalanceChart({ balance, level, selMonth, selDay, setLevel, setSel
     data.forEach((m, i) => {
       const x = ML + i * bTW + bPad;
       newBars.push({x, w: bW});
-      const sDirect = m.s - m.b;
+      const sDirect = Math.max(0, m.s - m.b - m.t);
+      // Direct solaire
       if (sDirect > 0) { ctx.fillStyle = '#f0a050'; ctx.fillRect(x, zeroY - sDirect * scalePos, bW, sDirect * scalePos); }
-      if (m.b > 0) { ctx.fillStyle = '#ffd098'; ctx.fillRect(x, zeroY - m.s * scalePos, bW, m.b * scalePos); }
+      // Stockage thermique (orange pointillé)
+      if (m.t > 0) {
+        const yTop = zeroY - (sDirect + m.t) * scalePos;
+        const barH = m.t * scalePos;
+        ctx.fillStyle = '#ffb060'; ctx.fillRect(x, yTop, bW, barH);
+        ctx.fillStyle = 'rgba(0,0,0,0.3)';
+        for (let dy = yTop + 3; dy < yTop + barH - 1; dy += 5) {
+          for (let dx = x + 3; dx < x + bW - 1; dx += 5) {
+            ctx.beginPath(); ctx.arc(dx, dy, 1.5, 0, Math.PI*2); ctx.fill();
+          }
+        }
+      }
+      // Batterie chimique
+      if (m.b > 0) { ctx.fillStyle = '#ffd098'; ctx.fillRect(x, zeroY - (sDirect + m.t + m.b) * scalePos, bW, m.b * scalePos); }
+      // Achat réseau
       if (m.g > 0) { ctx.fillStyle = '#d0d0d0'; ctx.fillRect(x, zeroY - (m.s + m.g) * scalePos, bW, m.g * scalePos - 1); }
+      // Injection
       if (m.i > 0) { ctx.fillStyle = '#f0e86a'; ctx.fillRect(x, zeroY + 2, bW, m.i * scaleNeg - 2); }
     });
     barsRef.current = newBars;
 
     // Labels axe X
-    const lblFont = n <= 24 ? '12px sans-serif' : n <= 31 ? '11px sans-serif' : '10px sans-serif';
-    ctx.fillStyle = 'rgba(255,255,255,.75)'; ctx.font = lblFont; ctx.textAlign = 'center';
+    const lblFont = n <= 24 ? '13px sans-serif' : n <= 31 ? '13px sans-serif' : '13px sans-serif';
+    ctx.fillStyle = 'rgba(255,255,255,.8)'; ctx.font = lblFont; ctx.textAlign = 'center';
     xLabels.forEach((lbl, i) => {
       if (n > 24 && i % 2 !== 0) return;
       ctx.fillText(lbl, ML + i * bTW + bTW / 2, H - 4);
@@ -2346,16 +2364,20 @@ function EnergyBalanceChart({ balance, level, selMonth, selDay, setLevel, setSel
 
     // Indice de niveau
     if (level !== 'hour') {
-      ctx.fillStyle = 'rgba(255,255,255,.3)'; ctx.font = '11px sans-serif'; ctx.textAlign = 'right';
+      ctx.fillStyle = 'rgba(255,255,255,.4)'; ctx.font = '13px sans-serif'; ctx.textAlign = 'right';
       ctx.fillText('double-clic pour zoomer', W - MR, MT - 4);
     }
 
-    // Légende (3 lignes)
-    [{color:'#f0a050',label:'Direct solaire sur place'},{color:'#ffd098',label:'Batterie sur place'},{color:'#d0d0d0',label:'Achat réseau'},{color:'#f0e86a',label:'Injection réseau'}]
+    // Légende (5 entrées)
+    [{color:'#f0a050',label:'Direct solaire'},{color:'#ffb060',label:'Stockage thermique',dots:true},{color:'#ffd098',label:'Batterie chimique'},{color:'#d0d0d0',label:'Achat réseau'},{color:'#f0e86a',label:'Injection réseau'}]
       .forEach((it, i) => {
         const ly = 3 + i * 18;
         ctx.fillStyle = it.color; ctx.fillRect(ML, ly + 2, 13, 12);
-        ctx.fillStyle = 'rgba(255,255,255,.85)'; ctx.font = '11px sans-serif'; ctx.textAlign = 'left';
+        if (it.dots) {
+          ctx.fillStyle = 'rgba(0,0,0,0.35)';
+          [3,8].forEach(dy => [3,8,13].forEach(dx => { ctx.beginPath(); ctx.arc(ML+dx, ly+2+dy, 1.5, 0, Math.PI*2); ctx.fill(); }));
+        }
+        ctx.fillStyle = 'white'; ctx.font = '13px sans-serif'; ctx.textAlign = 'left';
         ctx.fillText(it.label, ML + 18, ly + 12);
       });
   }, [chartData, xLabels, level]);
@@ -2651,27 +2673,26 @@ function MonSiteScreen({ user, userProfile, onBack }) {
               <div style={{padding:'10px 14px 12px'}}>
                 <div style={{display:'flex',gap:10,flexWrap:'wrap',alignItems:'flex-start'}}>
 
-                  {/* ── COLONNE GAUCHE 1/3 : params ultra-compacts ── */}
-                  <div style={{flex:'1 1 180px',display:'flex',flexDirection:'column',gap:6}}>
-                    {/* Profil + kWc sur la même ligne */}
-                    <div style={{display:'flex',gap:6,alignItems:'flex-end'}}>
-                      <div style={{flex:1,minWidth:0}}>
-                        <div style={{fontSize:8,color:'rgba(255,255,255,.4)',fontWeight:700,letterSpacing:'.4px',marginBottom:2}}>PROFIL</div>
-                        {prodProfils.length===0?(
-                          <div style={{fontSize:10,color:'rgba(255,255,255,.35)',padding:'4px 0'}}>Aucun profil</div>
-                        ):(
-                          <div style={{display:'flex',alignItems:'center',gap:4,background:'rgba(255,255,255,.05)',borderRadius:6,padding:'5px 7px'}}>
-                            <span style={{fontSize:10,color:'rgba(125,217,64,.9)'}}>📍</span>
-                            <span style={{fontSize:10,color:'white',fontWeight:600,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{prodProfils.find(p=>p.id===prodProfilId)?.nom||'…'}</span>
-                          </div>
-                        )}
-                      </div>
-                      <div style={{flex:'0 0 105px'}}>
-                        <div style={{fontSize:8,color:'rgba(255,255,255,.4)',fontWeight:700,letterSpacing:'.4px',marginBottom:2}}>kWc PV</div>
-                        <StepInput compact value={pvKwc} onChange={setPvKwc}
-                          onBlur={()=>{const v=parseFloat(pvKwc);updateSite({puissance_pv_kwc:isNaN(v)?null:v});}}
-                          step={0.5} min={0} placeholder="6"/>
-                      </div>
+                  {/* ── COLONNE GAUCHE : params ultra-compacts (largeur fixe) ── */}
+                  <div style={{flex:'0 0 130px',display:'flex',flexDirection:'column',gap:6}}>
+                    {/* Profil */}
+                    <div>
+                      <div style={{fontSize:13,color:'#f0a050',fontWeight:700,letterSpacing:'.4px',marginBottom:3}}>PROFIL</div>
+                      {prodProfils.length===0?(
+                        <div style={{fontSize:13,color:'rgba(255,255,255,.55)',padding:'4px 0'}}>Aucun profil</div>
+                      ):(
+                        <div style={{display:'flex',alignItems:'center',gap:4,background:'rgba(255,255,255,.05)',borderRadius:6,padding:'5px 7px'}}>
+                          <span style={{fontSize:13}}>📍</span>
+                          <span style={{fontSize:13,color:'white',fontWeight:600,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{prodProfils.find(p=>p.id===prodProfilId)?.nom||'…'}</span>
+                        </div>
+                      )}
+                    </div>
+                    {/* kWc PV */}
+                    <div>
+                      <div style={{fontSize:13,color:'#f0a050',fontWeight:700,letterSpacing:'.4px',marginBottom:3}}>kWc PV</div>
+                      <StepInput compact value={pvKwc} onChange={setPvKwc}
+                        onBlur={()=>{const v=parseFloat(pvKwc);updateSite({puissance_pv_kwc:isNaN(v)?null:v});}}
+                        step={0.5} min={0} placeholder="6"/>
                     </div>
 
                     {/* Batterie chimique — ultra-compact */}
@@ -2682,27 +2703,27 @@ function MonSiteScreen({ user, userProfile, onBack }) {
                           <rect x="16" y="7.5" width="3" height="5" rx="1" fill="white"/>
                           <rect x="3" y="7" width="7" height="6" rx="1" fill="white" fillOpacity="0.8"/>
                         </svg>
-                        <span style={{fontSize:10,fontWeight:800,color:'white'}}>Batterie chimique</span>
+                        <span style={{fontSize:13,fontWeight:800,color:'white'}}>Batterie</span>
                       </div>
-                      <div style={{display:'flex',gap:4}}>
-                        <div style={{flex:'1 1 60px'}}>
-                          <div style={{fontSize:7,color:'rgba(255,255,255,.4)',fontWeight:700,marginBottom:2}}>PUIS. kW</div>
+                      <div style={{display:'flex',gap:3}}>
+                        <div style={{flex:'1 1 30px'}}>
+                          <div style={{fontSize:13,color:'#f0a050',fontWeight:700,marginBottom:2}}>kW</div>
                           <StepInput compact value={batW} onChange={setBatW}
                             onBlur={()=>{const v=parseFloat(batW);updateSite({batterie_puissance_w:isNaN(v)?null:v*1000});}}
                             step={0.5} min={0} placeholder="3"/>
                         </div>
-                        <div style={{flex:'1 1 60px'}}>
-                          <div style={{fontSize:7,color:'rgba(255,255,255,.4)',fontWeight:700,marginBottom:2}}>CAP. kWh</div>
+                        <div style={{flex:'1 1 30px'}}>
+                          <div style={{fontSize:13,color:'#f0a050',fontWeight:700,marginBottom:2}}>kWh</div>
                           <StepInput compact value={batKwh} onChange={setBatKwh}
                             onBlur={()=>{const v=parseFloat(batKwh);updateSite({batterie_capacite_kwh:isNaN(v)?null:v});}}
                             step={0.5} min={0} placeholder="10"/>
                         </div>
-                        <div style={{flex:'0 0 46px'}}>
-                          <div style={{fontSize:7,color:'rgba(255,255,255,.4)',fontWeight:700,marginBottom:2}}>PERTES %</div>
+                        <div style={{flex:'0 0 36px'}}>
+                          <div style={{fontSize:13,color:'#f0a050',fontWeight:700,marginBottom:2}}>%</div>
                           <input className="inp" type="number" min="0" max="50" step="1" value={batLoss}
                             onChange={e=>setBatLoss(e.target.value)}
                             onBlur={()=>activeId&&localStorage.setItem(`starvolt_bat_loss_${activeId}`,batLoss)}
-                            style={{textAlign:'center',height:26,fontSize:12,padding:'0 3px',width:'100%'}}/>
+                            style={{textAlign:'center',height:26,fontSize:13,padding:'0 2px',width:'100%'}}/>
                         </div>
                       </div>
                     </div>
@@ -2712,28 +2733,28 @@ function MonSiteScreen({ user, userProfile, onBack }) {
                       <div style={{background:'rgba(255,160,50,.05)',border:'1px solid rgba(255,160,50,.28)',borderRadius:8,padding:'6px 8px'}}>
                         <div style={{display:'flex',alignItems:'center',gap:4,marginBottom:3}}>
                           <img src="/comwatt-box.png" style={{width:16,height:16,objectFit:'contain',mixBlendMode:'screen',flexShrink:0}} onError={e=>e.target.style.display='none'}/>
-                          <span style={{fontSize:10,fontWeight:800,color:'white'}}>Stockage thermique</span>
-                          <span style={{fontSize:8,color:'#7dd940',marginLeft:'auto',fontWeight:700}}>Box ✓</span>
+                          <span style={{fontSize:13,fontWeight:800,color:'white'}}>Thermique</span>
+                          <span style={{fontSize:13,color:'#7dd940',marginLeft:'auto',fontWeight:700}}>✓</span>
                         </div>
-                        <div style={{fontSize:9,color:'rgba(255,160,50,.7)',marginBottom:5}}>🌡️ Chauffage · Cumulus · {localStorage.getItem('starvolt_box_chosen')==='free'?'gratuit':'550€'}</div>
-                        <div style={{display:'flex',gap:4}}>
-                          <div style={{flex:'1 1 60px'}}>
-                            <div style={{fontSize:7,color:'rgba(255,255,255,.4)',fontWeight:700,marginBottom:2}}>PUIS. kW</div>
+                        <div style={{fontSize:13,color:'#f0a050',marginBottom:5}}>🌡️ {localStorage.getItem('starvolt_box_chosen')==='free'?'Gratuit':'550€'}</div>
+                        <div style={{display:'flex',gap:3}}>
+                          <div style={{flex:'1 1 30px'}}>
+                            <div style={{fontSize:13,color:'#f0a050',fontWeight:700,marginBottom:2}}>kW</div>
                             <StepInput compact value={thermW}
                               onChange={v=>{setThermW(v);activeId&&localStorage.setItem(`starvolt_therm_w_${activeId}`,v);}}
                               onBlur={()=>{}} step={0.5} min={0} placeholder="5"/>
                           </div>
-                          <div style={{flex:'1 1 60px'}}>
-                            <div style={{fontSize:7,color:'rgba(255,255,255,.4)',fontWeight:700,marginBottom:2}}>CAP. kWh</div>
+                          <div style={{flex:'1 1 30px'}}>
+                            <div style={{fontSize:13,color:'#f0a050',fontWeight:700,marginBottom:2}}>kWh</div>
                             <StepInput compact value={thermKwh}
                               onChange={v=>{setThermKwh(v);activeId&&localStorage.setItem(`starvolt_therm_kwh_${activeId}`,v);}}
                               onBlur={()=>{}} step={0.5} min={0} placeholder="10"/>
                           </div>
-                          <div style={{flex:'0 0 46px'}}>
-                            <div style={{fontSize:7,color:'rgba(255,255,255,.4)',fontWeight:700,marginBottom:2}}>PERTES %</div>
+                          <div style={{flex:'0 0 36px'}}>
+                            <div style={{fontSize:13,color:'#f0a050',fontWeight:700,marginBottom:2}}>%</div>
                             <input className="inp" type="number" min="0" max="50" step="1" value={thermLoss}
                               onChange={e=>{setThermLoss(e.target.value);activeId&&localStorage.setItem(`starvolt_therm_loss_${activeId}`,e.target.value);}}
-                              style={{textAlign:'center',height:26,fontSize:12,padding:'0 3px',width:'100%'}}/>
+                              style={{textAlign:'center',height:26,fontSize:13,padding:'0 2px',width:'100%'}}/>
                           </div>
                         </div>
                       </div>
@@ -2766,9 +2787,9 @@ function MonSiteScreen({ user, userProfile, onBack }) {
                               {label:'Autoproduction',value:tauxAutoprod,desc:'Conso couverte par la prod',color:'#7dd940'},
                             ].map(({label,value,desc,color})=>(
                               <div key={label} style={{flex:1,background:'rgba(255,255,255,.04)',border:'1px solid rgba(255,255,255,.08)',borderRadius:8,padding:'8px',textAlign:'center'}}>
-                                <div style={{fontSize:8,color:'rgba(255,255,255,.45)',fontWeight:700,letterSpacing:'.3px',marginBottom:3,textTransform:'uppercase'}}>{label}</div>
+                                <div style={{fontSize:13,color:'#f0a050',fontWeight:700,letterSpacing:'.3px',marginBottom:3,textTransform:'uppercase'}}>{label}</div>
                                 <div style={{fontSize:28,fontWeight:900,color,lineHeight:1}}>{value}<span style={{fontSize:13}}>%</span></div>
-                                <div style={{fontSize:9,color:'rgba(255,255,255,.3)',marginTop:2}}>{desc}</div>
+                                <div style={{fontSize:13,color:'rgba(255,255,255,.6)',marginTop:2}}>{desc}</div>
                               </div>
                             ))}
                           </div>
@@ -2776,18 +2797,18 @@ function MonSiteScreen({ user, userProfile, onBack }) {
                           <div style={{display:'flex',gap:4,marginBottom:7}}>
                             {[
                               {icon:'☀️',color:'#f0a050',bg:'rgba(240,160,80,.1)',label:'Solaire ici',value:fmt(autoconso)},
-                              {icon:'🔌',color:'#c0c0c0',bg:'rgba(200,200,200,.07)',label:'Achat réseau',value:fmt(achat)},
+                              {icon:'🔌',color:'white',bg:'rgba(200,200,200,.07)',label:'Achat réseau',value:fmt(achat)},
                               {icon:'⬆️',color:'#f0e86a',bg:'rgba(240,232,106,.07)',label:'Injection',value:fmt(injection)},
                             ].map(({icon,color,bg,label,value})=>(
                               <div key={label} style={{flex:1,display:'flex',flexDirection:'column',alignItems:'center',padding:'5px 4px',background:bg,border:'1px solid rgba(255,255,255,.06)',borderRadius:7,textAlign:'center'}}>
                                 <span style={{fontSize:13}}>{icon}</span>
-                                <div style={{fontSize:9,color:'rgba(255,255,255,.5)',fontWeight:600,marginTop:1,lineHeight:1.2}}>{label}</div>
+                                <div style={{fontSize:13,color:'white',fontWeight:600,marginTop:1,lineHeight:1.2}}>{label}</div>
                                 <div style={{fontSize:13,fontWeight:900,color,marginTop:2}}>{value}</div>
                               </div>
                             ))}
                           </div>
                           {/* Graphique */}
-                          <div style={{fontWeight:700,fontSize:10,color:'rgba(255,255,255,.4)',marginBottom:3}}>Bilan · {period}</div>
+                          <div style={{fontWeight:700,fontSize:13,color:'rgba(255,255,255,.6)',marginBottom:3}}>Bilan · {period}</div>
                           <EnergyBalanceChart balance={balance} level={chartLevel} selMonth={chartMonth} selDay={chartDay} setLevel={setChartLevel} setSelMonth={setChartMonth} setSelDay={setChartDay}/>
                         </div>
                       );
