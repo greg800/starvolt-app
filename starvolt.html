@@ -2956,12 +2956,12 @@ function SimulationsScreen({ onACC, onBox, onSolar, onOptimisation, onBack, user
               const bk = 10, tk = 10, kw = 6;
               const bal = computeEnergyBalance(site.conso_profil, pp.profil, kw,
                 bk*ratioBat*1000, bk, pBat, tk*ratioTherm, tk, pTherm);
-              const autoKwh = bal.monthly.reduce((s,m) => s + m.on_site + m.via_bat + m.via_therm, 0);
-              const injKwh  = bal.monthly.reduce((s,m) => s + m.injection, 0);
               const gridBuy = bal.monthly.reduce((s,m) => s + m.grid_buy, 0);
+              const injKwh  = bal.monthly.reduce((s,m) => s + m.injection, 0);
               const prixMoyen = kwh_total > 0 && curBill ? curBill / kwh_total : 0.18;
               const prixRachat = nat?.prix_rachat_injection ?? 0.04;
-              const realSav = Math.round(autoKwh * prixMoyen + injKwh * prixRachat);
+              const nouvFact = Math.max(0, gridBuy * prixMoyen - injKwh * prixRachat);
+              const realSav = Math.max(0, Math.round(curBill - nouvFact));
               setSolarSaving(realSav > 0 ? realSav : Math.round(adjBillSolar * 0.70));
               // Stocker pour projection correcte (inflation sur achat réseau uniquement)
               setSolGridKwh(gridBuy); setSolInjKwh(injKwh);
@@ -4727,18 +4727,18 @@ function SolarSimScreen({ user, userProfile, onBack, onPanier, onCartUpdate }) {
       bk * ratioBat  * 1000, bk, pBat,
       tk * ratioTherm,       tk, pTherm
     );
-    const autoKwh = bal.monthly.reduce((s,m) => s + m.on_site + m.via_bat + m.via_therm, 0);
     const gridBuy = bal.monthly.reduce((s,m) => s + m.grid_buy, 0);
-    const totalKwh = autoKwh + gridBuy;
     const injKwh = bal.monthly.reduce((s,m) => s + m.injection, 0);
     const { kwh_total, currentBill } = siteRef;
-    // Prix moyen tout compris (facture / kWh, abonnement amorti dans le prix unitaire)
     const prixMoyen = kwh_total > 0 && currentBill ? currentBill / kwh_total : 0.18;
     const prixRachat = gv.prix_rachat_injection ?? 0.04;
-    const saving = Math.round(autoKwh * prixMoyen + injKwh * prixRachat);
-    console.log('DEBUG SolarSim:', {autoKwh:Math.round(autoKwh), injKwh:Math.round(injKwh), gridBuy:Math.round(gridBuy), prixMoyen:prixMoyen.toFixed(4), prixRachat, kwh_total, currentBill, saving});
+    // Formule directe Greg : nouvFact = achat_réseau × prixMoyen - injection × prixRachat
+    // Évite le double-comptage de on_site + via_bat + via_therm dans computeEnergyBalance
+    const nouvFact = Math.max(0, gridBuy * prixMoyen - injKwh * prixRachat);
+    const saving = Math.max(0, Math.round(currentBill - nouvFact));
+    const trueAutoKwh = Math.max(0, kwh_total - gridBuy);
     setRealSaving(saving > 0 ? saving : null);
-    setAutoPct(totalKwh > 0 ? Math.round(autoKwh / totalKwh * 100) : 0);
+    setAutoPct(kwh_total > 0 ? Math.round(trueAutoKwh / kwh_total * 100) : 0);
   }, [pvKwc, batKwh, thermKwh, siteRef, prodData, globalVars]);
 
   // Gains solaires (fallback %-based si pas de profil prod)
@@ -5050,12 +5050,13 @@ function PanierScreen({ user, onBack, onGoTo }) {
           if (pp?.profil) {
             const bal = computeEnergyBalance(site.conso_profil, pp.profil, kw,
               bk*ratioBat*1000, bk, pBat, tk*ratioTherm, tk, pTherm);
-            const autoKwh = bal.monthly.reduce((s,m) => s+m.on_site+m.via_bat+m.via_therm, 0);
             const gridBuy = bal.monthly.reduce((s,m) => s+m.grid_buy, 0);
             const injKwh  = bal.monthly.reduce((s,m) => s+m.injection, 0);
             setSolGridKwh(gridBuy); setSolInjKwh(injKwh);
-            // Mise à jour des économies solaires réelles
-            const realSav = Math.round(autoKwh * prixBase + injKwh * prixRachat);
+            // Mise à jour des économies solaires réelles (formule nouvFact pour éviter double-comptage)
+            const curBillPan = Math.round(prixBase * siteKwh);
+            const nouvFactPan = Math.max(0, gridBuy * prixBase - injKwh * prixRachat);
+            const realSav = Math.max(0, Math.round(curBillPan - nouvFactPan));
             if (realSav > 0) setSavings(prev => ({...prev, solar: realSav}));
           }
         }
