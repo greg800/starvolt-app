@@ -2518,19 +2518,27 @@ function MonSiteScreen({ user, userProfile, onBack }) {
   // Calculer le bilan énergétique dès que les données sont prêtes
   useEffect(()=>{
     if(!site?.conso_profil||!prodProfilData){setBalance(null);return;}
+    const hasSolar=!!localStorage.getItem('starvolt_solar_chosen');
+    if(!hasSolar){
+      // Pas de solaire dans le panier : graphique tout gris (conso réseau pure)
+      setBalance(computeEnergyBalance(site.conso_profil,prodProfilData,0,0,0,0,0,0,0));
+      return;
+    }
     const kw=pvKwc===''?6:(parseFloat(pvKwc)||0);
-    const ratio=(globalVars?.ratio_puissance_stockage??50)/100;
+    const ratioBat=(globalVars?.ratio_puissance_stockage??50)/100;
+    const ratioTherm=(globalVars?.ratio_puissance_stockage_thermique??50)/100;
     const pBat=globalVars?.pertes_batterie??10;
+    const pTherm=globalVars?.pertes_thermique??0;
     const bk=parseFloat(batKwh)||0;
     const tk=parseFloat(thermKwh)||0;
     setBalance(computeEnergyBalance(
       site.conso_profil,prodProfilData,kw,
-      bk*ratio*1000, // batPowerW (W)
-      bk,            // batCapKwh
-      pBat,          // batLossPct
-      tk*ratio,      // thermPowerKw (kW)
-      tk,            // thermCapKwh
-      0              // thermLossPct (toujours 0)
+      bk*ratioBat*1000,  // batPowerW (W)
+      bk,                // batCapKwh
+      pBat,              // batLossPct
+      tk*ratioTherm,     // thermPowerKw (kW)
+      tk,                // thermCapKwh
+      pTherm             // thermLossPct
     ));
   },[site?.conso_profil,prodProfilData,pvKwc,batKwh,thermKwh,globalVars]);
 
@@ -2561,7 +2569,7 @@ function MonSiteScreen({ user, userProfile, onBack }) {
 
   // Charger variables globales + listener mobile
   useEffect(()=>{
-    sb.from('parametres_nationaux').select('ratio_puissance_stockage,pertes_batterie').eq('id',1).maybeSingle()
+    sb.from('parametres_nationaux').select('ratio_puissance_stockage,pertes_batterie,ratio_puissance_stockage_thermique,pertes_thermique').eq('id',1).maybeSingle()
       .then(({data})=>setGlobalVars(data));
     const handler=()=>setIsMobile(window.innerWidth<640);
     window.addEventListener('resize',handler);
@@ -2702,9 +2710,10 @@ function MonSiteScreen({ user, userProfile, onBack }) {
                     period=chartLevel==='hour'?`${chartDay}/${chartMonth}`:chartLevel==='day'?`Mois ${chartMonth}`:'Année';
                     fmt=v=>(v*scale).toFixed(unit==='MWh'?1:0)+' '+unit;
                   }
+                  const hasSolar=!!localStorage.getItem('starvolt_solar_chosen');
                   return(<>
-                    {/* ── Rangée 1 : PROFIL · kWc · Autoconso · Autoprod ── */}
-                    <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
+                    {/* ── Rangée 1 : PROFIL · kWc · Autoconso · Autoprod (si solaire au panier) ── */}
+                    {hasSolar&&<div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
                       {/* PROFIL */}
                       <div style={T}>
                         <div style={LBL}>PROFIL</div>
@@ -2742,10 +2751,10 @@ function MonSiteScreen({ user, userProfile, onBack }) {
                       {prodProfilId&&!site?.conso_profil&&(
                         <div style={{...T,fontSize:13,color:'rgba(255,200,80,.7)',background:'rgba(255,200,0,.04)',alignItems:'center',justifyContent:'center',textAlign:'center'}}>⚠️ Importez votre consommation</div>
                       )}
-                    </div>
+                    </div>}
 
                     {/* ── Rangée 2 : Batterie · Thermique · Solaire · Achat · Injection ── */}
-                    <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
+                    {hasSolar&&<div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
                       {/* Batterie chimique */}
                       <div style={T}>
                         <div style={{display:'flex',alignItems:'center',gap:5}}>
@@ -2768,7 +2777,6 @@ function MonSiteScreen({ user, userProfile, onBack }) {
                             <img src="/comwatt-box.png" style={{width:14,height:14,objectFit:'contain',mixBlendMode:'screen',flexShrink:0}} onError={e=>e.target.style.display='none'}/>
                             <span style={{fontSize:13,fontWeight:800,color:'white'}}>Stockage thermique</span>
                           </div>
-                          <div style={{fontSize:13,color:'rgba(255,255,255,.6)'}}>🌡️ {localStorage.getItem('starvolt_box_chosen')==='free'?'Box gratuite':'Box 550€'}</div>
                           <div><div style={LBL}>Capacité kWh</div>
                             <StepInput compact value={thermKwh}
                               onChange={v=>{setThermKwh(v);activeId&&localStorage.setItem(`starvolt_therm_kwh_${activeId}`,v);}}
@@ -2787,7 +2795,7 @@ function MonSiteScreen({ user, userProfile, onBack }) {
                           <div style={{fontSize:isMobile?16:20,fontWeight:900,color}}>{value}</div>
                         </div>
                       ))}
-                    </div>
+                    </div>}
 
                     {/* ── Graphique pleine largeur ── */}
                     {balance&&(
@@ -3685,9 +3693,11 @@ function GlobalVarsScreen({ onBack }) {
       .then(({data}) => {
         const n = data || {};
         setGlobalForm({
-          ratio_puissance_stockage: n.ratio_puissance_stockage ?? 50,
-          pertes_batterie:          n.pertes_batterie          ?? 10,
-          turpe_hp_hiver:           n.turpe_hp_hiver           ?? '',
+          ratio_puissance_stockage:           n.ratio_puissance_stockage           ?? 50,
+          pertes_batterie:                    n.pertes_batterie                    ?? 10,
+          ratio_puissance_stockage_thermique: n.ratio_puissance_stockage_thermique ?? 50,
+          pertes_thermique:                   n.pertes_thermique                   ?? 0,
+          turpe_hp_hiver:                     n.turpe_hp_hiver                     ?? '',
           turpe_hc_hiver:           n.turpe_hc_hiver           ?? '',
           turpe_hp_ete:             n.turpe_hp_ete             ?? '',
           turpe_hc_ete:             n.turpe_hc_ete             ?? '',
@@ -3710,9 +3720,11 @@ function GlobalVarsScreen({ onBack }) {
     const intr = v => v === '' ? null : parseInt(v);
     const { error } = await sb.from('parametres_nationaux').upsert({
       id: 1,
-      ratio_puissance_stockage:     num(globalForm.ratio_puissance_stockage),
-      pertes_batterie:              num(globalForm.pertes_batterie),
-      turpe_hp_hiver:               num(globalForm.turpe_hp_hiver),
+      ratio_puissance_stockage:                     num(globalForm.ratio_puissance_stockage),
+      pertes_batterie:                              num(globalForm.pertes_batterie),
+      ratio_puissance_stockage_thermique:           num(globalForm.ratio_puissance_stockage_thermique),
+      pertes_thermique:                             num(globalForm.pertes_thermique),
+      turpe_hp_hiver:                               num(globalForm.turpe_hp_hiver),
       turpe_hc_hiver:               num(globalForm.turpe_hc_hiver),
       turpe_hp_ete:                 num(globalForm.turpe_hp_ete),
       turpe_hc_ete:                 num(globalForm.turpe_hc_ete),
@@ -3749,8 +3761,8 @@ function GlobalVarsScreen({ onBack }) {
 
       <div className="card" style={{padding:'12px 14px',marginBottom:8}}>
         {/* ── Hypothèses stockage ── */}
-        <div style={SL}>Hypothèses stockage</div>
-        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:6,marginBottom:6}}>
+        <div style={SL}>Hypothèses stockage — Batterie chimique</div>
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:6,marginBottom:10}}>
           <div>
             <div style={FL}>Ratio puissance / capacité (%)</div>
             <input className="inp" type="number" step="5" min="0" max="100" placeholder="50"
@@ -3760,12 +3772,29 @@ function GlobalVarsScreen({ onBack }) {
             <div style={{fontSize:9,color:'rgba(255,255,255,.3)',marginTop:2}}>Ex : 10 kWh → puissance max 5 kW</div>
           </div>
           <div>
-            <div style={FL}>Pertes batterie chimique (%)</div>
+            <div style={FL}>Pertes (%)</div>
             <input className="inp" type="number" step="1" min="0" max="50" placeholder="10"
               value={String(globalForm.pertes_batterie)}
               onChange={e=>setGlobalForm(p=>({...p,pertes_batterie:e.target.value}))}
               style={F}/>
-            <div style={{fontSize:9,color:'rgba(255,255,255,.3)',marginTop:2}}>Stockage thermique : 0 % (fixe)</div>
+          </div>
+        </div>
+        <div style={{...SL,marginTop:4}}>Hypothèses stockage — Thermique</div>
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:6,marginBottom:10}}>
+          <div>
+            <div style={FL}>Ratio puissance / capacité (%)</div>
+            <input className="inp" type="number" step="5" min="0" max="100" placeholder="50"
+              value={String(globalForm.ratio_puissance_stockage_thermique)}
+              onChange={e=>setGlobalForm(p=>({...p,ratio_puissance_stockage_thermique:e.target.value}))}
+              style={F}/>
+            <div style={{fontSize:9,color:'rgba(255,255,255,.3)',marginTop:2}}>Ex : 10 kWh → puissance max 5 kW</div>
+          </div>
+          <div>
+            <div style={FL}>Pertes (%)</div>
+            <input className="inp" type="number" step="1" min="0" max="50" placeholder="0"
+              value={String(globalForm.pertes_thermique)}
+              onChange={e=>setGlobalForm(p=>({...p,pertes_thermique:e.target.value}))}
+              style={F}/>
           </div>
         </div>
 
