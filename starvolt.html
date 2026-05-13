@@ -2521,7 +2521,7 @@ function MonSiteScreen({ user, userProfile, onBack }) {
   useEffect(()=>{
     if(!site?.conso_profil||!prodProfilData){setBalance(null);return;}
     const hasSolar=!!localStorage.getItem('starvolt_solar_chosen');
-    const hasBox=!!localStorage.getItem('starvolt_box_chosen');
+    const hasBox=!!localStorage.getItem('starvolt_box_chosen')||localStorage.getItem('starvolt_solar_chosen')==='solar_box';
     const ratioTherm=(globalVars?.ratio_puissance_stockage_thermique??50)/100;
     const pTherm=globalVars?.pertes_thermique??0;
     const tk=parseFloat(thermKwh)||0;
@@ -2725,7 +2725,8 @@ function MonSiteScreen({ user, userProfile, onBack }) {
                     fmt=v=>(v*scale).toFixed(unit==='MWh'?1:0)+' '+unit;
                   }
                   const hasSolar=!!localStorage.getItem('starvolt_solar_chosen');
-                  const hasBox=!!localStorage.getItem('starvolt_box_chosen');
+                  // hasBox : box choisie seule OU incluse dans solar_box
+                  const hasBox=!!localStorage.getItem('starvolt_box_chosen')||localStorage.getItem('starvolt_solar_chosen')==='solar_box';
                   return(<>
                     {/* ── Rangée 1 : PROFIL · kWc · Autoconso · Autoprod (si solaire au panier) ── */}
                     {hasSolar&&<div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
