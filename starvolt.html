@@ -2455,7 +2455,7 @@ function MonSiteScreen({ user, userProfile, onBack }) {
   const load=async()=>{
     const[{data:s},{data:t},{data:pp}]=await Promise.all([
       sb.from('sites').select('*').eq('user_id',user.id).order('created_at'),
-      sb.from('tarifs_electricite').select('id,nom').order('nom'),
+      sb.from('tarifs_electricite').select('*').order('nom'),
       sb.from('profils_production').select('id,nom,latitude,longitude').order('nom'),
     ]);
     setSites(s||[]); setTariffs(t||[]); setProdProfils(pp||[]);
@@ -2654,9 +2654,19 @@ function MonSiteScreen({ user, userProfile, onBack }) {
                     {importMsg?.type==='ok'&&<div style={{color:'#7dd940',fontSize:12,padding:'6px 10px',background:'rgba(255,255,255,.05)',borderRadius:8}}>✅ {importMsg.kwh.toLocaleString('fr-FR')} kWh/an{importMsg.gaps>0?` · ${importMsg.gaps} trou(s) rebouché(s)`:''}</div>}
                     {site.conso_annuelle_kwh?(
                       <div>
-                        <div style={{display:'flex',alignItems:'baseline',gap:6,marginBottom:2}}>
+                        <div style={{display:'flex',alignItems:'baseline',gap:6,marginBottom:2,flexWrap:'wrap'}}>
                           <span style={{fontSize:28,fontWeight:900,color:'white'}}>{Math.round(site.conso_annuelle_kwh).toLocaleString('fr-FR')}</span>
                           <span style={{fontSize:13,color:'rgba(255,255,255,.6)',fontWeight:600}}>kWh/an</span>
+                          {(()=>{
+                            const curT=tariffs.find(t=>t.id===site.tarif_id);
+                            if(!curT||curT.tarif_dynamique)return null;
+                            const facture=Math.round((curT.abo_annuel||0)+site.conso_annuelle_kwh*(curT.prix_hp||0));
+                            const prix=curT.prix_hp;
+                            return(<React.Fragment>
+                              {facture>0&&<><span style={{fontSize:13,color:'rgba(255,255,255,.25)'}}>·</span><span style={{fontSize:13,color:'#f0a050',fontWeight:700}}>{facture.toLocaleString('fr-FR')} €/an</span></>}
+                              {prix>0&&<><span style={{fontSize:13,color:'rgba(255,255,255,.25)'}}>·</span><span style={{fontSize:13,color:'rgba(255,255,255,.5)',fontWeight:600}}>{prix.toFixed(4)} €/kWh</span></>}
+                            </React.Fragment>);
+                          })()}
                         </div>
                         <div style={{fontSize:10,color:'rgba(255,255,255,.35)'}}>{new Date(site.conso_imported_at).toLocaleDateString('fr-FR',{day:'numeric',month:'short',year:'numeric'})}</div>
                         {site.conso_gaps?.length>0&&(
@@ -2857,8 +2867,8 @@ function SimulationsScreen({ onACC, onBox, onSolar, onOptimisation, onBack, user
     const activeId = localStorage.getItem('starvolt_active_site_id');
     Promise.all([
       activeId
-        ? sb.from('sites').select('id,conso_profil,tarif_id,heure_debut_hc1,heure_fin_hc1,heure_debut_hc2,heure_fin_hc2').eq('id', activeId).maybeSingle()
-        : sb.from('sites').select('id,conso_profil,tarif_id,heure_debut_hc1,heure_fin_hc1,heure_debut_hc2,heure_fin_hc2').eq('user_id', user.id).not('conso_profil','is',null).order('created_at').limit(1).maybeSingle(),
+        ? sb.from('sites').select('id,conso_profil,tarif_id,profil_production_id,heure_debut_hc1,heure_fin_hc1,heure_debut_hc2,heure_fin_hc2').eq('id', activeId).maybeSingle()
+        : sb.from('sites').select('id,conso_profil,tarif_id,profil_production_id,heure_debut_hc1,heure_fin_hc1,heure_debut_hc2,heure_fin_hc2').eq('user_id', user.id).not('conso_profil','is',null).order('created_at').limit(1).maybeSingle(),
       sb.from('tarifs_electricite').select('*').order('nom'),
     ]).then(async ([{ data: siteData }, { data: tariffs }]) => {
       const site = Array.isArray(siteData) ? siteData[0] : siteData;
@@ -2885,7 +2895,21 @@ function SimulationsScreen({ onACC, onBox, onSolar, onOptimisation, onBack, user
           if (bSav > 0) setBoxSaving(bSav);
           const accSavEst = (() => { let k=0; for(let m=1;m<=12;m++) for(let d=1;d<=PROF_DAYS[m-1];d++) for(let h=9;h<18;h++) k+=(site.conso_profil[profIdx(m,d,h)]||0)/1000; return Math.max(0,Math.round(k*((site.tarif_id?tariffs.find(t=>t.id===site.tarif_id)?.prix_hp||0.24:0.24)-0.11))); })();
           const adjBillSolar = Math.max(0, curBill - (saving||0) - accSavEst);
-          setSolarSaving(Math.round(adjBillSolar * 0.70));
+          // Calcul réel des économies solaires (si profil de prod disponible)
+          if (site.profil_production_id && site.conso_profil) {
+            const { data: pp } = await sb.from('profils_production').select('profil').eq('id', site.profil_production_id).single();
+            if (pp?.profil) {
+              const bal = computeEnergyBalance(site.conso_profil, pp.profil, 6, 3000, 10, 10, 5, 10, 0);
+              const autoKwh = bal.monthly.reduce((s,m) => s + m.on_site + m.via_bat + m.via_therm, 0);
+              const prixMoyen = kwh_total > 0 ? Math.max(0, (curBill - (curTariff?.abo_annuel||0)) / kwh_total) : 0.18;
+              const realSav = Math.round(autoKwh * prixMoyen);
+              setSolarSaving(realSav > 0 ? realSav : Math.round(adjBillSolar * 0.70));
+            } else {
+              setSolarSaving(Math.round(adjBillSolar * 0.70));
+            }
+          } else {
+            setSolarSaving(Math.round(adjBillSolar * 0.70));
+          }
         }
       }
 
@@ -4544,17 +4568,26 @@ function SolarSimScreen({ user, userProfile, onBack, onPanier, onCartUpdate }) {
   const [isDynamic,    setIsDynamic]    = useState(false);
   const [chosen,       setChosen]       = useState(() => localStorage.getItem('starvolt_solar_chosen') || null);
   const [justConfirmed,setJustConfirmed]= useState(false);
-  const hasBox = !!localStorage.getItem('starvolt_box_chosen');
+  // Params installation (modifiables)
+  const [pvKwc,    setPvKwc]    = useState('6');
+  const [batKwh,   setBatKwh]   = useState('10');
+  const [thermKwh, setThermKwh] = useState('10');
+  // Données pour calcul réel
+  const [siteRef,    setSiteRef]    = useState(null);  // {conso_profil, currentBill, curTariff, site}
+  const [prodData,   setProdData]   = useState(null);
+  const [globalVars, setGlobalVars] = useState(null);
+  const [realSaving, setRealSaving] = useState(null);
+  const [autoPct,    setAutoPct]    = useState(null);
 
   useEffect(() => {
     const siteId = localStorage.getItem('starvolt_active_site_id');
     if (!siteId) { setLoading(false); return; }
     Promise.all([
-      sb.from('sites').select('id,conso_profil,tarif_id,heure_debut_hc1,heure_fin_hc1,heure_debut_hc2,heure_fin_hc2').eq('id', siteId).maybeSingle(),
+      sb.from('sites').select('id,conso_profil,tarif_id,profil_production_id,heure_debut_hc1,heure_fin_hc1,heure_debut_hc2,heure_fin_hc2').eq('id', siteId).maybeSingle(),
       sb.from('tarifs_electricite').select('*'),
       sb.rpc('get_spot_json'),
       sb.from('parametres_nationaux').select('*').eq('id', 1).maybeSingle(),
-    ]).then(([{ data: site }, { data: tariffs }, { data: spotRows }, { data: nat }]) => {
+    ]).then(async ([{ data: site }, { data: tariffs }, { data: spotRows }, { data: nat }]) => {
       if (!site?.conso_profil) { setLoading(false); return; }
       const curTariff = site.tarif_id ? (tariffs || []).find(t => t.id === site.tarif_id) : null;
       const { kwh_hc, kwh_hp } = calcHcHp(site.conso_profil, site);
@@ -4571,7 +4604,6 @@ function SolarSimScreen({ user, userProfile, onBack, onPanier, onCartUpdate }) {
       }
       if (!bill && kwh_total > 0) bill = Math.round(kwh_total * 0.18);
       const roundedBill = bill ? Math.round(bill) : null;
-      // Facture ajustée = facture - économies déjà obtenues (optimisation + ACC)
       const optiSavLS = parseInt(localStorage.getItem('starvolt_optimisation_saving')||'0');
       let accSavComp = 0;
       if (site.conso_profil) {
@@ -4582,23 +4614,54 @@ function SolarSimScreen({ user, userProfile, onBack, onPanier, onCartUpdate }) {
       const adj = roundedBill ? Math.max(0, roundedBill - optiSavLS - accSavComp) : null;
       setCurrentBill(roundedBill);
       setAdjustedBill(adj || roundedBill);
+      setGlobalVars(nat);
+      setSiteRef({ conso_profil: site.conso_profil, currentBill: roundedBill, curTariff, site, kwh_total, kwh_hc, kwh_hp });
+      // Charger le profil de production
+      if (site.profil_production_id) {
+        const { data: pp } = await sb.from('profils_production').select('profil').eq('id', site.profil_production_id).single();
+        if (pp?.profil) setProdData(pp.profil);
+      }
       setLoading(false);
     });
   }, []);
 
-  // Gains solaires appliqués sur la facture ajustée (après opti + ACC)
-  const solarOnlySaving = adjustedBill ? Math.round(adjustedBill * 0.50) : null;
-  const solarBoxSaving  = adjustedBill ? Math.round(adjustedBill * 0.70) : null;
+  // Calcul réel des économies solaires heure par heure
+  useEffect(() => {
+    if (!siteRef?.conso_profil || !prodData) return;
+    const gv = globalVars || {};
+    const ratioBat   = (gv.ratio_puissance_stockage              ?? 50) / 100;
+    const ratioTherm = (gv.ratio_puissance_stockage_thermique    ?? 50) / 100;
+    const pBat   = gv.pertes_batterie   ?? 10;
+    const pTherm = gv.pertes_thermique  ?? 0;
+    const kw  = parseFloat(pvKwc)   || 0;
+    const bk  = parseFloat(batKwh)  || 0;
+    const tk  = parseFloat(thermKwh)|| 0;
+    const bal = computeEnergyBalance(
+      siteRef.conso_profil, prodData, kw,
+      bk * ratioBat  * 1000, bk, pBat,
+      tk * ratioTherm,       tk, pTherm
+    );
+    const autoKwh = bal.monthly.reduce((s,m) => s + m.on_site + m.via_bat + m.via_therm, 0);
+    const gridBuy = bal.monthly.reduce((s,m) => s + m.grid_buy, 0);
+    const totalKwh = autoKwh + gridBuy;
+    const { kwh_total, currentBill, curTariff } = siteRef;
+    const prixMoyen = kwh_total > 0 && currentBill && curTariff && !curTariff.tarif_dynamique
+      ? Math.max(0, (currentBill - (curTariff.abo_annuel || 0)) / kwh_total)
+      : 0.18;
+    const saving = Math.round(autoKwh * prixMoyen);
+    setRealSaving(saving > 0 ? saving : null);
+    setAutoPct(totalKwh > 0 ? Math.round(autoKwh / totalKwh * 100) : 0);
+  }, [pvKwc, batKwh, thermKwh, siteRef, prodData, globalVars]);
+
+  // Gains solaires (fallback %-based si pas de profil prod)
+  const solarBoxSaving = adjustedBill ? Math.round(adjustedBill * 0.70) : null;
+  const finalSolarSaving = realSaving ?? solarBoxSaving;
+
   // Gains box (rappel)
   const shiftPct  = isDynamic ? 0.20 : 0.10;
   const shiftGain = currentBill ? Math.round(currentBill * shiftPct) : null;
-  const boxTotal  = 140 + (shiftGain || 0);
-
-  const effectiveChoice = chosen || (hasBox ? 'solar_box' : null);
-  const finalSolarSaving = effectiveChoice === 'solar_box' ? solarBoxSaving : solarOnlySaving;
 
   if (justConfirmed) {
-    const withBox = chosen === 'solar_box';
     return (
       <>
       <div className="screen fade-in">
@@ -4606,7 +4669,7 @@ function SolarSimScreen({ user, userProfile, onBack, onPanier, onCartUpdate }) {
         <div style={{ textAlign:'center', marginBottom:16 }}>
           <div style={{ fontSize:38, marginBottom:4 }}>☀️</div>
           <div style={{ fontSize:22, fontWeight:900, color:'white', lineHeight:1.2 }}>
-            {withBox ? 'Solaire + Box activés !' : 'Projet solaire lancé !'}
+            Solaire + Box activés !
           </div>
           <div style={{ fontSize:13, color:'rgba(255,255,255,.5)', marginTop:6 }}>
             Un conseiller Starvolt vous contacte sous 48h pour l'étude personnalisée.
@@ -4628,15 +4691,13 @@ function SolarSimScreen({ user, userProfile, onBack, onPanier, onCartUpdate }) {
                 <div style={{ fontSize:36, fontWeight:900, color:'#7dd940', lineHeight:1 }}>
                   {currentBill && finalSolarSaving ? (currentBill - finalSolarSaving).toLocaleString('fr-FR') : '—'} €
                 </div>
-                <div style={{ fontSize:10, color:'rgba(255,255,255,.35)', marginTop:3 }}>APRÈS SOLAIRE{withBox ? ' + BOX' : ''}</div>
+                <div style={{ fontSize:10, color:'rgba(255,255,255,.35)', marginTop:3 }}>APRÈS SOLAIRE + BOX</div>
               </div>
             </div>
-            <div style={{ background:'rgba(255,255,255,.05)', borderRadius:8, padding:'10px 12px', marginBottom: withBox ? 10 : 0 }}>
-              <div style={{ fontSize:11, color:'rgba(255,255,255,.5)', marginBottom:2 }}>Économies grâce au solaire</div>
+            <div style={{ background:'rgba(255,255,255,.05)', borderRadius:8, padding:'10px 12px' }}>
+              <div style={{ fontSize:11, color:'rgba(255,255,255,.5)', marginBottom:2 }}>Économies grâce au solaire + Box</div>
               <div style={{ fontSize:24, fontWeight:900, color:'#7dd940' }}>-{finalSolarSaving?.toLocaleString('fr-FR')} €/an</div>
-              <div style={{ fontSize:10, color:'rgba(255,255,255,.35)', marginTop:2 }}>
-                {withBox ? '-70% de votre facture restante grâce au solaire + batterie + Box Comwatt' : '-50% de votre facture restante grâce aux panneaux solaires et à la batterie'}
-              </div>
+              {autoPct !== null && <div style={{ fontSize:10, color:'rgba(255,255,255,.35)', marginTop:2 }}>{autoPct}% d'autoproduction · solaire + batterie + Box Comwatt</div>}
             </div>
           </div>
         )}
@@ -4660,12 +4721,12 @@ function SolarSimScreen({ user, userProfile, onBack, onPanier, onCartUpdate }) {
       <div className="screen fade-in">
 
         {/* ── 1. Titre ── */}
-        <div style={{ marginBottom:20, marginTop:4 }}>
+        <div style={{ marginBottom:16, marginTop:4 }}>
           <div style={{ fontSize:9, letterSpacing:'.8px', color:'rgba(125,217,64,.85)', fontWeight:700, textTransform:'uppercase', marginBottom:6 }}>Simulation</div>
           <div style={{ fontSize:20, fontWeight:900, color:'white', lineHeight:1.2 }}>
             Gagnez{' '}
-            {solarBoxSaving
-              ? <span className="accent">{solarBoxSaving.toLocaleString('fr-FR')} €/an</span>
+            {finalSolarSaving
+              ? <span className="accent">{finalSolarSaving.toLocaleString('fr-FR')} €/an</span>
               : <span className="accent">jusqu'à 70%</span>
             }{' '}
             grâce au solaire et aux batteries Comwatt
@@ -4676,7 +4737,36 @@ function SolarSimScreen({ user, userProfile, onBack, onPanier, onCartUpdate }) {
           <div style={{ textAlign:'center', padding:40 }}><div className="spinner" style={{ margin:'0 auto' }}/></div>
         ) : (<>
 
-          {/* ── 2. Énergie potagère ── */}
+          {/* ── 2. Paramètres installation (kWc, bat, therm) ── */}
+          <div className="card" style={{ padding:'12px 14px', marginBottom:10 }}>
+            <div style={{ fontSize:10, color:'rgba(255,255,255,.4)', fontWeight:700, letterSpacing:'.5px', marginBottom:8 }}>PERSONNALISEZ VOTRE INSTALLATION</div>
+            <div style={{ display:'flex', gap:8, flexWrap:'wrap' }}>
+              <div style={{ flex:'1 1 80px' }}>
+                <div style={{ fontSize:10, color:'rgba(255,255,255,.4)', fontWeight:700, marginBottom:4 }}>Panneaux (kWc)</div>
+                <StepInput compact value={pvKwc} onChange={setPvKwc} step={0.5} min={0} placeholder="6"/>
+              </div>
+              <div style={{ flex:'1 1 80px' }}>
+                <div style={{ fontSize:10, color:'rgba(255,255,255,.4)', fontWeight:700, marginBottom:4 }}>Batterie (kWh)</div>
+                <StepInput compact value={batKwh} onChange={setBatKwh} step={0.5} min={0} placeholder="10"/>
+              </div>
+              <div style={{ flex:'1 1 80px' }}>
+                <div style={{ fontSize:10, color:'rgba(255,255,255,.4)', fontWeight:700, marginBottom:4 }}>Thermique (kWh)</div>
+                <StepInput compact value={thermKwh} onChange={setThermKwh} step={0.5} min={0} placeholder="10"/>
+              </div>
+            </div>
+            {realSaving !== null && (
+              <div style={{ marginTop:10, paddingTop:10, borderTop:'1px solid rgba(255,255,255,.08)', display:'flex', alignItems:'baseline', gap:10, flexWrap:'wrap' }}>
+                <div style={{ fontSize:24, fontWeight:900, color:'#7dd940' }}>-{realSaving.toLocaleString('fr-FR')} €/an</div>
+                {autoPct !== null && <div style={{ fontSize:13, color:'rgba(255,255,255,.45)', fontWeight:600 }}>{autoPct}% d'autoproduction</div>}
+                {currentBill && realSaving && <div style={{ fontSize:12, color:'rgba(255,255,255,.3)' }}>-{Math.round(realSaving/currentBill*100)}% de facture</div>}
+              </div>
+            )}
+            {!prodData && !loading && (
+              <div style={{ marginTop:8, fontSize:11, color:'rgba(255,200,80,.6)' }}>⚠ Importez votre conso dans Mon site pour un calcul personnalisé</div>
+            )}
+          </div>
+
+          {/* ── 3. Énergie potagère ── */}
           <div className="card" style={{ padding:'18px 16px', marginBottom:12 }}>
             <div style={{ display:'flex', alignItems:'center', gap:16 }}>
               <img src="/energie-potagere.png" alt="Énergie potagère" style={{ width:64, height:64, flexShrink:0, filter:'brightness(0) invert(1)', objectFit:'contain' }}/>
@@ -4691,29 +4781,7 @@ function SolarSimScreen({ user, userProfile, onBack, onPanier, onCartUpdate }) {
             </div>
           </div>
 
-          {/* ── 3. Panneaux solaires + batterie (-50%) ── */}
-          <div className="card" style={{ padding:'18px 16px', marginBottom:12, border:'1px solid rgba(255,215,0,.35)' }}>
-            <div style={{ display:'flex', alignItems:'flex-start', gap:14 }}>
-              <div style={{ display:'flex', flexDirection:'column', alignItems:'center', gap:4, flexShrink:0 }}>
-                <img src="/maison.png" alt="Solaire" style={{ width:40, height:40, filter:'brightness(0) invert(1)', objectFit:'contain' }}/>
-                <img src="/batterie.png" alt="Batterie" style={{ width:34, height:34, filter:'brightness(0) invert(1)', objectFit:'contain' }}/>
-              </div>
-              <div>
-                <div style={{ fontWeight:900, fontSize:17, color:'white', marginBottom:6 }}>
-                  Gagnez{' '}
-                  <span style={{color:'#fbbf24'}}>
-                    {solarOnlySaving !== null ? `${solarOnlySaving.toLocaleString('fr-FR')} €` : '50%'}
-                  </span>{' '}
-                  avec des panneaux solaires et une batterie
-                </div>
-                <div style={{ fontSize:14, color:'rgba(255,255,255,.65)', lineHeight:1.55 }}>
-                  Les panneaux solaires associés à une batterie couvrent jusqu'à <strong style={{color:'white'}}>50% de votre facture restante</strong>. L'énergie produite est autoconsommée ou stockée pour le soir.
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* ── 4. Solaire + batterie + Box Comwatt (-80%) ── */}
+          {/* ── 4. Solaire + batterie + Box Comwatt ── */}
           <div className="card" style={{ padding:'18px 16px', marginBottom:12, border:'1.5px solid rgba(125,217,64,.4)' }}>
             <div style={{ display:'flex', alignItems:'flex-start', gap:14 }}>
               <div style={{ display:'flex', flexDirection:'column', alignItems:'center', gap:4, flexShrink:0 }}>
@@ -4725,18 +4793,13 @@ function SolarSimScreen({ user, userProfile, onBack, onPanier, onCartUpdate }) {
                 <div style={{ fontWeight:900, fontSize:17, color:'white', marginBottom:6 }}>
                   Gagnez{' '}
                   <span style={{color:'#7dd940'}}>
-                    {solarBoxSaving !== null ? `${solarBoxSaving.toLocaleString('fr-FR')} €` : '70%'}
+                    {finalSolarSaving !== null ? `${finalSolarSaving.toLocaleString('fr-FR')} €` : 'jusqu\'à 70%'}
                   </span>{' '}
                   avec solaire + batterie + Box Comwatt
                 </div>
                 <div style={{ fontSize:14, color:'rgba(255,255,255,.65)', lineHeight:1.55 }}>
-                  La Box Comwatt orchestre votre installation : flexibilité réseau, autoconsommation collective, optimisation tarifaire. Ensemble, ils réduisent votre facture de <strong style={{color:'white'}}>70%</strong>.
+                  La Box Comwatt orchestre votre installation : flexibilité réseau, autoconsommation collective, optimisation tarifaire. Ensemble, ils réduisent significativement votre facture.
                 </div>
-                {hasBox && (
-                  <div style={{ marginTop:10, paddingTop:10, borderTop:'1px solid rgba(125,217,64,.2)', fontSize:13, color:'rgba(125,217,64,.85)', fontWeight:700 }}>
-                    ✦ Vous avez déjà une Box — vos gains seront maximisés automatiquement.
-                  </div>
-                )}
               </div>
             </div>
           </div>
@@ -4745,27 +4808,14 @@ function SolarSimScreen({ user, userProfile, onBack, onPanier, onCartUpdate }) {
       </div>
 
       {!loading && (
-        hasBox ? (
-          <StickyFooter onBack={onBack}>
-            {chosen ? (
-            <button className="btn btn-yes" onClick={onPanier}>🛒 Voir le panier →</button>
-          ) : (
-            <button className="btn btn-yes" onClick={() => { localStorage.setItem('starvolt_solar_chosen','solar_box'); if(solarBoxSaving) localStorage.setItem('starvolt_solar_saving',String(solarBoxSaving)); localStorage.removeItem('starvolt_box_chosen'); localStorage.removeItem('starvolt_box_saving'); setChosen('solar_box'); setJustConfirmed(true); if(onCartUpdate) onCartUpdate(); }}>
-              ☀️ Je veux des panneaux solaires
-            </button>
-          )}
-          </StickyFooter>
-        ) : chosen ? (
+        chosen ? (
           <StickyFooter row onBack={onBack}>
             <button className="btn btn-yes" onClick={onPanier}>🛒 Voir le panier →</button>
           </StickyFooter>
         ) : (
-          <StickyFooter row onBack={onBack}>
-            <button className="btn btn-no" style={{fontSize:13, padding:'12px 8px'}} onClick={() => { localStorage.setItem('starvolt_solar_chosen','solar_only'); if(solarOnlySaving) localStorage.setItem('starvolt_solar_saving',String(solarOnlySaving)); localStorage.removeItem('starvolt_box_chosen'); localStorage.removeItem('starvolt_box_saving'); setChosen('solar_only'); setJustConfirmed(true); if(onCartUpdate) onCartUpdate(); }}>
-              ☀️ Solaire + batterie
-            </button>
-            <button className="btn btn-yes" style={{fontSize:13, padding:'12px 8px'}} onClick={() => { localStorage.setItem('starvolt_solar_chosen','solar_box'); if(solarBoxSaving) localStorage.setItem('starvolt_solar_saving',String(solarBoxSaving)); localStorage.removeItem('starvolt_box_chosen'); localStorage.removeItem('starvolt_box_saving'); setChosen('solar_box'); setJustConfirmed(true); if(onCartUpdate) onCartUpdate(); }}>
-              ☀️ + Box Comwatt
+          <StickyFooter onBack={onBack}>
+            <button className="btn btn-yes" onClick={() => { localStorage.setItem('starvolt_solar_chosen','solar_box'); if(solarBoxSaving) localStorage.setItem('starvolt_solar_saving',String(solarBoxSaving)); localStorage.removeItem('starvolt_box_chosen'); localStorage.removeItem('starvolt_box_saving'); setChosen('solar_box'); setJustConfirmed(true); if(onCartUpdate) onCartUpdate(); }}>
+              ☀️ Je veux des panneaux + batterie + Box
             </button>
           </StickyFooter>
         )
