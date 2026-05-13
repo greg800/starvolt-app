@@ -4736,6 +4736,7 @@ function SolarSimScreen({ user, userProfile, onBack, onPanier, onCartUpdate }) {
     const prixMoyen = kwh_total > 0 && currentBill ? currentBill / kwh_total : 0.18;
     const prixRachat = gv.prix_rachat_injection ?? 0.04;
     const saving = Math.round(autoKwh * prixMoyen + injKwh * prixRachat);
+    console.log('DEBUG SolarSim:', {autoKwh:Math.round(autoKwh), injKwh:Math.round(injKwh), gridBuy:Math.round(gridBuy), prixMoyen:prixMoyen.toFixed(4), prixRachat, kwh_total, currentBill, saving});
     setRealSaving(saving > 0 ? saving : null);
     setAutoPct(totalKwh > 0 ? Math.round(autoKwh / totalKwh * 100) : 0);
   }, [pvKwc, batKwh, thermKwh, siteRef, prodData, globalVars]);
