@@ -2469,10 +2469,13 @@ function MonSiteScreen({ user, userProfile, onBack }) {
 
   // Sync champs locaux quand on change de site
   useEffect(()=>{
-    setPvKwc(site?.puissance_pv_kwc>0?String(site.puissance_pv_kwc):'6');
-    setBatKwh(site?.batterie_capacite_kwh>0?String(site.batterie_capacite_kwh):'10');
+    // Lire les defaults depuis la page solaire (ce que l'utilisateur a configuré là-bas)
+    const solarDef=(()=>{try{return JSON.parse(localStorage.getItem('starvolt_solar_defaults'))||{};}catch{return{};}})();
+    const defPv=solarDef.pvKwc||'6', defBat=solarDef.batKwh||'10', defTherm=solarDef.thermKwh||'10';
+    setPvKwc(site?.puissance_pv_kwc>0?String(site.puissance_pv_kwc):defPv);
+    setBatKwh(site?.batterie_capacite_kwh>0?String(site.batterie_capacite_kwh):defBat);
     const lsGet=(k,def)=>{const v=localStorage.getItem(k);return v!==null&&v!==''&&Number(v)>0?v:def;};
-    setThermKwh(activeId?lsGet(`starvolt_therm_kwh_${activeId}`,'10'):'10');
+    setThermKwh(activeId?lsGet(`starvolt_therm_kwh_${activeId}`,defTherm):defTherm);
     setProdProfilId(site?.profil_production_id||'');
     setProdProfilData(null); setBalance(null);
   },[activeId]);
@@ -2517,18 +2520,20 @@ function MonSiteScreen({ user, userProfile, onBack }) {
   useEffect(()=>{
     if(!site?.conso_profil||!prodProfilData){setBalance(null);return;}
     const hasSolar=!!localStorage.getItem('starvolt_solar_chosen');
+    const hasBox=!!localStorage.getItem('starvolt_box_chosen');
+    const ratioTherm=(globalVars?.ratio_puissance_stockage_thermique??50)/100;
+    const pTherm=globalVars?.pertes_thermique??0;
+    const tk=parseFloat(thermKwh)||0;
     if(!hasSolar){
-      // Pas de solaire dans le panier : graphique tout gris (conso réseau pure)
-      setBalance(computeEnergyBalance(site.conso_profil,prodProfilData,0,0,0,0,0,0,0));
+      // Pas de solaire : calculer quand même le stockage thermique si box au panier
+      setBalance(computeEnergyBalance(site.conso_profil,prodProfilData,0,0,0,0,
+        hasBox?tk*ratioTherm:0, hasBox?tk:0, pTherm));
       return;
     }
     const kw=pvKwc===''?6:(parseFloat(pvKwc)||0);
     const ratioBat=(globalVars?.ratio_puissance_stockage??50)/100;
-    const ratioTherm=(globalVars?.ratio_puissance_stockage_thermique??50)/100;
     const pBat=globalVars?.pertes_batterie??10;
-    const pTherm=globalVars?.pertes_thermique??0;
     const bk=parseFloat(batKwh)||0;
-    const tk=parseFloat(thermKwh)||0;
     setBalance(computeEnergyBalance(
       site.conso_profil,prodProfilData,kw,
       bk*ratioBat*1000,  // batPowerW (W)
@@ -2719,6 +2724,7 @@ function MonSiteScreen({ user, userProfile, onBack }) {
                     fmt=v=>(v*scale).toFixed(unit==='MWh'?1:0)+' '+unit;
                   }
                   const hasSolar=!!localStorage.getItem('starvolt_solar_chosen');
+                  const hasBox=!!localStorage.getItem('starvolt_box_chosen');
                   return(<>
                     {/* ── Rangée 1 : PROFIL · kWc · Autoconso · Autoprod (si solaire au panier) ── */}
                     {hasSolar&&<div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
@@ -2761,10 +2767,10 @@ function MonSiteScreen({ user, userProfile, onBack }) {
                       )}
                     </div>}
 
-                    {/* ── Rangée 2 : Batterie · Thermique · Solaire · Achat · Injection ── */}
-                    {hasSolar&&<div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
-                      {/* Batterie chimique */}
-                      <div style={T}>
+                    {/* ── Rangée 2 : Batterie · Thermique · Box · Solaire · Achat · Injection ── */}
+                    {(hasSolar||hasBox)&&<div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
+                      {/* Batterie chimique — seulement si solaire */}
+                      {hasSolar&&<div style={T}>
                         <div style={{display:'flex',alignItems:'center',gap:5}}>
                           <svg width="14" height="14" viewBox="0 0 20 20" fill="none" style={{flexShrink:0}}>
                             <rect x="1" y="5" width="15" height="10" rx="2" stroke="white" strokeWidth="1.5"/>
@@ -2777,12 +2783,12 @@ function MonSiteScreen({ user, userProfile, onBack }) {
                           <StepInput compact value={batKwh} onChange={setBatKwh}
                             onBlur={()=>{const v=parseFloat(batKwh);updateSite({batterie_capacite_kwh:isNaN(v)?null:v});}}
                             step={0.5} min={0} placeholder="10"/></div>
-                      </div>
-                      {/* Stockage thermique */}
-                      {localStorage.getItem('starvolt_box_chosen')&&(
+                      </div>}
+                      {/* Stockage thermique — si box au panier */}
+                      {hasBox&&(
                         <div style={{...T,background:'rgba(255,160,50,.06)',border:'1px solid rgba(255,160,50,.3)'}}>
                           <div style={{display:'flex',alignItems:'center',gap:5}}>
-                            <img src="/comwatt-box.png" style={{width:14,height:14,objectFit:'contain',mixBlendMode:'screen',flexShrink:0}} onError={e=>e.target.style.display='none'}/>
+                            <span style={{fontSize:14}}>🌡️</span>
                             <span style={{fontSize:13,fontWeight:800,color:'white'}}>Stockage thermique</span>
                           </div>
                           <div><div style={LBL}>Capacité kWh</div>
@@ -2791,8 +2797,21 @@ function MonSiteScreen({ user, userProfile, onBack }) {
                               onBlur={()=>{}} step={0.5} min={0} placeholder="10"/></div>
                         </div>
                       )}
-                      {/* Tuiles énergie */}
-                      {balance&&[
+                      {/* Box Comwatt — si solar_box choisi */}
+                      {localStorage.getItem('starvolt_solar_chosen')==='solar_box'&&(
+                        <div style={{...T,background:'rgba(125,217,64,.05)',border:'1px solid rgba(125,217,64,.25)'}}>
+                          <div style={{display:'flex',alignItems:'center',gap:5,marginBottom:4}}>
+                            <img src="/comwatt-box.png" style={{width:14,height:14,objectFit:'contain',mixBlendMode:'screen',flexShrink:0}} onError={e=>e.target.style.display='none'}/>
+                            <span style={{fontSize:13,fontWeight:800,color:'#7dd940'}}>Box Comwatt</span>
+                          </div>
+                          <div style={{fontSize:10,color:'rgba(255,255,255,.45)',lineHeight:1.4}}>
+                            {localStorage.getItem('starvolt_box_chosen')==='free'?'Incluse · cagnotte 3 ans':'Incluse dans votre offre'}
+                          </div>
+                          <div style={{fontSize:10,color:'rgba(125,217,64,.55)',marginTop:3}}>Pilotage auto · Thermique · Injection</div>
+                        </div>
+                      )}
+                      {/* Tuiles énergie — seulement si solaire */}
+                      {hasSolar&&balance&&[
                         {icon:'☀️',color:'#f0a050',bg:'rgba(240,160,80,.08)',label:'Solaire sur place',value:fmt(autoconso)},
                         {icon:'🔌',color:'white',bg:'rgba(200,200,200,.06)',label:'Achat réseau',value:fmt(achat)},
                         {icon:'⬆️',color:'#f0e86a',bg:'rgba(240,232,106,.06)',label:'Injection réseau',value:fmt(injection)},
@@ -4594,6 +4613,12 @@ function SolarSimScreen({ user, userProfile, onBack, onPanier, onCartUpdate }) {
   const [pvKwc,    setPvKwc]    = useState('6');
   const [batKwh,   setBatKwh]   = useState('10');
   const [thermKwh, setThermKwh] = useState('10');
+
+  // Persister les valeurs dans localStorage → Ma prod peut les copier comme defaults
+  useEffect(()=>{
+    localStorage.setItem('starvolt_solar_defaults',JSON.stringify({pvKwc,batKwh,thermKwh}));
+  },[pvKwc,batKwh,thermKwh]);
+
   // Données pour calcul réel
   const [siteRef,    setSiteRef]    = useState(null);  // {conso_profil, currentBill, curTariff, site}
   const [prodData,   setProdData]   = useState(null);
