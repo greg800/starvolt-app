@@ -2732,6 +2732,21 @@ function MonSiteScreen({ user, userProfile, onBack }) {
                     period=chartLevel==='hour'?`${chartDay}/${chartMonth}`:chartLevel==='day'?`Mois ${chartMonth}`:'Année';
                     fmt=v=>(v*scale).toFixed(unit==='MWh'?1:0)+' '+unit;
                   }
+                  // Réduction de facture annuelle (toujours calculé depuis balance.monthly, indépendant du filtre période)
+                  let reductionFacturePct=null;
+                  if(balance&&site?.conso_profil){
+                    const annAuto=balance.monthly.reduce((s,m)=>s+m.on_site+m.via_bat+m.via_therm,0);
+                    const annInj=balance.monthly.reduce((s,m)=>s+m.injection,0);
+                    const curT=tariffs.find(t=>t.id===site.tarif_id);
+                    const {kwh_hc:_hc,kwh_hp:_hp}=calcHcHp(site.conso_profil,site);
+                    const _tot=_hc+_hp;
+                    const _bill=curT&&!curT.tarif_dynamique?(calcTariffCost(curT,_hc,_hp)?.total||null):null;
+                    if(_bill&&_tot>0){
+                      const _pm=_bill/_tot;
+                      const _pr=globalVars?.prix_rachat_injection??0.04;
+                      reductionFacturePct=Math.min(100,Math.round((annAuto*_pm+annInj*_pr)/_bill*100));
+                    }
+                  }
                   const hasSolar=!!localStorage.getItem('starvolt_solar_chosen');
                   // hasBox : box choisie seule OU incluse dans solar_box
                   const hasBox=!!localStorage.getItem('starvolt_box_chosen')||localStorage.getItem('starvolt_solar_chosen')==='solar_box';
@@ -2757,10 +2772,10 @@ function MonSiteScreen({ user, userProfile, onBack }) {
                           onBlur={()=>{const v=parseFloat(pvKwc);updateSite({puissance_pv_kwc:isNaN(v)?null:v});}}
                           step={0.5} min={0} placeholder="6"/>
                       </div>
-                      {/* Autoconso + Autoprod */}
+                      {/* Autoconso + Réduction facture */}
                       {balance&&[
                         {label:'Autoconso',value:tauxAC,desc:'Prod consommée sur place',color:'#f0a050'},
-                        {label:'Autoprod',value:tauxAP,desc:'Conso couverte par prod',color:'#7dd940'},
+                        {label:'Réduction',value:reductionFacturePct??tauxAP,desc:'Baisse de facture annuelle',color:'#7dd940'},
                       ].map(({label,value,desc,color})=>(
                         <div key={label} style={{...T,alignItems:'center',justifyContent:'center',textAlign:'center'}}>
                           <div style={LBL}>{label.toUpperCase()}</div>
@@ -2936,7 +2951,7 @@ function SimulationsScreen({ onACC, onBox, onSolar, onOptimisation, onBack, user
                 bk*ratioBat*1000, bk, pBat, tk*ratioTherm, tk, pTherm);
               const autoKwh = bal.monthly.reduce((s,m) => s + m.on_site + m.via_bat + m.via_therm, 0);
               const injKwh  = bal.monthly.reduce((s,m) => s + m.injection, 0);
-              const prixMoyen = kwh_total > 0 ? Math.max(0, (curBill - (curTariff?.abo_annuel||0)) / kwh_total) : 0.18;
+              const prixMoyen = kwh_total > 0 && curBill ? curBill / kwh_total : 0.18;
               const prixRachat = nat?.prix_rachat_injection ?? 0.04;
               const realSav = Math.round(autoKwh * prixMoyen + injKwh * prixRachat);
               setSolarSaving(realSav > 0 ? realSav : Math.round(adjBillSolar * 0.70));
@@ -4702,10 +4717,9 @@ function SolarSimScreen({ user, userProfile, onBack, onPanier, onCartUpdate }) {
     const gridBuy = bal.monthly.reduce((s,m) => s + m.grid_buy, 0);
     const totalKwh = autoKwh + gridBuy;
     const injKwh = bal.monthly.reduce((s,m) => s + m.injection, 0);
-    const { kwh_total, currentBill, curTariff } = siteRef;
-    const prixMoyen = kwh_total > 0 && currentBill && curTariff && !curTariff.tarif_dynamique
-      ? Math.max(0, (currentBill - (curTariff.abo_annuel || 0)) / kwh_total)
-      : 0.18;
+    const { kwh_total, currentBill } = siteRef;
+    // Prix moyen tout compris (facture / kWh, abonnement amorti dans le prix unitaire)
+    const prixMoyen = kwh_total > 0 && currentBill ? currentBill / kwh_total : 0.18;
     const prixRachat = gv.prix_rachat_injection ?? 0.04;
     const saving = Math.round(autoKwh * prixMoyen + injKwh * prixRachat);
     setRealSaving(saving > 0 ? saving : null);
@@ -4814,10 +4828,12 @@ function SolarSimScreen({ user, userProfile, onBack, onPanier, onCartUpdate }) {
               </div>
             </div>
             {realSaving !== null && (
-              <div style={{ marginTop:10, paddingTop:10, borderTop:'1px solid rgba(255,255,255,.08)', display:'flex', alignItems:'baseline', gap:10, flexWrap:'wrap' }}>
-                <div style={{ fontSize:24, fontWeight:900, color:'#7dd940' }}>-{realSaving.toLocaleString('fr-FR')} €/an</div>
-                {autoPct !== null && <div style={{ fontSize:13, color:'rgba(255,255,255,.45)', fontWeight:600 }}>{autoPct}% d'autoproduction</div>}
-                {currentBill && realSaving && (()=>{const pct=Math.round(realSaving/currentBill*100);return(<div style={{fontSize:12,color:'rgba(255,255,255,.3)'}}>{pct<=100?`-${pct}% de facture`:'Facture couverte + surplus revendu'}</div>);})()}
+              <div style={{ marginTop:10, paddingTop:10, borderTop:'1px solid rgba(255,255,255,.08)' }}>
+                <div style={{ display:'flex', alignItems:'baseline', gap:10, flexWrap:'wrap', marginBottom:4 }}>
+                  <div style={{ fontSize:24, fontWeight:900, color:'#7dd940' }}>-{realSaving.toLocaleString('fr-FR')} €/an</div>
+                  {currentBill && (()=>{const pct=Math.min(100,Math.round(realSaving/currentBill*100));return(<div style={{fontSize:16,fontWeight:700,color:'#7dd940'}}>-{pct}% de facture</div>);})()}
+                </div>
+                {currentBill && <div style={{fontSize:12,color:'rgba(255,255,255,.35)'}}>Nouvelle facture estimée : {Math.max(0,currentBill-realSaving).toLocaleString('fr-FR')} €/an (vs {currentBill.toLocaleString('fr-FR')} €)</div>}
               </div>
             )}
             {!prodData && !loading && (
@@ -4988,9 +5004,9 @@ function PanierScreen({ user, onBack, onGoTo }) {
           boxSav = parseInt(localStorage.getItem('starvolt_box_saving')||'0');
           if (!boxSav) boxSav = Math.round(140 + bill * shiftPctBox);
         }
-        let solSav = parseInt(localStorage.getItem('starvolt_solar_saving')||'0');
+        // Solar savings : toujours recalculer depuis le bilan heure par heure (ignorer localStorage stale)
         const adjBillSolar = Math.max(0, bill - optSav - accSav);
-        if (!solSav) solSav = solarChoice === 'solar_box' ? Math.round(adjBillSolar * 0.70) : Math.round(adjBillSolar * 0.50);
+        let solSav = solarChoice === 'solar_box' ? Math.round(adjBillSolar * 0.70) : Math.round(adjBillSolar * 0.50);
         // Si solar_box choisi, la Box est comprise dans le 70% — ne pas compter ses économies en double
         const effectiveBoxSav = (solarChoice === 'solar_box') ? 0 : boxSav;
         setSavings({ optimisation: optSav, acc: accSav, box: effectiveBoxSav, solar: solSav });
