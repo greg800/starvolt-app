@@ -2427,12 +2427,8 @@ function MonSiteScreen({ user, userProfile, onBack }) {
   const[showDeleteConfirm,setShowDeleteConfirm]=useState(false);
   const[importingDemo,setImportingDemo]=useState(false);
   const[pvKwc,setPvKwc]=useState('6');
-  const[batW,setBatW]=useState('');
   const[batKwh,setBatKwh]=useState('');
-  const[batLoss,setBatLoss]=useState('10');
-  const[thermW,setThermW]=useState('');
   const[thermKwh,setThermKwh]=useState('');
-  const[thermLoss,setThermLoss]=useState('');
   const[prodProfilId,setProdProfilId]=useState('');
   const[prodProfilData,setProdProfilData]=useState(null);
   const[balance,setBalance]=useState(null);
@@ -2440,6 +2436,8 @@ function MonSiteScreen({ user, userProfile, onBack }) {
   const[chartLevel,setChartLevel]=useState('month');
   const[chartMonth,setChartMonth]=useState(null);
   const[chartDay,setChartDay]=useState(null);
+  const[globalVars,setGlobalVars]=useState(null);
+  const[isMobile,setIsMobile]=useState(window.innerWidth<640);
   const fileRef=useRef(null);
 
   const handleImportDemo=async()=>{
@@ -2472,14 +2470,10 @@ function MonSiteScreen({ user, userProfile, onBack }) {
   // Sync champs locaux quand on change de site
   useEffect(()=>{
     setPvKwc(site?.puissance_pv_kwc!=null?String(site.puissance_pv_kwc):'6');
-    setBatW(site?.batterie_puissance_w!=null?String(site.batterie_puissance_w/1000):'');
     setBatKwh(site?.batterie_capacite_kwh!=null?String(site.batterie_capacite_kwh):'');
-    const lsGet=(k,def)=>{const v=localStorage.getItem(k);return v!==null?v:def;};
     if(activeId){
-      setBatLoss(lsGet(`starvolt_bat_loss_${activeId}`,'10'));
-      setThermW(lsGet(`starvolt_therm_w_${activeId}`,''));
+      const lsGet=(k,def)=>{const v=localStorage.getItem(k);return v!==null?v:def;};
       setThermKwh(lsGet(`starvolt_therm_kwh_${activeId}`,''));
-      setThermLoss(lsGet(`starvolt_therm_loss_${activeId}`,'0'));
     }
     setProdProfilId(site?.profil_production_id||'');
     setProdProfilData(null); setBalance(null);
@@ -2525,10 +2519,20 @@ function MonSiteScreen({ user, userProfile, onBack }) {
   useEffect(()=>{
     if(!site?.conso_profil||!prodProfilData){setBalance(null);return;}
     const kw=pvKwc===''?6:(parseFloat(pvKwc)||0);
-    const bw=(parseFloat(batW)||0)*1000, bk=parseFloat(batKwh)||0, bl=parseFloat(batLoss)||0;
-    const tw=parseFloat(thermW)||0, tk=parseFloat(thermKwh)||0, tl=parseFloat(thermLoss)||0;
-    setBalance(computeEnergyBalance(site.conso_profil,prodProfilData,kw,bw,bk,bl,tw,tk,tl));
-  },[site?.conso_profil,prodProfilData,pvKwc,batW,batKwh,batLoss,thermW,thermKwh,thermLoss]);
+    const ratio=(globalVars?.ratio_puissance_stockage??50)/100;
+    const pBat=globalVars?.pertes_batterie??10;
+    const bk=parseFloat(batKwh)||0;
+    const tk=parseFloat(thermKwh)||0;
+    setBalance(computeEnergyBalance(
+      site.conso_profil,prodProfilData,kw,
+      bk*ratio*1000, // batPowerW (W)
+      bk,            // batCapKwh
+      pBat,          // batLossPct
+      tk*ratio,      // thermPowerKw (kW)
+      tk,            // thermCapKwh
+      0              // thermLossPct (toujours 0)
+    ));
+  },[site?.conso_profil,prodProfilData,pvKwc,batKwh,thermKwh,globalVars]);
 
   const updateSite=async(updates)=>{ await sb.from('sites').update(updates).eq('id',activeId); await load(); };
 
@@ -2554,6 +2558,15 @@ function MonSiteScreen({ user, userProfile, onBack }) {
     }catch(err){setImportMsg({type:'err',text:String(err)});}
     finally{setImporting(false);if(fileRef.current)fileRef.current.value='';}
   };
+
+  // Charger variables globales + listener mobile
+  useEffect(()=>{
+    sb.from('parametres_nationaux').select('ratio_puissance_stockage,pertes_batterie').eq('id',1).maybeSingle()
+      .then(({data})=>setGlobalVars(data));
+    const handler=()=>setIsMobile(window.innerWidth<640);
+    window.addEventListener('resize',handler);
+    return()=>window.removeEventListener('resize',handler);
+  },[]);
 
   if(sites===null)return(<><div className="screen fade-in"><div style={{textAlign:'center',padding:40,color:'rgba(255,255,255,.5)'}}>Chargement…</div></div><StickyFooter onBack={onBack}/></>);
 
@@ -2672,7 +2685,7 @@ function MonSiteScreen({ user, userProfile, onBack }) {
               </div>
               <div style={{padding:'10px 14px 12px',display:'flex',flexDirection:'column',gap:8}}>
                 {(()=>{
-                  const T={background:'rgba(255,255,255,.05)',border:'1px solid rgba(255,255,255,.1)',borderRadius:10,padding:'12px',display:'flex',flexDirection:'column',gap:6,flex:'1 1 130px'};
+                  const T={background:'rgba(255,255,255,.05)',border:'1px solid rgba(255,255,255,.1)',borderRadius:10,padding:isMobile?'6px 10px':'12px',display:'flex',flexDirection:'column',gap:isMobile?3:6,flex:'1 1 130px'};
                   const LBL={fontSize:13,color:'rgba(255,255,255,.65)',fontWeight:700,letterSpacing:'.3px'};
                   let pts=null,autoconso=0,achat=0,injection=0,prod=0,conso=0,tauxAC=0,tauxAP=0,unit='kWh',scale=1,period='Année',fmt=v=>v.toFixed(0)+' kWh';
                   if(balance){
@@ -2718,8 +2731,8 @@ function MonSiteScreen({ user, userProfile, onBack }) {
                       ].map(({label,value,desc,color})=>(
                         <div key={label} style={{...T,alignItems:'center',justifyContent:'center',textAlign:'center'}}>
                           <div style={LBL}>{label.toUpperCase()}</div>
-                          <div style={{fontSize:32,fontWeight:900,color,lineHeight:1.1}}>{value}<span style={{fontSize:14}}>%</span></div>
-                          <div style={{fontSize:13,color:'rgba(255,255,255,.45)'}}>{desc}</div>
+                          <div style={{fontSize:isMobile?22:32,fontWeight:900,color,lineHeight:1.1}}>{value}<span style={{fontSize:isMobile?11:14}}>%</span></div>
+                          {!isMobile&&<div style={{fontSize:13,color:'rgba(255,255,255,.45)'}}>{desc}</div>}
                         </div>
                       ))}
                       {/* Messages quand pas encore de bilan */}
@@ -2743,19 +2756,10 @@ function MonSiteScreen({ user, userProfile, onBack }) {
                           </svg>
                           <span style={{fontSize:13,fontWeight:800,color:'white'}}>Batterie chimique</span>
                         </div>
-                        <div><div style={LBL}>Puissance kW</div>
-                          <StepInput compact value={batW} onChange={setBatW}
-                            onBlur={()=>{const v=parseFloat(batW);updateSite({batterie_puissance_w:isNaN(v)?null:v*1000});}}
-                            step={0.5} min={0} placeholder="3"/></div>
                         <div><div style={LBL}>Capacité kWh</div>
                           <StepInput compact value={batKwh} onChange={setBatKwh}
                             onBlur={()=>{const v=parseFloat(batKwh);updateSite({batterie_capacite_kwh:isNaN(v)?null:v});}}
                             step={0.5} min={0} placeholder="10"/></div>
-                        <div><div style={LBL}>Pertes %</div>
-                          <input className="inp" type="number" min="0" max="50" step="1" placeholder="10" value={batLoss}
-                            onChange={e=>setBatLoss(e.target.value)}
-                            onBlur={()=>activeId&&localStorage.setItem(`starvolt_bat_loss_${activeId}`,batLoss)}
-                            style={{textAlign:'center',height:26,fontSize:13,padding:'0 4px',width:'100%'}}/></div>
                       </div>
                       {/* Stockage thermique */}
                       {localStorage.getItem('starvolt_box_chosen')&&(
@@ -2765,30 +2769,22 @@ function MonSiteScreen({ user, userProfile, onBack }) {
                             <span style={{fontSize:13,fontWeight:800,color:'white'}}>Stockage thermique</span>
                           </div>
                           <div style={{fontSize:13,color:'rgba(255,255,255,.6)'}}>🌡️ {localStorage.getItem('starvolt_box_chosen')==='free'?'Box gratuite':'Box 550€'}</div>
-                          <div><div style={LBL}>Puissance kW</div>
-                            <StepInput compact value={thermW}
-                              onChange={v=>{setThermW(v);activeId&&localStorage.setItem(`starvolt_therm_w_${activeId}`,v);}}
-                              onBlur={()=>{}} step={0.5} min={0} placeholder="5"/></div>
                           <div><div style={LBL}>Capacité kWh</div>
                             <StepInput compact value={thermKwh}
                               onChange={v=>{setThermKwh(v);activeId&&localStorage.setItem(`starvolt_therm_kwh_${activeId}`,v);}}
                               onBlur={()=>{}} step={0.5} min={0} placeholder="10"/></div>
-                          <div><div style={LBL}>Pertes %</div>
-                            <input className="inp" type="number" min="0" max="50" step="1" placeholder="0" value={thermLoss}
-                              onChange={e=>{setThermLoss(e.target.value);activeId&&localStorage.setItem(`starvolt_therm_loss_${activeId}`,e.target.value);}}
-                              style={{textAlign:'center',height:26,fontSize:13,padding:'0 4px',width:'100%'}}/></div>
                         </div>
                       )}
                       {/* Tuiles énergie */}
                       {balance&&[
-                        {icon:'☀️',color:'#f0a050',bg:'rgba(240,160,80,.08)',label:'Solaire ici',value:fmt(autoconso)},
+                        {icon:'☀️',color:'#f0a050',bg:'rgba(240,160,80,.08)',label:'Solaire sur place',value:fmt(autoconso)},
                         {icon:'🔌',color:'white',bg:'rgba(200,200,200,.06)',label:'Achat réseau',value:fmt(achat)},
                         {icon:'⬆️',color:'#f0e86a',bg:'rgba(240,232,106,.06)',label:'Injection réseau',value:fmt(injection)},
                       ].map(({icon,color,bg,label,value})=>(
                         <div key={label} style={{...T,background:bg,alignItems:'center',justifyContent:'center',textAlign:'center'}}>
-                          <span style={{fontSize:22}}>{icon}</span>
-                          <div style={{fontSize:13,color:'rgba(255,255,255,.7)',fontWeight:600}}>{label}</div>
-                          <div style={{fontSize:20,fontWeight:900,color}}>{value}</div>
+                          {!isMobile&&<span style={{fontSize:22}}>{icon}</span>}
+                          <div style={{fontSize:isMobile?11:13,color:'rgba(255,255,255,.7)',fontWeight:600}}>{label}</div>
+                          <div style={{fontSize:isMobile?16:20,fontWeight:900,color}}>{value}</div>
                         </div>
                       ))}
                     </div>
@@ -3677,6 +3673,166 @@ function SpotHeatmapCanvas({ spotAll, natParams, heatmapMode }) {
   );
 }
 
+// ─── GlobalVarsScreen ─────────────────────────
+function GlobalVarsScreen({ onBack }) {
+  const [loading,      setLoading]      = useState(true);
+  const [globalForm,   setGlobalForm]   = useState(null);
+  const [savingGlobal, setSavingGlobal] = useState(false);
+  const [saveGlobalMsg,setSaveGlobalMsg]= useState(null);
+
+  useEffect(() => {
+    sb.from('parametres_nationaux').select('*').eq('id',1).maybeSingle()
+      .then(({data}) => {
+        const n = data || {};
+        setGlobalForm({
+          ratio_puissance_stockage: n.ratio_puissance_stockage ?? 50,
+          pertes_batterie:          n.pertes_batterie          ?? 10,
+          turpe_hp_hiver:           n.turpe_hp_hiver           ?? '',
+          turpe_hc_hiver:           n.turpe_hc_hiver           ?? '',
+          turpe_hp_ete:             n.turpe_hp_ete             ?? '',
+          turpe_hc_ete:             n.turpe_hc_ete             ?? '',
+          accise:                   n.accise                   ?? '',
+          tva:                      n.tva                      ?? 20,
+          hc_debut1:                n.hc_debut1                ?? '',
+          hc_fin1:                  n.hc_fin1                  ?? '',
+          hc_debut2:                n.hc_debut2                ?? '',
+          hc_fin2:                  n.hc_fin2                  ?? '',
+          taux_inflation_electricite:   n.taux_inflation_electricite   ?? 4,
+          taux_inflation_electricite_2: n.taux_inflation_electricite_2 ?? 0,
+        });
+        setLoading(false);
+      });
+  }, []);
+
+  const saveGlobalParams = async () => {
+    setSavingGlobal(true); setSaveGlobalMsg(null);
+    const num  = v => v === '' ? null : parseFloat(v);
+    const intr = v => v === '' ? null : parseInt(v);
+    const { error } = await sb.from('parametres_nationaux').upsert({
+      id: 1,
+      ratio_puissance_stockage:     num(globalForm.ratio_puissance_stockage),
+      pertes_batterie:              num(globalForm.pertes_batterie),
+      turpe_hp_hiver:               num(globalForm.turpe_hp_hiver),
+      turpe_hc_hiver:               num(globalForm.turpe_hc_hiver),
+      turpe_hp_ete:                 num(globalForm.turpe_hp_ete),
+      turpe_hc_ete:                 num(globalForm.turpe_hc_ete),
+      accise:                       num(globalForm.accise),
+      tva:                          num(globalForm.tva),
+      hc_debut1:                    intr(globalForm.hc_debut1),
+      hc_fin1:                      intr(globalForm.hc_fin1),
+      hc_debut2:                    intr(globalForm.hc_debut2),
+      hc_fin2:                      intr(globalForm.hc_fin2),
+      taux_inflation_electricite:   num(globalForm.taux_inflation_electricite),
+      taux_inflation_electricite_2: num(globalForm.taux_inflation_electricite_2),
+      updated_at: new Date().toISOString(),
+    }, { onConflict: 'id' });
+    setSavingGlobal(false);
+    if (error) { setSaveGlobalMsg('Erreur : ' + error.message); return; }
+    setSaveGlobalMsg('✓ Variables enregistrées');
+  };
+
+  if (loading || !globalForm) return (
+    <><div className="screen fade-in"><div style={{textAlign:'center',padding:40}}><div className="spinner" style={{margin:'0 auto'}}/></div></div><StickyFooter onBack={onBack}/></>
+  );
+
+  const F = {fontSize:13,padding:'6px 8px'};
+  const SL = {fontSize:11,color:'rgba(255,217,64,.75)',fontWeight:700,marginBottom:6};
+  const FL = {fontSize:10,color:'rgba(255,255,255,.45)',fontWeight:700,marginBottom:2};
+
+  return (
+    <>
+    <div className="screen fade-in">
+      <div className="auth-header">
+        <div className="welcome-tag" style={{color:'#ffb340'}}>Administration</div>
+        <h1 className="welcome-title">Variables<br/><span className="accent">globales</span></h1>
+      </div>
+
+      <div className="card" style={{padding:'12px 14px',marginBottom:8}}>
+        {/* ── Hypothèses stockage ── */}
+        <div style={SL}>Hypothèses stockage</div>
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:6,marginBottom:6}}>
+          <div>
+            <div style={FL}>Ratio puissance / capacité (%)</div>
+            <input className="inp" type="number" step="5" min="0" max="100" placeholder="50"
+              value={String(globalForm.ratio_puissance_stockage)}
+              onChange={e=>setGlobalForm(p=>({...p,ratio_puissance_stockage:e.target.value}))}
+              style={F}/>
+            <div style={{fontSize:9,color:'rgba(255,255,255,.3)',marginTop:2}}>Ex : 10 kWh → puissance max 5 kW</div>
+          </div>
+          <div>
+            <div style={FL}>Pertes batterie chimique (%)</div>
+            <input className="inp" type="number" step="1" min="0" max="50" placeholder="10"
+              value={String(globalForm.pertes_batterie)}
+              onChange={e=>setGlobalForm(p=>({...p,pertes_batterie:e.target.value}))}
+              style={F}/>
+            <div style={{fontSize:9,color:'rgba(255,255,255,.3)',marginTop:2}}>Stockage thermique : 0 % (fixe)</div>
+          </div>
+        </div>
+
+        {/* ── TURPE ── */}
+        <div style={{...SL,marginTop:10}}>TURPE variable (c€/kWh) — 4 combinaisons</div>
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:6,marginBottom:10}}>
+          {[['HP Hiver','turpe_hp_hiver','ex: 1.47'],['HC Hiver','turpe_hc_hiver','ex: 0.89'],['HP Été (avr–oct)','turpe_hp_ete','ex: 0.86'],['HC Été','turpe_hc_ete','ex: 0.52']].map(([lbl,key,ph])=>(
+            <div key={key}>
+              <div style={FL}>{lbl}</div>
+              <input className="inp" type="number" step="0.01" placeholder={ph} value={String(globalForm[key])}
+                onChange={e=>setGlobalForm(p=>({...p,[key]:e.target.value}))} style={F}/>
+            </div>
+          ))}
+        </div>
+
+        {/* ── Accise + TVA ── */}
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:6,marginBottom:10}}>
+          <div>
+            <div style={FL}>Accise (c€/kWh)</div>
+            <input className="inp" type="number" step="0.001" placeholder="ex: 2.139" value={String(globalForm.accise)}
+              onChange={e=>setGlobalForm(p=>({...p,accise:e.target.value}))} style={F}/>
+          </div>
+          <div>
+            <div style={FL}>TVA (%)</div>
+            <input className="inp" type="number" step="0.1" placeholder="20" value={String(globalForm.tva)}
+              onChange={e=>setGlobalForm(p=>({...p,tva:e.target.value}))} style={F}/>
+          </div>
+        </div>
+
+        {/* ── Inflation ── */}
+        <div style={SL}>Hypothèses hausse prix électricité (%/an)</div>
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:6,marginBottom:10}}>
+          <div>
+            <div style={FL}>Années 1 à 10 (%/an)</div>
+            <input className="inp" type="number" step="0.5" min="0" max="20" placeholder="4" value={String(globalForm.taux_inflation_electricite)}
+              onChange={e=>setGlobalForm(p=>({...p,taux_inflation_electricite:e.target.value}))} style={F}/>
+          </div>
+          <div>
+            <div style={FL}>Années 11 à 25 (%/an)</div>
+            <input className="inp" type="number" step="0.5" min="0" max="20" placeholder="0" value={String(globalForm.taux_inflation_electricite_2)}
+              onChange={e=>setGlobalForm(p=>({...p,taux_inflation_electricite_2:e.target.value}))} style={F}/>
+          </div>
+        </div>
+
+        {/* ── Plages HC ── */}
+        <div style={SL}>Plages HC (pour heatmap TTC)</div>
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr 1fr',gap:6,marginBottom:10}}>
+          {[['HC1 début h','hc_debut1','22'],['HC1 fin h','hc_fin1','6'],['HC2 début h','hc_debut2',''],['HC2 fin h','hc_fin2','']].map(([lbl,key,ph])=>(
+            <div key={key}>
+              <div style={FL}>{lbl}</div>
+              <input className="inp" type="number" min="0" max="23" placeholder={ph} value={String(globalForm[key])}
+                onChange={e=>setGlobalForm(p=>({...p,[key]:e.target.value}))} style={F}/>
+            </div>
+          ))}
+        </div>
+
+        {saveGlobalMsg && <div style={{fontSize:11,fontWeight:700,color:saveGlobalMsg.startsWith('✓')?'var(--green)':'#ff9090',marginBottom:6}}>{saveGlobalMsg}</div>}
+        <button onClick={saveGlobalParams} disabled={savingGlobal} style={{width:'100%',background:'rgba(125,217,64,.2)',border:'1px solid rgba(125,217,64,.4)',color:'#7dd940',fontFamily:'var(--font)',fontSize:12,fontWeight:700,borderRadius:8,padding:'8px',cursor:'pointer'}}>
+          {savingGlobal ? 'Enregistrement…' : '✓ Enregistrer'}
+        </button>
+      </div>
+    </div>
+    <StickyFooter onBack={onBack}/>
+    </>
+  );
+}
+
 // ─── SpotPricesScreen ─────────────────────────
 function SpotPricesScreen({ onBack }) {
   const [meta,       setMeta]       = useState(null);
@@ -3685,9 +3841,6 @@ function SpotPricesScreen({ onBack }) {
   const [importing,  setImporting]  = useState(false);
   const [importMsg,  setImportMsg]  = useState(null);
   const [natParams,  setNatParams]  = useState(null);
-  const [natForm,    setNatForm]    = useState(null);   // null = collapsed
-  const [savingNat,  setSavingNat]  = useState(false);
-  const [saveNatMsg, setSaveNatMsg] = useState(null);
   const [heatmapMode,setHeatmapMode]= useState('spot'); // 'spot' | 'ttc'
   const fileRef = useRef(null);
 
@@ -3702,52 +3855,6 @@ function SpotPricesScreen({ onBack }) {
     setNatParams(nat || null);
     setLoading(false);
   }, []);
-
-  const openNatForm = () => {
-    const n = natParams || {};
-    setNatForm({
-      turpe_hp_hiver: n.turpe_hp_hiver ?? '',
-      turpe_hc_hiver: n.turpe_hc_hiver ?? '',
-      turpe_hp_ete:   n.turpe_hp_ete   ?? '',
-      turpe_hc_ete:   n.turpe_hc_ete   ?? '',
-      accise:         n.accise          ?? '',
-      tva:            n.tva             ?? 20,
-      hc_debut1:      n.hc_debut1       ?? '',
-      hc_fin1:        n.hc_fin1         ?? '',
-      hc_debut2:      n.hc_debut2       ?? '',
-      hc_fin2:        n.hc_fin2         ?? '',
-      taux_inflation_electricite:   n.taux_inflation_electricite   ?? 4,
-      taux_inflation_electricite_2: n.taux_inflation_electricite_2 ?? 0,
-    });
-    setSaveNatMsg(null);
-  };
-
-  const saveNatParams = async () => {
-    setSavingNat(true); setSaveNatMsg(null);
-    const num = v => v === '' ? null : parseFloat(v);
-    const intr = v => v === '' ? null : parseInt(v);
-    const { error } = await sb.from('parametres_nationaux').upsert({
-      id: 1,
-      turpe_hp_hiver: num(natForm.turpe_hp_hiver),
-      turpe_hc_hiver: num(natForm.turpe_hc_hiver),
-      turpe_hp_ete:   num(natForm.turpe_hp_ete),
-      turpe_hc_ete:   num(natForm.turpe_hc_ete),
-      accise:         num(natForm.accise),
-      tva:            num(natForm.tva),
-      hc_debut1:      intr(natForm.hc_debut1),
-      hc_fin1:        intr(natForm.hc_fin1),
-      hc_debut2:      intr(natForm.hc_debut2),
-      hc_fin2:        intr(natForm.hc_fin2),
-      taux_inflation_electricite:   num(natForm.taux_inflation_electricite),
-      taux_inflation_electricite_2: num(natForm.taux_inflation_electricite_2),
-      updated_at:     new Date().toISOString(),
-    }, { onConflict: 'id' });
-    setSavingNat(false);
-    if (error) { setSaveNatMsg('Erreur : ' + error.message); return; }
-    setSaveNatMsg('✓ Paramètres enregistrés');
-    setNatForm(null);
-    await loadData();
-  };
 
   useEffect(() => { loadData(); }, [loadData]);
 
@@ -3817,79 +3924,14 @@ function SpotPricesScreen({ onBack }) {
         </button>
       </div>
 
-      {/* Variables nationales */}
-      {natForm ? (
-        <div className="card" style={{padding:'12px 14px',marginBottom:8}}>
-          <div style={{fontWeight:800,fontSize:13,color:'white',marginBottom:10}}>Variables nationales</div>
-          <div style={{fontSize:11,color:'rgba(255,217,64,.75)',fontWeight:700,marginBottom:6}}>TURPE variable (c€/kWh) — 4 combinaisons</div>
-          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:6,marginBottom:10}}>
-            {[['HP Hiver','turpe_hp_hiver','ex: 1.47'],['HC Hiver','turpe_hc_hiver','ex: 0.89'],['HP Été (avr–oct)','turpe_hp_ete','ex: 0.86'],['HC Été','turpe_hc_ete','ex: 0.52']].map(([lbl,key,ph])=>(
-              <div key={key}>
-                <div style={{fontSize:10,color:'rgba(255,255,255,.45)',fontWeight:700,marginBottom:2}}>{lbl}</div>
-                <input className="inp" type="number" step="0.01" placeholder={ph} value={String(natForm[key])}
-                  onChange={e=>setNatForm(p=>({...p,[key]:e.target.value}))} style={{fontSize:13,padding:'6px 8px'}}/>
-              </div>
-            ))}
-          </div>
-          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:6,marginBottom:10}}>
-            <div>
-              <div style={{fontSize:10,color:'rgba(255,255,255,.45)',fontWeight:700,marginBottom:2}}>Accise (c€/kWh)</div>
-              <input className="inp" type="number" step="0.001" placeholder="ex: 2.139" value={String(natForm.accise)}
-                onChange={e=>setNatForm(p=>({...p,accise:e.target.value}))} style={{fontSize:13,padding:'6px 8px'}}/>
-            </div>
-            <div>
-              <div style={{fontSize:10,color:'rgba(255,255,255,.45)',fontWeight:700,marginBottom:2}}>TVA (%)</div>
-              <input className="inp" type="number" step="0.1" placeholder="20" value={String(natForm.tva)}
-                onChange={e=>setNatForm(p=>({...p,tva:e.target.value}))} style={{fontSize:13,padding:'6px 8px'}}/>
-            </div>
-          </div>
-          <div style={{fontSize:11,color:'rgba(255,217,64,.75)',fontWeight:700,marginBottom:6}}>Hypothèses hausse prix électricité (%/an)</div>
-          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:6,marginBottom:10}}>
-            <div>
-              <div style={{fontSize:10,color:'rgba(255,255,255,.45)',fontWeight:700,marginBottom:2}}>Années 1 à 10 (%/an)</div>
-              <input className="inp" type="number" step="0.5" min="0" max="20" placeholder="4" value={String(natForm.taux_inflation_electricite)}
-                onChange={e=>setNatForm(p=>({...p,taux_inflation_electricite:e.target.value}))} style={{fontSize:13,padding:'6px 8px'}}/>
-            </div>
-            <div>
-              <div style={{fontSize:10,color:'rgba(255,255,255,.45)',fontWeight:700,marginBottom:2}}>Années 11 à 25 (%/an)</div>
-              <input className="inp" type="number" step="0.5" min="0" max="20" placeholder="0" value={String(natForm.taux_inflation_electricite_2)}
-                onChange={e=>setNatForm(p=>({...p,taux_inflation_electricite_2:e.target.value}))} style={{fontSize:13,padding:'6px 8px'}}/>
-            </div>
-          </div>
-          <div style={{fontSize:11,color:'rgba(255,217,64,.75)',fontWeight:700,marginBottom:6}}>Plages HC (pour heatmap TTC)</div>
-          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr 1fr',gap:6,marginBottom:10}}>
-            {[['HC1 début h','hc_debut1','22'],['HC1 fin h','hc_fin1','6'],['HC2 début h','hc_debut2',''],['HC2 fin h','hc_fin2','']].map(([lbl,key,ph])=>(
-              <div key={key}>
-                <div style={{fontSize:10,color:'rgba(255,255,255,.45)',fontWeight:700,marginBottom:2}}>{lbl}</div>
-                <input className="inp" type="number" min="0" max="23" placeholder={ph} value={String(natForm[key])}
-                  onChange={e=>setNatForm(p=>({...p,[key]:e.target.value}))} style={{fontSize:13,padding:'6px 8px'}}/>
-              </div>
-            ))}
-          </div>
-          {saveNatMsg && <div style={{fontSize:11,fontWeight:700,color:saveNatMsg.startsWith('✓')?'var(--green)':'#ff9090',marginBottom:6}}>{saveNatMsg}</div>}
-          <div style={{display:'flex',gap:8}}>
-            <button onClick={saveNatParams} disabled={savingNat} style={{flex:1,background:'rgba(125,217,64,.2)',border:'1px solid rgba(125,217,64,.4)',color:'#7dd940',fontFamily:'var(--font)',fontSize:12,fontWeight:700,borderRadius:8,padding:'8px',cursor:'pointer'}}>
-              {savingNat ? 'Enregistrement…' : '✓ Enregistrer'}
+      {/* Sélecteur spot / TTC */}
+      {natParams && spotAll && (
+        <div style={{display:'flex',background:'rgba(255,255,255,.06)',borderRadius:7,padding:2,gap:2,marginBottom:8,alignSelf:'flex-start'}}>
+          {[['spot','Prix spot'],['ttc','Prix TTC']].map(([m,lbl])=>(
+            <button key={m} onClick={()=>setHeatmapMode(m)} style={{fontSize:11,fontWeight:700,border:'none',borderRadius:5,padding:'4px 10px',cursor:'pointer',fontFamily:'var(--font)',background:heatmapMode===m?'rgba(125,217,64,.25)':'transparent',color:heatmapMode===m?'#7dd940':'rgba(255,255,255,.45)'}}>
+              {lbl}
             </button>
-            <button onClick={()=>setNatForm(null)} style={{flex:1,background:'rgba(255,255,255,.07)',border:'1px solid rgba(255,255,255,.15)',color:'rgba(255,255,255,.6)',fontFamily:'var(--font)',fontSize:12,fontWeight:700,borderRadius:8,padding:'8px',cursor:'pointer'}}>
-              Annuler
-            </button>
-          </div>
-        </div>
-      ) : (
-        <div style={{display:'flex',gap:6,marginBottom:8,flexWrap:'wrap'}}>
-          <button onClick={openNatForm} style={{fontSize:11,fontWeight:700,background:'rgba(255,217,64,.1)',border:'1px solid rgba(255,217,64,.3)',color:'rgba(255,217,64,.8)',borderRadius:7,padding:'5px 10px',cursor:'pointer',fontFamily:'var(--font)'}}>
-            ⚙ Variables nationales {natParams ? '(configurées)' : '(non configurées)'}
-          </button>
-          {natParams && spotAll && (
-            <div style={{display:'flex',background:'rgba(255,255,255,.06)',borderRadius:7,padding:2,gap:2}}>
-              {[['spot','Prix spot'],['ttc','Prix TTC']].map(([m,lbl])=>(
-                <button key={m} onClick={()=>setHeatmapMode(m)} style={{fontSize:11,fontWeight:700,border:'none',borderRadius:5,padding:'4px 10px',cursor:'pointer',fontFamily:'var(--font)',background:heatmapMode===m?'rgba(125,217,64,.25)':'transparent',color:heatmapMode===m?'#7dd940':'rgba(255,255,255,.45)'}}>
-                  {lbl}
-                </button>
-              ))}
-            </div>
-          )}
+          ))}
         </div>
       )}
 
@@ -5183,7 +5225,7 @@ function AdminProductionScreen({ onBack }) {
 }
 
 // ─── AdminScreen ──────────────────────────────
-function AdminScreen({ onTariffs, onUsers, onSpot, onAcc, onProduction, onBack }) {
+function AdminScreen({ onTariffs, onUsers, onSpot, onAcc, onProduction, onGlobalVars, onBack }) {
   return (
     <>
     <div className="screen fade-in">
@@ -5192,6 +5234,14 @@ function AdminScreen({ onTariffs, onUsers, onSpot, onAcc, onProduction, onBack }
         <h1 className="welcome-title">Menu<br/><span className="accent">admin</span></h1>
       </div>
       <div className="sim-btns">
+        <button className="sim-btn" onClick={onGlobalVars}>
+          <span className="sim-icon">⚙️</span>
+          <div className="sim-text">
+            <div className="sim-title">Variables globales</div>
+            <div className="sim-sub">Hypothèses stockage, TURPE, inflation, plages HC</div>
+          </div>
+          <span className="sim-arrow">→</span>
+        </button>
         <button className="sim-btn" onClick={onTariffs}>
           <span className="sim-icon">⚡</span>
           <div className="sim-text">
@@ -5896,7 +5946,11 @@ function App() {
           onUsers={()=>goTo('ADMIN_USERS')}
           onAcc={()=>goTo('ADMIN_ACC')}
           onProduction={()=>goTo('ADMIN_PRODUCTION')}
+          onGlobalVars={()=>goTo('ADMIN_GLOBAL_VARS')}
           onBack={goBack}/>;
+
+      case 'ADMIN_GLOBAL_VARS':
+        return <GlobalVarsScreen onBack={goBack}/>;
 
       case 'ADMIN_PRODUCTION':
         return <AdminProductionScreen onBack={goBack}/>;
