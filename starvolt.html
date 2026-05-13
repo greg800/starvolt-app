@@ -2407,8 +2407,8 @@ function MonSiteScreen({ user, userProfile, onBack }) {
   const[batW,setBatW]=useState('');
   const[batKwh,setBatKwh]=useState('');
   const[batLoss,setBatLoss]=useState('');
-  const[thermW,setThermW]=useState('5');
-  const[thermKwh,setThermKwh]=useState('10');
+  const[thermW,setThermW]=useState('');
+  const[thermKwh,setThermKwh]=useState('');
   const[thermLoss,setThermLoss]=useState('');
   const[prodProfilId,setProdProfilId]=useState('');
   const[prodProfilData,setProdProfilData]=useState(null);
@@ -2454,8 +2454,8 @@ function MonSiteScreen({ user, userProfile, onBack }) {
     const lsGet=(k,def)=>{const v=localStorage.getItem(k);return v!==null?v:def;};
     if(activeId){
       setBatLoss(lsGet(`starvolt_bat_loss_${activeId}`,''));
-      setThermW(lsGet(`starvolt_therm_w_${activeId}`,'5'));
-      setThermKwh(lsGet(`starvolt_therm_kwh_${activeId}`,'10'));
+      setThermW(lsGet(`starvolt_therm_w_${activeId}`,''));
+      setThermKwh(lsGet(`starvolt_therm_kwh_${activeId}`,''));
       setThermLoss(lsGet(`starvolt_therm_loss_${activeId}`,''));
     }
     setProdProfilId(site?.profil_production_id||'');
@@ -2586,7 +2586,7 @@ function MonSiteScreen({ user, userProfile, onBack }) {
             <div className="card" style={{padding:0,marginBottom:8,overflow:'hidden'}}>
               <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'10px 14px 8px',borderBottom:'1px solid rgba(255,255,255,.07)'}}>
                 <div style={{fontWeight:800,fontSize:13,color:'white',display:'flex',alignItems:'center',gap:6}}>⚡ Ma conso</div>
-                <button className="btn btn-sec" style={{fontSize:11,padding:'5px 11px',borderRadius:8}} onClick={()=>fileRef.current?.click()} disabled={importing}>
+                <button className="btn btn-sec" style={{fontSize:11,padding:'5px 14px',borderRadius:8,width:'auto',flexShrink:0}} onClick={()=>fileRef.current?.click()} disabled={importing}>
                   {importing?'⏳ Traitement…':'📂 Importer'}
                 </button>
                 <input ref={fileRef} type="file" accept=".xlsx,.xls" style={{display:'none'}} onChange={handleImport}/>
@@ -2630,7 +2630,7 @@ function MonSiteScreen({ user, userProfile, onBack }) {
                   </div>
                   {/* Colonne droite : heatmap */}
                   {site.conso_profil?.length===8784&&(
-                    <div style={{flex:'0 0 220px',maxWidth:220}}>
+                    <div style={{flex:'0 1 32%',minWidth:160}}>
                       <div style={{fontWeight:700,fontSize:10,color:'rgba(255,255,255,.4)',marginBottom:4,letterSpacing:'.4px'}}>HEATMAP · 0–23h × JOURS</div>
                       <ConsoHeatmapCanvas profile={site.conso_profil} months={heatmapExpanded?undefined:[1,2,3]}/>
                       <button onClick={()=>setHeatmapExpanded(v=>!v)} style={{background:'none',border:'none',cursor:'pointer',color:'rgba(255,255,255,.4)',fontSize:10,padding:'4px 0 0',display:'flex',alignItems:'center',gap:3}}>
@@ -2672,26 +2672,28 @@ function MonSiteScreen({ user, userProfile, onBack }) {
                 {/* Batterie chimique + Stockage thermique côte à côte */}
                 <div style={{display:'flex',gap:10,flexWrap:'wrap'}}>
                   {/* Batterie chimique */}
-                  <div style={{flex:'1 1 148px',maxWidth:220,background:'rgba(255,255,255,.04)',border:'1px solid rgba(255,255,255,.12)',borderRadius:12,padding:'10px 12px'}}>
-                    <div style={{display:'flex',alignItems:'center',gap:6,marginBottom:8}}>
-                      <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" style={{flexShrink:0}}>
+                  <div style={{flex:'1 1 180px',maxWidth:260,background:'rgba(255,255,255,.04)',border:'1px solid rgba(255,255,255,.12)',borderRadius:12,padding:'9px 11px'}}>
+                    <div style={{display:'flex',alignItems:'center',gap:6,marginBottom:7}}>
+                      <svg width="18" height="18" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" style={{flexShrink:0}}>
                         <rect x="1" y="5" width="15" height="10" rx="2" stroke="white" strokeWidth="1.5"/>
                         <rect x="16" y="7.5" width="3" height="5" rx="1" fill="white"/>
                         <rect x="3" y="7" width="7" height="6" rx="1" fill="white" fillOpacity="0.8"/>
                       </svg>
                       <span style={{fontWeight:800,fontSize:12,color:'white'}}>Batterie chimique</span>
                     </div>
-                    <div style={{marginBottom:6}}>
-                      <label style={{fontSize:9,color:'rgba(255,255,255,.4)',fontWeight:700,letterSpacing:'.5px',display:'block',marginBottom:3}}>PUISSANCE (kW)</label>
-                      <StepInput value={batW} onChange={setBatW}
-                        onBlur={()=>{const v=parseFloat(batW);updateSite({batterie_puissance_w:isNaN(v)?null:v*1000});}}
-                        step={0.5} min={0} placeholder="3"/>
-                    </div>
-                    <div style={{marginBottom:6}}>
-                      <label style={{fontSize:9,color:'rgba(255,255,255,.4)',fontWeight:700,letterSpacing:'.5px',display:'block',marginBottom:3}}>CAPACITÉ (kWh)</label>
-                      <StepInput value={batKwh} onChange={setBatKwh}
-                        onBlur={()=>{const v=parseFloat(batKwh);updateSite({batterie_capacite_kwh:isNaN(v)?null:v});}}
-                        step={0.5} min={0} placeholder="10"/>
+                    <div style={{display:'flex',gap:6,marginBottom:6}}>
+                      <div style={{flex:1}}>
+                        <label style={{fontSize:9,color:'rgba(255,255,255,.4)',fontWeight:700,letterSpacing:'.5px',display:'block',marginBottom:3}}>PUISSANCE (kW)</label>
+                        <StepInput value={batW} onChange={setBatW}
+                          onBlur={()=>{const v=parseFloat(batW);updateSite({batterie_puissance_w:isNaN(v)?null:v*1000});}}
+                          step={0.5} min={0} placeholder="3"/>
+                      </div>
+                      <div style={{flex:1}}>
+                        <label style={{fontSize:9,color:'rgba(255,255,255,.4)',fontWeight:700,letterSpacing:'.5px',display:'block',marginBottom:3}}>CAPACITÉ (kWh)</label>
+                        <StepInput value={batKwh} onChange={setBatKwh}
+                          onBlur={()=>{const v=parseFloat(batKwh);updateSite({batterie_capacite_kwh:isNaN(v)?null:v});}}
+                          step={0.5} min={0} placeholder="10"/>
+                      </div>
                     </div>
                     <div>
                       <label style={{fontSize:9,color:'rgba(255,255,255,.4)',fontWeight:700,letterSpacing:'.5px',display:'block',marginBottom:3}}>PERTES / CYCLE (%)</label>
@@ -2702,23 +2704,25 @@ function MonSiteScreen({ user, userProfile, onBack }) {
                     </div>
                   </div>
                   {/* Stockage thermique */}
-                  <div style={{flex:'1 1 148px',maxWidth:220,background:'rgba(255,160,50,.05)',border:'1px solid rgba(255,160,50,.28)',borderRadius:12,padding:'10px 12px'}}>
+                  <div style={{flex:'1 1 180px',maxWidth:260,background:'rgba(255,160,50,.05)',border:'1px solid rgba(255,160,50,.28)',borderRadius:12,padding:'9px 11px'}}>
                     <div style={{display:'flex',alignItems:'center',gap:6,marginBottom:4}}>
-                      <img src="/comwatt-box.png" style={{width:22,height:22,objectFit:'contain',mixBlendMode:'screen',flexShrink:0}} onError={e=>e.target.style.display='none'}/>
+                      <img src="/comwatt-box.png" style={{width:20,height:20,objectFit:'contain',mixBlendMode:'screen',flexShrink:0}} onError={e=>e.target.style.display='none'}/>
                       <span style={{fontWeight:800,fontSize:12,color:'white'}}>Stockage thermique</span>
                     </div>
-                    <div style={{fontSize:10,color:'rgba(255,160,50,.8)',marginBottom:8}}>🌡️ Chauffage · Cumulus</div>
-                    <div style={{marginBottom:6}}>
-                      <label style={{fontSize:9,color:'rgba(255,255,255,.4)',fontWeight:700,letterSpacing:'.5px',display:'block',marginBottom:3}}>PUISSANCE (kW)</label>
-                      <StepInput value={thermW}
-                        onChange={v=>{setThermW(v);activeId&&localStorage.setItem(`starvolt_therm_w_${activeId}`,v);}}
-                        onBlur={()=>{}} step={0.5} min={0} placeholder="5"/>
-                    </div>
-                    <div style={{marginBottom:6}}>
-                      <label style={{fontSize:9,color:'rgba(255,255,255,.4)',fontWeight:700,letterSpacing:'.5px',display:'block',marginBottom:3}}>CAPACITÉ (kWh)</label>
-                      <StepInput value={thermKwh}
-                        onChange={v=>{setThermKwh(v);activeId&&localStorage.setItem(`starvolt_therm_kwh_${activeId}`,v);}}
-                        onBlur={()=>{}} step={0.5} min={0} placeholder="10"/>
+                    <div style={{fontSize:10,color:'rgba(255,160,50,.8)',marginBottom:6}}>🌡️ Chauffage · Cumulus</div>
+                    <div style={{display:'flex',gap:6,marginBottom:6}}>
+                      <div style={{flex:1}}>
+                        <label style={{fontSize:9,color:'rgba(255,255,255,.4)',fontWeight:700,letterSpacing:'.5px',display:'block',marginBottom:3}}>PUISSANCE (kW)</label>
+                        <StepInput value={thermW}
+                          onChange={v=>{setThermW(v);activeId&&localStorage.setItem(`starvolt_therm_w_${activeId}`,v);}}
+                          onBlur={()=>{}} step={0.5} min={0} placeholder="5"/>
+                      </div>
+                      <div style={{flex:1}}>
+                        <label style={{fontSize:9,color:'rgba(255,255,255,.4)',fontWeight:700,letterSpacing:'.5px',display:'block',marginBottom:3}}>CAPACITÉ (kWh)</label>
+                        <StepInput value={thermKwh}
+                          onChange={v=>{setThermKwh(v);activeId&&localStorage.setItem(`starvolt_therm_kwh_${activeId}`,v);}}
+                          onBlur={()=>{}} step={0.5} min={0} placeholder="10"/>
+                      </div>
                     </div>
                     <div>
                       <label style={{fontSize:9,color:'rgba(255,255,255,.4)',fontWeight:700,letterSpacing:'.5px',display:'block',marginBottom:3}}>PERTES / CYCLE (%)</label>
@@ -2782,25 +2786,23 @@ function MonSiteScreen({ user, userProfile, onBack }) {
                           </div>
                         ))}
                       </div>
-                      {/* Graphique */}
-                      <div style={{fontWeight:700,fontSize:11,color:'rgba(255,255,255,.5)',marginBottom:4}}>Bilan énergétique · {period}</div>
-                      <EnergyBalanceChart balance={balance} level={chartLevel} selMonth={chartMonth} selDay={chartDay} setLevel={setChartLevel} setSelMonth={setChartMonth} setSelDay={setChartDay}/>
-                      {/* Infos énergie — lisibles */}
-                      <div style={{marginTop:10,borderRadius:10,overflow:'hidden',border:'1px solid rgba(255,255,255,.08)'}}>
+                      {/* Infos énergie compactes — au-dessus du graphique */}
+                      <div style={{display:'flex',gap:6,marginBottom:10,flexWrap:'wrap'}}>
                         {[
-                          {icon:'☀️',color:'#f0a050',bg:'rgba(240,160,80,.1)',label:'Énergie solaire consommée ici',value:fmt(autoconso)},
-                          {icon:'🔌',color:'#d0d0d0',bg:'rgba(208,208,208,.07)',label:'Énergie achetée au réseau',value:fmt(achat)},
-                          {icon:'⬆️',color:'#f0e86a',bg:'rgba(240,232,106,.08)',label:'Énergie envoyée au réseau',value:fmt(injection)},
+                          {icon:'☀️',color:'#f0a050',bg:'rgba(240,160,80,.1)',label:'Solaire sur place',value:fmt(autoconso)},
+                          {icon:'🔌',color:'#c0c0c0',bg:'rgba(200,200,200,.07)',label:'Achat réseau',value:fmt(achat)},
+                          {icon:'⬆️',color:'#f0e86a',bg:'rgba(240,232,106,.07)',label:'Injection réseau',value:fmt(injection)},
                         ].map(({icon,color,bg,label,value})=>(
-                          <div key={label} style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'11px 14px',background:bg,borderBottom:'1px solid rgba(255,255,255,.06)'}}>
-                            <div style={{display:'flex',alignItems:'center',gap:8}}>
-                              <span style={{fontSize:18,flexShrink:0}}>{icon}</span>
-                              <div style={{fontSize:13,color:'rgba(255,255,255,.85)',fontWeight:600,lineHeight:1.2}}>{label}</div>
-                            </div>
-                            <div style={{fontSize:22,fontWeight:900,color,flexShrink:0,marginLeft:8}}>{value}</div>
+                          <div key={label} style={{flex:'1 1 90px',display:'flex',flexDirection:'column',alignItems:'center',padding:'7px 8px',background:bg,border:'1px solid rgba(255,255,255,.06)',borderRadius:8,textAlign:'center'}}>
+                            <span style={{fontSize:15}}>{icon}</span>
+                            <div style={{fontSize:10,color:'rgba(255,255,255,.5)',fontWeight:600,marginTop:2,lineHeight:1.2}}>{label}</div>
+                            <div style={{fontSize:16,fontWeight:900,color,marginTop:3}}>{value}</div>
                           </div>
                         ))}
                       </div>
+                      {/* Graphique */}
+                      <div style={{fontWeight:700,fontSize:11,color:'rgba(255,255,255,.5)',marginBottom:4}}>Bilan énergétique · {period}</div>
+                      <EnergyBalanceChart balance={balance} level={chartLevel} selMonth={chartMonth} selDay={chartDay} setLevel={setChartLevel} setSelMonth={setChartMonth} setSelDay={setChartDay}/>
                     </div>
                   );
                 })()}
