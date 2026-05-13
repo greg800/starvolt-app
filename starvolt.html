@@ -2901,6 +2901,11 @@ function SimulationsScreen({ onACC, onBox, onSolar, onOptimisation, onBack, user
   const [accSaving, setAccSaving] = useState(null);
   const [boxSaving,   setBoxSaving]   = useState(null);
   const [solarSaving, setSolarSaving] = useState(null);
+  // Pour la projection correcte : achat réseau après solar, injection, prix base
+  const [solGridKwh,    setSolGridKwh]    = useState(null);
+  const [solInjKwh,     setSolInjKwh]     = useState(null);
+  const [solPrixBase,   setSolPrixBase]   = useState(null);
+  const [solPrixRachat, setSolPrixRachat] = useState(0.04);
   const [bestTariffName, setBestTariffName] = useState(null);
   const [changedTariff, setChangedTariff] = useState(false);
 
@@ -2951,10 +2956,14 @@ function SimulationsScreen({ onACC, onBox, onSolar, onOptimisation, onBack, user
                 bk*ratioBat*1000, bk, pBat, tk*ratioTherm, tk, pTherm);
               const autoKwh = bal.monthly.reduce((s,m) => s + m.on_site + m.via_bat + m.via_therm, 0);
               const injKwh  = bal.monthly.reduce((s,m) => s + m.injection, 0);
+              const gridBuy = bal.monthly.reduce((s,m) => s + m.grid_buy, 0);
               const prixMoyen = kwh_total > 0 && curBill ? curBill / kwh_total : 0.18;
               const prixRachat = nat?.prix_rachat_injection ?? 0.04;
               const realSav = Math.round(autoKwh * prixMoyen + injKwh * prixRachat);
               setSolarSaving(realSav > 0 ? realSav : Math.round(adjBillSolar * 0.70));
+              // Stocker pour projection correcte (inflation sur achat réseau uniquement)
+              setSolGridKwh(gridBuy); setSolInjKwh(injKwh);
+              setSolPrixBase(prixMoyen); setSolPrixRachat(prixRachat);
             } else {
               setSolarSaving(Math.round(adjBillSolar * 0.70));
             }
@@ -5032,15 +5041,39 @@ function PanierScreen({ user, onBack, onGoTo }) {
     setItems({ optimisation:false, acc:false, box:false, solar:false });
   };
 
+  // Année 1 = pas d'inflation ; année N = (N-1) augmentations
   const projYear = (n, bill) => {
     if (!bill) return 0;
-    if (n <= 10) return Math.round(bill * Math.pow(1 + taux/100, n));
-    const bill10 = bill * Math.pow(1 + taux/100, 10);
+    if (n <= 10) return Math.round(bill * Math.pow(1 + taux/100, n - 1));
+    const bill10 = bill * Math.pow(1 + taux/100, 9); // 9 hausses jusqu'en année 10
     return Math.round(bill10 * Math.pow(1 + taux2/100, n - 10));
   };
   const projCum = (bill) => {
     let s = 0;
     for (let n = 1; n <= 25; n++) s += projYear(n, bill);
+    return Math.round(s);
+  };
+  // Projection "avec action" : seul le coût d'achat réseau est indexé sur l'inflation
+  // injection (revenus vente surplus) reste fixe, autoconsommation = gratuite
+  const projBilledAfter = (n) => {
+    if (solGridKwh !== null && solPrixBase !== null) {
+      let gridCost;
+      if (n <= 10) gridCost = solGridKwh * solPrixBase * Math.pow(1 + taux/100, n - 1);
+      else {
+        const gc10 = solGridKwh * solPrixBase * Math.pow(1 + taux/100, 9);
+        gridCost = gc10 * Math.pow(1 + taux2/100, n - 10);
+      }
+      return Math.max(0, Math.round(gridCost - solInjKwh * solPrixRachat));
+    }
+    // Fallback si pas de balance heure/heure disponible
+    if (!billedAfter) return 0;
+    if (n <= 10) return Math.round(billedAfter * Math.pow(1 + taux/100, n - 1));
+    const ba10 = billedAfter * Math.pow(1 + taux/100, 9);
+    return Math.round(ba10 * Math.pow(1 + taux2/100, n - 10));
+  };
+  const projCumBilledAfter = () => {
+    let s = 0;
+    for (let n = 1; n <= 25; n++) s += projBilledAfter(n);
     return Math.round(s);
   };
 
@@ -5049,7 +5082,7 @@ function PanierScreen({ user, onBack, onGoTo }) {
   const totalInvestment    = activeItems.reduce((s,[k])=>s+(investments[k]||0),0);
   const billedAfter        = currentBill ? Math.max(0, currentBill - totalAnnualSaving) : null;
   const roiGlobal          = totalInvestment > 0 && totalAnnualSaving > 0 ? Math.ceil(totalInvestment / totalAnnualSaving) : null;
-  const gainNet25          = currentBill ? Math.max(0, projCum(currentBill) - projCum(billedAfter) - totalInvestment) : 0;
+  const gainNet25          = currentBill ? Math.max(0, projCum(currentBill) - projCumBilledAfter() - totalInvestment) : 0;
   const itemsCount         = activeItems.length;
 
   if (validated) {
@@ -5142,12 +5175,12 @@ function PanierScreen({ user, onBack, onGoTo }) {
                   <React.Fragment key={n}>
                     <div style={{fontSize:16,color:'rgba(255,255,255,.85)',padding:'4px 0'}}>{lbl}</div>
                     <div style={{fontSize:18,fontWeight:700,color:'#fca5a5',textAlign:'center',padding:'4px 0'}}>{fmtGrand(projYear(n,currentBill))} €</div>
-                    <div style={{fontSize:18,fontWeight:700,color:'#7dd940',textAlign:'center',padding:'4px 0'}}>{fmtGrand(projYear(n,billedAfter))} €</div>
+                    <div style={{fontSize:18,fontWeight:700,color:'#7dd940',textAlign:'center',padding:'4px 0'}}>{fmtGrand(projBilledAfter(n))} €</div>
                   </React.Fragment>
                 ))}
                 <div style={{fontSize:16,color:'rgba(255,255,255,.85)',fontWeight:700,padding:'4px 0'}}>Cumulé 25 ans</div>
                 <div style={{fontSize:18,fontWeight:700,color:'#fca5a5',textAlign:'center',padding:'4px 0'}}>{fmtGrand(projCum(currentBill))} €</div>
-                <div style={{fontSize:18,fontWeight:700,color:'#7dd940',textAlign:'center',padding:'4px 0'}}>{fmtGrand(projCum(billedAfter)+totalInvestment)} €</div>
+                <div style={{fontSize:18,fontWeight:700,color:'#7dd940',textAlign:'center',padding:'4px 0'}}>{fmtGrand(projCumBilledAfter()+totalInvestment)} €</div>
               </div>
               {totalInvestment > 0 && (
                 <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:10,padding:'10px 14px',background:'rgba(255,255,255,.06)',borderRadius:10}}>
