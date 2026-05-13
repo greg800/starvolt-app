@@ -2732,19 +2732,21 @@ function MonSiteScreen({ user, userProfile, onBack }) {
                     period=chartLevel==='hour'?`${chartDay}/${chartMonth}`:chartLevel==='day'?`Mois ${chartMonth}`:'Année';
                     fmt=v=>(v*scale).toFixed(unit==='MWh'?1:0)+' '+unit;
                   }
-                  // Réduction de facture annuelle (toujours calculé depuis balance.monthly, indépendant du filtre période)
+                  // Réduction de facture annuelle — même formule que l'affichage Ma conso
                   let reductionFacturePct=null;
-                  if(balance&&site?.conso_profil){
+                  if(balance&&site?.conso_profil&&site.conso_annuelle_kwh>0){
                     const annAuto=balance.monthly.reduce((s,m)=>s+m.on_site+m.via_bat+m.via_therm,0);
                     const annInj=balance.monthly.reduce((s,m)=>s+m.injection,0);
+                    const annGrid=balance.monthly.reduce((s,m)=>s+m.grid_buy,0);
                     const curT=tariffs.find(t=>t.id===site.tarif_id);
-                    const {kwh_hc:_hc,kwh_hp:_hp}=calcHcHp(site.conso_profil,site);
-                    const _tot=_hc+_hp;
-                    const _bill=curT&&!curT.tarif_dynamique?(calcTariffCost(curT,_hc,_hp)?.total||null):null;
-                    if(_bill&&_tot>0){
-                      const _pm=_bill/_tot;
-                      const _pr=globalVars?.prix_rachat_injection??0.04;
-                      reductionFacturePct=Math.min(100,Math.round((annAuto*_pm+annInj*_pr)/_bill*100));
+                    if(curT&&!curT.tarif_dynamique){
+                      const _bill=Math.round((curT.abo_annuel||0)+site.conso_annuelle_kwh*(curT.prix_hp||0));
+                      if(_bill>0){
+                        const _pm=_bill/site.conso_annuelle_kwh;
+                        const _pr=globalVars?.prix_rachat_injection??0.04;
+                        const nouvFact=Math.max(0,annGrid*_pm-annInj*_pr);
+                        reductionFacturePct=Math.min(100,Math.round((1-nouvFact/_bill)*100));
+                      }
                     }
                   }
                   const hasSolar=!!localStorage.getItem('starvolt_solar_chosen');
@@ -4664,7 +4666,7 @@ function SolarSimScreen({ user, userProfile, onBack, onPanier, onCartUpdate }) {
     const siteId = localStorage.getItem('starvolt_active_site_id');
     if (!siteId) { setLoading(false); return; }
     Promise.all([
-      sb.from('sites').select('id,conso_profil,tarif_id,profil_production_id,heure_debut_hc1,heure_fin_hc1,heure_debut_hc2,heure_fin_hc2').eq('id', siteId).maybeSingle(),
+      sb.from('sites').select('id,conso_profil,conso_annuelle_kwh,tarif_id,profil_production_id,heure_debut_hc1,heure_fin_hc1,heure_debut_hc2,heure_fin_hc2').eq('id', siteId).maybeSingle(),
       sb.from('tarifs_electricite').select('*'),
       sb.rpc('get_spot_json'),
       sb.from('parametres_nationaux').select('*').eq('id', 1).maybeSingle(),
@@ -4673,6 +4675,8 @@ function SolarSimScreen({ user, userProfile, onBack, onPanier, onCartUpdate }) {
       const curTariff = site.tarif_id ? (tariffs || []).find(t => t.id === site.tarif_id) : null;
       const { kwh_hc, kwh_hp } = calcHcHp(site.conso_profil, site);
       const kwh_total = kwh_hc + kwh_hp;
+      // Utiliser conso_annuelle_kwh (DB) pour cohérence avec l'affichage Ma conso
+      const siteKwh = site.conso_annuelle_kwh || kwh_total;
       let bill = null;
       if (curTariff?.tarif_dynamique) {
         setIsDynamic(true);
@@ -4680,10 +4684,11 @@ function SolarSimScreen({ user, userProfile, onBack, onPanier, onCartUpdate }) {
           const r = calcDynamicCost(curTariff, site.conso_profil, buildSpotMap(spotRows), nat, site);
           bill = r?.total || null;
         }
-      } else if (curTariff) {
-        bill = calcTariffCost(curTariff, kwh_hc, kwh_hp)?.total || null;
+      } else if (curTariff && siteKwh > 0) {
+        // Même formule que MonSiteScreen : abo + conso_annuelle_kwh * prix_hp
+        bill = Math.round((curTariff.abo_annuel||0) + siteKwh * (curTariff.prix_hp||0));
       }
-      if (!bill && kwh_total > 0) bill = Math.round(kwh_total * 0.18);
+      if (!bill && siteKwh > 0) bill = Math.round(siteKwh * 0.18);
       const roundedBill = bill ? Math.round(bill) : null;
       const optiSavLS = parseInt(localStorage.getItem('starvolt_optimisation_saving')||'0');
       let accSavComp = 0;
@@ -4696,7 +4701,7 @@ function SolarSimScreen({ user, userProfile, onBack, onPanier, onCartUpdate }) {
       setCurrentBill(roundedBill);
       setAdjustedBill(adj || roundedBill);
       setGlobalVars(nat);
-      setSiteRef({ conso_profil: site.conso_profil, currentBill: roundedBill, curTariff, site, kwh_total, kwh_hc, kwh_hp });
+      setSiteRef({ conso_profil: site.conso_profil, currentBill: roundedBill, curTariff, site, kwh_total: siteKwh, kwh_hc, kwh_hp });
       // Charger le profil de production
       if (site.profil_production_id) {
         const { data: pp } = await sb.from('profils_production').select('profil').eq('id', site.profil_production_id).single();
@@ -4950,6 +4955,10 @@ function PanierScreen({ user, onBack, onGoTo }) {
   const [taux2,       setTaux2]       = useState(0);
   const [savings,     setSavings]     = useState({ optimisation:0, acc:0, box:0, solar:0 });
   const [validated,   setValidated]   = useState(false);
+  const [solGridKwh,    setSolGridKwh]    = useState(null);
+  const [solInjKwh,     setSolInjKwh]     = useState(null);
+  const [solPrixBase,   setSolPrixBase]   = useState(null);
+  const [solPrixRachat, setSolPrixRachat] = useState(0.04);
   const [items,       setItems]       = useState(() => ({
     optimisation: !!localStorage.getItem('starvolt_optimisation_chosen'),
     acc:          localStorage.getItem('starvolt_acc_chosen') === 'true',
@@ -4965,11 +4974,11 @@ function PanierScreen({ user, onBack, onGoTo }) {
     const siteId = localStorage.getItem('starvolt_active_site_id');
     if (!siteId) { setLoading(false); return; }
     Promise.all([
-      sb.from('sites').select('id,conso_profil,tarif_id,heure_debut_hc1,heure_fin_hc1,heure_debut_hc2,heure_fin_hc2').eq('id', siteId).maybeSingle(),
+      sb.from('sites').select('id,conso_profil,conso_annuelle_kwh,tarif_id,profil_production_id,heure_debut_hc1,heure_fin_hc1,heure_debut_hc2,heure_fin_hc2').eq('id', siteId).maybeSingle(),
       sb.from('tarifs_electricite').select('*'),
       sb.rpc('get_spot_json'),
       sb.from('parametres_nationaux').select('*').eq('id',1).maybeSingle(),
-    ]).then(([{ data:site }, { data:tariffs }, { data:spotRows }, { data:nat }]) => {
+    ]).then(async ([{ data:site }, { data:tariffs }, { data:spotRows }, { data:nat }]) => {
       if (!site?.conso_profil) { setLoading(false); return; }
       if (nat?.taux_inflation_electricite)   setTaux(Number(nat.taux_inflation_electricite));
       if (nat?.taux_inflation_electricite_2 != null) setTaux2(Number(nat.taux_inflation_electricite_2));
@@ -5019,6 +5028,36 @@ function PanierScreen({ user, onBack, onGoTo }) {
         // Si solar_box choisi, la Box est comprise dans le 70% — ne pas compter ses économies en double
         const effectiveBoxSav = (solarChoice === 'solar_box') ? 0 : boxSav;
         setSavings({ optimisation: optSav, acc: accSav, box: effectiveBoxSav, solar: solSav });
+        // Projection solaire précise : calculer achat réseau et injection heure par heure
+        if (solarChoice && site.profil_production_id && site.conso_profil) {
+          const siteKwh = site.conso_annuelle_kwh || kwh_total;
+          const prixBase = curTariff && !curTariff.tarif_dynamique && siteKwh > 0
+            ? Math.round((curTariff.abo_annuel||0) + siteKwh * (curTariff.prix_hp||0)) / siteKwh
+            : (bill && kwh_total > 0 ? bill / kwh_total : 0.18);
+          const prixRachat = nat?.prix_rachat_injection ?? 0.04;
+          setSolPrixBase(prixBase);
+          setSolPrixRachat(prixRachat);
+          const solarDef = (()=>{ try{return JSON.parse(localStorage.getItem('starvolt_solar_defaults'))||{};}catch{return{};} })();
+          const kw = parseFloat(solarDef.pvKwc)||6;
+          const bk = parseFloat(solarDef.batKwh)||10;
+          const tk = parseFloat(solarDef.thermKwh)||10;
+          const ratioBat   = ((nat?.ratio_puissance_stockage              ??50)/100);
+          const ratioTherm = ((nat?.ratio_puissance_stockage_thermique    ??50)/100);
+          const pBat   = nat?.pertes_batterie  ?? 10;
+          const pTherm = nat?.pertes_thermique ?? 0;
+          const { data: pp } = await sb.from('profils_production').select('profil').eq('id', site.profil_production_id).single();
+          if (pp?.profil) {
+            const bal = computeEnergyBalance(site.conso_profil, pp.profil, kw,
+              bk*ratioBat*1000, bk, pBat, tk*ratioTherm, tk, pTherm);
+            const autoKwh = bal.monthly.reduce((s,m) => s+m.on_site+m.via_bat+m.via_therm, 0);
+            const gridBuy = bal.monthly.reduce((s,m) => s+m.grid_buy, 0);
+            const injKwh  = bal.monthly.reduce((s,m) => s+m.injection, 0);
+            setSolGridKwh(gridBuy); setSolInjKwh(injKwh);
+            // Mise à jour des économies solaires réelles
+            const realSav = Math.round(autoKwh * prixBase + injKwh * prixRachat);
+            if (realSav > 0) setSavings(prev => ({...prev, solar: realSav}));
+          }
+        }
       }
       setLoading(false);
     });
