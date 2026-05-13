@@ -2140,12 +2140,34 @@ function SiteFormCard({initial={},onSave,onCancel}){
   );
 }
 
+// ─── StepInput ────────────────────────────────
+function StepInput({value, onChange, onBlur, step=1, min=0, placeholder=''}){
+  const num = parseFloat(value)||0;
+  const dec = ()=>onChange(String(Math.max(min, Math.round((num-step)*10)/10)));
+  const inc = ()=>onChange(String(Math.round((num+step)*10)/10));
+  const btnS = {width:28,height:34,borderRadius:6,background:'rgba(255,255,255,.1)',border:'1px solid rgba(255,255,255,.15)',color:'white',cursor:'pointer',fontSize:18,lineHeight:'1',padding:0,flexShrink:0,display:'flex',alignItems:'center',justifyContent:'center'};
+  return(
+    <div style={{display:'flex',gap:4,alignItems:'center'}}>
+      <button style={btnS} onClick={dec}>−</button>
+      <input className="inp" type="number" min={min} step={step} placeholder={placeholder} value={value}
+        onChange={e=>onChange(e.target.value)} onBlur={onBlur}
+        style={{flex:1,textAlign:'center',paddingLeft:6,paddingRight:6}}/>
+      <button style={btnS} onClick={inc}>+</button>
+    </div>
+  );
+}
+
 // ─── computeEnergyBalance ─────────────────────
 // Retourne { monthly[12], hourly[8784] } en kWh
-function computeEnergyBalance(conso, prodNorm, pvKwc, batPowerW, batCapKwh) {
+// batLossPct/thermLossPct : % pertes sur cycle (ex 10 = 10%). Pertes à la charge.
+function computeEnergyBalance(conso, prodNorm, pvKwc, batPowerW, batCapKwh, batLossPct, thermPowerKw, thermCapKwh, thermLossPct) {
   const batCapWh = (batCapKwh || 0) * 1000;
   const batPowWh = batPowerW || 0;
-  let batState = 0;
+  const batEff = 1 - Math.min(Math.max(batLossPct||0,0),100)/100;
+  const thermCapWh = (thermCapKwh || 0) * 1000;
+  const thermPowWh = (thermPowerKw || 0) * 1000;
+  const thermEff = 1 - Math.min(Math.max(thermLossPct||0,0),100)/100;
+  let batState = 0, thermState = 0;
   const monthly = Array.from({length:12}, () => ({on_site:0, grid_buy:0, injection:0, via_bat:0}));
   const hourly = new Array(8784);
   for (let m = 1; m <= 12; m++) {
@@ -2154,20 +2176,31 @@ function computeEnergyBalance(conso, prodNorm, pvKwc, batPowerW, batCapKwh) {
         const idx = profIdx(m, d, h);
         const consoWh = conso[idx] || 0;
         const prodWh = (prodNorm[idx] || 0) * pvKwc;
-        const bal = prodWh - consoWh;
-        let onSite, gridBuy, injection, viaBat = 0;
-        if (bal >= 0) {
-          let charge = 0;
-          if (batCapWh > 0) { charge = Math.min(bal, batPowWh, batCapWh - batState); batState += charge; }
-          injection = bal - charge; gridBuy = 0; onSite = consoWh;
+        let surplus = prodWh - consoWh;
+        let viaBat = 0;
+        if (surplus >= 0) {
+          if (batCapWh > 0 && batEff > 0) {
+            const room = batCapWh - batState;
+            const ci = Math.min(surplus, batPowWh, room > 0 ? room / batEff : 0);
+            batState += ci * batEff; surplus -= ci;
+          }
+          if (thermCapWh > 0 && thermEff > 0) {
+            const room = thermCapWh - thermState;
+            const ci = Math.min(surplus, thermPowWh, room > 0 ? room / thermEff : 0);
+            thermState += ci * thermEff; surplus -= ci;
+          }
+          const os = consoWh/1000, inj = surplus/1000;
+          hourly[idx] = {on_site:os, grid_buy:0, injection:inj, via_bat:0, m, d, h};
+          monthly[m-1].on_site += os; monthly[m-1].injection += inj;
         } else {
-          let discharge = 0;
-          if (batState > 0) { discharge = Math.min(-bal, batPowWh, batState); batState -= discharge; }
-          gridBuy = (-bal) - discharge; injection = 0; onSite = prodWh + discharge; viaBat = discharge;
+          let need = -surplus;
+          if (batState > 0) { const d1=Math.min(need,batPowWh,batState); batState-=d1; need-=d1; viaBat+=d1; }
+          if (thermState > 0 && need > 0) { const d2=Math.min(need,thermPowWh,thermState); thermState-=d2; need-=d2; viaBat+=d2; }
+          const onSite=prodWh+viaBat;
+          const os=onSite/1000, gb=need/1000, vb=viaBat/1000;
+          hourly[idx] = {on_site:os, grid_buy:gb, injection:0, via_bat:vb, m, d, h};
+          monthly[m-1].on_site += os; monthly[m-1].grid_buy += gb; monthly[m-1].via_bat += vb;
         }
-        const os = onSite/1000, gb = gridBuy/1000, inj = injection/1000, vb = viaBat/1000;
-        hourly[idx] = {on_site:os, grid_buy:gb, injection:inj, via_bat:vb, m, d, h};
-        monthly[m-1].on_site += os; monthly[m-1].grid_buy += gb; monthly[m-1].injection += inj; monthly[m-1].via_bat += vb;
       }
     }
   }
@@ -2373,6 +2406,10 @@ function MonSiteScreen({ user, userProfile, onBack }) {
   const[pvKwc,setPvKwc]=useState('6');
   const[batW,setBatW]=useState('');
   const[batKwh,setBatKwh]=useState('');
+  const[batLoss,setBatLoss]=useState('');
+  const[thermW,setThermW]=useState('5');
+  const[thermKwh,setThermKwh]=useState('10');
+  const[thermLoss,setThermLoss]=useState('');
   const[prodProfilId,setProdProfilId]=useState('');
   const[prodProfilData,setProdProfilData]=useState(null);
   const[balance,setBalance]=useState(null);
@@ -2414,6 +2451,13 @@ function MonSiteScreen({ user, userProfile, onBack }) {
     setPvKwc(site?.puissance_pv_kwc!=null?String(site.puissance_pv_kwc):'6');
     setBatW(site?.batterie_puissance_w!=null?String(site.batterie_puissance_w/1000):'');
     setBatKwh(site?.batterie_capacite_kwh!=null?String(site.batterie_capacite_kwh):'');
+    const lsGet=(k,def)=>{const v=localStorage.getItem(k);return v!==null?v:def;};
+    if(activeId){
+      setBatLoss(lsGet(`starvolt_bat_loss_${activeId}`,''));
+      setThermW(lsGet(`starvolt_therm_w_${activeId}`,'5'));
+      setThermKwh(lsGet(`starvolt_therm_kwh_${activeId}`,'10'));
+      setThermLoss(lsGet(`starvolt_therm_loss_${activeId}`,''));
+    }
     setProdProfilId(site?.profil_production_id||'');
     setProdProfilData(null); setBalance(null);
   },[activeId]);
@@ -2452,10 +2496,12 @@ function MonSiteScreen({ user, userProfile, onBack }) {
   // Calculer le bilan énergétique dès que les données sont prêtes
   useEffect(()=>{
     if(!site?.conso_profil||!prodProfilData){setBalance(null);return;}
-    const kw=pvKwc===''?6:(parseFloat(pvKwc)||0), bw=(parseFloat(batW)||0)*1000, bk=parseFloat(batKwh)||0;
-    setBalance(computeEnergyBalance(site.conso_profil,prodProfilData,kw,bw,bk));
+    const kw=pvKwc===''?6:(parseFloat(pvKwc)||0);
+    const bw=(parseFloat(batW)||0)*1000, bk=parseFloat(batKwh)||0, bl=parseFloat(batLoss)||0;
+    const tw=parseFloat(thermW)||0, tk=parseFloat(thermKwh)||0, tl=parseFloat(thermLoss)||0;
+    setBalance(computeEnergyBalance(site.conso_profil,prodProfilData,kw,bw,bk,bl,tw,tk,tl));
     setChartLevel('month'); setChartMonth(null); setChartDay(null);
-  },[site?.conso_profil,prodProfilData,pvKwc,batW,batKwh]);
+  },[site?.conso_profil,prodProfilData,pvKwc,batW,batKwh,batLoss,thermW,thermKwh,thermLoss]);
 
   const updateSite=async(updates)=>{ await sb.from('sites').update(updates).eq('id',activeId); await load(); };
 
@@ -2499,7 +2545,7 @@ function MonSiteScreen({ user, userProfile, onBack }) {
         {/* Sélecteur de site (si plusieurs) */}
         {sites.length>1&&!showAdd&&(
           <div style={{marginBottom:8}}>
-            <select className="inp inp-sel" style={{fontSize:13,padding:'9px 36px 9px 12px'}} value={activeId||''} onChange={e=>{
+            <select className="inp inp-sel" style={{fontSize:13,padding:'9px 36px 9px 12px',maxWidth:260}} value={activeId||''} onChange={e=>{
               persistActiveSite(e.target.value); setEditMode(false); setImportMsg(null); setShowDeleteConfirm(false);
             }}>
               {sites.map(s=><option key={s.id} value={s.id}>{s.nom}</option>)}
@@ -2544,52 +2590,54 @@ function MonSiteScreen({ user, userProfile, onBack }) {
                 </button>
                 <input ref={fileRef} type="file" accept=".xlsx,.xls" style={{display:'none'}} onChange={handleImport}/>
               </div>
-              <div style={{padding:'10px 14px 12px',display:'flex',flexDirection:'column',gap:8}}>
-                {/* Tarif + PDL */}
-                <div>
-                  <label style={{fontSize:10,color:'rgba(255,255,255,.45)',fontWeight:700,letterSpacing:'.5px',display:'block',marginBottom:4}}>TARIF D'ÉLECTRICITÉ</label>
-                  <select className="inp inp-sel" style={{fontSize:13,padding:'8px 36px 8px 12px'}} value={site.tarif_id||''} onChange={e=>updateSite({tarif_id:e.target.value||null})}>
-                    <option value=''>— Sélectionner —</option>
-                    {tariffs.map(t=><option key={t.id} value={t.id}>{t.nom}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label style={{fontSize:10,color:'rgba(255,255,255,.45)',fontWeight:700,letterSpacing:'.5px',display:'block',marginBottom:4}}>PDL (optionnel)</label>
-                  <PDLInput value={site.pdl||''} onSave={v=>updateSite({pdl:v})}/>
-                </div>
-                {/* Messages import */}
-                {importMsg?.type==='err'&&<div style={{color:'#ff6b6b',fontSize:12,padding:'6px 10px',background:'rgba(255,50,50,.1)',borderRadius:8}}>⚠️ {importMsg.text}</div>}
-                {importMsg?.type==='ok'&&<div style={{color:'#7dd940',fontSize:12,padding:'6px 10px',background:'rgba(255,255,255,.05)',borderRadius:8}}>✅ {importMsg.kwh.toLocaleString('fr-FR')} kWh/an{importMsg.gaps>0?` · ${importMsg.gaps} trou(s) rebouché(s)`:''}</div>}
-                {/* Stats conso */}
-                {site.conso_annuelle_kwh?(
-                  <div>
-                    <div style={{display:'flex',alignItems:'baseline',gap:6,marginBottom:2}}>
-                      <span style={{fontSize:28,fontWeight:900,color:'white'}}>{Math.round(site.conso_annuelle_kwh).toLocaleString('fr-FR')}</span>
-                      <span style={{fontSize:13,color:'rgba(255,255,255,.6)',fontWeight:600}}>kWh/an</span>
-                      <span style={{fontSize:10,color:'rgba(255,255,255,.35)',marginLeft:4}}>· importé le {new Date(site.conso_imported_at).toLocaleDateString('fr-FR',{day:'numeric',month:'short',year:'numeric'})}</span>
+              <div style={{padding:'10px 14px 12px'}}>
+                <div style={{display:'flex',gap:12,alignItems:'flex-start'}}>
+                  {/* Colonne gauche : saisies + stats */}
+                  <div style={{flex:1,minWidth:0,display:'flex',flexDirection:'column',gap:8}}>
+                    <div>
+                      <label style={{fontSize:10,color:'rgba(255,255,255,.45)',fontWeight:700,letterSpacing:'.5px',display:'block',marginBottom:4}}>TARIF D'ÉLECTRICITÉ</label>
+                      <select className="inp inp-sel" style={{fontSize:13,padding:'8px 36px 8px 12px'}} value={site.tarif_id||''} onChange={e=>updateSite({tarif_id:e.target.value||null})}>
+                        <option value=''>— Sélectionner —</option>
+                        {tariffs.map(t=><option key={t.id} value={t.id}>{t.nom}</option>)}
+                      </select>
                     </div>
-                    {site.conso_gaps?.length>0&&(
-                      <>
-                        <button style={{background:'none',border:'none',color:'rgba(255,255,255,.45)',fontSize:11,cursor:'pointer',padding:'2px 0'}} onClick={()=>setShowGaps(!showGaps)}>
-                          {showGaps?'▼':'▶'} {site.conso_gaps.length} trou{site.conso_gaps.length>1?'s':''} rebouché{site.conso_gaps.length>1?'s':''}
-                        </button>
-                        {showGaps&&<div style={{display:'flex',flexDirection:'column',gap:4,marginTop:6}}>{site.conso_gaps.map((g,idx)=><div key={idx} className="gap-item"><span>{formatGapDate(g.start)} → {formatGapDate(g.end)}</span><span style={{color:'rgba(255,255,255,.4)',fontSize:10}}>{g.hours}h · {g.method}</span></div>)}</div>}
-                      </>
+                    <div>
+                      <label style={{fontSize:10,color:'rgba(255,255,255,.45)',fontWeight:700,letterSpacing:'.5px',display:'block',marginBottom:4}}>PDL (optionnel)</label>
+                      <PDLInput value={site.pdl||''} onSave={v=>updateSite({pdl:v})}/>
+                    </div>
+                    {importMsg?.type==='err'&&<div style={{color:'#ff6b6b',fontSize:12,padding:'6px 10px',background:'rgba(255,50,50,.1)',borderRadius:8}}>⚠️ {importMsg.text}</div>}
+                    {importMsg?.type==='ok'&&<div style={{color:'#7dd940',fontSize:12,padding:'6px 10px',background:'rgba(255,255,255,.05)',borderRadius:8}}>✅ {importMsg.kwh.toLocaleString('fr-FR')} kWh/an{importMsg.gaps>0?` · ${importMsg.gaps} trou(s) rebouché(s)`:''}</div>}
+                    {site.conso_annuelle_kwh?(
+                      <div>
+                        <div style={{display:'flex',alignItems:'baseline',gap:6,marginBottom:2}}>
+                          <span style={{fontSize:28,fontWeight:900,color:'white'}}>{Math.round(site.conso_annuelle_kwh).toLocaleString('fr-FR')}</span>
+                          <span style={{fontSize:13,color:'rgba(255,255,255,.6)',fontWeight:600}}>kWh/an</span>
+                        </div>
+                        <div style={{fontSize:10,color:'rgba(255,255,255,.35)'}}>{new Date(site.conso_imported_at).toLocaleDateString('fr-FR',{day:'numeric',month:'short',year:'numeric'})}</div>
+                        {site.conso_gaps?.length>0&&(
+                          <>
+                            <button style={{background:'none',border:'none',color:'rgba(255,255,255,.45)',fontSize:11,cursor:'pointer',padding:'2px 0'}} onClick={()=>setShowGaps(!showGaps)}>
+                              {showGaps?'▼':'▶'} {site.conso_gaps.length} trou{site.conso_gaps.length>1?'s':''} rebouché{site.conso_gaps.length>1?'s':''}
+                            </button>
+                            {showGaps&&<div style={{display:'flex',flexDirection:'column',gap:4,marginTop:6}}>{site.conso_gaps.map((g,idx)=><div key={idx} className="gap-item"><span>{formatGapDate(g.start)} → {formatGapDate(g.end)}</span><span style={{color:'rgba(255,255,255,.4)',fontSize:10}}>{g.hours}h · {g.method}</span></div>)}</div>}
+                          </>
+                        )}
+                      </div>
+                    ):(
+                      <div style={{color:'rgba(255,255,255,.4)',fontSize:12,padding:'4px 0'}}>Aucune donnée — importez un fichier XLS Enedis</div>
                     )}
                   </div>
-                ):(
-                  <div style={{color:'rgba(255,255,255,.4)',fontSize:12,textAlign:'center',padding:'6px 0'}}>Aucune donnée — importez un fichier XLS Enedis</div>
-                )}
-                {/* Heatmap */}
-                {site.conso_profil?.length===8784&&(
-                  <div>
-                    <div style={{fontWeight:700,fontSize:11,color:'rgba(255,255,255,.5)',marginBottom:5}}>Heatmap · heures (0–23h) × jours</div>
-                    <ConsoHeatmapCanvas profile={site.conso_profil} months={heatmapExpanded?undefined:[1]}/>
-                    <button onClick={()=>setHeatmapExpanded(v=>!v)} style={{background:'none',border:'none',cursor:'pointer',color:'rgba(255,255,255,.45)',fontSize:11,padding:'6px 0 0',display:'flex',alignItems:'center',gap:4}}>
-                      {heatmapExpanded?'▲ Replier':'▼ Voir toute l\'année'}
-                    </button>
-                  </div>
-                )}
+                  {/* Colonne droite : heatmap */}
+                  {site.conso_profil?.length===8784&&(
+                    <div style={{flex:'0 0 160px',maxWidth:160}}>
+                      <div style={{fontWeight:700,fontSize:10,color:'rgba(255,255,255,.4)',marginBottom:4,letterSpacing:'.4px'}}>HEATMAP · 0–23h × JOURS</div>
+                      <ConsoHeatmapCanvas profile={site.conso_profil} months={heatmapExpanded?undefined:[1,2,3]}/>
+                      <button onClick={()=>setHeatmapExpanded(v=>!v)} style={{background:'none',border:'none',cursor:'pointer',color:'rgba(255,255,255,.4)',fontSize:10,padding:'4px 0 0',display:'flex',alignItems:'center',gap:3}}>
+                        {heatmapExpanded?'▲ Replier':'▼ Année entière'}
+                      </button>
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
 
@@ -2599,119 +2647,158 @@ function MonSiteScreen({ user, userProfile, onBack }) {
                 <div style={{fontWeight:800,fontSize:13,color:'white',display:'flex',alignItems:'center',gap:6}}>☀️ Ma production, mon stockage et ma box</div>
               </div>
               <div style={{padding:'10px 14px 12px',display:'flex',flexDirection:'column',gap:10}}>
-                {/* Paramètres — limités en largeur sur desktop */}
-                <div className="prod-params" style={{display:'flex',flexDirection:'column',gap:10}}>
-                  {/* Profil de production */}
-                  <div>
+                {/* Profil + kWc — limité en largeur */}
+                <div style={{maxWidth:340}}>
+                  <div style={{marginBottom:8}}>
                     <label style={{fontSize:10,color:'rgba(255,255,255,.45)',fontWeight:700,letterSpacing:'.5px',display:'block',marginBottom:4}}>PROFIL DE PRODUCTION</label>
                     {prodProfils.length===0?(
                       <div style={{fontSize:12,color:'rgba(255,255,255,.35)',padding:'6px 0'}}>Aucun profil disponible — importez via Admin → Production solaire</div>
                     ):(
-                      <div style={{display:'flex',alignItems:'center',gap:6,background:'rgba(255,255,255,.05)',borderRadius:8,padding:'8px 12px'}}>
-                        <span style={{fontSize:13,color:'rgba(125,217,64,.9)',fontWeight:700}}>📍</span>
-                        <span style={{fontSize:13,color:'white',fontWeight:600}}>
-                          {prodProfils.find(p=>p.id===prodProfilId)?.nom||'Détection en cours…'}
-                        </span>
+                      <div style={{display:'flex',alignItems:'center',gap:6,background:'rgba(255,255,255,.05)',borderRadius:8,padding:'7px 10px'}}>
+                        <span style={{fontSize:12,color:'rgba(125,217,64,.9)',fontWeight:700}}>📍</span>
+                        <span style={{fontSize:12,color:'white',fontWeight:600}}>{prodProfils.find(p=>p.id===prodProfilId)?.nom||'Détection en cours…'}</span>
                       </div>
                     )}
                   </div>
-                  {/* kWc */}
                   <div>
                     <label style={{fontSize:10,color:'rgba(255,255,255,.45)',fontWeight:700,letterSpacing:'.5px',display:'block',marginBottom:4}}>PUISSANCE PV (kWc)</label>
-                    <input className="inp" type="number" min="0" step="0.5" placeholder="6" value={pvKwc}
-                      onChange={e=>setPvKwc(e.target.value)}
-                      onBlur={()=>{const v=parseFloat(pvKwc);updateSite({puissance_pv_kwc:isNaN(v)?null:v});}}/>
-                  </div>
-                  {/* Batterie */}
-                  <div style={{display:'flex',gap:8}}>
-                    <div style={{flex:1}}>
-                      <label style={{fontSize:10,color:'rgba(255,255,255,.45)',fontWeight:700,letterSpacing:'.5px',display:'block',marginBottom:4}}>BATTERIE PUISSANCE (kW)</label>
-                      <input className="inp" type="number" min="0" step="0.5" placeholder="ex : 3" value={batW}
-                        onChange={e=>setBatW(e.target.value)}
-                        onBlur={()=>{const v=parseFloat(batW);updateSite({batterie_puissance_w:isNaN(v)?null:v*1000});}}/>
-                    </div>
-                    <div style={{flex:1}}>
-                      <label style={{fontSize:10,color:'rgba(255,255,255,.45)',fontWeight:700,letterSpacing:'.5px',display:'block',marginBottom:4}}>CAPACITÉ (kWh)</label>
-                      <input className="inp" type="number" min="0" step="0.5" placeholder="ex : 10" value={batKwh}
-                        onChange={e=>setBatKwh(e.target.value)}
-                        onBlur={()=>{const v=parseFloat(batKwh);updateSite({batterie_capacite_kwh:isNaN(v)?null:v});}}/>
-                    </div>
-                  </div>
-                  {/* Box */}
-                  <div>
-                    <label style={{fontSize:10,color:'rgba(255,255,255,.45)',fontWeight:700,letterSpacing:'.5px',display:'block',marginBottom:6}}>BOX ÉNERGIE</label>
-                    {localStorage.getItem('starvolt_box_chosen')?(
-                      <div style={{display:'flex',alignItems:'center',gap:8,background:'rgba(125,217,64,.1)',border:'1px solid rgba(125,217,64,.35)',borderRadius:10,padding:'8px 12px'}}>
-                        <img src="/comwatt-box.png" style={{width:28,height:28,objectFit:'contain',mixBlendMode:'screen'}}/>
-                        <div>
-                          <div style={{fontWeight:700,color:'#7dd940',fontSize:13}}>Box Comwatt ✓</div>
-                          <div style={{fontSize:11,color:'rgba(255,255,255,.5)'}}>{localStorage.getItem('starvolt_box_chosen')==='free'?'Option gratuite (cagnotte 3 ans)':'Achat direct 550 €'}</div>
-                        </div>
-                      </div>
-                    ):(
-                      <div style={{fontSize:12,color:'rgba(255,255,255,.35)',padding:'4px 0'}}>Aucune box — disponible dans les simulations d'économie</div>
-                    )}
+                    <StepInput value={pvKwc} onChange={setPvKwc}
+                      onBlur={()=>{const v=parseFloat(pvKwc);updateSite({puissance_pv_kwc:isNaN(v)?null:v});}}
+                      step={0.5} min={0} placeholder="6"/>
                   </div>
                 </div>
-                {/* Graphique bilan énergétique */}
-                {parseFloat(batW) > 0 && parseFloat(batW) < 0.5 && (
-                  <div style={{fontSize:11,color:'rgba(255,200,80,.85)',padding:'6px 10px',background:'rgba(255,200,0,.07)',borderRadius:8,marginTop:2}}>
+
+                {/* Batterie chimique + Stockage thermique côte à côte */}
+                <div style={{display:'flex',gap:10,flexWrap:'wrap'}}>
+                  {/* 🔋 Batterie chimique */}
+                  <div style={{flex:'1 1 148px',background:'rgba(255,255,255,.04)',border:'1px solid rgba(255,255,255,.12)',borderRadius:12,padding:'10px 12px'}}>
+                    <div style={{display:'flex',alignItems:'center',gap:6,marginBottom:8}}>
+                      <span style={{fontSize:20}}>🔋</span>
+                      <span style={{fontWeight:800,fontSize:12,color:'white'}}>Batterie chimique</span>
+                    </div>
+                    <div style={{marginBottom:6}}>
+                      <label style={{fontSize:9,color:'rgba(255,255,255,.4)',fontWeight:700,letterSpacing:'.5px',display:'block',marginBottom:3}}>PUISSANCE (kW)</label>
+                      <StepInput value={batW} onChange={setBatW}
+                        onBlur={()=>{const v=parseFloat(batW);updateSite({batterie_puissance_w:isNaN(v)?null:v*1000});}}
+                        step={0.5} min={0} placeholder="3"/>
+                    </div>
+                    <div style={{marginBottom:6}}>
+                      <label style={{fontSize:9,color:'rgba(255,255,255,.4)',fontWeight:700,letterSpacing:'.5px',display:'block',marginBottom:3}}>CAPACITÉ (kWh)</label>
+                      <StepInput value={batKwh} onChange={setBatKwh}
+                        onBlur={()=>{const v=parseFloat(batKwh);updateSite({batterie_capacite_kwh:isNaN(v)?null:v});}}
+                        step={0.5} min={0} placeholder="10"/>
+                    </div>
+                    <div>
+                      <label style={{fontSize:9,color:'rgba(255,255,255,.4)',fontWeight:700,letterSpacing:'.5px',display:'block',marginBottom:3}}>PERTES / CYCLE (%)</label>
+                      <input className="inp" type="number" min="0" max="50" step="1" placeholder="ex : 10" value={batLoss}
+                        onChange={e=>setBatLoss(e.target.value)}
+                        onBlur={()=>activeId&&localStorage.setItem(`starvolt_bat_loss_${activeId}`,batLoss)}
+                        style={{textAlign:'center'}}/>
+                    </div>
+                  </div>
+                  {/* 🌡️ Stockage thermique */}
+                  <div style={{flex:'1 1 148px',background:'rgba(255,160,50,.05)',border:'1px solid rgba(255,160,50,.28)',borderRadius:12,padding:'10px 12px'}}>
+                    <div style={{display:'flex',alignItems:'center',gap:6,marginBottom:4}}>
+                      <img src="/comwatt-box.png" style={{width:22,height:22,objectFit:'contain',mixBlendMode:'screen',flexShrink:0}} onError={e=>e.target.style.display='none'}/>
+                      <span style={{fontWeight:800,fontSize:12,color:'white'}}>Stockage thermique</span>
+                    </div>
+                    <div style={{fontSize:10,color:'rgba(255,160,50,.8)',marginBottom:8}}>🌡️ Chauffage · Cumulus</div>
+                    <div style={{marginBottom:6}}>
+                      <label style={{fontSize:9,color:'rgba(255,255,255,.4)',fontWeight:700,letterSpacing:'.5px',display:'block',marginBottom:3}}>PUISSANCE (kW)</label>
+                      <StepInput value={thermW}
+                        onChange={v=>{setThermW(v);activeId&&localStorage.setItem(`starvolt_therm_w_${activeId}`,v);}}
+                        onBlur={()=>{}} step={0.5} min={0} placeholder="5"/>
+                    </div>
+                    <div style={{marginBottom:6}}>
+                      <label style={{fontSize:9,color:'rgba(255,255,255,.4)',fontWeight:700,letterSpacing:'.5px',display:'block',marginBottom:3}}>CAPACITÉ (kWh)</label>
+                      <StepInput value={thermKwh}
+                        onChange={v=>{setThermKwh(v);activeId&&localStorage.setItem(`starvolt_therm_kwh_${activeId}`,v);}}
+                        onBlur={()=>{}} step={0.5} min={0} placeholder="10"/>
+                    </div>
+                    <div>
+                      <label style={{fontSize:9,color:'rgba(255,255,255,.4)',fontWeight:700,letterSpacing:'.5px',display:'block',marginBottom:3}}>PERTES / CYCLE (%)</label>
+                      <input className="inp" type="number" min="0" max="50" step="1" placeholder="ex : 5" value={thermLoss}
+                        onChange={e=>{setThermLoss(e.target.value);activeId&&localStorage.setItem(`starvolt_therm_loss_${activeId}`,e.target.value);}}
+                        style={{textAlign:'center'}}/>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Box */}
+                <div style={{maxWidth:340}}>
+                  <label style={{fontSize:10,color:'rgba(255,255,255,.45)',fontWeight:700,letterSpacing:'.5px',display:'block',marginBottom:6}}>BOX ÉNERGIE</label>
+                  {localStorage.getItem('starvolt_box_chosen')?(
+                    <div style={{display:'flex',alignItems:'center',gap:8,background:'rgba(125,217,64,.1)',border:'1px solid rgba(125,217,64,.35)',borderRadius:10,padding:'8px 12px'}}>
+                      <img src="/comwatt-box.png" style={{width:28,height:28,objectFit:'contain',mixBlendMode:'screen'}}/>
+                      <div>
+                        <div style={{fontWeight:700,color:'#7dd940',fontSize:13}}>Box Comwatt ✓</div>
+                        <div style={{fontSize:11,color:'rgba(255,255,255,.5)'}}>{localStorage.getItem('starvolt_box_chosen')==='free'?'Option gratuite (cagnotte 3 ans)':'Achat direct 550 €'}</div>
+                      </div>
+                    </div>
+                  ):(
+                    <div style={{fontSize:12,color:'rgba(255,255,255,.35)',padding:'4px 0'}}>Aucune box — disponible dans les simulations d'économie</div>
+                  )}
+                </div>
+
+                {parseFloat(batW)>0&&parseFloat(batW)<0.5&&(
+                  <div style={{fontSize:11,color:'rgba(255,200,80,.85)',padding:'6px 10px',background:'rgba(255,200,0,.07)',borderRadius:8}}>
                     💡 Puissance batterie très faible ({batW} kW). Une batterie domestique est typiquement entre 3 et 10 kW.
                   </div>
                 )}
-                {balance&&(
-                  <div style={{marginTop:4}}>
-                    <div style={{fontWeight:700,fontSize:11,color:'rgba(255,255,255,.5)',marginBottom:6}}>Bilan énergétique mensuel</div>
-                    <EnergyBalanceChart balance={balance} level={chartLevel} selMonth={chartMonth} selDay={chartDay} setLevel={setChartLevel} setSelMonth={setChartMonth} setSelDay={setChartDay}/>
-                    {(()=>{
-                      // Agrégation selon le niveau de zoom du graphique
-                      let pts;
-                      if(chartLevel==='month') pts=balance.monthly;
-                      else if(chartLevel==='day') pts=balance.hourly.filter(p=>p&&p.m===chartMonth);
-                      else pts=balance.hourly.filter(p=>p&&p.m===chartMonth&&p.d===chartDay);
-                      const autoconso = pts.reduce((s,m)=>s+m.on_site,0);
-                      const achat = pts.reduce((s,m)=>s+m.grid_buy,0);
-                      const injection = pts.reduce((s,m)=>s+m.injection,0);
-                      const prod = autoconso + injection;
-                      const conso = autoconso + achat;
-                      const tauxAutoconso = prod > 0 ? Math.round(autoconso / prod * 100) : 0;
-                      const tauxAutoprod = conso > 0 ? Math.round(autoconso / conso * 100) : 0;
-                      const unit = (autoconso+achat) >= 100 ? 'MWh' : 'kWh';
-                      const scale = unit==='MWh' ? 0.001 : 1;
-                      const period = chartLevel==='hour' ? `${chartDay}/${chartMonth}` : chartLevel==='day' ? `Mois ${chartMonth}` : 'Année';
-                      const fmt = v => (v*scale).toFixed(unit==='MWh'?1:0) + ' ' + unit;
-                      return (<>
-                        {/* KPI taux */}
-                        <div style={{display:'flex',gap:8,marginTop:10}}>
-                          {[
-                            {label:'Taux d\'autoconsommation', value:tauxAutoconso, desc:'Production consommée sur place', color:'#f0a050'},
-                            {label:'Taux d\'autoproduction', value:tauxAutoprod, desc:'Conso couverte par la prod locale', color:'#7dd940'},
-                          ].map(({label,value,desc,color})=>(
-                            <div key={label} style={{flex:1,background:'rgba(255,255,255,.04)',border:'1px solid rgba(255,255,255,.08)',borderRadius:10,padding:'12px 14px',textAlign:'center'}}>
-                              <div style={{fontSize:10,color:'rgba(255,255,255,.45)',fontWeight:700,letterSpacing:'.4px',marginBottom:6,textTransform:'uppercase'}}>{label}</div>
-                              <div style={{fontSize:36,fontWeight:900,color,lineHeight:1}}>{value}<span style={{fontSize:18}}>%</span></div>
-                              <div style={{fontSize:10,color:'rgba(255,255,255,.35)',marginTop:5}}>{desc}</div>
+
+                {/* Bilan énergétique */}
+                {balance&&(()=>{
+                  let pts;
+                  if(chartLevel==='month') pts=balance.monthly;
+                  else if(chartLevel==='day') pts=balance.hourly.filter(p=>p&&p.m===chartMonth);
+                  else pts=balance.hourly.filter(p=>p&&p.m===chartMonth&&p.d===chartDay);
+                  const autoconso=pts.reduce((s,m)=>s+m.on_site,0);
+                  const achat=pts.reduce((s,m)=>s+m.grid_buy,0);
+                  const injection=pts.reduce((s,m)=>s+m.injection,0);
+                  const prod=autoconso+injection, conso=autoconso+achat;
+                  const tauxAutoconso=prod>0?Math.round(autoconso/prod*100):0;
+                  const tauxAutoprod=conso>0?Math.round(autoconso/conso*100):0;
+                  const unit=(autoconso+achat)>=100?'MWh':'kWh';
+                  const scale=unit==='MWh'?0.001:1;
+                  const period=chartLevel==='hour'?`${chartDay}/${chartMonth}`:chartLevel==='day'?`Mois ${chartMonth}`:'Année';
+                  const fmt=v=>(v*scale).toFixed(unit==='MWh'?1:0)+' '+unit;
+                  return(
+                    <div style={{marginTop:2}}>
+                      {/* KPIs au-dessus du graphique */}
+                      <div style={{display:'flex',gap:8,marginBottom:10}}>
+                        {[
+                          {label:'Autoconsommation',value:tauxAutoconso,desc:'Production consommée sur place',color:'#f0a050'},
+                          {label:'Autoproduction',value:tauxAutoprod,desc:'Conso couverte par la prod',color:'#7dd940'},
+                        ].map(({label,value,desc,color})=>(
+                          <div key={label} style={{flex:1,background:'rgba(255,255,255,.04)',border:'1px solid rgba(255,255,255,.08)',borderRadius:10,padding:'10px 10px',textAlign:'center'}}>
+                            <div style={{fontSize:9,color:'rgba(255,255,255,.45)',fontWeight:700,letterSpacing:'.4px',marginBottom:4,textTransform:'uppercase'}}>{label}</div>
+                            <div style={{fontSize:34,fontWeight:900,color,lineHeight:1}}>{value}<span style={{fontSize:16}}>%</span></div>
+                            <div style={{fontSize:10,color:'rgba(255,255,255,.35)',marginTop:4}}>{desc}</div>
+                          </div>
+                        ))}
+                      </div>
+                      {/* Graphique */}
+                      <div style={{fontWeight:700,fontSize:11,color:'rgba(255,255,255,.5)',marginBottom:4}}>Bilan énergétique · {period}</div>
+                      <EnergyBalanceChart balance={balance} level={chartLevel} selMonth={chartMonth} selDay={chartDay} setLevel={setChartLevel} setSelMonth={setChartMonth} setSelDay={setChartDay}/>
+                      {/* Infos énergie — lisibles */}
+                      <div style={{marginTop:10,borderRadius:10,overflow:'hidden',border:'1px solid rgba(255,255,255,.08)'}}>
+                        {[
+                          {icon:'☀️',color:'#f0a050',bg:'rgba(240,160,80,.1)',label:'Énergie solaire consommée ici',value:fmt(autoconso)},
+                          {icon:'🔌',color:'#d0d0d0',bg:'rgba(208,208,208,.07)',label:'Énergie achetée au réseau',value:fmt(achat)},
+                          {icon:'⬆️',color:'#f0e86a',bg:'rgba(240,232,106,.08)',label:'Énergie envoyée au réseau',value:fmt(injection)},
+                        ].map(({icon,color,bg,label,value})=>(
+                          <div key={label} style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'11px 14px',background:bg,borderBottom:'1px solid rgba(255,255,255,.06)'}}>
+                            <div style={{display:'flex',alignItems:'center',gap:8}}>
+                              <span style={{fontSize:18,flexShrink:0}}>{icon}</span>
+                              <div style={{fontSize:13,color:'rgba(255,255,255,.85)',fontWeight:600,lineHeight:1.2}}>{label}</div>
                             </div>
-                          ))}
-                        </div>
-                        {/* Détail énergie — période affichée */}
-                        <div style={{fontSize:10,color:'rgba(255,255,255,.35)',fontWeight:700,letterSpacing:'.5px',textTransform:'uppercase',marginTop:8,marginBottom:3}}>{period}</div>
-                        <div className="energy-summary" style={{display:'flex',flexDirection:'column',gap:0,borderRadius:10,overflow:'hidden',border:'1px solid rgba(255,255,255,.08)'}}>
-                          {[
-                            {color:'#f0a050', bg:'rgba(240,160,80,.1)', label:'Produite et consommée sur place', value:fmt(autoconso)},
-                            {color:'#d0d0d0', bg:'rgba(208,208,208,.07)', label:'Achetée au réseau', value:fmt(achat)},
-                            {color:'#f0e86a', bg:'rgba(240,232,106,.08)', label:'Injectée dans le réseau', value:fmt(injection)},
-                          ].map(({color,bg,label,value})=>(
-                            <div key={label} style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'10px 14px',background:bg,borderBottom:'1px solid rgba(255,255,255,.06)'}}>
-                              <div style={{fontSize:12,color:'rgba(255,255,255,.75)'}}>{label}</div>
-                              <div style={{fontSize:20,fontWeight:900,color,flexShrink:0,marginLeft:10}}>{value}</div>
-                            </div>
-                          ))}
-                        </div>
-                      </>);
-                    })()}
-                  </div>
-                )}
+                            <div style={{fontSize:22,fontWeight:900,color,flexShrink:0,marginLeft:8}}>{value}</div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })()}
                 {prodProfilId&&!balance&&site?.conso_profil&&(
                   <div style={{textAlign:'center',padding:'10px 0',color:'rgba(255,255,255,.35)',fontSize:12}}>Calcul du bilan…</div>
                 )}
