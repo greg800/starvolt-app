@@ -2427,8 +2427,8 @@ function MonSiteScreen({ user, userProfile, onBack }) {
   const[showDeleteConfirm,setShowDeleteConfirm]=useState(false);
   const[importingDemo,setImportingDemo]=useState(false);
   const[pvKwc,setPvKwc]=useState('6');
-  const[batKwh,setBatKwh]=useState('');
-  const[thermKwh,setThermKwh]=useState('');
+  const[batKwh,setBatKwh]=useState('10');
+  const[thermKwh,setThermKwh]=useState('10');
   const[prodProfilId,setProdProfilId]=useState('');
   const[prodProfilData,setProdProfilData]=useState(null);
   const[balance,setBalance]=useState(null);
@@ -2469,12 +2469,10 @@ function MonSiteScreen({ user, userProfile, onBack }) {
 
   // Sync champs locaux quand on change de site
   useEffect(()=>{
-    setPvKwc(site?.puissance_pv_kwc!=null?String(site.puissance_pv_kwc):'6');
-    setBatKwh(site?.batterie_capacite_kwh!=null?String(site.batterie_capacite_kwh):'10');
-    if(activeId){
-      const lsGet=(k,def)=>{const v=localStorage.getItem(k);return v!==null?v:def;};
-      setThermKwh(lsGet(`starvolt_therm_kwh_${activeId}`,'10'));
-    }
+    setPvKwc(site?.puissance_pv_kwc>0?String(site.puissance_pv_kwc):'6');
+    setBatKwh(site?.batterie_capacite_kwh>0?String(site.batterie_capacite_kwh):'10');
+    const lsGet=(k,def)=>{const v=localStorage.getItem(k);return v!==null&&v!==''&&Number(v)>0?v:def;};
+    setThermKwh(activeId?lsGet(`starvolt_therm_kwh_${activeId}`,'10'):'10');
     setProdProfilId(site?.profil_production_id||'');
     setProdProfilData(null); setBalance(null);
   },[activeId]);
