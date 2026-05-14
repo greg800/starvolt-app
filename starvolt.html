@@ -2406,8 +2406,14 @@ function EnergyBalanceChart({ balance, level, selMonth, selDay, setLevel, setSel
           position:'absolute', bottom:28, left:4, zIndex:2,
           background:'white', border:'none',
           borderRadius:'50%', width:26, height:26, cursor:'pointer',
-          color:'#333', fontSize:13, lineHeight:'24px', textAlign:'center', padding:0, fontWeight:700
-        }}>⊖</button>
+          padding:0, display:'flex', alignItems:'center', justifyContent:'center'
+        }}>
+          <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+            <circle cx="7.5" cy="7.5" r="5.5" stroke="#333" strokeWidth="2"/>
+            <line x1="4.5" y1="7.5" x2="10.5" y2="7.5" stroke="#333" strokeWidth="2" strokeLinecap="round"/>
+            <line x1="12" y1="12" x2="16" y2="16" stroke="#333" strokeWidth="2" strokeLinecap="round"/>
+          </svg>
+        </button>
       )}
       {ctxLabel && <div style={{textAlign:'center',fontSize:11,color:'rgba(255,255,255,.45)',marginTop:2}}>{ctxLabel}</div>}
     </div>
