@@ -3075,10 +3075,7 @@ function SimulationsScreen({ onACC, onBox, onSolar, onOptimisation, onBack, user
           <img src="/maison.png" alt="Solaire" className="sim-icon"/>
           <div className="sim-text">
             <div className="sim-title">Économiser avec le solaire</div>
-            {solarSaving !== null && solarSaving > 0
-              ? <div className="sim-sub green" style={{color:'#7dd940',fontWeight:700}}>Baisse de la facture : -{solarSaving.toLocaleString('fr-FR')} €TTC/an</div>
-              : <div className="sim-sub">Panneaux solaires + batterie</div>
-            }
+            {(()=>{const ls=parseInt(localStorage.getItem('starvolt_baisse_facture')||'0');const val=ls||solarSaving;return val>0?<div className="sim-sub green" style={{color:'#7dd940',fontWeight:700}}>Baisse de la facture : -{val.toLocaleString('fr-FR')} €TTC/an</div>:<div className="sim-sub">Panneaux solaires + batterie</div>;})()}
           </div>
           <span className="sim-arrow">→</span>
         </button>
@@ -4844,15 +4841,20 @@ function SolarSimScreen({ user, userProfile, onBack, onPanier, onCartUpdate }) {
                 <StepInput compact value={thermKwh} onChange={setThermKwh} step={0.5} min={0} placeholder="10"/>
               </div>
             </div>
-            {realSaving !== null && (
-              <div style={{ marginTop:10, paddingTop:10, borderTop:'1px solid rgba(255,255,255,.08)' }}>
-                <div style={{ display:'flex', alignItems:'baseline', gap:10, flexWrap:'wrap', marginBottom:4 }}>
-                  <div style={{ fontSize:24, fontWeight:900, color:'#7dd940' }}>-{realSaving.toLocaleString('fr-FR')} €/an</div>
-                  {currentBill && (()=>{const pct=Math.min(100,Math.round(realSaving/currentBill*100));return(<div style={{fontSize:16,fontWeight:700,color:'#7dd940'}}>-{pct}% de facture</div>);})()}
+            {(()=>{
+              const displayed = realSaving ?? parseInt(localStorage.getItem('starvolt_baisse_facture')||'0')||null;
+              if(!displayed) return null;
+              return (
+                <div style={{ marginTop:10, paddingTop:10, borderTop:'1px solid rgba(255,255,255,.08)' }}>
+                  <div style={{ fontSize:10, color:'rgba(255,255,255,.4)', fontWeight:700, letterSpacing:'.5px', marginBottom:6 }}>BAISSE DE LA FACTURE</div>
+                  <div style={{ display:'flex', alignItems:'baseline', gap:10, flexWrap:'wrap', marginBottom:4 }}>
+                    <div style={{ fontSize:24, fontWeight:900, color:'#7dd940' }}>-{displayed.toLocaleString('fr-FR')} €TTC/an</div>
+                    {currentBill && (()=>{const pct=Math.min(100,Math.round(displayed/currentBill*100));return(<div style={{fontSize:16,fontWeight:700,color:'#7dd940'}}>-{pct}%</div>);})()}
+                  </div>
+                  {currentBill && <div style={{fontSize:12,color:'rgba(255,255,255,.35)'}}>Nouvelle facture estimée : {Math.max(0,currentBill-displayed).toLocaleString('fr-FR')} €/an (vs {currentBill.toLocaleString('fr-FR')} €)</div>}
                 </div>
-                {currentBill && <div style={{fontSize:12,color:'rgba(255,255,255,.35)'}}>Nouvelle facture estimée : {Math.max(0,currentBill-realSaving).toLocaleString('fr-FR')} €/an (vs {currentBill.toLocaleString('fr-FR')} €)</div>}
-              </div>
-            )}
+              );
+            })()}
             {!prodData && !loading && (
               <div style={{ marginTop:8, fontSize:11, color:'rgba(255,200,80,.6)' }}>⚠ Importez votre conso dans Mon site pour un calcul personnalisé</div>
             )}
@@ -5271,13 +5273,16 @@ function PanierScreen({ user, onBack, onGoTo }) {
           color="#7dd940" onRemove={()=>removeItem('box')}
           onClick={()=>onGoTo&&onGoTo('BOX_SIM')}/>
       )}
-      {items.solar && (
-        <CartItemCard imgSrc="/maison.png" title="Installation solaire"
-          subtitle={`${solarChoice==='solar_box'?'Panneaux + batterie + Box Comwatt':'Panneaux solaires + batterie'}${savings.solar>0?' · Baisse de la facture : −'+savings.solar.toLocaleString('fr-FR')+' €TTC/an':''}`}
+      {items.solar && (()=>{
+        const baisseLS=parseInt(localStorage.getItem('starvolt_baisse_facture')||'0');
+        const baisseVal=baisseLS||savings.solar;
+        const baisseStr=baisseVal>0?' · Baisse de la facture : −'+baisseVal.toLocaleString('fr-FR')+' €TTC/an':'';
+        return <CartItemCard imgSrc="/maison.png" title="Installation solaire"
+          subtitle={`${solarChoice==='solar_box'?'Panneaux + batterie + Box Comwatt':'Panneaux solaires + batterie'}${baisseStr}`}
           saving={savings.solar} investment={13000}
           color="#fbbf24" onRemove={()=>removeItem('solar')}
-          onClick={()=>onGoTo&&onGoTo('SOLAR_SIM')}/>
-      )}
+          onClick={()=>onGoTo&&onGoTo('SOLAR_SIM')}/>;
+      })()}
 
       {itemsCount === 0 && !loading && (
         <div className="card" style={{textAlign:'center',padding:'32px 20px',marginBottom:14}}>
