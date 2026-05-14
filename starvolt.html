@@ -2317,7 +2317,7 @@ function EnergyBalanceChart({ balance, level, selMonth, selDay, setLevel, setSel
     ctx.fillText('-'+vn.toFixed(1), ML - 4, yn + 4);
 
     // Axe zéro
-    ctx.strokeStyle = 'rgba(255,165,0,.55)'; ctx.lineWidth = 1.5;
+    ctx.strokeStyle = 'rgba(255,255,255,1)'; ctx.lineWidth = 3;
     ctx.beginPath(); ctx.moveTo(ML, zeroY); ctx.lineTo(W - MR, zeroY); ctx.stroke();
 
     // Label axe Y
@@ -2355,10 +2355,11 @@ function EnergyBalanceChart({ balance, level, selMonth, selDay, setLevel, setSel
     barsRef.current = newBars;
 
     // Labels axe X
-    const lblFont = n <= 24 ? '13px sans-serif' : n <= 31 ? '13px sans-serif' : '13px sans-serif';
-    ctx.fillStyle = 'rgba(255,255,255,.8)'; ctx.font = lblFont; ctx.textAlign = 'center';
+    ctx.fillStyle = 'rgba(255,255,255,.8)'; ctx.font = '13px sans-serif'; ctx.textAlign = 'center';
+    const isMob = window.innerWidth < 640;
     xLabels.forEach((lbl, i) => {
       if (n > 24 && i % 2 !== 0) return;
+      if (isMob && n === 24 && i % 4 !== 0) return;
       ctx.fillText(lbl, ML + i * bTW + bTW / 2, H - 4);
     });
 
