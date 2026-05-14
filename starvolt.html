@@ -2428,7 +2428,7 @@ function MonSiteScreen({ user, userProfile, onBack }) {
   const[importingDemo,setImportingDemo]=useState(false);
   const[pvKwc,setPvKwc]=useState('6');
   const[batKwh,setBatKwh]=useState('10');
-  const[thermKwh,setThermKwh]=useState('10');
+  const[thermKwh,setThermKwh]=useState('5');
   const[prodProfilId,setProdProfilId]=useState('');
   const[prodProfilData,setProdProfilData]=useState(null);
   const[balance,setBalance]=useState(null);
@@ -2470,24 +2470,19 @@ function MonSiteScreen({ user, userProfile, onBack }) {
   // Sync champs locaux quand on change de site
   // Règle : si solar au panier → valeurs de la page solaire (panier) ; sinon → valeurs DB ou défauts
   useEffect(()=>{
-    const hasSolar=!!localStorage.getItem('starvolt_solar_chosen');
+    // Source unique : starvolt_solar_defaults (partagé avec la page solaire) > DB > défauts
     const solarDef=(()=>{try{return JSON.parse(localStorage.getItem('starvolt_solar_defaults'))||{};}catch{return{};}})();
-    if(hasSolar){
-      // Le panier définit la config : utiliser les valeurs choisies sur la page solaire
-      setPvKwc(solarDef.pvKwc||'6');
-      setBatKwh(solarDef.batKwh||'10');
-      const savedTherm=activeId?localStorage.getItem(`starvolt_therm_kwh_${activeId}`):null;
-      setThermKwh(savedTherm&&Number(savedTherm)>0?savedTherm:(solarDef.thermKwh||'10'));
-    } else {
-      // Pas de projet solaire : valeurs DB ou défauts
-      if(site?.puissance_pv_kwc>0) setPvKwc(String(site.puissance_pv_kwc)); else setPvKwc('6');
-      if(site?.batterie_capacite_kwh>0) setBatKwh(String(site.batterie_capacite_kwh)); else setBatKwh('10');
-      const savedTherm=activeId?localStorage.getItem(`starvolt_therm_kwh_${activeId}`):null;
-      if(savedTherm&&Number(savedTherm)>0) setThermKwh(savedTherm); else setThermKwh('10');
-    }
+    setPvKwc(solarDef.pvKwc||(site?.puissance_pv_kwc>0?String(site.puissance_pv_kwc):'6'));
+    setBatKwh(solarDef.batKwh||(site?.batterie_capacite_kwh>0?String(site.batterie_capacite_kwh):'10'));
+    setThermKwh(solarDef.thermKwh||'5');
     setProdProfilId(site?.profil_production_id||'');
     setProdProfilData(null); setBalance(null);
   },[activeId]);
+
+  // Sync bidirectionnelle : écriture vers starvolt_solar_defaults partagé avec SolarSim
+  useEffect(()=>{
+    localStorage.setItem('starvolt_solar_defaults',JSON.stringify({pvKwc,batKwh,thermKwh}));
+  },[pvKwc,batKwh,thermKwh]);
 
   // Auto-sélection du profil de production le plus proche par GPS
   useEffect(()=>{
@@ -2732,10 +2727,9 @@ function MonSiteScreen({ user, userProfile, onBack }) {
                     period=chartLevel==='hour'?`${chartDay}/${chartMonth}`:chartLevel==='day'?`Mois ${chartMonth}`:'Année';
                     fmt=v=>(v*scale).toFixed(unit==='MWh'?1:0)+' '+unit;
                   }
-                  // Réduction de facture annuelle — même formule que l'affichage Ma conso
-                  let reductionFacturePct=null;
+                  // Baisse de facture annuelle (€TTC) et réduction (%) — même formule que SolarSim
+                  let reductionFacturePct=null, baisseFacture=null;
                   if(balance&&site?.conso_profil&&site.conso_annuelle_kwh>0){
-                    const annAuto=balance.monthly.reduce((s,m)=>s+m.on_site+m.via_bat+m.via_therm,0);
                     const annInj=balance.monthly.reduce((s,m)=>s+m.injection,0);
                     const annGrid=balance.monthly.reduce((s,m)=>s+m.grid_buy,0);
                     const curT=tariffs.find(t=>t.id===site.tarif_id);
@@ -2746,6 +2740,8 @@ function MonSiteScreen({ user, userProfile, onBack }) {
                         const _pr=globalVars?.prix_rachat_injection??0.04;
                         const nouvFact=Math.max(0,annGrid*_pm-annInj*_pr);
                         reductionFacturePct=Math.min(100,Math.round((1-nouvFact/_bill)*100));
+                        baisseFacture=Math.max(0,Math.round(_bill-nouvFact));
+                        localStorage.setItem('starvolt_baisse_facture',String(baisseFacture));
                       }
                     }
                   }
@@ -2774,17 +2770,21 @@ function MonSiteScreen({ user, userProfile, onBack }) {
                           onBlur={()=>{const v=parseFloat(pvKwc);updateSite({puissance_pv_kwc:isNaN(v)?null:v});}}
                           step={0.5} min={0} placeholder="6"/>
                       </div>
-                      {/* Autoconso + Réduction facture */}
-                      {balance&&[
-                        {label:'Autoconso',value:tauxAC,desc:'Prod consommée sur place',color:'#f0a050'},
-                        {label:'Réduction',value:reductionFacturePct??tauxAP,desc:'Baisse de facture annuelle',color:'#7dd940'},
-                      ].map(({label,value,desc,color})=>(
-                        <div key={label} style={{...T,alignItems:'center',justifyContent:'center',textAlign:'center'}}>
-                          <div style={LBL}>{label.toUpperCase()}</div>
-                          <div style={{fontSize:isMobile?22:32,fontWeight:900,color,lineHeight:1.1}}>{value}<span style={{fontSize:isMobile?11:14}}>%</span></div>
-                          {!isMobile&&<div style={{fontSize:13,color:'rgba(255,255,255,.45)'}}>{desc}</div>}
+                      {/* Baisse facture €TTC + Réduction % */}
+                      {balance&&<>
+                        <div style={{...T,alignItems:'center',justifyContent:'center',textAlign:'center'}}>
+                          <div style={LBL}>BAISSE FACTURE</div>
+                          <div style={{fontSize:isMobile?19:26,fontWeight:900,color:'#7dd940',lineHeight:1.1}}>
+                            {baisseFacture!==null?baisseFacture.toLocaleString('fr-FR'):'—'}<span style={{fontSize:isMobile?10:13}}> €TTC</span>
+                          </div>
+                          {!isMobile&&<div style={{fontSize:11,color:'rgba(255,255,255,.45)'}}>Prix avant − prix après · /an</div>}
                         </div>
-                      ))}
+                        <div style={{...T,alignItems:'center',justifyContent:'center',textAlign:'center'}}>
+                          <div style={LBL}>RÉDUCTION</div>
+                          <div style={{fontSize:isMobile?22:32,fontWeight:900,color:'#7dd940',lineHeight:1.1}}>{reductionFacturePct??tauxAP}<span style={{fontSize:isMobile?11:14}}>%</span></div>
+                          {!isMobile&&<div style={{fontSize:13,color:'rgba(255,255,255,.45)'}}>Baisse de facture annuelle</div>}
+                        </div>
+                      </>}
                       {/* Messages quand pas encore de bilan */}
                       {prodProfilId&&!balance&&site?.conso_profil&&(
                         <div style={{...T,alignItems:'center',justifyContent:'center',color:'rgba(255,255,255,.35)',fontSize:13}}>Calcul…</div>
@@ -2953,7 +2953,8 @@ function SimulationsScreen({ onACC, onBox, onSolar, onOptimisation, onBack, user
               const ratioTherm = ((nat?.ratio_puissance_stockage_thermique    ?? 50) / 100);
               const pBat   = nat?.pertes_batterie   ?? 10;
               const pTherm = nat?.pertes_thermique  ?? 0;
-              const bk = 10, tk = 10, kw = 6;
+              const solDef=(()=>{try{return JSON.parse(localStorage.getItem('starvolt_solar_defaults'))||{};}catch{return{};}})();
+              const kw=parseFloat(solDef.pvKwc)||6, bk=parseFloat(solDef.batKwh)||10, tk=parseFloat(solDef.thermKwh)||5;
               const bal = computeEnergyBalance(site.conso_profil, pp.profil, kw,
                 bk*ratioBat*1000, bk, pBat, tk*ratioTherm, tk, pTherm);
               const gridBuy = bal.monthly.reduce((s,m) => s + m.grid_buy, 0);
@@ -3075,7 +3076,7 @@ function SimulationsScreen({ onACC, onBox, onSolar, onOptimisation, onBack, user
           <div className="sim-text">
             <div className="sim-title">Économiser avec le solaire</div>
             {solarSaving !== null && solarSaving > 0
-              ? <div className="sim-sub green" style={{color:'#7dd940',fontWeight:700}}>Jusqu'à -{solarSaving.toLocaleString('fr-FR')} €/an d'économie</div>
+              ? <div className="sim-sub green" style={{color:'#7dd940',fontWeight:700}}>Baisse de la facture : -{solarSaving.toLocaleString('fr-FR')} €TTC/an</div>
               : <div className="sim-sub">Panneaux solaires + batterie</div>
             }
           </div>
@@ -3890,7 +3891,7 @@ function GlobalVarsScreen({ onBack }) {
         <div style={{...SL,marginTop:4}}>Vente surplus réseau</div>
         <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:6,marginBottom:10}}>
           <div>
-            <div style={FL}>Prix rachat injection (€/kWh)</div>
+            <div style={FL}>Prix achat par réseau (€/kWh)</div>
             <input className="inp" type="number" step="0.005" min="0" max="0.5" placeholder="0.04"
               value={String(globalForm.prix_rachat_injection)}
               onChange={e=>setGlobalForm(p=>({...p,prix_rachat_injection:e.target.value}))}
@@ -4645,10 +4646,10 @@ function SolarSimScreen({ user, userProfile, onBack, onPanier, onCartUpdate }) {
   const [isDynamic,    setIsDynamic]    = useState(false);
   const [chosen,       setChosen]       = useState(() => localStorage.getItem('starvolt_solar_chosen') || null);
   const [justConfirmed,setJustConfirmed]= useState(false);
-  // Params installation (modifiables)
-  const [pvKwc,    setPvKwc]    = useState('6');
-  const [batKwh,   setBatKwh]   = useState('10');
-  const [thermKwh, setThermKwh] = useState('10');
+  // Params installation — init depuis starvolt_solar_defaults (source partagée avec Ma prod)
+  const [pvKwc,    setPvKwc]    = useState(()=>{try{return JSON.parse(localStorage.getItem('starvolt_solar_defaults'))?.pvKwc||'6';}catch{return'6';}});
+  const [batKwh,   setBatKwh]   = useState(()=>{try{return JSON.parse(localStorage.getItem('starvolt_solar_defaults'))?.batKwh||'10';}catch{return'10';}});
+  const [thermKwh, setThermKwh] = useState(()=>{try{return JSON.parse(localStorage.getItem('starvolt_solar_defaults'))?.thermKwh||'5';}catch{return'5';}});
 
   // Persister les valeurs dans localStorage → Ma prod peut les copier comme defaults
   useEffect(()=>{
@@ -4737,6 +4738,7 @@ function SolarSimScreen({ user, userProfile, onBack, onPanier, onCartUpdate }) {
     const nouvFact = Math.max(0, gridBuy * prixMoyen - injKwh * prixRachat);
     const saving = Math.max(0, Math.round(currentBill - nouvFact));
     const trueAutoKwh = Math.max(0, kwh_total - gridBuy);
+    if(saving > 0) localStorage.setItem('starvolt_baisse_facture', String(saving));
     setRealSaving(saving > 0 ? saving : null);
     setAutoPct(kwh_total > 0 ? Math.round(trueAutoKwh / kwh_total * 100) : 0);
   }, [pvKwc, batKwh, thermKwh, siteRef, prodData, globalVars]);
@@ -4783,8 +4785,8 @@ function SolarSimScreen({ user, userProfile, onBack, onPanier, onCartUpdate }) {
               </div>
             </div>
             <div style={{ background:'rgba(255,255,255,.05)', borderRadius:8, padding:'10px 12px' }}>
-              <div style={{ fontSize:11, color:'rgba(255,255,255,.5)', marginBottom:2 }}>Économies grâce au solaire + Box</div>
-              <div style={{ fontSize:24, fontWeight:900, color:'#7dd940' }}>-{finalSolarSaving?.toLocaleString('fr-FR')} €/an</div>
+              <div style={{ fontSize:11, color:'rgba(255,255,255,.5)', marginBottom:2 }}>Baisse de la facture électrique</div>
+              <div style={{ fontSize:24, fontWeight:900, color:'#7dd940' }}>-{finalSolarSaving?.toLocaleString('fr-FR')} €TTC/an</div>
               {autoPct !== null && <div style={{ fontSize:10, color:'rgba(255,255,255,.35)', marginTop:2 }}>{autoPct}% d'autoproduction · solaire + batterie + Box Comwatt</div>}
             </div>
           </div>
@@ -5041,7 +5043,7 @@ function PanierScreen({ user, onBack, onGoTo }) {
           const solarDef = (()=>{ try{return JSON.parse(localStorage.getItem('starvolt_solar_defaults'))||{};}catch{return{};} })();
           const kw = parseFloat(solarDef.pvKwc)||6;
           const bk = parseFloat(solarDef.batKwh)||10;
-          const tk = parseFloat(solarDef.thermKwh)||10;
+          const tk = parseFloat(solarDef.thermKwh)||5;
           const ratioBat   = ((nat?.ratio_puissance_stockage              ??50)/100);
           const ratioTherm = ((nat?.ratio_puissance_stockage_thermique    ??50)/100);
           const pBat   = nat?.pertes_batterie  ?? 10;
@@ -5271,7 +5273,7 @@ function PanierScreen({ user, onBack, onGoTo }) {
       )}
       {items.solar && (
         <CartItemCard imgSrc="/maison.png" title="Installation solaire"
-          subtitle={solarChoice==='solar_box' ? 'Panneaux + batterie + Box Comwatt' : 'Panneaux solaires + batterie'}
+          subtitle={`${solarChoice==='solar_box'?'Panneaux + batterie + Box Comwatt':'Panneaux solaires + batterie'}${savings.solar>0?' · Baisse de la facture : −'+savings.solar.toLocaleString('fr-FR')+' €TTC/an':''}`}
           saving={savings.solar} investment={13000}
           color="#fbbf24" onRemove={()=>removeItem('solar')}
           onClick={()=>onGoTo&&onGoTo('SOLAR_SIM')}/>
