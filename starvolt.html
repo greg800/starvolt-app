@@ -4842,7 +4842,7 @@ function SolarSimScreen({ user, userProfile, onBack, onPanier, onCartUpdate }) {
               </div>
             </div>
             {(()=>{
-              const displayed = realSaving ?? parseInt(localStorage.getItem('starvolt_baisse_facture')||'0')||null;
+              const displayed = realSaving ?? (parseInt(localStorage.getItem('starvolt_baisse_facture')||'0') || null);
               if(!displayed) return null;
               return (
                 <div style={{ marginTop:10, paddingTop:10, borderTop:'1px solid rgba(255,255,255,.08)' }}>
