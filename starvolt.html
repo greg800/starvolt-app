@@ -4742,7 +4742,8 @@ function SolarSimScreen({ user, userProfile, onBack, onPanier, onCartUpdate }) {
 
   // Gains solaires (fallback %-based si pas de profil prod)
   const solarBoxSaving = adjustedBill ? Math.round(adjustedBill * 0.70) : null;
-  const finalSolarSaving = realSaving ?? solarBoxSaving;
+  const baisseFactureLS = parseInt(localStorage.getItem('starvolt_baisse_facture')||'0') || null;
+  const finalSolarSaving = realSaving ?? baisseFactureLS ?? solarBoxSaving;
 
   // Gains box (rappel)
   const shiftPct  = isDynamic ? 0.20 : 0.10;
@@ -5027,9 +5028,10 @@ function PanierScreen({ user, onBack, onGoTo }) {
           boxSav = parseInt(localStorage.getItem('starvolt_box_saving')||'0');
           if (!boxSav) boxSav = Math.round(140 + bill * shiftPctBox);
         }
-        // Solar savings : toujours recalculer depuis le bilan heure par heure (ignorer localStorage stale)
+        // Solar savings : utiliser baisse facture calculée (MaProd) si dispo, sinon estimation 70%
         const adjBillSolar = Math.max(0, bill - optSav - accSav);
-        let solSav = solarChoice === 'solar_box' ? Math.round(adjBillSolar * 0.70) : Math.round(adjBillSolar * 0.50);
+        const baisseFact0 = parseInt(localStorage.getItem('starvolt_baisse_facture')||'0') || 0;
+        let solSav = baisseFact0 > 0 ? baisseFact0 : (solarChoice === 'solar_box' ? Math.round(adjBillSolar * 0.70) : Math.round(adjBillSolar * 0.50));
         // Si solar_box choisi, la Box est comprise dans le 70% — ne pas compter ses économies en double
         const effectiveBoxSav = (solarChoice === 'solar_box') ? 0 : boxSav;
         setSavings({ optimisation: optSav, acc: accSav, box: effectiveBoxSav, solar: solSav });
@@ -5057,11 +5059,15 @@ function PanierScreen({ user, onBack, onGoTo }) {
             const gridBuy = bal.monthly.reduce((s,m) => s+m.grid_buy, 0);
             const injKwh  = bal.monthly.reduce((s,m) => s+m.injection, 0);
             setSolGridKwh(gridBuy); setSolInjKwh(injKwh);
-            // Mise à jour des économies solaires réelles (formule nouvFact pour éviter double-comptage)
-            const curBillPan = Math.round(prixBase * siteKwh);
-            const nouvFactPan = Math.max(0, gridBuy * prixBase - injKwh * prixRachat);
-            const realSav = Math.max(0, Math.round(curBillPan - nouvFactPan));
-            if (realSav > 0) setSavings(prev => ({...prev, solar: realSav}));
+            const baisseLSPan = parseInt(localStorage.getItem('starvolt_baisse_facture')||'0') || 0;
+            if (baisseLSPan > 0) {
+              setSavings(prev => ({...prev, solar: baisseLSPan}));
+            } else {
+              const curBillPan = Math.round(prixBase * siteKwh);
+              const nouvFactPan = Math.max(0, gridBuy * prixBase - injKwh * prixRachat);
+              const realSav = Math.max(0, Math.round(curBillPan - nouvFactPan));
+              if (realSav > 0) setSavings(prev => ({...prev, solar: realSav}));
+            }
           }
         }
       }
