@@ -2404,12 +2404,12 @@ function EnergyBalanceChart({ balance, level, selMonth, selDay, setLevel, setSel
       const ly = Math.floor((LEGEND_H - sqSz) / 2);
       LEG.forEach((it, i) => { drawLegItem(it, lx, ly, sqSz); lx += widths[i] + pad; });
     } else {
-      // Mobile : 2 colonnes (3 gauche, 2 droite), compact
+      // Mobile : 2 colonnes centrées (marge 40px pour laisser place aux flèches nav)
       ctx.font = 'bold 13px sans-serif';
-      const colW = Math.floor(W / 2), rowH = 19, sqSz = 11;
+      const legMargin = 40, colW = Math.floor((W - legMargin * 2) / 2), rowH = 19, sqSz = 11;
       LEG.forEach((it, i) => {
         const col = i >= 3 ? 1 : 0, row = i >= 3 ? i - 3 : i;
-        drawLegItem(it, col * colW + 4, 3 + row * rowH, sqSz);
+        drawLegItem(it, legMargin + col * colW, 3 + row * rowH, sqSz);
       });
     }
   }, [chartData, xLabels, level]);
