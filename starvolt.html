@@ -2395,7 +2395,7 @@ function computeStorageOptimization(consoProfile, tariff, site, batKwh, thermKwh
 }
 
 // ─── EnergyBalanceChart ───────────────────────
-function EnergyBalanceChart({ balance, level, selMonth, selDay, setLevel, setSelMonth, setSelDay }) {
+function EnergyBalanceChart({ balance, level, selMonth, selDay, setLevel, setSelMonth, setSelDay, hourlyPrices, isDynamic }) {
   const wrapperRef = useRef(null), canvasRef = useRef(null);
   const barsRef = useRef([]);
 
@@ -2431,6 +2431,25 @@ function EnergyBalanceChart({ balance, level, selMonth, selDay, setLevel, setSel
     if (level === 'day') return Array.from({length: PROF_DAYS[selMonth-1]}, (_, i) => String(i+1));
     return Array.from({length:24}, (_, i) => i + 'h');
   }, [level, selMonth]);
+
+  // Prix agrégés pour l'axe droit (€/kWh → on affiche en c€/kWh × 100)
+  const priceData = useMemo(() => {
+    if (!hourlyPrices) return null;
+    if (level === 'month') return Array.from({length:12}, (_, mi) => {
+      let s=0, cnt=0;
+      for(let d=1;d<=PROF_DAYS[mi];d++) for(let h=0;h<24;h++){s+=hourlyPrices[profIdx(mi+1,d,h)]||0;cnt++;}
+      return cnt>0?s/cnt:0;
+    });
+    if (level === 'day') { const days=PROF_DAYS[selMonth-1]; return Array.from({length:days},(_,di)=>{let s=0;for(let h=0;h<24;h++)s+=hourlyPrices[profIdx(selMonth,di+1,h)]||0;return s/24;}); }
+    if (level === 'hour') return Array.from({length:24},(_,h)=>hourlyPrices[profIdx(selMonth,selDay,h)]||0);
+    return null;
+  }, [hourlyPrices, level, selMonth, selDay]);
+
+  // Moyenne 24h pour tarif dynamique en vue heure (trait pointillé)
+  const dailyAvgPrice = useMemo(() => {
+    if (!isDynamic || level !== 'hour' || !hourlyPrices) return null;
+    let s=0; for(let h=0;h<24;h++) s+=hourlyPrices[profIdx(selMonth,selDay,h)]||0; return s/24;
+  }, [isDynamic, level, selMonth, selDay, hourlyPrices]);
 
   const handleDblClick = (e) => {
     if (level === 'hour') return;
@@ -2471,7 +2490,7 @@ function EnergyBalanceChart({ balance, level, selMonth, selDay, setLevel, setSel
 
     const isMobChart = window.innerWidth < 640;
     const LEGEND_H = isMobChart ? 62 : 26;
-    const ML = 46, MR = 8, MT = LEGEND_H + 6, MB = isMobChart ? 24 : 28;
+    const ML = 46, MR = priceData ? 48 : 8, MT = LEGEND_H + 6, MB = isMobChart ? 24 : 28;
     const cW = W - ML - MR, cH = H - MT - MB;
     const n = chartData.length;
 
@@ -2541,6 +2560,66 @@ function EnergyBalanceChart({ balance, level, selMonth, selDay, setLevel, setSel
     });
     barsRef.current = newBars;
 
+    // ── Axe droit : tarif (€/kWh) ──────────────────────────────────────────────
+    if (priceData) {
+      const maxP = Math.max(...priceData, dailyAvgPrice||0, 0.001);
+      // Échelle : 0 en bas (zeroY), maxP en haut (MT)
+      const priceY = p => zeroY - Math.max(0, p) / maxP * (zeroY - MT);
+      const axX = W - MR + 4; // ligne de l'axe
+
+      // Ligne verticale axe droit
+      ctx.save();
+      ctx.strokeStyle = 'rgba(255,255,255,.35)';
+      ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(axX, MT); ctx.lineTo(axX, zeroY); ctx.stroke();
+
+      // Ticks + labels (0, mid, max) en c€/kWh
+      ctx.fillStyle = 'rgba(255,255,255,.65)';
+      ctx.font = (isMobChart ? '9px' : '10px') + ' sans-serif';
+      ctx.textAlign = 'left';
+      const ticks = [0, maxP * 0.5, maxP];
+      ticks.forEach(p => {
+        const ty = priceY(p);
+        ctx.beginPath(); ctx.moveTo(axX, ty); ctx.lineTo(axX + 4, ty);
+        ctx.strokeStyle = 'rgba(255,255,255,.35)'; ctx.lineWidth = 1; ctx.stroke();
+        const lbl = (p * 100).toFixed(p === 0 ? 0 : 1);
+        ctx.fillText(lbl, axX + 6, ty + 3.5);
+      });
+      // Label unité
+      ctx.save();
+      ctx.fillStyle = 'rgba(255,255,255,.5)';
+      ctx.font = (isMobChart ? '8px' : '9px') + ' sans-serif';
+      ctx.textAlign = 'center';
+      ctx.translate(W - 6, MT + (zeroY - MT) / 2);
+      ctx.rotate(Math.PI / 2);
+      ctx.fillText('c€/kWh', 0, 0);
+      ctx.restore();
+
+      // Trait blanc horizontal par barre = tarif moyen de la période
+      newBars.forEach((bar, i) => {
+        if (i >= priceData.length) return;
+        const py = priceY(priceData[i]);
+        ctx.strokeStyle = 'white';
+        ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.moveTo(bar.x, py); ctx.lineTo(bar.x + bar.w, py); ctx.stroke();
+      });
+
+      // Trait pointillé = moyenne 24h (tarif dynamique, vue heure uniquement)
+      if (dailyAvgPrice != null) {
+        const py = priceY(dailyAvgPrice);
+        ctx.strokeStyle = 'rgba(255,255,255,.75)';
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([5, 4]);
+        ctx.beginPath(); ctx.moveTo(ML, py); ctx.lineTo(W - MR, py); ctx.stroke();
+        ctx.setLineDash([]);
+        // Label moy
+        ctx.fillStyle = 'rgba(255,255,255,.75)';
+        ctx.font = '10px sans-serif'; ctx.textAlign = 'right';
+        ctx.fillText('moy', W - MR - 2, py - 3);
+      }
+      ctx.restore();
+    }
+
     // Labels axe X
     ctx.fillStyle = 'rgba(255,255,255,.92)';
     ctx.textAlign = 'center';
@@ -2595,7 +2674,7 @@ function EnergyBalanceChart({ balance, level, selMonth, selDay, setLevel, setSel
         drawLegItem(it, legMargin + col * colW, 3 + row * rowH, sqSz);
       });
     }
-  }, [chartData, xLabels, level]);
+  }, [chartData, xLabels, level, priceData, dailyAvgPrice]);
 
   const ctxLabel = level === 'day' ? MOIS_FULL[selMonth-1] : level === 'hour' ? `${selDay} ${MOIS_FULL[selMonth-1]}` : null;
 
@@ -2820,6 +2899,45 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations }) {
     window.addEventListener('resize',handler);
     return()=>window.removeEventListener('resize',handler);
   },[]);
+
+  // Tarif effectif (panier si choisi, sinon site) — utilisé pour hourlyPrices
+  const effectiveTariff = useMemo(()=>{
+    if(!tariffs.length) return null;
+    const optiChosen=!!localStorage.getItem('starvolt_optimisation_chosen');
+    const optiId=optiChosen?localStorage.getItem('starvolt_optimisation_tariff_id'):null;
+    const tid=optiId||site?.tarif_id;
+    return tid?tariffs.find(t=>t.id===tid)||null:null;
+  },[tariffs,site?.tarif_id]);
+
+  const isDynamicTariff = !!(effectiveTariff?.tarif_dynamique);
+
+  // Prix horaire (€/kWh) pour l'axe droit du graphique
+  const hourlyPrices = useMemo(()=>{
+    if(!effectiveTariff) return null;
+    const hcWin=[
+      {s:parseHcHour(site?.heure_debut_hc1??globalVars?.hc_debut1), e:parseHcHour(site?.heure_fin_hc1??globalVars?.hc_fin1)},
+      {s:parseHcHour(site?.heure_debut_hc2??globalVars?.hc_debut2), e:parseHcHour(site?.heure_fin_hc2??globalVars?.hc_fin2)},
+    ].filter(w=>w.s!==null&&w.e!==null);
+    const arr=new Float32Array(8784);
+    if(effectiveTariff.tarif_dynamique&&spotMap){
+      const marge=(effectiveTariff.marge_fournisseur_ceur_kwh||0)/100;
+      const accise=(globalVars?.accise||0)/100;
+      const tva=(globalVars?.tva??20)/100;
+      for(let m=1;m<=12;m++) for(let d=1;d<=PROF_DAYS[m-1];d++) for(let h=0;h<24;h++){
+        const idx=profIdx(m,d,h);
+        const spot=spotMap[`${m}_${d}_${h}`]||0;
+        arr[idx]=Math.max(0,(spot+getTurpeRate(m,h,globalVars,hcWin)+accise+marge)*(1+tva));
+      }
+    } else {
+      const ph=parseFloat(effectiveTariff.prix_hp)||0;
+      const pc=effectiveTariff.prix_hc!=null?parseFloat(effectiveTariff.prix_hc)||0:ph;
+      for(let m=1;m<=12;m++) for(let d=1;d<=PROF_DAYS[m-1];d++) for(let h=0;h<24;h++){
+        const idx=profIdx(m,d,h);
+        arr[idx]=hcWin.length>0&&isHcHour(h,hcWin)?pc:ph;
+      }
+    }
+    return arr;
+  },[effectiveTariff,site?.heure_debut_hc1,site?.heure_fin_hc1,site?.heure_debut_hc2,site?.heure_fin_hc2,globalVars,spotMap]);
 
   // Charger les données spot si tarif dynamique + pas de PV
   useEffect(()=>{
@@ -3220,7 +3338,7 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations }) {
                     {balance&&(
                       <div>
                         <div style={{fontWeight:700,fontSize:13,color:'rgba(255,255,255,.55)',marginBottom:5}}>Bilan · {period}</div>
-                        <EnergyBalanceChart balance={balance} level={chartLevel} selMonth={chartMonth} selDay={chartDay} setLevel={setChartLevel} setSelMonth={setChartMonth} setSelDay={setChartDay}/>
+                        <EnergyBalanceChart balance={balance} level={chartLevel} selMonth={chartMonth} selDay={chartDay} setLevel={setChartLevel} setSelMonth={setChartMonth} setSelDay={setChartDay} hourlyPrices={hourlyPrices} isDynamic={isDynamicTariff}/>
                       </div>
                     )}
                   </>);
@@ -3443,7 +3561,7 @@ function SimulationsScreen({ onACC, onBox, onSolar, onOptimisation, onBack, onMo
 }
 
 // ─── Optimisation utilities ───────────────────
-function parseHcHour(s) { return s ? parseInt(s.split(':')[0]) : null; }
+function parseHcHour(s) { if (s == null || s === '') return null; if (typeof s === 'number') return Math.round(s); const n = parseInt(String(s).split(':')[0]); return isNaN(n) ? null : n; }
 
 function isHcHour(h, windows) {
   for (const { s, e } of windows) {
