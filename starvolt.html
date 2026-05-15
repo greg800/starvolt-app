@@ -3082,8 +3082,9 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations }) {
     const optiTarif   = globalVars?.opti_tarif   ?? true;
 
     if(kw===0){
-      // Pas de PV : optimisation stockage via tarif uniquement (optiTarif doit être actif)
-      if(optiTarif&&(bk>0||tk>0)&&tariffs.length>0){
+      // Pas de PV : calculer dans tous les cas si un tarif est disponible.
+      // computeStorageOptimization gère bk=0/tk=0 et optiTarif=false → affiche au moins la facture de base.
+      if(tariffs.length>0){
         const optiChosen=!!localStorage.getItem('starvolt_optimisation_chosen');
         const optiTariffId=optiChosen?localStorage.getItem('starvolt_optimisation_tariff_id'):null;
         const effectiveTariffId=optiTariffId||site.tarif_id;
