@@ -3156,16 +3156,16 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations }) {
                   return(<>
                     {/* ── Rangée 1 : PROFIL · kWc · Autoconso · Autoprod (si solaire au panier) ── */}
                     <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
-                      {/* PROFIL */}
+                      {/* TARIF */}
                       <div style={T}>
-                        <div style={LBL}>PROFIL</div>
-                        {prodProfils.length===0?(
-                          <div style={{fontSize:13,color:'rgba(255,255,255,.4)'}}>Aucun profil</div>
-                        ):(
-                          <div style={{display:'flex',alignItems:'center',gap:5,background:'rgba(255,255,255,.07)',borderRadius:7,padding:'6px 8px'}}>
-                            <span>📍</span>
-                            <span style={{fontSize:13,color:'white',fontWeight:600,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{prodProfils.find(p=>p.id===prodProfilId)?.nom||'…'}</span>
+                        <div style={LBL}>TARIF</div>
+                        {effectiveTariff?(
+                          <div style={{display:'flex',flexDirection:'column',gap:3}}>
+                            <div style={{fontSize:13,color:'white',fontWeight:700,lineHeight:1.2}}>{effectiveTariff.nom}</div>
+                            {(()=>{const optiChosen=!!localStorage.getItem('starvolt_optimisation_chosen');return optiChosen?<div style={{fontSize:10,color:'rgba(125,217,64,.8)',fontWeight:600}}>Offre panier</div>:<div style={{fontSize:10,color:'rgba(255,255,255,.4)'}}>Tarif par défaut</div>;})()}
                           </div>
+                        ):(
+                          <div style={{fontSize:13,color:'rgba(255,255,255,.4)'}}>Non défini</div>
                         )}
                       </div>
                       {/* kWc PV */}
