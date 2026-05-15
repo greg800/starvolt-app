@@ -2401,7 +2401,7 @@ function computeStorageOptimization(consoProfile, tariff, site, batKwh, thermKwh
 // Retourne { monthly[12], hourly[8784], billWithout, billWithStorage, saving, reductionPct, _combined:true }
 function computeCombinedOptimization(consoProfile, prodNorm, pvKwc, batKwh, thermKwh, globalVars, tariff, site, spotMap) {
   const optiSolaire = globalVars?.opti_solaire ?? true; // charger le stockage depuis le surplus PV
-  // optiTarif=true implicite (cette fonction n'est appelée que dans ce cas)
+  const optiTarif   = globalVars?.opti_tarif   ?? true; // charge HC/bon-marché, décharge HP/cher
 
   const ratioBat   = (globalVars?.ratio_puissance_stockage           ?? 50) / 100;
   const ratioTherm = (globalVars?.ratio_puissance_stockage_thermique ?? 50) / 100;
@@ -2501,18 +2501,29 @@ function computeCombinedOptimization(consoProfile, prodNorm, pvKwc, batKwh, ther
         } else {
           let need = -surplus; // déficit à couvrir
 
-          if (price > avgDay * (1 + localSeuil)) {
-            // Heure chère → décharger le stockage avant d'acheter
+          if (optiTarif) {
+            // Optimisation tarifaire : charge HC/bon-marché, décharge HP/cher
+            if (price > avgDay * (1 + localSeuil)) {
+              // Heure chère → décharger le stockage avant d'acheter
+              if (thermSOC > 0 && need > 0) { const dt=Math.min(thermPowWh,thermSOC,need); thermSOC-=dt; need-=dt; viaTherm=dt; }
+              if (batSOC > 0  && need > 0) { const db=Math.min(batPowWh,batSOC,need);   batSOC -=db; need-=db; viaBat=db; }
+              gridBuyWh = Math.max(0, need);
+            } else if (price < avgDay * (1 - localSeuil)) {
+              // Heure bon marché → couvrir déficit + charger stockage depuis réseau
+              gridBuyWh = need;
+              if (thermCapWh > 0) { const ci=Math.min(thermPowWh,thermCapWh-thermSOC); if(ci>0){thermSOC+=ci;gridBuyWh+=ci;} }
+              if (batCapWh > 0 && batEff > 0) { const room=batCapWh-batSOC; const ci=Math.min(batPowWh,room>0?room/batEff:0); if(ci>0){batSOC+=ci*batEff;gridBuyWh+=ci;} }
+            } else {
+              // Heure neutre → acheter uniquement le déficit
+              gridBuyWh = need;
+            }
+          } else if (optiSolaire) {
+            // Solaire seul : décharger le stockage (énergie solaire stockée) sur tout déficit, sans achat réseau préventif
             if (thermSOC > 0 && need > 0) { const dt=Math.min(thermPowWh,thermSOC,need); thermSOC-=dt; need-=dt; viaTherm=dt; }
             if (batSOC > 0  && need > 0) { const db=Math.min(batPowWh,batSOC,need);   batSOC -=db; need-=db; viaBat=db; }
             gridBuyWh = Math.max(0, need);
-          } else if (price < avgDay * (1 - localSeuil)) {
-            // Heure bon marché → couvrir déficit + charger stockage depuis réseau
-            gridBuyWh = need;
-            if (thermCapWh > 0) { const ci=Math.min(thermPowWh,thermCapWh-thermSOC); if(ci>0){thermSOC+=ci;gridBuyWh+=ci;} }
-            if (batCapWh > 0 && batEff > 0) { const room=batCapWh-batSOC; const ci=Math.min(batPowWh,room>0?room/batEff:0); if(ci>0){batSOC+=ci*batEff;gridBuyWh+=ci;} }
           } else {
-            // Heure neutre → acheter uniquement le déficit
+            // Aucune optimisation stockage → achat direct réseau
             gridBuyWh = need;
           }
         }
@@ -3007,36 +3018,32 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations }) {
     }
 
     if(!prodProfilData){setBalance(null);return;}
-    const ratioTherm=(globalVars?.ratio_puissance_stockage_thermique??50)/100;
-    const pTherm=globalVars?.pertes_thermique??0;
-    const ratioBat=(globalVars?.ratio_puissance_stockage??50)/100;
-    const pBat=globalVars?.pertes_batterie??10;
 
-    // PV + stockage combinés avec optimisation tarif (optiTarif actif + tarif à variation temporelle)
-    if(optiTarif&&(bk>0||tk>0)&&tariffs.length>0){
+    // Toujours passer par computeCombinedOptimization quand un tarif est connu :
+    // méthode de facturation unique et cohérente pour toutes les combinaisons de flags.
+    // Les flags optiSolaire/optiTarif contrôlent uniquement le comportement du stockage
+    // dans la boucle, pas la formule de calcul du coût.
+    if(tariffs.length>0){
       const optiChosen=!!localStorage.getItem('starvolt_optimisation_chosen');
       const optiTariffId=optiChosen?localStorage.getItem('starvolt_optimisation_tariff_id'):null;
       const effectiveTariffId=optiTariffId||site.tarif_id;
       const curT=effectiveTariffId?tariffs.find(t=>t.id===effectiveTariffId):null;
       if(curT){
-        const isCurDyn=curT.tarif_dynamique;
-        const hasCurHC=!isCurDyn&&curT.prix_hc!=null&&curT.prix_hc!==curT.prix_hp;
-        if(isCurDyn||hasCurHC){
-          if(isCurDyn&&!spotMap){setBalance(null);return;}
-          setBalance(computeCombinedOptimization(site.conso_profil,prodProfilData,kw,batKwh,thermKwh,globalVars,curT,site,spotMap));
-          return;
-        }
+        if(curT.tarif_dynamique&&!spotMap){setBalance(null);return;}
+        setBalance(computeCombinedOptimization(site.conso_profil,prodProfilData,kw,batKwh,thermKwh,globalVars,curT,site,spotMap));
+        return;
       }
     }
 
-    // PV + stockage solaire seul (buffer PV, pas de déplacement tarifaire)
-    // Si les deux flags sont désactivés, stockage inactif (bk/tk=0)
-    const effBk = optiSolaire ? bk : 0;
-    const effTk = optiSolaire ? tk : 0;
+    // Pas de tarif connu → PV seul (sans facturation, affichage graphique uniquement)
+    const ratioTherm=(globalVars?.ratio_puissance_stockage_thermique??50)/100;
+    const pTherm=globalVars?.pertes_thermique??0;
+    const ratioBat=(globalVars?.ratio_puissance_stockage??50)/100;
+    const pBat=globalVars?.pertes_batterie??10;
     setBalance(computeEnergyBalance(
       site.conso_profil,prodProfilData,kw,
-      effBk*ratioBat*1000, effBk, pBat,
-      effTk*ratioTherm,    effTk, pTherm
+      bk*ratioBat*1000, bk, pBat,
+      tk*ratioTherm,    tk, pTherm
     ));
   },[site?.conso_profil,prodProfilData,pvKwc,batKwh,thermKwh,globalVars,spotMap,tariffs,site?.tarif_id,site?.heure_debut_hc1,site?.heure_fin_hc1,site?.heure_debut_hc2,site?.heure_fin_hc2]);
 
