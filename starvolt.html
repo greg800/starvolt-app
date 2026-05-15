@@ -3107,10 +3107,8 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations }) {
     return arr;
   },[effectiveTariff,site?.heure_debut_hc1,site?.heure_fin_hc1,site?.heure_debut_hc2,site?.heure_fin_hc2,globalVars,spotMap]);
 
-  // Charger les données spot si tarif dynamique + pas de PV
+  // Charger les données spot si tarif dynamique (avec ou sans PV)
   useEffect(()=>{
-    const kw=pvKwc===''?6:(parseFloat(pvKwc)||0);
-    if(kw!==0){setSpotMap(null);return;}
     const optiChosen=!!localStorage.getItem('starvolt_optimisation_chosen');
     const optiTariffId=optiChosen?localStorage.getItem('starvolt_optimisation_tariff_id'):null;
     const effectiveTariffId=optiTariffId||site?.tarif_id;
@@ -3120,7 +3118,7 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations }) {
     } else {
       setSpotMap(null);
     }
-  },[pvKwc,site?.tarif_id,tariffs]);
+  },[site?.tarif_id,tariffs]);
 
   if(sites===null)return(<><div className="screen fade-in"><div style={{textAlign:'center',padding:40,color:'rgba(255,255,255,.5)'}}>Chargement…</div></div><StickyFooter onBack={onBack}/></>);
 
