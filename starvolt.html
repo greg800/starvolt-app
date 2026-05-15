@@ -2239,8 +2239,13 @@ function computeStorageOptimization(consoProfile, tariff, site, batKwh, thermKwh
   const monthly = Array.from({length:12}, () => ({on_site:0, grid_buy:0, injection:0, via_bat:0, via_therm:0}));
   const hourly  = new Array(8784);
 
+  // Helper : convertit une valeur HC (string "22" ou entier 22) en heure entière
+  const toHcH = v => { if (v == null || v === '') return null; const n = parseInt(String(v).split(':')[0]); return isNaN(n) ? null : n; };
+
   // ── Helper : boucle interne charge/décharge (commun aux deux modes) ──────────
-  function runLoop(getPrice, getDailyAvg) {
+  // localSeuil=seuil pour spot dynamique ; localSeuil=0 pour HC/HP fixe
+  // (seuil=0 → charge tout HC, décharge tout HP, sans filtre par seuil)
+  function runLoop(getPrice, getDailyAvg, localSeuil) {
     let batSOC = batCapWh * 0.5, thermSOC = thermCapWh * 0.5;
     let varCostHT_without = 0, varCostHT_with = 0;
     for (let m = 1; m <= 12; m++) {
@@ -2249,14 +2254,14 @@ function computeStorageOptimization(consoProfile, tariff, site, batKwh, thermKwh
         for (let h = 0; h < 24; h++) {
           const idx     = profIdx(m, d, h);
           const consoWh = consoProfile[idx] || 0;
-          const price   = getPrice(m, d, h);  // HT (ou prix fixe pour HC/HP)
+          const price   = getPrice(m, d, h);
           varCostHT_without += (consoWh / 1000) * price;
 
           let gridConsumedWh = consoWh;
           let gridBillableWh = consoWh;
           let viaBat = 0, viaTherm = 0;
 
-          if (price < avgDay * (1 - seuil)) {
+          if (price < avgDay * (1 - localSeuil)) {
             // Bon marché → charger (thermique d'abord)
             if (thermCapWh > 0) {
               const ci = Math.min(thermPowWh, thermCapWh - thermSOC);
@@ -2267,7 +2272,7 @@ function computeStorageOptimization(consoProfile, tariff, site, batKwh, thermKwh
               const ci   = Math.min(batPowWh, room > 0 ? room / batEff : 0);
               if (ci > 0) { batSOC += ci * batEff; gridBillableWh += ci; }
             }
-          } else if (price > avgDay * (1 + seuil)) {
+          } else if (price > avgDay * (1 + localSeuil)) {
             // Cher → décharger (thermique d'abord)
             let need = consoWh;
             if (thermSOC > 0 && need > 0) {
@@ -2323,8 +2328,8 @@ function computeStorageOptimization(consoProfile, tariff, site, batKwh, thermKwh
     const tva    = (globalVars?.tva     ?? 20) / 100;
     const fixedHT = (tariff.abo_annuel || 0) + (tariff.turpe_fixe || 0) + (tariff.cta_fixe || 0);
     const hcWin   = [
-      { s: parseHcHour(site?.heure_debut_hc1 ?? globalVars?.hc_debut1), e: parseHcHour(site?.heure_fin_hc1 ?? globalVars?.hc_fin1) },
-      { s: parseHcHour(site?.heure_debut_hc2 ?? globalVars?.hc_debut2), e: parseHcHour(site?.heure_fin_hc2 ?? globalVars?.hc_fin2) },
+      { s: toHcH(site?.heure_debut_hc1 ?? globalVars?.hc_debut1), e: toHcH(site?.heure_fin_hc1 ?? globalVars?.hc_fin1) },
+      { s: toHcH(site?.heure_debut_hc2 ?? globalVars?.hc_debut2), e: toHcH(site?.heure_fin_hc2 ?? globalVars?.hc_fin2) },
     ].filter(w => w.s !== null && w.e !== null);
 
     // Prix HT de l'heure (spot + TURPE + accise + marge)
@@ -2339,16 +2344,18 @@ function computeStorageOptimization(consoProfile, tariff, site, batKwh, thermKwh
       return s / 24;
     };
 
-    const {varCostHT_without, varCostHT_with} = runLoop(getPrice, getDailyAvg);
+    // Mode dynamique : utilise le seuil global pour filtrer les heures marginales
+    const {varCostHT_without, varCostHT_with} = runLoop(getPrice, getDailyAvg, seuil);
     billWithout    = Math.round((varCostHT_without + fixedHT) * (1 + tva));
     billWithStorage = Math.round((varCostHT_with   + fixedHT) * (1 + tva));
 
   // ── MODE HC/HP FIXE : moyenne annuelle constante ─────────────────────────────
   } else {
     // Plages HC : site d'abord, sinon fallback sur les valeurs globales (parametres_nationaux)
+    // toHcH() gère les entiers (DB) et les strings ("22" ou "22:00")
     const hcWindows = [
-      { s: parseHcHour(site?.heure_debut_hc1 ?? globalVars?.hc_debut1), e: parseHcHour(site?.heure_fin_hc1 ?? globalVars?.hc_fin1) },
-      { s: parseHcHour(site?.heure_debut_hc2 ?? globalVars?.hc_debut2), e: parseHcHour(site?.heure_fin_hc2 ?? globalVars?.hc_fin2) },
+      { s: toHcH(site?.heure_debut_hc1 ?? globalVars?.hc_debut1), e: toHcH(site?.heure_fin_hc1 ?? globalVars?.hc_fin1) },
+      { s: toHcH(site?.heure_debut_hc2 ?? globalVars?.hc_debut2), e: toHcH(site?.heure_fin_hc2 ?? globalVars?.hc_fin2) },
     ].filter(w => w.s !== null && w.e !== null);
 
     // Pas de plages HC renseignées (ni sur le site, ni en global) → traiter comme plat
@@ -2374,7 +2381,9 @@ function computeStorageOptimization(consoProfile, tariff, site, batKwh, thermKwh
     const getPrice   = (m, d, h) => isHcHour(h, hcWindows) ? tariff.prix_hc : tariff.prix_hp;
     const getDailyAvg = ()       => avgFixed;
 
-    const {varCostHT_without, varCostHT_with} = runLoop(getPrice, getDailyAvg);
+    // HC/HP fixe : seuil=0 → charge systématiquement tout HC, décharge tout HP
+    // (le seuil global ne s'applique qu'au spot où les prix sont continus)
+    const {varCostHT_without, varCostHT_with} = runLoop(getPrice, getDailyAvg, 0);
     const abo = tariff.abo_annuel || 0;
     billWithout    = Math.round(varCostHT_without + abo);
     billWithStorage = Math.round(varCostHT_with   + abo);
