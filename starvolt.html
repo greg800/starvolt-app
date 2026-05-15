@@ -2400,6 +2400,9 @@ function computeStorageOptimization(consoProfile, tariff, site, batKwh, thermKwh
 //   Prix dynamique : seuil global, charge heures bon marché, décharge heures chères
 // Retourne { monthly[12], hourly[8784], billWithout, billWithStorage, saving, reductionPct, _combined:true }
 function computeCombinedOptimization(consoProfile, prodNorm, pvKwc, batKwh, thermKwh, globalVars, tariff, site, spotMap) {
+  const optiSolaire = globalVars?.opti_solaire ?? true; // charger le stockage depuis le surplus PV
+  // optiTarif=true implicite (cette fonction n'est appelée que dans ce cas)
+
   const ratioBat   = (globalVars?.ratio_puissance_stockage           ?? 50) / 100;
   const ratioTherm = (globalVars?.ratio_puissance_stockage_thermique ?? 50) / 100;
   const pBat       = (globalVars?.pertes_batterie                    ?? 10) / 100;
@@ -2481,16 +2484,18 @@ function computeCombinedOptimization(consoProfile, prodNorm, pvKwc, batKwh, ther
         let gridBuyWh = 0, injectWh = 0, viaBat = 0, viaTherm = 0;
 
         if (surplus >= 0) {
-          // PV couvre tout — charger le stockage depuis le surplus PV (gratuit)
           let free = surplus;
-          if (thermCapWh > 0) {
-            const ci = Math.min(thermPowWh, thermCapWh - thermSOC, free);
-            if (ci > 0) { thermSOC += ci; free -= ci; }
-          }
-          if (batCapWh > 0 && batEff > 0) {
-            const room = batCapWh - batSOC;
-            const ci   = Math.min(batPowWh, room > 0 ? room / batEff : 0, free);
-            if (ci > 0) { batSOC += ci * batEff; free -= ci; }
+          if (optiSolaire) {
+            // Charger le stockage depuis le surplus PV (gratuit)
+            if (thermCapWh > 0) {
+              const ci = Math.min(thermPowWh, thermCapWh - thermSOC, free);
+              if (ci > 0) { thermSOC += ci; free -= ci; }
+            }
+            if (batCapWh > 0 && batEff > 0) {
+              const room = batCapWh - batSOC;
+              const ci   = Math.min(batPowWh, room > 0 ? room / batEff : 0, free);
+              if (ci > 0) { batSOC += ci * batEff; free -= ci; }
+            }
           }
           injectWh = free; // surplus PV non stocké → injection réseau
         } else {
@@ -2981,16 +2986,18 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations }) {
     const bk=parseFloat(batKwh)||0;
     const tk=parseFloat(thermKwh)||0;
 
+    // Flags de configuration de la box (défaut : tout activé)
+    const optiSolaire = globalVars?.opti_solaire ?? true;
+    const optiTarif   = globalVars?.opti_tarif   ?? true;
+
     if(kw===0){
-      // Pas de PV : optimisation stockage si batterie présente et tarif connu
-      if((bk>0||tk>0)&&tariffs.length>0){
-        // N'utiliser le tarif panier que si l'offre est bien dans le panier (clé _chosen présente)
+      // Pas de PV : optimisation stockage via tarif uniquement (optiTarif doit être actif)
+      if(optiTarif&&(bk>0||tk>0)&&tariffs.length>0){
         const optiChosen=!!localStorage.getItem('starvolt_optimisation_chosen');
         const optiTariffId=optiChosen?localStorage.getItem('starvolt_optimisation_tariff_id'):null;
         const effectiveTariffId=optiTariffId||site.tarif_id;
         const curT=effectiveTariffId?tariffs.find(t=>t.id===effectiveTariffId):null;
         if(curT){
-          // Tarif dynamique : attendre que les données spot soient chargées
           if(curT.tarif_dynamique&&!spotMap){setBalance(null);return;}
           setBalance(computeStorageOptimization(site.conso_profil,curT,site,bk,tk,globalVars,spotMap));
           return;
@@ -3005,8 +3012,8 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations }) {
     const ratioBat=(globalVars?.ratio_puissance_stockage??50)/100;
     const pBat=globalVars?.pertes_batterie??10;
 
-    // PV + stockage combinés : si stockage présent et tarif avec variation temporelle
-    if((bk>0||tk>0)&&tariffs.length>0){
+    // PV + stockage combinés avec optimisation tarif (optiTarif actif + tarif à variation temporelle)
+    if(optiTarif&&(bk>0||tk>0)&&tariffs.length>0){
       const optiChosen=!!localStorage.getItem('starvolt_optimisation_chosen');
       const optiTariffId=optiChosen?localStorage.getItem('starvolt_optimisation_tariff_id'):null;
       const effectiveTariffId=optiTariffId||site.tarif_id;
@@ -3022,15 +3029,14 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations }) {
       }
     }
 
-    // PV seul (tarif plat, ou pas de stockage)
+    // PV + stockage solaire seul (buffer PV, pas de déplacement tarifaire)
+    // Si les deux flags sont désactivés, stockage inactif (bk/tk=0)
+    const effBk = optiSolaire ? bk : 0;
+    const effTk = optiSolaire ? tk : 0;
     setBalance(computeEnergyBalance(
       site.conso_profil,prodProfilData,kw,
-      bk*ratioBat*1000,  // batPowerW (W)
-      bk,                // batCapKwh
-      pBat,              // batLossPct
-      tk*ratioTherm,     // thermPowerKw (kW)
-      tk,                // thermCapKwh
-      pTherm             // thermLossPct
+      effBk*ratioBat*1000, effBk, pBat,
+      effTk*ratioTherm,    effTk, pTherm
     ));
   },[site?.conso_profil,prodProfilData,pvKwc,batKwh,thermKwh,globalVars,spotMap,tariffs,site?.tarif_id,site?.heure_debut_hc1,site?.heure_fin_hc1,site?.heure_debut_hc2,site?.heure_fin_hc2]);
 
@@ -4435,6 +4441,8 @@ function GlobalVarsScreen({ onBack }) {
           taux_inflation_electricite:   n.taux_inflation_electricite   ?? 4,
           taux_inflation_electricite_2: n.taux_inflation_electricite_2 ?? 0,
           prix_rachat_injection:        n.prix_rachat_injection        ?? 0.04,
+          opti_solaire:                 n.opti_solaire                 ?? true,
+          opti_tarif:                   n.opti_tarif                   ?? true,
         });
         setLoading(false);
       });
@@ -4464,6 +4472,8 @@ function GlobalVarsScreen({ onBack }) {
       taux_inflation_electricite:   num(globalForm.taux_inflation_electricite),
       taux_inflation_electricite_2: num(globalForm.taux_inflation_electricite_2),
       prix_rachat_injection:        num(globalForm.prix_rachat_injection),
+      opti_solaire:                 !!globalForm.opti_solaire,
+      opti_tarif:                   !!globalForm.opti_tarif,
       updated_at: new Date().toISOString(),
     }, { onConflict: 'id' });
     setSavingGlobal(false);
@@ -4488,6 +4498,33 @@ function GlobalVarsScreen({ onBack }) {
       </div>
 
       <div className="card" style={{padding:'12px 14px',marginBottom:8}}>
+        {/* ── Optimisation par la box ── */}
+        <div style={SL}>Optimisation par la box</div>
+        <div style={{display:'flex',flexDirection:'column',gap:10,marginBottom:14}}>
+          {[
+            ['opti_solaire','Optimisation solaire','Charge le stockage depuis le surplus PV, décharge pour couvrir les déficits'],
+            ['opti_tarif',  'Optimisation tarif réseau','Charge le stockage en heures creuses ou bon marché, décharge en heures de pointe'],
+          ].map(([key, label, desc]) => (
+            <label key={key} style={{display:'flex',alignItems:'flex-start',gap:10,cursor:'pointer',userSelect:'none'}}>
+              <input
+                type="checkbox"
+                checked={!!globalForm[key]}
+                onChange={e=>setGlobalForm(p=>({...p,[key]:e.target.checked}))}
+                style={{marginTop:2,width:16,height:16,accentColor:'#7dd940',flexShrink:0}}
+              />
+              <div>
+                <div style={{fontSize:13,color:'white',fontWeight:700}}>{label}</div>
+                <div style={{fontSize:10,color:'rgba(255,255,255,.4)',marginTop:1}}>{desc}</div>
+              </div>
+            </label>
+          ))}
+          {!globalForm.opti_solaire && !globalForm.opti_tarif && (
+            <div style={{fontSize:10,color:'rgba(255,160,80,.8)',padding:'4px 8px',background:'rgba(255,160,80,.08)',borderRadius:6,border:'1px solid rgba(255,160,80,.2)'}}>
+              ⚠ Aucune optimisation activée — la box ne fait aucun déplacement de charge
+            </div>
+          )}
+        </div>
+
         {/* ── Hypothèses stockage ── */}
         <div style={SL}>Hypothèses stockage — Batterie chimique</div>
         <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:6,marginBottom:10}}>
