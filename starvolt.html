@@ -2546,21 +2546,24 @@ function computeCombinedOptimization(consoProfile, prodNorm, pvKwc, batKwh, ther
         } else {
           let need = -surplus;
           if (optiTarif) {
-            // Look-ahead : surplus PV attendu dans les heures restantes de la journée.
-            // Utilisé pour décider si on décharge maintenant (libère de la place pour le PV)
-            // ou si on garde le stockage pour l'arbitrage HP.
+            // Look-ahead 24h glissantes : surplus PV attendu dans les 24 prochaines heures.
+            // Si ce surplus dépasse la place dispo → pas de charge réseau, tout réservé au solaire.
+            // Sinon : roomForGrid = place restante après réservation PV → optimisation tarifaire sur cette marge.
             let expPvSurp = 0;
             if (optiSolaire) {
-              for (let fh = h + 1; fh < 24; fh++) {
-                const fidx = profIdx(m, d, fh);
-                expPvSurp += Math.max(0, (prodNorm[fidx]||0)*pvKwc - (consoProfile[fidx]||0));
+              const currentAbs = profIdx(m, d, h);
+              for (let delta = 1; delta <= 24; delta++) {
+                const fabs = Math.min(currentAbs + delta, 8783);
+                expPvSurp += Math.max(0, (prodNorm[fabs]||0)*pvKwc - (consoProfile[fabs]||0));
               }
             }
             const thermRoom   = thermCapWh - thermSOC;
             const batRoom     = batCapWh   - batSOC;
             const currentRoom = thermRoom  + batRoom;
-            // Le PV va-t-il remplir le stockage ? Si oui, priorité = libérer de la place.
-            const pvWillFill  = expPvSurp > currentRoom;
+            // Marge pour la charge réseau = place dispo - surplus PV des 24h (min 0)
+            const roomForGrid = Math.max(0, currentRoom - expPvSurp);
+            // pvWillFill : surplus PV des 24h va remplir tout le stockage dispo → priorité autoconso
+            const pvWillFill  = optiSolaire && roomForGrid === 0;
 
             if (price > avgDay * (1 + localSeuil)) {
               // Heure chère → décharger toujours
@@ -2570,22 +2573,22 @@ function computeCombinedOptimization(consoProfile, prodNorm, pvKwc, batKwh, ther
             } else if (price < avgDay * (1 - localSeuil)) {
               // Heure bon marché
               if (pvWillFill) {
-                // Le PV va remplir le stockage de toute façon → décharger maintenant.
-                // Valeur : autoconso PV (≈0,13 €/kWh) >> arbitrage HC/HP (0,035 €/kWh).
+                // Le PV (24h) va remplir le dispo → décharger maintenant, pas de charge réseau.
+                // Valeur autoconso PV (≈0,13 €/kWh) >> arbitrage HC/HP (0,035 €/kWh).
                 if (thermSOC > 0 && need > 0) { const dt=Math.min(thermPowWh,thermSOC,need); thermSOC-=dt; need-=dt; viaTherm=dt; }
                 if (batSOC > 0  && need > 0) { const db=Math.min(batPowWh,batSOC,need);   batSOC -=db; need-=db; viaBat=db; }
                 gridBuyWh = Math.max(0, need);
               } else {
-                // Place suffisante pour le PV → garder pour HP, charger depuis réseau
+                // Marge disponible → garder pour HP, charger depuis réseau jusqu'à roomForGrid
                 gridBuyWh = need;
-                let roomForGrid = Math.max(0, currentRoom - expPvSurp);
-                if (thermCapWh > 0 && roomForGrid > 0) {
-                  const ci=Math.min(thermPowWh, Math.min(thermRoom, roomForGrid));
-                  if(ci>0){thermSOC+=ci;gridBuyWh+=ci;roomForGrid-=ci;}
+                let rFG = roomForGrid;
+                if (thermCapWh > 0 && rFG > 0) {
+                  const ci=Math.min(thermPowWh, Math.min(thermRoom, rFG));
+                  if(ci>0){thermSOC+=ci;gridBuyWh+=ci;rFG-=ci;}
                 }
-                if (batCapWh > 0 && batEff > 0 && roomForGrid > 0) {
+                if (batCapWh > 0 && batEff > 0 && rFG > 0) {
                   const room=batCapWh-batSOC;
-                  const ci=Math.min(batPowWh, room>0?Math.min(room/batEff, roomForGrid/batEff):0);
+                  const ci=Math.min(batPowWh, room>0?Math.min(room/batEff, rFG/batEff):0);
                   if(ci>0){batSOC+=ci*batEff;gridBuyWh+=ci;}
                 }
               }
