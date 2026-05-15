@@ -2287,7 +2287,8 @@ function EnergyBalanceChart({ balance, level, selMonth, selDay, setLevel, setSel
     ctx.clearRect(0, 0, W, H);
 
     const isMobChart = window.innerWidth < 640;
-    const LEGEND_H = 92, ML = 46, MR = 8, MT = LEGEND_H + 4, MB = isMobChart ? 24 : 28;
+    const LEGEND_H = isMobChart ? 50 : 20;
+    const ML = 46, MR = 8, MT = LEGEND_H + 6, MB = isMobChart ? 24 : 28;
     const cW = W - ML - MR, cH = H - MT - MB;
     const n = chartData.length;
 
@@ -2372,22 +2373,46 @@ function EnergyBalanceChart({ balance, level, selMonth, selDay, setLevel, setSel
 
     // Indice de niveau
     if (level !== 'hour') {
-      ctx.fillStyle = 'rgba(255,255,255,.4)'; ctx.font = '13px sans-serif'; ctx.textAlign = 'right';
-      ctx.fillText('double-clic pour zoomer', W - MR, MT - 4);
+      ctx.fillStyle = 'rgba(255,255,255,.35)'; ctx.font = '11px sans-serif'; ctx.textAlign = 'right';
+      ctx.fillText('double-clic pour zoomer', W - MR, MT + 10);
     }
 
-    // Légende (5 entrées)
-    [{color:'#f0a050',label:'Direct solaire'},{color:'#ffb060',label:'Stockage thermique',dots:true},{color:'#ffd098',label:'Batterie chimique'},{color:'#d0d0d0',label:'Achat réseau'},{color:'#f0e86a',label:'Injection réseau'}]
-      .forEach((it, i) => {
-        const ly = 3 + i * 18;
-        ctx.fillStyle = it.color; ctx.fillRect(ML, ly + 2, 13, 12);
-        if (it.dots) {
-          ctx.fillStyle = 'rgba(0,0,0,0.35)';
-          [3,8].forEach(dy => [3,8,13].forEach(dx => { ctx.beginPath(); ctx.arc(ML+dx, ly+2+dy, 1.5, 0, Math.PI*2); ctx.fill(); }));
-        }
-        ctx.fillStyle = 'white'; ctx.font = '13px sans-serif'; ctx.textAlign = 'left';
-        ctx.fillText(it.label, ML + 18, ly + 12);
+    // Légende — labels courts
+    const LEG = [
+      {color:'#f0a050', label:'Solaire'},
+      {color:'#ffb060', label:'Bat. Thermique', dots:true},
+      {color:'#ffd098', label:'Batterie'},
+      {color:'#d0d0d0', label:'Achat'},
+      {color:'#f0e86a', label:'Injection'},
+    ];
+    const drawLegItem = (it, lx, ly) => {
+      const sqSz = 9;
+      ctx.fillStyle = it.color; ctx.fillRect(lx, ly, sqSz, sqSz);
+      if (it.dots) {
+        ctx.fillStyle = 'rgba(0,0,0,0.35)';
+        [2,6].forEach(dy => [2,5,8].forEach(dx => { ctx.beginPath(); ctx.arc(lx+dx, ly+dy, 1.2, 0, Math.PI*2); ctx.fill(); }));
+      }
+      ctx.fillStyle = 'rgba(255,255,255,.82)'; ctx.textAlign = 'left';
+      ctx.fillText(it.label, lx + sqSz + 3, ly + sqSz - 1);
+    };
+    if (!isMobChart) {
+      // Desktop : 1 ligne centrée
+      ctx.font = '11px sans-serif';
+      const sqSz = 9, txtGap = 3, pad = 16;
+      const widths = LEG.map(it => sqSz + txtGap + ctx.measureText(it.label).width);
+      const totalW = widths.reduce((s, w) => s + w, 0) + pad * (LEG.length - 1);
+      let lx = Math.max(4, (W - totalW) / 2);
+      const ly = Math.floor((LEGEND_H - sqSz) / 2);
+      LEG.forEach((it, i) => { drawLegItem(it, lx, ly); lx += widths[i] + pad; });
+    } else {
+      // Mobile : 2 colonnes (3 gauche, 2 droite), compact
+      ctx.font = '10px sans-serif';
+      const colW = Math.floor(W / 2), rowH = 16;
+      LEG.forEach((it, i) => {
+        const col = i >= 3 ? 1 : 0, row = i >= 3 ? i - 3 : i;
+        drawLegItem(it, col * colW + 4, 2 + row * rowH);
       });
+    }
   }, [chartData, xLabels, level]);
 
   const ctxLabel = level === 'day' ? MOIS_FULL[selMonth-1] : level === 'hour' ? `${selDay} ${MOIS_FULL[selMonth-1]}` : null;
