@@ -2396,18 +2396,21 @@ function computeStorageOptimization(consoProfile, tariff, site, batKwh, thermKwh
 
 // ─── computeCombinedOptimization ─────────────
 // PV + stockage + déplacement temporel combinés.
-//   HC/HP fixe   : seuil=0, charge heures HC (depuis réseau ou PV), décharge HP
-//   Prix dynamique : seuil global, charge heures bon marché, décharge heures chères
-// Retourne { monthly[12], hourly[8784], billWithout, billWithStorage, saving, reductionPct, _combined:true }
-function computeCombinedOptimization(consoProfile, prodNorm, pvKwc, batKwh, thermKwh, globalVars, tariff, site, spotMap) {
-  const optiSolaire = globalVars?.opti_solaire ?? true; // charger le stockage depuis le surplus PV
-  const optiTarif   = globalVars?.opti_tarif   ?? true; // charge HC/bon-marché, décharge HP/cher
+// baseTariff = tarif actuel du site (avant tout changement de fournisseur) → sert au billWithout.
+// tariff     = tarif effectif retenu (panier ou site) → sert au billWithStorage.
+// → billWithout = coût sans PV ni stockage, au tarif actuel
+// → billWithStorage = coût avec PV + stockage optimisé, au tarif retenu (panier compris)
+// → saving = tous les effets cumulés : changement fournisseur + PV + box
+function computeCombinedOptimization(consoProfile, prodNorm, pvKwc, batKwh, thermKwh, globalVars, tariff, baseTariff, site, spotMap) {
+  const optiSolaire = globalVars?.opti_solaire ?? true;
+  const optiTarif   = globalVars?.opti_tarif   ?? true;
 
   const ratioBat   = (globalVars?.ratio_puissance_stockage           ?? 50) / 100;
   const ratioTherm = (globalVars?.ratio_puissance_stockage_thermique ?? 50) / 100;
   const pBat       = (globalVars?.pertes_batterie                    ?? 10) / 100;
   const seuil      = (globalVars?.seuil_optimisation_stockage        ?? 10) / 100;
   const prixRachat = (globalVars?.prix_rachat_injection              ?? 0.04);
+  const tva        = (globalVars?.tva                                ?? 20)  / 100;
 
   const bk = parseFloat(batKwh)   || 0;
   const tk  = parseFloat(thermKwh) || 0;
@@ -2422,48 +2425,67 @@ function computeCombinedOptimization(consoProfile, prodNorm, pvKwc, batKwh, ther
 
   const toHcH = v => { if (v == null || v === '') return null; const n = parseInt(String(v).split(':')[0]); return isNaN(n) ? null : n; };
 
-  const isDynamic = !!(tariff.tarif_dynamique && spotMap);
+  // Plages HC communes (depuis le site, avec fallback sur variables globales)
+  const hcWinArr = [
+    { s: toHcH(site?.heure_debut_hc1 ?? globalVars?.hc_debut1), e: toHcH(site?.heure_fin_hc1 ?? globalVars?.hc_fin1) },
+    { s: toHcH(site?.heure_debut_hc2 ?? globalVars?.hc_debut2), e: toHcH(site?.heure_fin_hc2 ?? globalVars?.hc_fin2) },
+  ].filter(w => w.s !== null && w.e !== null);
 
-  // ── getPrice / getDailyAvg / localSeuil selon le mode ─────────────────────
-  let getPrice, getDailyAvg, localSeuil, fixedHT, tva;
-
-  if (isDynamic) {
-    const marge  = (tariff.marge_fournisseur_ceur_kwh || 0) / 100;
-    const accise = (globalVars?.accise || 0) / 100;
-    tva     = (globalVars?.tva ?? 20) / 100;
-    fixedHT = (tariff.abo_annuel || 0) + (tariff.turpe_fixe || 0) + (tariff.cta_fixe || 0);
-    const hcWin = [
-      { s: toHcH(site?.heure_debut_hc1 ?? globalVars?.hc_debut1), e: toHcH(site?.heure_fin_hc1 ?? globalVars?.hc_fin1) },
-      { s: toHcH(site?.heure_debut_hc2 ?? globalVars?.hc_debut2), e: toHcH(site?.heure_fin_hc2 ?? globalVars?.hc_fin2) },
-    ].filter(w => w.s !== null && w.e !== null);
-    getPrice    = (m, d, h) => { const spot = spotMap[`${m}_${d}_${h}`] || 0; return spot + getTurpeRate(m, h, globalVars, hcWin) + accise + marge; };
-    getDailyAvg = (m, d)   => { let s = 0; for (let h = 0; h < 24; h++) s += getPrice(m, d, h); return s / 24; };
-    localSeuil  = seuil;
-  } else {
-    const hasHC = tariff.prix_hc != null && tariff.prix_hc !== tariff.prix_hp;
-    const hcWindows = hasHC ? [
-      { s: toHcH(site?.heure_debut_hc1 ?? globalVars?.hc_debut1), e: toHcH(site?.heure_fin_hc1 ?? globalVars?.hc_fin1) },
-      { s: toHcH(site?.heure_debut_hc2 ?? globalVars?.hc_debut2), e: toHcH(site?.heure_fin_hc2 ?? globalVars?.hc_fin2) },
-    ].filter(w => w.s !== null && w.e !== null) : [];
-
-    if (hcWindows.length > 0) {
-      let hcCount = 0;
-      for (let h = 0; h < 24; h++) if (isHcHour(h, hcWindows)) hcCount++;
-      const avgFixed = (hcCount * tariff.prix_hc + (24 - hcCount) * tariff.prix_hp) / 24;
-      getPrice    = (m, d, h) => isHcHour(h, hcWindows) ? tariff.prix_hc : tariff.prix_hp;
-      getDailyAvg = ()        => avgFixed;
-      localSeuil  = 0; // charge tout HC, décharge tout HP
-    } else {
-      // Tarif plat (pas d'optim temporelle, PV seul)
-      const flat = tariff.prix_hp || 0;
-      getPrice    = () => flat;
-      getDailyAvg = () => flat;
-      localSeuil  = 0;
+  // ── Helper : construit une fonction getPrice(m,d,h) pour un tarif donné ───
+  const makePriceFn = t => {
+    if (!t) return () => 0;
+    if (t.tarif_dynamique && spotMap) {
+      const marge  = (t.marge_fournisseur_ceur_kwh || 0) / 100;
+      const accise = (globalVars?.accise || 0) / 100;
+      return (m, d, h) => (spotMap[`${m}_${d}_${h}`] || 0) + getTurpeRate(m, h, globalVars, hcWinArr) + accise + marge;
     }
+    if (t.prix_hc != null && t.prix_hc !== t.prix_hp && hcWinArr.length > 0) {
+      return (m, d, h) => isHcHour(h, hcWinArr) ? t.prix_hc : t.prix_hp;
+    }
+    const flat = t.prix_hp || 0;
+    return () => flat;
+  };
+
+  // ── Helper : calcule le coût annuel TTC d'un tarif sur un profil de conso ──
+  // (pas de PV ni stockage — boucle simple)
+  const annualBill = (t, priceFn) => {
+    let varCost = 0;
+    for (let m = 1; m <= 12; m++)
+      for (let d = 1; d <= PROF_DAYS[m-1]; d++)
+        for (let h = 0; h < 24; h++)
+          varCost += ((consoProfile[profIdx(m,d,h)] || 0) / 1000) * priceFn(m, d, h);
+    if (t.tarif_dynamique && spotMap) {
+      return Math.round((varCost + (t.abo_annuel||0) + (t.turpe_fixe||0) + (t.cta_fixe||0)) * (1 + tva));
+    }
+    return Math.round(varCost + (t.abo_annuel || 0));
+  };
+
+  // ── Tarif baseline (avant changement de fournisseur) ──────────────────────
+  const bt = baseTariff || tariff; // fallback sur tarif effectif si pas de baseline distinct
+  const billWithout = annualBill(bt, makePriceFn(bt));
+
+  // ── Tarif effectif (après changement) : getPrice + getDailyAvg ───────────
+  const getPrice = makePriceFn(tariff);
+  const isDynamic = !!(tariff.tarif_dynamique && spotMap);
+  const hasHC_fixed = !tariff.tarif_dynamique && tariff.prix_hc != null && tariff.prix_hc !== tariff.prix_hp && hcWinArr.length > 0;
+
+  let getDailyAvg, localSeuil;
+  if (isDynamic) {
+    getDailyAvg = (m, d) => { let s = 0; for (let h = 0; h < 24; h++) s += getPrice(m, d, h); return s / 24; };
+    localSeuil  = seuil;
+  } else if (hasHC_fixed) {
+    let hcCount = 0;
+    for (let h = 0; h < 24; h++) if (isHcHour(h, hcWinArr)) hcCount++;
+    const avgFixed = (hcCount * tariff.prix_hc + (24 - hcCount) * tariff.prix_hp) / 24;
+    getDailyAvg = () => avgFixed;
+    localSeuil  = 0;
+  } else {
+    getDailyAvg = () => tariff.prix_hp || 0;
+    localSeuil  = 0;
   }
 
-  // ── Boucle horaire ────────────────────────────────────────────────────────
-  let varCostHT_without = 0, varCostHT_with = 0, annInjKwh = 0;
+  // ── Boucle horaire (scénario optimisé) ────────────────────────────────────
+  let varCostHT_with = 0, annInjKwh = 0;
   let batSOC = batCapWh * 0.5, thermSOC = thermCapWh * 0.5;
 
   for (let m = 1; m <= 12; m++) {
@@ -2471,14 +2493,10 @@ function computeCombinedOptimization(consoProfile, prodNorm, pvKwc, batKwh, ther
       const avgDay = getDailyAvg(m, d);
       for (let h = 0; h < 24; h++) {
         const idx    = profIdx(m, d, h);
-        const conso  = consoProfile[idx] || 0;          // Wh
-        const pvProd = (prodNorm[idx] || 0) * pvKwc;    // Wh (prodNorm en Wh/kWc)
+        const conso  = consoProfile[idx] || 0;
+        const pvProd = (prodNorm[idx] || 0) * pvKwc;
         const price  = getPrice(m, d, h);
 
-        // Baseline (tout depuis le réseau, sans PV ni stockage)
-        varCostHT_without += (conso / 1000) * price;
-
-        // Simulation combinée PV + stockage
         const surplus  = pvProd - conso;
         const onSiteWh = Math.min(pvProd, conso);
         let gridBuyWh = 0, injectWh = 0, viaBat = 0, viaTherm = 0;
@@ -2486,44 +2504,29 @@ function computeCombinedOptimization(consoProfile, prodNorm, pvKwc, batKwh, ther
         if (surplus >= 0) {
           let free = surplus;
           if (optiSolaire) {
-            // Charger le stockage depuis le surplus PV (gratuit)
-            if (thermCapWh > 0) {
-              const ci = Math.min(thermPowWh, thermCapWh - thermSOC, free);
-              if (ci > 0) { thermSOC += ci; free -= ci; }
-            }
-            if (batCapWh > 0 && batEff > 0) {
-              const room = batCapWh - batSOC;
-              const ci   = Math.min(batPowWh, room > 0 ? room / batEff : 0, free);
-              if (ci > 0) { batSOC += ci * batEff; free -= ci; }
-            }
+            if (thermCapWh > 0) { const ci=Math.min(thermPowWh,thermCapWh-thermSOC,free); if(ci>0){thermSOC+=ci;free-=ci;} }
+            if (batCapWh > 0 && batEff > 0) { const room=batCapWh-batSOC; const ci=Math.min(batPowWh,room>0?room/batEff:0,free); if(ci>0){batSOC+=ci*batEff;free-=ci;} }
           }
-          injectWh = free; // surplus PV non stocké → injection réseau
+          injectWh = free;
         } else {
-          let need = -surplus; // déficit à couvrir
-
+          let need = -surplus;
           if (optiTarif) {
-            // Optimisation tarifaire : charge HC/bon-marché, décharge HP/cher
             if (price > avgDay * (1 + localSeuil)) {
-              // Heure chère → décharger le stockage avant d'acheter
               if (thermSOC > 0 && need > 0) { const dt=Math.min(thermPowWh,thermSOC,need); thermSOC-=dt; need-=dt; viaTherm=dt; }
               if (batSOC > 0  && need > 0) { const db=Math.min(batPowWh,batSOC,need);   batSOC -=db; need-=db; viaBat=db; }
               gridBuyWh = Math.max(0, need);
             } else if (price < avgDay * (1 - localSeuil)) {
-              // Heure bon marché → couvrir déficit + charger stockage depuis réseau
               gridBuyWh = need;
               if (thermCapWh > 0) { const ci=Math.min(thermPowWh,thermCapWh-thermSOC); if(ci>0){thermSOC+=ci;gridBuyWh+=ci;} }
               if (batCapWh > 0 && batEff > 0) { const room=batCapWh-batSOC; const ci=Math.min(batPowWh,room>0?room/batEff:0); if(ci>0){batSOC+=ci*batEff;gridBuyWh+=ci;} }
             } else {
-              // Heure neutre → acheter uniquement le déficit
               gridBuyWh = need;
             }
           } else if (optiSolaire) {
-            // Solaire seul : décharger le stockage (énergie solaire stockée) sur tout déficit, sans achat réseau préventif
             if (thermSOC > 0 && need > 0) { const dt=Math.min(thermPowWh,thermSOC,need); thermSOC-=dt; need-=dt; viaTherm=dt; }
             if (batSOC > 0  && need > 0) { const db=Math.min(batPowWh,batSOC,need);   batSOC -=db; need-=db; viaBat=db; }
             gridBuyWh = Math.max(0, need);
           } else {
-            // Aucune optimisation stockage → achat direct réseau
             gridBuyWh = need;
           }
         }
@@ -2542,16 +2545,14 @@ function computeCombinedOptimization(consoProfile, prodNorm, pvKwc, batKwh, ther
     }
   }
 
-  // ── Facturation finale ────────────────────────────────────────────────────
+  // ── Facturation du scénario optimisé ─────────────────────────────────────
   const injCredit = annInjKwh * prixRachat;
-  let billWithout, billWithStorage;
+  let billWithStorage;
   if (isDynamic) {
-    billWithout     = Math.round((varCostHT_without + fixedHT) * (1 + tva));
+    const fixedHT = (tariff.abo_annuel||0) + (tariff.turpe_fixe||0) + (tariff.cta_fixe||0);
     billWithStorage = Math.round(Math.max(0, (varCostHT_with + fixedHT) * (1 + tva) - injCredit));
   } else {
-    const abo = tariff.abo_annuel || 0;
-    billWithout     = Math.round(varCostHT_without + abo);
-    billWithStorage = Math.round(Math.max(0, varCostHT_with + abo - injCredit));
+    billWithStorage = Math.round(Math.max(0, varCostHT_with + (tariff.abo_annuel||0) - injCredit));
   }
 
   const saving       = Math.max(0, billWithout - billWithStorage);
@@ -3030,7 +3031,10 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations }) {
       const curT=effectiveTariffId?tariffs.find(t=>t.id===effectiveTariffId):null;
       if(curT){
         if(curT.tarif_dynamique&&!spotMap){setBalance(null);return;}
-        setBalance(computeCombinedOptimization(site.conso_profil,prodProfilData,kw,batKwh,thermKwh,globalVars,curT,site,spotMap));
+        // baseTariff = tarif actuel du site (avant changement de fournisseur)
+        // → billWithout calculé avec ce tarif ; billWithStorage avec le tarif retenu (panier)
+        const baseTariff=site.tarif_id?tariffs.find(t=>t.id===site.tarif_id)||curT:curT;
+        setBalance(computeCombinedOptimization(site.conso_profil,prodProfilData,kw,batKwh,thermKwh,globalVars,curT,baseTariff,site,spotMap));
         return;
       }
     }
