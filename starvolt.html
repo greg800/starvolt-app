@@ -2323,8 +2323,8 @@ function computeStorageOptimization(consoProfile, tariff, site, batKwh, thermKwh
     const tva    = (globalVars?.tva     ?? 20) / 100;
     const fixedHT = (tariff.abo_annuel || 0) + (tariff.turpe_fixe || 0) + (tariff.cta_fixe || 0);
     const hcWin   = [
-      { s: parseHcHour(site?.heure_debut_hc1), e: parseHcHour(site?.heure_fin_hc1) },
-      { s: parseHcHour(site?.heure_debut_hc2), e: parseHcHour(site?.heure_fin_hc2) },
+      { s: parseHcHour(site?.heure_debut_hc1 ?? globalVars?.hc_debut1), e: parseHcHour(site?.heure_fin_hc1 ?? globalVars?.hc_fin1) },
+      { s: parseHcHour(site?.heure_debut_hc2 ?? globalVars?.hc_debut2), e: parseHcHour(site?.heure_fin_hc2 ?? globalVars?.hc_fin2) },
     ].filter(w => w.s !== null && w.e !== null);
 
     // Prix HT de l'heure (spot + TURPE + accise + marge)
@@ -2345,12 +2345,13 @@ function computeStorageOptimization(consoProfile, tariff, site, batKwh, thermKwh
 
   // ── MODE HC/HP FIXE : moyenne annuelle constante ─────────────────────────────
   } else {
+    // Plages HC : site d'abord, sinon fallback sur les valeurs globales (parametres_nationaux)
     const hcWindows = [
-      { s: parseHcHour(site?.heure_debut_hc1), e: parseHcHour(site?.heure_fin_hc1) },
-      { s: parseHcHour(site?.heure_debut_hc2), e: parseHcHour(site?.heure_fin_hc2) },
+      { s: parseHcHour(site?.heure_debut_hc1 ?? globalVars?.hc_debut1), e: parseHcHour(site?.heure_fin_hc1 ?? globalVars?.hc_fin1) },
+      { s: parseHcHour(site?.heure_debut_hc2 ?? globalVars?.hc_debut2), e: parseHcHour(site?.heure_fin_hc2 ?? globalVars?.hc_fin2) },
     ].filter(w => w.s !== null && w.e !== null);
 
-    // Pas de plages HC renseignées → traiter comme plat
+    // Pas de plages HC renseignées (ni sur le site, ni en global) → traiter comme plat
     if (hcWindows.length === 0) {
       let bwo = tariff.abo_annuel || 0;
       for (let m = 1; m <= 12; m++)
@@ -2746,7 +2747,9 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations }) {
     if(kw===0){
       // Pas de PV : optimisation stockage si batterie présente et tarif connu
       if((bk>0||tk>0)&&tariffs.length>0){
-        const optiTariffId=localStorage.getItem('starvolt_optimisation_tariff_id');
+        // N'utiliser le tarif panier que si l'offre est bien dans le panier (clé _chosen présente)
+        const optiChosen=!!localStorage.getItem('starvolt_optimisation_chosen');
+        const optiTariffId=optiChosen?localStorage.getItem('starvolt_optimisation_tariff_id'):null;
         const effectiveTariffId=optiTariffId||site.tarif_id;
         const curT=effectiveTariffId?tariffs.find(t=>t.id===effectiveTariffId):null;
         if(curT){
@@ -2813,7 +2816,8 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations }) {
   useEffect(()=>{
     const kw=pvKwc===''?6:(parseFloat(pvKwc)||0);
     if(kw!==0){setSpotMap(null);return;}
-    const optiTariffId=localStorage.getItem('starvolt_optimisation_tariff_id');
+    const optiChosen=!!localStorage.getItem('starvolt_optimisation_chosen');
+    const optiTariffId=optiChosen?localStorage.getItem('starvolt_optimisation_tariff_id'):null;
     const effectiveTariffId=optiTariffId||site?.tarif_id;
     const curT=effectiveTariffId?tariffs.find(t=>t.id===effectiveTariffId):null;
     if(curT?.tarif_dynamique){
@@ -5435,7 +5439,7 @@ function PanierScreen({ user, onBack, onGoTo }) {
 
   const removeItem = (key) => {
     const removes = {
-      optimisation: ['starvolt_optimisation_chosen','starvolt_optimisation_saving'],
+      optimisation: ['starvolt_optimisation_chosen','starvolt_optimisation_saving','starvolt_optimisation_tariff_id'],
       acc:          ['starvolt_acc_chosen'],
       box:          ['starvolt_box_chosen','starvolt_box_saving'],
       solar:        ['starvolt_solar_chosen','starvolt_solar_saving'],
@@ -5445,7 +5449,7 @@ function PanierScreen({ user, onBack, onGoTo }) {
   };
 
   const clearPanier = () => {
-    ['starvolt_optimisation_chosen','starvolt_optimisation_saving','starvolt_solar_chosen',
+    ['starvolt_optimisation_chosen','starvolt_optimisation_saving','starvolt_optimisation_tariff_id','starvolt_solar_chosen',
      'starvolt_solar_saving','starvolt_box_chosen','starvolt_box_saving','starvolt_acc_chosen'].forEach(k => localStorage.removeItem(k));
     setItems({ optimisation:false, acc:false, box:false, solar:false });
   };
