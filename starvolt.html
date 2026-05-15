@@ -2355,12 +2355,15 @@ function EnergyBalanceChart({ balance, level, selMonth, selDay, setLevel, setSel
     barsRef.current = newBars;
 
     // Labels axe X
-    ctx.fillStyle = 'rgba(255,255,255,.8)'; ctx.font = '13px sans-serif'; ctx.textAlign = 'center';
     const isMob = window.innerWidth < 640;
+    ctx.fillStyle = 'rgba(255,255,255,.9)';
+    ctx.font = isMob ? '13px sans-serif' : 'bold 20px sans-serif';
+    ctx.textAlign = 'center';
     xLabels.forEach((lbl, i) => {
       if (n > 24 && i % 2 !== 0) return;
       if (isMob && n === 24 && i % 4 !== 0) return;
-      ctx.fillText(lbl, ML + i * bTW + bTW / 2, H - 4);
+      if (!isMob && n === 24 && i % 2 !== 0) return;
+      ctx.fillText(lbl, ML + i * bTW + bTW / 2, H - (isMob ? 4 : 6));
     });
 
     // Indice de niveau
@@ -2386,10 +2389,11 @@ function EnergyBalanceChart({ balance, level, selMonth, selDay, setLevel, setSel
   const ctxLabel = level === 'day' ? `Mois ${selMonth}` : level === 'hour' ? `${selDay}/${selMonth}` : null;
 
   const navBtnStyle = {
-    position:'absolute', zIndex:2, background:'rgba(255,255,255,.15)',
-    border:'1px solid rgba(255,255,255,.35)', borderRadius:'50%',
-    width:28, height:28, cursor:'pointer', color:'white',
-    fontSize:15, lineHeight:'26px', textAlign:'center', padding:0
+    position:'absolute', zIndex:2, background:'#5cb85c',
+    border:'none', borderRadius:'50%',
+    width:32, height:32, cursor:'pointer', color:'white',
+    fontSize:16, lineHeight:'30px', textAlign:'center', padding:0,
+    boxShadow:'0 2px 8px rgba(125,217,64,.35)'
   };
 
   return (
@@ -2404,14 +2408,15 @@ function EnergyBalanceChart({ balance, level, selMonth, selDay, setLevel, setSel
       {level !== 'month' && (
         <button onClick={zoomOut} title="Zoom arrière" style={{
           position:'absolute', bottom:28, left:4, zIndex:2,
-          background:'white', border:'none',
-          borderRadius:'50%', width:26, height:26, cursor:'pointer',
-          padding:0, display:'flex', alignItems:'center', justifyContent:'center'
+          background:'#5cb85c', border:'none',
+          borderRadius:'50%', width:32, height:32, cursor:'pointer',
+          padding:0, display:'flex', alignItems:'center', justifyContent:'center',
+          boxShadow:'0 2px 8px rgba(125,217,64,.35)'
         }}>
           <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
-            <circle cx="7.5" cy="7.5" r="5.5" stroke="#333" strokeWidth="2"/>
-            <line x1="4.5" y1="7.5" x2="10.5" y2="7.5" stroke="#333" strokeWidth="2" strokeLinecap="round"/>
-            <line x1="12" y1="12" x2="16" y2="16" stroke="#333" strokeWidth="2" strokeLinecap="round"/>
+            <circle cx="7.5" cy="7.5" r="5.5" stroke="white" strokeWidth="2"/>
+            <line x1="4.5" y1="7.5" x2="10.5" y2="7.5" stroke="white" strokeWidth="2" strokeLinecap="round"/>
+            <line x1="12" y1="12" x2="16" y2="16" stroke="white" strokeWidth="2" strokeLinecap="round"/>
           </svg>
         </button>
       )}
@@ -2445,6 +2450,8 @@ function MonSiteScreen({ user, userProfile, onBack }) {
   const[chartDay,setChartDay]=useState(null);
   const[globalVars,setGlobalVars]=useState(null);
   const[isMobile,setIsMobile]=useState(window.innerWidth<640);
+  const[consoOpen,setConsoOpen]=useState(true);
+  const[prodOpen,setProdOpen]=useState(!!localStorage.getItem('starvolt_solar_chosen'));
   const fileRef=useRef(null);
 
   const handleImportDemo=async()=>{
@@ -2634,14 +2641,28 @@ function MonSiteScreen({ user, userProfile, onBack }) {
 
             {/* ── Tuile Ma conso ── */}
             <div className="card" style={{padding:0,marginBottom:8,overflow:'hidden'}}>
-              <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'10px 14px 8px',borderBottom:'1px solid rgba(255,255,255,.07)'}}>
-                <div style={{fontWeight:800,fontSize:13,color:'white',display:'flex',alignItems:'center',gap:6}}>⚡ Ma conso</div>
-                <button className="btn btn-sec" style={{fontSize:11,padding:'5px 14px',borderRadius:8,width:'auto',flexShrink:0}} onClick={()=>fileRef.current?.click()} disabled={importing}>
-                  {importing?'⏳ Traitement…':'📂 Importer'}
-                </button>
-                <input ref={fileRef} type="file" accept=".xlsx,.xls" style={{display:'none'}} onChange={handleImport}/>
+              <div
+                style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'10px 14px 8px',borderBottom: consoOpen ? '1px solid rgba(255,255,255,.07)' : 'none',cursor:'pointer',userSelect:'none'}}
+                onClick={()=>setConsoOpen(v=>!v)}
+              >
+                <div style={{fontWeight:800,fontSize:13,color:'white',display:'flex',alignItems:'center',gap:6}}>
+                  ⚡ Ma conso
+                  {!consoOpen && site?.conso_annuelle_kwh > 0 && (
+                    <span style={{fontSize:11,fontWeight:600,color:'rgba(255,255,255,.45)',marginLeft:4}}>
+                      {Math.round(site.conso_annuelle_kwh).toLocaleString('fr-FR')} kWh/an
+                      {(()=>{ const curT=tariffs.find(t=>t.id===site.tarif_id); if(!curT||curT.tarif_dynamique)return null; const f=Math.round((curT.abo_annuel||0)+site.conso_annuelle_kwh*(curT.prix_hp||0)); return f>0?<span style={{color:'rgba(240,160,80,.7)',marginLeft:4}}>· {f.toLocaleString('fr-FR')} €/an</span>:null; })()}
+                    </span>
+                  )}
+                </div>
+                <div style={{display:'flex',alignItems:'center',gap:8}} onClick={e=>e.stopPropagation()}>
+                  <button className="btn btn-sec" style={{fontSize:11,padding:'5px 14px',borderRadius:8,width:'auto',flexShrink:0}} onClick={()=>fileRef.current?.click()} disabled={importing}>
+                    {importing?'⏳ Traitement…':'📂 Importer'}
+                  </button>
+                  <input ref={fileRef} type="file" accept=".xlsx,.xls" style={{display:'none'}} onChange={handleImport}/>
+                  <span style={{color:'rgba(255,255,255,.4)',fontSize:16,lineHeight:1,transition:'transform .2s',transform:consoOpen?'rotate(0deg)':'rotate(-90deg)',display:'inline-block'}}>▾</span>
+                </div>
               </div>
-              <div style={{padding:'10px 14px 12px'}}>
+              {consoOpen && <div style={{padding:'10px 14px 12px'}}>
                 <div style={{display:'flex',gap:12,alignItems:'flex-start',flexWrap:'wrap'}}>
                   {/* Colonne gauche : saisies + stats */}
                   <div style={{flex:'1 1 200px',minWidth:0,display:'flex',flexDirection:'column',gap:8}}>
@@ -2699,15 +2720,19 @@ function MonSiteScreen({ user, userProfile, onBack }) {
                     </div>
                   )}
                 </div>
-              </div>
+              </div>}
             </div>
 
             {/* ── Tuile Ma production, mon stockage et ma box ── */}
             <div className="card" style={{padding:0,marginBottom:8,overflow:'hidden'}}>
-              <div style={{padding:'10px 14px 8px',borderBottom:'1px solid rgba(255,255,255,.07)'}}>
+              <div
+                style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'10px 14px 8px',borderBottom: prodOpen ? '1px solid rgba(255,255,255,.07)' : 'none',cursor:'pointer',userSelect:'none'}}
+                onClick={()=>setProdOpen(v=>!v)}
+              >
                 <div style={{fontWeight:800,fontSize:13,color:'white',display:'flex',alignItems:'center',gap:6}}>☀️ Ma production, mon stockage et ma box</div>
+                <span style={{color:'rgba(255,255,255,.4)',fontSize:16,lineHeight:1,transition:'transform .2s',transform:prodOpen?'rotate(0deg)':'rotate(-90deg)',display:'inline-block'}}>▾</span>
               </div>
-              <div style={{padding:'10px 14px 12px',display:'flex',flexDirection:'column',gap:8}}>
+              {prodOpen && <div style={{padding:'10px 14px 12px',display:'flex',flexDirection:'column',gap:8}}>
                 {(()=>{
                   const T={background:'rgba(255,255,255,.05)',border:'1px solid rgba(255,255,255,.1)',borderRadius:10,padding:isMobile?'6px 10px':'12px',display:'flex',flexDirection:'column',gap:isMobile?3:6,flex:'1 1 130px'};
                   const LBL={fontSize:13,color:'rgba(255,255,255,.65)',fontWeight:700,letterSpacing:'.3px'};
@@ -2813,7 +2838,7 @@ function MonSiteScreen({ user, userProfile, onBack }) {
                       {/* Stockage thermique */}
                       <div style={{...T,background:'rgba(255,160,50,.06)',border:'1px solid rgba(255,160,50,.3)'}}>
                         <div style={{display:'flex',alignItems:'center',gap:5}}>
-                          <span style={{fontSize:14}}>🌡️</span>
+                          <img src="/comwatt-box.png" style={{width:14,height:14,objectFit:'contain',mixBlendMode:'screen',flexShrink:0}} onError={e=>e.target.style.display='none'}/>
                           <span style={{fontSize:13,fontWeight:800,color:'white'}}>Stockage thermique</span>
                         </div>
                         <div><div style={LBL}>Capacité kWh</div>
@@ -2821,27 +2846,23 @@ function MonSiteScreen({ user, userProfile, onBack }) {
                             onChange={v=>{setThermKwh(v);activeId&&localStorage.setItem(`starvolt_therm_kwh_${activeId}`,v);}}
                             onBlur={()=>{}} step={0.5} min={0} placeholder="10"/></div>
                       </div>
-                      {/* Box Comwatt — si solar_box choisi */}
-                      {localStorage.getItem('starvolt_solar_chosen')==='solar_box'&&(
-                        <div style={{...T,background:'rgba(125,217,64,.05)',border:'1px solid rgba(125,217,64,.25)'}}>
-                          <div style={{display:'flex',alignItems:'center',gap:5,marginBottom:4}}>
-                            <img src="/comwatt-box.png" style={{width:14,height:14,objectFit:'contain',mixBlendMode:'screen',flexShrink:0}} onError={e=>e.target.style.display='none'}/>
-                            <span style={{fontSize:13,fontWeight:800,color:'#7dd940'}}>Box Comwatt</span>
-                          </div>
-                          <div style={{fontSize:10,color:'rgba(255,255,255,.45)',lineHeight:1.4}}>
-                            {localStorage.getItem('starvolt_box_chosen')==='free'?'Incluse · cagnotte 3 ans':'Incluse dans votre offre'}
-                          </div>
-                          <div style={{fontSize:10,color:'rgba(125,217,64,.55)',marginTop:3}}>Pilotage auto · Thermique · Injection</div>
-                        </div>
-                      )}
                       {/* Tuiles énergie */}
                       {balance&&[
-                        {icon:'☀️',color:'#f0a050',bg:'rgba(240,160,80,.08)',label:'Solaire sur place',value:fmt(autoconso)},
-                        {icon:'🔌',color:'white',bg:'rgba(200,200,200,.06)',label:'Achat réseau',value:fmt(achat)},
-                        {icon:'⬆️',color:'#f0e86a',bg:'rgba(240,232,106,.06)',label:'Injection réseau',value:fmt(injection)},
+                        {
+                          icon: <img src="/maison.png" style={{width:22,height:22,objectFit:'contain',mixBlendMode:'screen',filter:'brightness(0) invert(1)'}} onError={e=>e.target.style.display='none'}/>,
+                          color:'#f0a050',bg:'rgba(240,160,80,.08)',label:'Solaire sur place',value:fmt(autoconso)
+                        },
+                        {
+                          icon: <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M9 3h6M8 6h8M7 9l1 4h8l1-4M9 13l-2 8M15 13l2 8M4 9h16" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/><path d="M12 21l-1-5h2l-1 5z" fill="white"/><path d="M10.5 16.5l3 0" stroke="white" strokeWidth="1.2" strokeLinecap="round"/><path d="M17 4l2.5 1.5M7 4l-2.5 1.5" stroke="white" strokeWidth="1.3" strokeLinecap="round"/><path d="M19 12l2.5 1" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeDasharray="1.5 2"/><polyline points="21.5,13 23,13 22.5,14.5" fill="none" stroke="white" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/></svg>,
+                          color:'white',bg:'rgba(200,200,200,.06)',label:'Achat réseau',value:fmt(achat)
+                        },
+                        {
+                          icon: <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M9 3h6M8 6h8M7 9l1 4h8l1-4M9 13l-2 8M15 13l2 8M4 9h16" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/><path d="M12 21l-1-5h2l-1 5z" fill="white"/><path d="M10.5 16.5l3 0" stroke="white" strokeWidth="1.2" strokeLinecap="round"/><path d="M17 4l2.5 1.5M7 4l-2.5 1.5" stroke="white" strokeWidth="1.3" strokeLinecap="round"/><polyline points="19,10.5 21,10.5 20.5,9" fill="none" stroke="white" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/><path d="M21 10.5l0.5 0" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeDasharray="1.5 2" transform="scaleX(-1) translate(-42,0)"/><polyline points="21,9 23,10.5 21,12" fill="none" stroke="white" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/></svg>,
+                          color:'#f0e86a',bg:'rgba(240,232,106,.06)',label:'Injection réseau',value:fmt(injection)
+                        },
                       ].map(({icon,color,bg,label,value})=>(
                         <div key={label} style={{...T,background:bg,alignItems:'center',justifyContent:'center',textAlign:'center'}}>
-                          {!isMobile&&<span style={{fontSize:22}}>{icon}</span>}
+                          {!isMobile && <div style={{display:'flex',justifyContent:'center',opacity:.85}}>{icon}</div>}
                           <div style={{fontSize:isMobile?11:13,color:'rgba(255,255,255,.7)',fontWeight:600}}>{label}</div>
                           <div style={{fontSize:isMobile?16:20,fontWeight:900,color}}>{value}</div>
                         </div>
@@ -2857,7 +2878,7 @@ function MonSiteScreen({ user, userProfile, onBack }) {
                     )}
                   </>);
                 })()}
-              </div>
+              </div>}
             </div>
 
             {/* Suppression */}
