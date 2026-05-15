@@ -1650,6 +1650,11 @@ function AuthSignupScreen({ onGoToLogin, onSignedUp, onDemoImported }) {
     // Préremplir le profil AVANT signUp pour que pendingProfileRef soit prêt
     // quand l'event SIGNED_IN se déclenche (qui peut précéder onSignedUp)
     onSignedUp?.({ prenom: prenom.trim(), nom: nom.trim() });
+    // Vider le panier localStorage avant la création du compte
+    ['starvolt_solar_chosen','starvolt_solar_saving','starvolt_box_chosen','starvolt_box_saving',
+     'starvolt_optimisation_chosen','starvolt_optimisation_tariff_id','starvolt_optimisation_saving',
+     'starvolt_optimisation_tariff_nom','starvolt_acc_chosen','starvolt_acc_saving','starvolt_baisse_facture',
+     'starvolt_solar_defaults'].forEach(k=>localStorage.removeItem(k));
     const { data, error: err } = await sb.auth.signUp({ email: email.trim(), password: pwd });
     if (err) { setError(err.message); setLoading(false); return; }
     if (data.user) {
@@ -2454,7 +2459,7 @@ function EnergyBalanceChart({ balance, level, selMonth, selDay, setLevel, setSel
 }
 
 // ─── MonSiteScreen ────────────────────────────
-function MonSiteScreen({ user, userProfile, onBack }) {
+function MonSiteScreen({ user, userProfile, onBack, onSimulations }) {
   const[sites,setSites]=useState(null);
   const[activeId,setActiveId]=useState(null);
   const[tariffs,setTariffs]=useState([]);
@@ -2637,7 +2642,11 @@ function MonSiteScreen({ user, userProfile, onBack }) {
           <div className="card" style={{textAlign:'center',padding:'24px 20px'}}>
             <div style={{fontSize:32,marginBottom:10}}>🏠</div>
             <div style={{color:'white',fontWeight:700,marginBottom:5}}>Aucun site configuré</div>
-            <div style={{color:'rgba(255,255,255,.55)',fontSize:13}}>Ajoutez votre site pour importer votre profil de consommation.</div>
+            <div style={{color:'rgba(255,255,255,.55)',fontSize:13,marginBottom:16}}>Ajoutez votre site pour importer votre profil de consommation.</div>
+            <div style={{display:'flex',gap:10,justifyContent:'center',flexWrap:'wrap'}}>
+              <button className="btn btn-primary" style={{fontSize:13}} onClick={()=>{setShowAdd(true);setEditMode(false);}}>🏠 Créer mon site</button>
+              <button className="btn btn-sec" style={{fontSize:13}} disabled={importingDemo} onClick={handleImportDemo}>{importingDemo?'⏳ Chargement…':'📂 Données témoins'}</button>
+            </div>
           </div>
         )}
 
@@ -2646,9 +2655,9 @@ function MonSiteScreen({ user, userProfile, onBack }) {
             {/* Info site — compact, sélecteur intégré si plusieurs sites */}
             {!editMode?(
               <div className="card" style={{padding:'8px 14px',marginBottom:8}}>
-                <div style={{display:'flex',alignItems:'center',gap:10}}>
+                <div style={{display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}}>
                   {sites.length>1?(
-                    <select className="inp inp-sel" style={{fontSize:13,padding:'6px 30px 6px 10px',maxWidth:220,flexShrink:0}} value={activeId||''} onChange={e=>{persistActiveSite(e.target.value);setEditMode(false);setImportMsg(null);setShowDeleteConfirm(false);}}>
+                    <select className="inp inp-sel" style={{fontSize:13,padding:'6px 30px 6px 10px',maxWidth:200,flexShrink:0}} value={activeId||''} onChange={e=>{persistActiveSite(e.target.value);setEditMode(false);setImportMsg(null);setShowDeleteConfirm(false);}}>
                       {sites.map(s=><option key={s.id} value={s.id}>{s.nom}</option>)}
                     </select>
                   ):(
@@ -2659,7 +2668,11 @@ function MonSiteScreen({ user, userProfile, onBack }) {
                       {[site.adresse_ligne1,site.code_postal,site.ville].filter(Boolean).join(' ')}
                     </span>
                   )}
-                  <button style={{background:'none',border:'none',color:'rgba(255,255,255,.35)',cursor:'pointer',fontSize:12,flexShrink:0}} onClick={()=>setEditMode(true)}>✏️</button>
+                  <div style={{display:'flex',gap:6,marginLeft:'auto',flexShrink:0}}>
+                    <button style={{background:'rgba(125,217,64,.15)',border:'1px solid rgba(125,217,64,.3)',color:'#7dd940',cursor:'pointer',fontSize:11,fontWeight:700,padding:'4px 10px',borderRadius:6}} onClick={()=>{setShowAdd(true);setEditMode(false);setShowDeleteConfirm(false);}}>+ Ajouter</button>
+                    {!showDeleteConfirm&&<button style={{background:'rgba(255,80,80,.1)',border:'1px solid rgba(255,80,80,.25)',color:'#ff6b6b',cursor:'pointer',fontSize:11,fontWeight:700,padding:'4px 10px',borderRadius:6}} onClick={()=>setShowDeleteConfirm(true)}>🗑 Supprimer</button>}
+                    <button style={{background:'none',border:'none',color:'rgba(255,255,255,.35)',cursor:'pointer',fontSize:12,flexShrink:0}} onClick={()=>setEditMode(true)}>✏️</button>
+                  </div>
                 </div>
                 <div style={{fontSize:10,color:'rgba(125,217,64,.65)',fontWeight:700,marginTop:4,display:'flex',alignItems:'center',gap:4}}><span>✦</span> Ce site sera utilisé dans tous les calculs d'économie</div>
               </div>
@@ -3009,25 +3022,14 @@ function MonSiteScreen({ user, userProfile, onBack }) {
       </div>
 
       <StickyFooter row onBack={onBack}>
-        {showActions&&sites.length===0&&(
-          <>
-            <button className="btn btn-primary" style={{fontSize:13,flex:1}} onClick={()=>{setShowAdd(true);setEditMode(false);}}>🏠 Créer mon site</button>
-            <button className="btn btn-sec" style={{fontSize:13,flex:1}} disabled={importingDemo} onClick={handleImportDemo}>{importingDemo?'⏳ Chargement…':'📂 Données témoins'}</button>
-          </>
-        )}
-        {showActions&&sites.length>0&&(
-          <>
-            <button className="btn btn-primary" style={{fontSize:13}} onClick={()=>{setShowAdd(true);setEditMode(false);setShowDeleteConfirm(false);}}>+ Ajouter un site</button>
-            {site&&!showDeleteConfirm&&<button className="btn btn-no" style={{fontSize:13}} onClick={()=>setShowDeleteConfirm(true)}>🗑️ Supprimer</button>}
-          </>
-        )}
+        {onSimulations&&<button className="btn btn-primary" style={{fontSize:13}} onClick={onSimulations}>Simulations d'économies →</button>}
       </StickyFooter>
     </>
   );
 }
 
 // ─── SimulationsScreen ────────────────────────
-function SimulationsScreen({ onACC, onBox, onSolar, onOptimisation, onBack, user, userProfile }) {
+function SimulationsScreen({ onACC, onBox, onSolar, onOptimisation, onBack, onMonSite, user, userProfile }) {
   const [hasConso,  setHasConso]  = useState(false);
   const [maxSaving, setMaxSaving] = useState(null);
   const [accSaving, setAccSaving] = useState(null);
@@ -3211,7 +3213,9 @@ function SimulationsScreen({ onACC, onBox, onSolar, onOptimisation, onBack, user
         </button>
       </div>
     </div>
-    <StickyFooter onBack={onBack}/>
+    <StickyFooter row onBack={onBack}>
+      {onMonSite&&<button className="btn btn-primary" style={{fontSize:13}} onClick={onMonSite}>Mon site →</button>}
+    </StickyFooter>
     </>
   );
 }
@@ -6359,7 +6363,7 @@ function App() {
           onBack={goBack}/>;
 
       case 'MA_CONSO':
-        return <MonSiteScreen user={user} userProfile={profile} onBack={goBack}/>;
+        return <MonSiteScreen user={user} userProfile={profile} onBack={goBack} onSimulations={()=>goTo('SIMULATIONS')}/>;
 
       case 'SIMULATIONS': {
         const base = { name: profile?.prenom||'', address:'Zone ACC', initialBill:2000, bill:2000, bravoItems:[], investment:0, eligible:true };
@@ -6370,7 +6374,8 @@ function App() {
           onBox={()=>goTo('BOX_SIM')}
           onSolar={()=>goTo('SOLAR_SIM')}
           onOptimisation={()=>goTo('OPTIMISATION')}
-          onBack={goBack}/>;
+          onBack={goBack}
+          onMonSite={()=>goTo('MA_CONSO')}/>;
       }
 
       case 'PANIER':
