@@ -2216,6 +2216,138 @@ function computeEnergyBalance(conso, prodNorm, pvKwc, batPowerW, batCapKwh, batL
   return {monthly, hourly};
 }
 
+// ─── computeStorageOptimization ───────────────
+// Optimisation stockage sans PV : charge en HC (bon marché), décharge en HP (cher)
+// Retourne { monthly[12], hourly[8784], billWithout, billWithStorage, saving, reductionPct, _storageOpti:true }
+function computeStorageOptimization(consoProfile, tariff, site, batKwh, thermKwh, globalVars) {
+  const ratioBat   = (globalVars?.ratio_puissance_stockage             ?? 50) / 100;
+  const ratioTherm = (globalVars?.ratio_puissance_stockage_thermique   ?? 50) / 100;
+  const pBat       = (globalVars?.pertes_batterie                      ?? 10) / 100;
+  const seuil      = (globalVars?.seuil_optimisation_stockage          ?? 10) / 100;
+
+  const bk = parseFloat(batKwh)   || 0;
+  const tk = parseFloat(thermKwh) || 0;
+  const batCapWh   = bk * 1000;
+  const thermCapWh = tk * 1000;
+  const batPowWh   = batCapWh  * ratioBat;
+  const thermPowWh = thermCapWh * ratioTherm;
+  const batEff     = 1 - Math.min(Math.max(pBat, 0), 1); // rendement chimique
+
+  const monthly = Array.from({length:12}, () => ({on_site:0, grid_buy:0, injection:0, via_bat:0, via_therm:0}));
+  const hourly  = new Array(8784);
+  let billWithStorage = tariff.abo_annuel || 0;
+  let billWithout     = tariff.abo_annuel || 0;
+
+  // Tarif plat ou dynamique : pas d'optim possible, on calcule juste la facture de référence
+  const hasHC = tariff.prix_hc != null && tariff.prix_hc !== tariff.prix_hp && !tariff.tarif_dynamique;
+
+  if (!hasHC) {
+    for (let m = 1; m <= 12; m++)
+      for (let d = 1; d <= PROF_DAYS[m-1]; d++)
+        for (let h = 0; h < 24; h++) {
+          const idx = profIdx(m, d, h);
+          const gb  = (consoProfile[idx] || 0) / 1000;
+          monthly[m-1].grid_buy += gb;
+          hourly[idx] = {on_site:0, grid_buy:gb, injection:0, via_bat:0, via_therm:0, m, d, h};
+          billWithout += gb * (tariff.prix_hp || 0);
+        }
+    const bwo = Math.round(billWithout);
+    return {monthly, hourly, billWithout: bwo, billWithStorage: bwo, saving: 0, reductionPct: 0, _storageOpti: true};
+  }
+
+  // HC/HP : construire les fenêtres HC du site
+  const hcWindows = [
+    { s: parseHcHour(site?.heure_debut_hc1), e: parseHcHour(site?.heure_fin_hc1) },
+    { s: parseHcHour(site?.heure_debut_hc2), e: parseHcHour(site?.heure_fin_hc2) },
+  ].filter(w => w.s !== null && w.e !== null);
+
+  const prixHC = tariff.prix_hc;
+  const prixHP = tariff.prix_hp;
+
+  // Si pas de plages HC renseignées sur le site → même que tarif plat
+  if (hcWindows.length === 0) {
+    for (let m = 1; m <= 12; m++)
+      for (let d = 1; d <= PROF_DAYS[m-1]; d++)
+        for (let h = 0; h < 24; h++) {
+          const idx = profIdx(m, d, h);
+          const gb  = (consoProfile[idx] || 0) / 1000;
+          monthly[m-1].grid_buy += gb;
+          hourly[idx] = {on_site:0, grid_buy:gb, injection:0, via_bat:0, via_therm:0, m, d, h};
+          billWithout += gb * prixHP;
+        }
+    const bwo = Math.round(billWithout);
+    return {monthly, hourly, billWithout: bwo, billWithStorage: bwo, saving: 0, reductionPct: 0, _storageOpti: true};
+  }
+
+  // Moyenne journalière (la même tous les jours car HC/HP fixe)
+  let hcCount = 0;
+  for (let h = 0; h < 24; h++) if (isHcHour(h, hcWindows)) hcCount++;
+  const avgPrice = (hcCount * prixHC + (24 - hcCount) * prixHP) / 24;
+
+  // SOC initial = 50 % pour les deux stockages
+  let batSOC   = batCapWh  * 0.5;
+  let thermSOC = thermCapWh * 0.5;
+
+  for (let m = 1; m <= 12; m++) {
+    for (let d = 1; d <= PROF_DAYS[m-1]; d++) {
+      for (let h = 0; h < 24; h++) {
+        const idx     = profIdx(m, d, h);
+        const consoWh = consoProfile[idx] || 0;
+        const isHC    = isHcHour(h, hcWindows);
+        const price   = isHC ? prixHC : prixHP;
+
+        billWithout += (consoWh / 1000) * price;
+
+        let gridConsumedWh = consoWh;  // pour le graphique : conso - via stockage
+        let gridBillableWh = consoWh;  // pour la facture  : inclut la charge
+        let viaBat = 0, viaTherm = 0;
+
+        if (price < avgPrice * (1 - seuil)) {
+          // Heure bon marché → charger (thermique d'abord, puis chimique)
+          if (thermCapWh > 0) {
+            const room = thermCapWh - thermSOC;
+            const ci   = Math.min(thermPowWh, room); // eff thermique = 1
+            if (ci > 0) { thermSOC += ci; gridBillableWh += ci; }
+          }
+          if (batCapWh > 0 && batEff > 0) {
+            const room = batCapWh - batSOC;
+            const ci   = Math.min(batPowWh, room > 0 ? room / batEff : 0);
+            if (ci > 0) { batSOC += ci * batEff; gridBillableWh += ci; }
+          }
+        } else if (price > avgPrice * (1 + seuil)) {
+          // Heure chère → décharger (thermique d'abord, puis chimique)
+          let need = consoWh;
+          if (thermSOC > 0 && need > 0) {
+            const dt = Math.min(thermPowWh, thermSOC, need);
+            thermSOC -= dt; need -= dt; viaTherm = dt;
+          }
+          if (batSOC > 0 && need > 0) {
+            const db = Math.min(batPowWh, batSOC, need);
+            batSOC -= db; need -= db; viaBat = db;
+          }
+          gridConsumedWh = Math.max(0, consoWh - viaBat - viaTherm);
+          gridBillableWh = gridConsumedWh;
+        }
+
+        billWithStorage += (gridBillableWh / 1000) * price;
+
+        const gb = gridConsumedWh / 1000, vb = viaBat / 1000, vt = viaTherm / 1000;
+        hourly[idx] = {on_site:0, grid_buy:gb, injection:0, via_bat:vb, via_therm:vt, m, d, h};
+        monthly[m-1].grid_buy  += gb;
+        monthly[m-1].via_bat   += vb;
+        monthly[m-1].via_therm += vt;
+      }
+    }
+  }
+
+  billWithStorage = Math.round(billWithStorage);
+  billWithout     = Math.round(billWithout);
+  const saving       = Math.max(0, billWithout - billWithStorage);
+  const reductionPct = billWithout > 0 ? Math.min(100, Math.round((saving / billWithout) * 100)) : 0;
+
+  return {monthly, hourly, billWithout, billWithStorage, saving, reductionPct, _storageOpti: true};
+}
+
 // ─── EnergyBalanceChart ───────────────────────
 function EnergyBalanceChart({ balance, level, selMonth, selDay, setLevel, setSelMonth, setSelDay }) {
   const wrapperRef = useRef(null), canvasRef = useRef(null);
@@ -2569,14 +2701,30 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations }) {
 
   // Calculer le bilan énergétique dès que les données sont prêtes
   useEffect(()=>{
-    if(!site?.conso_profil||!prodProfilData){setBalance(null);return;}
+    if(!site?.conso_profil){setBalance(null);return;}
+    const kw=pvKwc===''?6:(parseFloat(pvKwc)||0);
+    const bk=parseFloat(batKwh)||0;
+    const tk=parseFloat(thermKwh)||0;
+
+    if(kw===0){
+      // Pas de PV : optimisation stockage HC/HP si batterie présente et tarif connu
+      if((bk>0||tk>0)&&tariffs.length>0){
+        const optiTariffId=localStorage.getItem('starvolt_optimisation_tariff_id');
+        const effectiveTariffId=optiTariffId||site.tarif_id;
+        const curT=effectiveTariffId?tariffs.find(t=>t.id===effectiveTariffId):null;
+        if(curT&&!curT.tarif_dynamique){
+          setBalance(computeStorageOptimization(site.conso_profil,curT,site,bk,tk,globalVars));
+          return;
+        }
+      }
+      setBalance(null);return;
+    }
+
+    if(!prodProfilData){setBalance(null);return;}
     const ratioTherm=(globalVars?.ratio_puissance_stockage_thermique??50)/100;
     const pTherm=globalVars?.pertes_thermique??0;
-    const tk=parseFloat(thermKwh)||0;
-    const kw=pvKwc===''?6:(parseFloat(pvKwc)||0);
     const ratioBat=(globalVars?.ratio_puissance_stockage??50)/100;
     const pBat=globalVars?.pertes_batterie??10;
-    const bk=parseFloat(batKwh)||0;
     setBalance(computeEnergyBalance(
       site.conso_profil,prodProfilData,kw,
       bk*ratioBat*1000,  // batPowerW (W)
@@ -2586,7 +2734,7 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations }) {
       tk,                // thermCapKwh
       pTherm             // thermLossPct
     ));
-  },[site?.conso_profil,prodProfilData,pvKwc,batKwh,thermKwh,globalVars]);
+  },[site?.conso_profil,prodProfilData,pvKwc,batKwh,thermKwh,globalVars,tariffs,site?.tarif_id,site?.heure_debut_hc1,site?.heure_fin_hc1,site?.heure_debut_hc2,site?.heure_fin_hc2]);
 
   const updateSite=async(updates)=>{ await sb.from('sites').update(updates).eq('id',activeId); await load(); };
 
@@ -2615,7 +2763,7 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations }) {
 
   // Charger variables globales + listener mobile
   useEffect(()=>{
-    sb.from('parametres_nationaux').select('ratio_puissance_stockage,pertes_batterie,ratio_puissance_stockage_thermique,pertes_thermique,prix_rachat_injection').eq('id',1).maybeSingle()
+    sb.from('parametres_nationaux').select('ratio_puissance_stockage,pertes_batterie,ratio_puissance_stockage_thermique,pertes_thermique,prix_rachat_injection,seuil_optimisation_stockage').eq('id',1).maybeSingle()
       .then(({data})=>setGlobalVars(data));
     const handler=()=>setIsMobile(window.innerWidth<640);
     window.addEventListener('resize',handler);
@@ -2792,21 +2940,29 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations }) {
                     period=chartLevel==='hour'?`${chartDay}/${chartMonth}`:chartLevel==='day'?`Mois ${chartMonth}`:'Année';
                     fmt=v=>(v*scale).toFixed(unit==='MWh'?1:0)+' '+unit;
                   }
-                  // Baisse de facture annuelle (€TTC) et réduction (%) — même formule que SolarSim
+                  // Baisse de facture annuelle (€TTC) et réduction (%)
                   let reductionFacturePct=null, baisseFacture=null;
-                  if(balance&&site?.conso_profil&&site.conso_annuelle_kwh>0){
-                    const annInj=balance.monthly.reduce((s,m)=>s+m.injection,0);
-                    const annGrid=balance.monthly.reduce((s,m)=>s+m.grid_buy,0);
-                    const curT=tariffs.find(t=>t.id===site.tarif_id);
-                    if(curT&&!curT.tarif_dynamique){
-                      const _bill=Math.round((curT.abo_annuel||0)+site.conso_annuelle_kwh*(curT.prix_hp||0));
-                      if(_bill>0){
-                        const _pm=_bill/site.conso_annuelle_kwh;
-                        const _pr=globalVars?.prix_rachat_injection??0.04;
-                        const nouvFact=Math.max(0,annGrid*_pm-annInj*_pr);
-                        reductionFacturePct=Math.min(100,Math.round((1-nouvFact/_bill)*100));
-                        baisseFacture=Math.max(0,Math.round(_bill-nouvFact));
-                        localStorage.setItem('starvolt_baisse_facture',String(baisseFacture));
+                  if(balance){
+                    if(balance._storageOpti){
+                      // Résultat optimisation stockage sans PV
+                      baisseFacture=balance.saving;
+                      reductionFacturePct=balance.reductionPct;
+                      if(baisseFacture>0) localStorage.setItem('starvolt_baisse_facture',String(baisseFacture));
+                    } else if(site?.conso_profil&&site.conso_annuelle_kwh>0){
+                      // Bilan PV normal — même formule que SolarSim
+                      const annInj=balance.monthly.reduce((s,m)=>s+m.injection,0);
+                      const annGrid=balance.monthly.reduce((s,m)=>s+m.grid_buy,0);
+                      const curT=tariffs.find(t=>t.id===site.tarif_id);
+                      if(curT&&!curT.tarif_dynamique){
+                        const _bill=Math.round((curT.abo_annuel||0)+site.conso_annuelle_kwh*(curT.prix_hp||0));
+                        if(_bill>0){
+                          const _pm=_bill/site.conso_annuelle_kwh;
+                          const _pr=globalVars?.prix_rachat_injection??0.04;
+                          const nouvFact=Math.max(0,annGrid*_pm-annInj*_pr);
+                          reductionFacturePct=Math.min(100,Math.round((1-nouvFact/_bill)*100));
+                          baisseFacture=Math.max(0,Math.round(_bill-nouvFact));
+                          localStorage.setItem('starvolt_baisse_facture',String(baisseFacture));
+                        }
                       }
                     }
                   }
@@ -3915,6 +4071,7 @@ function GlobalVarsScreen({ onBack }) {
           pertes_batterie:                    n.pertes_batterie                    ?? 10,
           ratio_puissance_stockage_thermique: n.ratio_puissance_stockage_thermique ?? 50,
           pertes_thermique:                   n.pertes_thermique                   ?? 0,
+          seuil_optimisation_stockage:        n.seuil_optimisation_stockage        ?? 10,
           turpe_hp_hiver:                     n.turpe_hp_hiver                     ?? '',
           turpe_hc_hiver:           n.turpe_hc_hiver           ?? '',
           turpe_hp_ete:             n.turpe_hp_ete             ?? '',
@@ -3943,6 +4100,7 @@ function GlobalVarsScreen({ onBack }) {
       pertes_batterie:                              num(globalForm.pertes_batterie),
       ratio_puissance_stockage_thermique:           num(globalForm.ratio_puissance_stockage_thermique),
       pertes_thermique:                             num(globalForm.pertes_thermique),
+      seuil_optimisation_stockage:                  num(globalForm.seuil_optimisation_stockage),
       turpe_hp_hiver:                               num(globalForm.turpe_hp_hiver),
       turpe_hc_hiver:               num(globalForm.turpe_hc_hiver),
       turpe_hp_ete:                 num(globalForm.turpe_hp_ete),
@@ -4015,6 +4173,19 @@ function GlobalVarsScreen({ onBack }) {
               value={String(globalForm.pertes_thermique)}
               onChange={e=>setGlobalForm(p=>({...p,pertes_thermique:e.target.value}))}
               style={F}/>
+          </div>
+        </div>
+
+        {/* ── Seuil optimisation stockage ── */}
+        <div style={{...SL,marginTop:4}}>Optimisation stockage sans PV</div>
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:6,marginBottom:10}}>
+          <div>
+            <div style={FL}>Seuil déclenchement (%)</div>
+            <input className="inp" type="number" step="1" min="0" max="50" placeholder="10"
+              value={String(globalForm.seuil_optimisation_stockage)}
+              onChange={e=>setGlobalForm(p=>({...p,seuil_optimisation_stockage:e.target.value}))}
+              style={F}/>
+            <div style={{fontSize:9,color:'rgba(255,255,255,.3)',marginTop:2}}>Charge si prix &lt; moy−seuil, décharge si prix &gt; moy+seuil</div>
           </div>
         </div>
 
