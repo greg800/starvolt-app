@@ -2552,8 +2552,26 @@ function computeCombinedOptimization(consoProfile, prodNorm, pvKwc, batKwh, ther
               gridBuyWh = Math.max(0, need);
             } else if (price < avgDay * (1 - localSeuil)) {
               gridBuyWh = need;
-              if (thermCapWh > 0) { const ci=Math.min(thermPowWh,thermCapWh-thermSOC); if(ci>0){thermSOC+=ci;gridBuyWh+=ci;} }
-              if (batCapWh > 0 && batEff > 0) { const room=batCapWh-batSOC; const ci=Math.min(batPowWh,room>0?room/batEff:0); if(ci>0){batSOC+=ci*batEff;gridBuyWh+=ci;} }
+              // Look-ahead : réserver la capacité de stockage pour le surplus PV attendu
+              // dans les heures restantes de la journée. Évite de remplir la batterie la nuit
+              // au tarif HC et de rater le stockage du surplus PV du lendemain matin.
+              let expectedPvSurplus = 0;
+              for (let fh = h + 1; fh < 24; fh++) {
+                const fidx = profIdx(m, d, fh);
+                expectedPvSurplus += Math.max(0, (prodNorm[fidx]||0)*pvKwc - (consoProfile[fidx]||0));
+              }
+              const thermRoom = thermCapWh - thermSOC;
+              const batRoom   = batCapWh   - batSOC;
+              let roomForGrid = Math.max(0, (thermRoom + batRoom) - expectedPvSurplus);
+              if (thermCapWh > 0 && roomForGrid > 0) {
+                const ci=Math.min(thermPowWh, Math.min(thermRoom, roomForGrid));
+                if(ci>0){thermSOC+=ci;gridBuyWh+=ci;roomForGrid-=ci;}
+              }
+              if (batCapWh > 0 && batEff > 0 && roomForGrid > 0) {
+                const room=batCapWh-batSOC;
+                const ci=Math.min(batPowWh, room>0?Math.min(room/batEff, roomForGrid/batEff):0);
+                if(ci>0){batSOC+=ci*batEff;gridBuyWh+=ci;}
+              }
             } else {
               gridBuyWh = need;
             }
