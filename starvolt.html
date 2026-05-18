@@ -2555,7 +2555,8 @@ function computeCombinedOptimization(consoProfile, prodNorm, pvKwc, batKwh, ther
         const price  = getPrice(m, d, h);
 
         // Prix négatif : on est payé pour consommer → arrêt onduleurs PV + charge stockage à fond
-        if (price < 0) {
+        // Uniquement si l'optimisation tarifaire est active (optiTarif)
+        if (price < 0 && optiTarif) {
           let chargeWh = 0;
           if (thermCapWh > 0) { const ci=Math.min(thermPowWh,thermCapWh-thermSOC); if(ci>0){thermSOC+=ci;chargeWh+=ci;} }
           if (batCapWh > 0 && batEff > 0) { const room=batCapWh-batSOC; const ci=Math.min(batPowWh,room>0?room/batEff:0); if(ci>0){batSOC+=ci*batEff;chargeWh+=ci;} }
