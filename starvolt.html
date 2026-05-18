@@ -2841,29 +2841,38 @@ function EnergyBalanceChart({ balance, level, selMonth, selDay, setLevel, setSel
 
     // ── Axe droit : tarif (€/kWh) ──────────────────────────────────────────────
     if (priceData) {
+      const hasNegPrice = priceData.some(p => p < 0);
       const maxP = Math.max(...priceData, dailyAvgPrice||0, 0.001);
-      // Échelle : 0 en bas (zeroY), maxP en haut (MT)
-      const priceY = p => zeroY - Math.max(0, p) / maxP * (zeroY - MT);
-      const axX = W - MR + 4; // ligne de l'axe
+      const minP = hasNegPrice ? Math.min(...priceData, dailyAvgPrice||0) : 0;
+      // Échelle : zeroY = prix 0, croissant vers le haut (positif) et vers le bas (négatif)
+      const priceScale = (zeroY - MT) / maxP; // px par €/kWh
+      const priceY = p => zeroY - p * priceScale;
+      const axX = W - MR + 4;
+      const axBottom = hasNegPrice ? Math.min(MT + cH, priceY(minP)) : zeroY;
 
-      // Ligne verticale axe droit
       ctx.save();
+
+      // Ligne verticale axe droit (étendue vers le bas si prix négatifs)
       ctx.strokeStyle = 'rgba(255,255,255,.35)';
       ctx.lineWidth = 1;
-      ctx.beginPath(); ctx.moveTo(axX, MT); ctx.lineTo(axX, zeroY); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(axX, MT); ctx.lineTo(axX, axBottom); ctx.stroke();
 
-      // Ticks + labels (0, mid, max) en c€/kWh
-      ctx.fillStyle = 'rgba(255,255,255,.65)';
+      // Ticks + labels en c€/kWh
       ctx.font = (isMobChart ? '9px' : '10px') + ' sans-serif';
       ctx.textAlign = 'left';
       const ticks = [0, maxP * 0.5, maxP];
+      if (hasNegPrice) ticks.push(minP);
       ticks.forEach(p => {
         const ty = priceY(p);
-        ctx.beginPath(); ctx.moveTo(axX, ty); ctx.lineTo(axX + 4, ty);
-        ctx.strokeStyle = 'rgba(255,255,255,.35)'; ctx.lineWidth = 1; ctx.stroke();
-        const lbl = (p * 100).toFixed(p === 0 ? 0 : 1);
-        ctx.fillText(lbl, axX + 6, ty + 3.5);
+        if (ty < MT - 4 || ty > axBottom + 4) return;
+        const neg = p < 0;
+        ctx.strokeStyle = neg ? 'rgba(255,100,100,.6)' : 'rgba(255,255,255,.35)';
+        ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(axX, ty); ctx.lineTo(axX + 4, ty); ctx.stroke();
+        ctx.fillStyle = neg ? 'rgba(255,160,160,.9)' : 'rgba(255,255,255,.65)';
+        ctx.fillText((p * 100).toFixed(p === 0 ? 0 : 1), axX + 6, ty + 3.5);
       });
+
       // Label unité
       ctx.save();
       ctx.fillStyle = 'rgba(255,255,255,.5)';
@@ -2874,11 +2883,13 @@ function EnergyBalanceChart({ balance, level, selMonth, selDay, setLevel, setSel
       ctx.fillText('c€/kWh', 0, 0);
       ctx.restore();
 
-      // Trait blanc horizontal par barre = tarif moyen de la période
+      // Trait horizontal par barre = tarif de la période (rouge si négatif)
       newBars.forEach((bar, i) => {
         if (i >= priceData.length) return;
-        const py = priceY(priceData[i]);
-        ctx.strokeStyle = 'white';
+        const p = priceData[i];
+        const py = priceY(p);
+        if (py < MT - 4 || py > axBottom + 4) return;
+        ctx.strokeStyle = p < 0 ? 'rgba(255,80,80,.95)' : 'white';
         ctx.lineWidth = 2;
         ctx.beginPath(); ctx.moveTo(bar.x, py); ctx.lineTo(bar.x + bar.w, py); ctx.stroke();
       });
@@ -2886,13 +2897,13 @@ function EnergyBalanceChart({ balance, level, selMonth, selDay, setLevel, setSel
       // Trait pointillé = moyenne 24h (tarif dynamique, vue heure uniquement)
       if (dailyAvgPrice != null) {
         const py = priceY(dailyAvgPrice);
-        ctx.strokeStyle = 'rgba(255,255,255,.75)';
+        const negAvg = dailyAvgPrice < 0;
+        ctx.strokeStyle = negAvg ? 'rgba(255,150,150,.75)' : 'rgba(255,255,255,.75)';
         ctx.lineWidth = 1.5;
         ctx.setLineDash([5, 4]);
         ctx.beginPath(); ctx.moveTo(ML, py); ctx.lineTo(W - MR, py); ctx.stroke();
         ctx.setLineDash([]);
-        // Label moy
-        ctx.fillStyle = 'rgba(255,255,255,.75)';
+        ctx.fillStyle = negAvg ? 'rgba(255,150,150,.75)' : 'rgba(255,255,255,.75)';
         ctx.font = '10px sans-serif'; ctx.textAlign = 'right';
         ctx.fillText('moy', W - MR - 2, py - 3);
       }
