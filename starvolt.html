@@ -2274,6 +2274,24 @@ function computeStorageOptimization(consoProfile, tariff, baseTariff, site, batK
   // billWithout = facture AVANT tout changement (tarif actuel du site, pas de stockage)
   const billWithoutBase = simpleAnnualBill(baseTariff || tariff);
 
+  const optiTarif = globalVars?.opti_tarif ?? true;
+
+  // Optimisation désactivée → facture = conso brute × tarif retenu, pas de charge/décharge
+  if (!optiTarif) {
+    const billWithStorage = simpleAnnualBill(tariff);
+    for (let m = 1; m <= 12; m++)
+      for (let d = 1; d <= PROF_DAYS[m-1]; d++)
+        for (let h = 0; h < 24; h++) {
+          const idx = profIdx(m, d, h);
+          const gb  = (consoProfile[idx] || 0) / 1000;
+          monthly[m-1].grid_buy += gb;
+          hourly[idx] = {on_site:0, grid_buy:gb, injection:0, via_bat:0, via_therm:0, m, d, h};
+        }
+    const saving = Math.max(0, billWithoutBase - billWithStorage);
+    const reductionPct = billWithoutBase > 0 ? Math.min(100, Math.round(saving/billWithoutBase*100)) : 0;
+    return {monthly, hourly, billWithout: billWithoutBase, billWithStorage, saving, reductionPct, _storageOpti: true};
+  }
+
   // ── Helper : boucle interne charge/décharge (commun aux deux modes) ──────────
   // localSeuil=seuil pour spot dynamique ; localSeuil=0 pour HC/HP fixe
   // (seuil=0 → charge tout HC, décharge tout HP, sans filtre par seuil)
