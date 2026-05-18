@@ -3232,7 +3232,7 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations }) {
       for(let m=1;m<=12;m++) for(let d=1;d<=PROF_DAYS[m-1];d++) for(let h=0;h<24;h++){
         const idx=profIdx(m,d,h);
         const spot=spotMap[`${m}_${d}_${h}`]||0;
-        arr[idx]=Math.max(0,(spot+getTurpeRate(m,h,globalVars,hcWin)+accise+marge)*(1+tva));
+        arr[idx]=(spot+getTurpeRate(m,h,globalVars,hcWin)+accise+marge)*(1+tva);
       }
     } else {
       const ph=parseFloat(effectiveTariff.prix_hp)||0;
