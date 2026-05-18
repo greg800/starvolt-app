@@ -3099,52 +3099,50 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations }) {
     const optiSolaire = globalVars?.opti_solaire ?? true;
     const optiTarif   = globalVars?.opti_tarif   ?? true;
 
-    // ── Résolution du tarif effectif (commun aux deux branches) ───────────────
+    // ── Helpers tarif ─────────────────────────────────────────────────────────
     const getEffectiveTariff = () => {
       if(!tariffs.length) return null;
       const optiChosen=!!localStorage.getItem('starvolt_optimisation_chosen');
       const optiTariffId=optiChosen?localStorage.getItem('starvolt_optimisation_tariff_id'):null;
-      const effectiveTariffId=optiTariffId||site.tarif_id;
-      return effectiveTariffId?tariffs.find(t=>t.id===effectiveTariffId)||null:null;
+      const id=optiTariffId||site.tarif_id;
+      return id?tariffs.find(t=>t.id===id)||null:null;
     };
     const getBaseTariff = curT => site.tarif_id?tariffs.find(t=>t.id===site.tarif_id)||curT:curT;
 
-    // ── Routage selon les flags ────────────────────────────────────────────────
-    // • kw=0 ou (⚡ seul) → computeStorageOptimization : PV ignoré, pur arbitrage tarifaire
-    // • ☀️ seul ou les deux → computeCombinedOptimization : PV + stockage, flags contrôlent les bras
-    const useStoragePath = kw===0 || (!optiSolaire && optiTarif);
+    // ── Routage ────────────────────────────────────────────────────────────────
+    // Les flags ☀️/⚡ contrôlent la STRATÉGIE DE STOCKAGE, pas si le PV est compté.
+    // Le PV réduit toujours la facture finale via l'autoconsommation (kW instantanés).
+    //
+    // • kw>0 + profil prod présent → computeCombinedOptimization
+    //   PV toujours inclus dans billWithStorage ; flags contrôlent le dispatch du stockage.
+    // • kw=0 ou pas de profil prod → computeStorageOptimization (tarif pur, PV absent)
+    // • Pas de tarif connu → computeEnergyBalance (graphique PV sans €)
 
-    if(useStoragePath){
-      const curT=getEffectiveTariff();
-      if(curT){
-        if(curT.tarif_dynamique&&!spotMap){setBalance(null);return;}
-        setBalance(computeStorageOptimization(site.conso_profil,curT,getBaseTariff(curT),site,bk,tk,globalVars,spotMap));
-        return;
-      }
-      setBalance(null);return;
-    }
+    const curT = getEffectiveTariff();
 
-    if(!prodProfilData){setBalance(null);return;}
-
-    if(tariffs.length>0){
-      const curT=getEffectiveTariff();
+    if(kw>0 && prodProfilData){
+      // ── Chemin PV + stockage ──
       if(curT){
         if(curT.tarif_dynamique&&!spotMap){setBalance(null);return;}
         setBalance(computeCombinedOptimization(site.conso_profil,prodProfilData,kw,batKwh,thermKwh,globalVars,curT,getBaseTariff(curT),site,spotMap));
         return;
       }
+      // Pas de tarif → graphique PV seul
+      const ratioBat=(globalVars?.ratio_puissance_stockage??50)/100;
+      const pBat=globalVars?.pertes_batterie??10;
+      const ratioTherm=(globalVars?.ratio_puissance_stockage_thermique??50)/100;
+      const pTherm=globalVars?.pertes_thermique??0;
+      setBalance(computeEnergyBalance(site.conso_profil,prodProfilData,kw,bk*ratioBat*1000,bk,pBat,tk*ratioTherm,tk,pTherm));
+      return;
     }
 
-    // Pas de tarif connu → PV seul (sans facturation, affichage graphique uniquement)
-    const ratioTherm=(globalVars?.ratio_puissance_stockage_thermique??50)/100;
-    const pTherm=globalVars?.pertes_thermique??0;
-    const ratioBat=(globalVars?.ratio_puissance_stockage??50)/100;
-    const pBat=globalVars?.pertes_batterie??10;
-    setBalance(computeEnergyBalance(
-      site.conso_profil,prodProfilData,kw,
-      bk*ratioBat*1000, bk, pBat,
-      tk*ratioTherm,    tk, pTherm
-    ));
+    // ── Chemin tarif pur (kw=0 ou profil prod absent) ──
+    if(curT){
+      if(curT.tarif_dynamique&&!spotMap){setBalance(null);return;}
+      setBalance(computeStorageOptimization(site.conso_profil,curT,getBaseTariff(curT),site,bk,tk,globalVars,spotMap));
+      return;
+    }
+    setBalance(null);
   },[site?.conso_profil,prodProfilData,pvKwc,batKwh,thermKwh,globalVars,spotMap,tariffs,site?.tarif_id,site?.heure_debut_hc1,site?.heure_fin_hc1,site?.heure_debut_hc2,site?.heure_fin_hc2]);
 
   const updateSite=async(updates)=>{ await sb.from('sites').update(updates).eq('id',activeId); await load(); };
