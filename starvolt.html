@@ -2750,12 +2750,18 @@ function EnergyBalanceChart({ balance, level, selMonth, selDay, setLevel, setSel
 
   const handlePrev = () => {
     if (level === 'day') { const m = selMonth > 1 ? selMonth - 1 : 12; setSelMonth(m); }
-    else if (level === 'hour') { const d = selDay > 1 ? selDay - 1 : PROF_DAYS[selMonth-1]; setSelDay(d); }
+    else if (level === 'hour') {
+      if (selDay > 1) { setSelDay(selDay - 1); }
+      else { const pm = selMonth > 1 ? selMonth - 1 : 12; setSelMonth(pm); setSelDay(PROF_DAYS[pm-1]); }
+    }
   };
 
   const handleNext = () => {
     if (level === 'day') { const m = selMonth < 12 ? selMonth + 1 : 1; setSelMonth(m); }
-    else if (level === 'hour') { const d = selDay < PROF_DAYS[selMonth-1] ? selDay + 1 : 1; setSelDay(d); }
+    else if (level === 'hour') {
+      if (selDay < PROF_DAYS[selMonth-1]) { setSelDay(selDay + 1); }
+      else { const nm = selMonth < 12 ? selMonth + 1 : 1; setSelMonth(nm); setSelDay(1); }
+    }
   };
 
   useEffect(() => {
@@ -3033,7 +3039,7 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations }) {
   const[spotMap,setSpotMap]=useState(null);
   const[isMobile,setIsMobile]=useState(window.innerWidth<640);
   const[consoOpen,setConsoOpen]=useState(true);
-  const[prodOpen,setProdOpen]=useState(!!localStorage.getItem('starvolt_solar_chosen'));
+  const[prodOpen,setProdOpen]=useState(true);
   const fileRef=useRef(null);
 
   const handleImportDemo=async()=>{
