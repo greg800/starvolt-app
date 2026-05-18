@@ -3099,41 +3099,38 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations }) {
     const optiSolaire = globalVars?.opti_solaire ?? true;
     const optiTarif   = globalVars?.opti_tarif   ?? true;
 
-    if(kw===0){
-      // Pas de PV : calculer dans tous les cas si un tarif est disponible.
-      // computeStorageOptimization gère bk=0/tk=0 et optiTarif=false → affiche au moins la facture de base.
-      if(tariffs.length>0){
-        const optiChosen=!!localStorage.getItem('starvolt_optimisation_chosen');
-        const optiTariffId=optiChosen?localStorage.getItem('starvolt_optimisation_tariff_id'):null;
-        const effectiveTariffId=optiTariffId||site.tarif_id;
-        const curT=effectiveTariffId?tariffs.find(t=>t.id===effectiveTariffId):null;
-        if(curT){
-          if(curT.tarif_dynamique&&!spotMap){setBalance(null);return;}
-          const baseTariff0=site.tarif_id?tariffs.find(t=>t.id===site.tarif_id)||curT:curT;
-          setBalance(computeStorageOptimization(site.conso_profil,curT,baseTariff0,site,bk,tk,globalVars,spotMap));
-          return;
-        }
+    // ── Résolution du tarif effectif (commun aux deux branches) ───────────────
+    const getEffectiveTariff = () => {
+      if(!tariffs.length) return null;
+      const optiChosen=!!localStorage.getItem('starvolt_optimisation_chosen');
+      const optiTariffId=optiChosen?localStorage.getItem('starvolt_optimisation_tariff_id'):null;
+      const effectiveTariffId=optiTariffId||site.tarif_id;
+      return effectiveTariffId?tariffs.find(t=>t.id===effectiveTariffId)||null:null;
+    };
+    const getBaseTariff = curT => site.tarif_id?tariffs.find(t=>t.id===site.tarif_id)||curT:curT;
+
+    // ── Routage selon les flags ────────────────────────────────────────────────
+    // • kw=0 ou (⚡ seul) → computeStorageOptimization : PV ignoré, pur arbitrage tarifaire
+    // • ☀️ seul ou les deux → computeCombinedOptimization : PV + stockage, flags contrôlent les bras
+    const useStoragePath = kw===0 || (!optiSolaire && optiTarif);
+
+    if(useStoragePath){
+      const curT=getEffectiveTariff();
+      if(curT){
+        if(curT.tarif_dynamique&&!spotMap){setBalance(null);return;}
+        setBalance(computeStorageOptimization(site.conso_profil,curT,getBaseTariff(curT),site,bk,tk,globalVars,spotMap));
+        return;
       }
       setBalance(null);return;
     }
 
     if(!prodProfilData){setBalance(null);return;}
 
-    // Toujours passer par computeCombinedOptimization quand un tarif est connu :
-    // méthode de facturation unique et cohérente pour toutes les combinaisons de flags.
-    // Les flags optiSolaire/optiTarif contrôlent uniquement le comportement du stockage
-    // dans la boucle, pas la formule de calcul du coût.
     if(tariffs.length>0){
-      const optiChosen=!!localStorage.getItem('starvolt_optimisation_chosen');
-      const optiTariffId=optiChosen?localStorage.getItem('starvolt_optimisation_tariff_id'):null;
-      const effectiveTariffId=optiTariffId||site.tarif_id;
-      const curT=effectiveTariffId?tariffs.find(t=>t.id===effectiveTariffId):null;
+      const curT=getEffectiveTariff();
       if(curT){
         if(curT.tarif_dynamique&&!spotMap){setBalance(null);return;}
-        // baseTariff = tarif actuel du site (avant changement de fournisseur)
-        // → billWithout calculé avec ce tarif ; billWithStorage avec le tarif retenu (panier)
-        const baseTariff=site.tarif_id?tariffs.find(t=>t.id===site.tarif_id)||curT:curT;
-        setBalance(computeCombinedOptimization(site.conso_profil,prodProfilData,kw,batKwh,thermKwh,globalVars,curT,baseTariff,site,spotMap));
+        setBalance(computeCombinedOptimization(site.conso_profil,prodProfilData,kw,batKwh,thermKwh,globalVars,curT,getBaseTariff(curT),site,spotMap));
         return;
       }
     }
