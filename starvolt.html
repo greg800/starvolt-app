@@ -3448,10 +3448,22 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations }) {
                           </div>
                           {!isMobile&&<div style={{fontSize:11,color:'rgba(255,255,255,.45)'}}>Prix avant − prix après · /an</div>}
                         </div>
-                        <div style={{...T,alignItems:'center',justifyContent:'center',textAlign:'center'}}>
-                          <div style={LBL}>RÉDUCTION</div>
-                          <div style={{fontSize:isMobile?22:32,fontWeight:900,color:'#7dd940',lineHeight:1.1}}>{reductionFacturePct??tauxAP}<span style={{fontSize:isMobile?11:14}}>%</span></div>
-                          {!isMobile&&<div style={{fontSize:13,color:'rgba(255,255,255,.45)'}}>Baisse de facture annuelle</div>}
+                        <div style={{...T,flexDirection:'column',gap:6,justifyContent:'center'}}>
+                          <div style={{fontSize:9,color:'rgba(255,255,255,.4)',fontWeight:700,letterSpacing:'0.08em',textTransform:'uppercase'}}>Optimisation box</div>
+                          {[['opti_solaire','☀️ Solaire'],['opti_tarif','⚡ Tarif réseau']].map(([key,label])=>(
+                            <label key={key} style={{display:'flex',alignItems:'center',gap:6,cursor:'pointer'}}>
+                              <input type="checkbox"
+                                checked={!!(globalVars?.[key]??true)}
+                                onChange={e=>{
+                                  const val=e.target.checked;
+                                  setGlobalVars(prev=>({...prev,[key]:val}));
+                                  sb.from('parametres_nationaux').upsert({id:1,[key]:val},{onConflict:'id'});
+                                }}
+                                style={{accentColor:'#7dd940',width:14,height:14,cursor:'pointer'}}
+                              />
+                              <span style={{fontSize:11,color:'rgba(255,255,255,.85)',fontWeight:600}}>{label}</span>
+                            </label>
+                          ))}
                         </div>
                       </>}
                       {/* Messages quand pas encore de bilan */}
