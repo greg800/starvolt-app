@@ -2311,7 +2311,11 @@ function computeStorageOptimization(consoProfile, tariff, baseTariff, site, batK
           let gridBillableWh = consoWh;
           let viaBat = 0, viaTherm = 0;
 
-          if (price < avgDay * (1 - localSeuil)) {
+          if (price < 0) {
+            // Prix négatif : on est payé pour consommer → charge stockage à fond depuis réseau
+            if (thermCapWh > 0) { const ci=Math.min(thermPowWh,thermCapWh-thermSOC); if(ci>0){thermSOC+=ci;gridBillableWh+=ci;} }
+            if (batCapWh > 0 && batEff > 0) { const room=batCapWh-batSOC; const ci=Math.min(batPowWh,room>0?room/batEff:0); if(ci>0){batSOC+=ci*batEff;gridBillableWh+=ci;} }
+          } else if (price < avgDay * (1 - localSeuil)) {
             // Bon marché → charger (thermique d'abord)
             if (thermCapWh > 0) {
               const ci = Math.min(thermPowWh, thermCapWh - thermSOC);
@@ -2550,8 +2554,20 @@ function computeCombinedOptimization(consoProfile, prodNorm, pvKwc, batKwh, ther
         const pvProd = (prodNorm[idx] || 0) * pvKwc;
         const price  = getPrice(m, d, h);
 
+        // Prix négatif : on est payé pour consommer → arrêt onduleurs PV + charge stockage à fond
+        if (price < 0) {
+          let chargeWh = 0;
+          if (thermCapWh > 0) { const ci=Math.min(thermPowWh,thermCapWh-thermSOC); if(ci>0){thermSOC+=ci;chargeWh+=ci;} }
+          if (batCapWh > 0 && batEff > 0) { const room=batCapWh-batSOC; const ci=Math.min(batPowWh,room>0?room/batEff:0); if(ci>0){batSOC+=ci*batEff;chargeWh+=ci;} }
+          const gb=(conso+chargeWh)/1000;
+          varCostHT_with += gb * price; // négatif → gain
+          hourly[idx]={on_site:0,grid_buy:gb,injection:0,via_bat:0,via_therm:0,m,d,h};
+          monthly[m-1].grid_buy+=gb;
+          continue;
+        }
+
         const surplus  = pvProd - conso;
-        const onSiteWh = Math.min(pvProd, conso);
+        let   onSiteWh = Math.min(pvProd, conso);
         let gridBuyWh = 0, injectWh = 0, viaBat = 0, viaTherm = 0;
 
         if (surplus >= 0) {
