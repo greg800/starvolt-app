@@ -3550,12 +3550,16 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations }) {
                         {/* Activation des services */}
                         <div style={{...T,flexDirection:'column',gap:5,justifyContent:'center',minWidth:155}}>
                           <div style={{fontSize:9,color:'rgba(255,255,255,.4)',fontWeight:700,letterSpacing:'0.08em',textTransform:'uppercase'}}>Activation des services</div>
-                          {[
-                            {key:'opti_solaire', label:'☀️ Optimisation solaire', enabled:hasBox, def:true},
-                            {key:'opti_tarif',   label:'⚡ Optimisation tarifaire', enabled:hasBox, def:true},
-                            {key:'opti_flex',    label:'🔄 Flex', enabled:hasBox, def:false},
-                            {key:'opti_acc',     label:'🤝 ACC', enabled:hasAcc, def:false},
-                          ].map(({key,label,enabled,def})=>(
+                          {(()=>{
+                            const hasStorage=(parseFloat(batKwh)||0)>0||(parseFloat(thermKwh)||0)>0;
+                            const hasPV=(parseFloat(pvKwc)||0)>0;
+                            return[
+                              {key:'opti_solaire', label:'☀️ Optimisation solaire', enabled:hasBox&&hasStorage&&hasPV, def:true},
+                              {key:'opti_tarif',   label:'⚡ Optimisation tarifaire', enabled:hasBox&&hasStorage, def:true},
+                              {key:'opti_flex',    label:'🔄 Flex', enabled:hasBox&&hasStorage, def:false},
+                              {key:'opti_acc',     label:'🤝 ACC', enabled:hasAcc, def:false},
+                            ];
+                          })().map(({key,label,enabled,def})=>(
                             <label key={key} style={{display:'flex',alignItems:'center',gap:6,cursor:enabled?'pointer':'not-allowed',opacity:enabled?1:0.35}}>
                               <input type="checkbox"
                                 disabled={!enabled}
