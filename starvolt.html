@@ -1854,6 +1854,13 @@ const PROF_DAYS=[31,29,31,30,31,30,31,31,30,31,30,31];
 const MOIS_ABBR=['Jan','Fév','Mar','Avr','Mai','Jun','Jul','Aoû','Sep','Oct','Nov','Déc'];
 const MOIS_FULL=['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
 function profIdx(m,d,h){let o=0;for(let i=1;i<m;i++)o+=PROF_DAYS[i-1]*24;return o+(d-1)*24+h;}
+// Vide toutes les clés panier du localStorage
+function clearPanierLS(){
+  ['starvolt_solar_chosen','starvolt_solar_saving','starvolt_box_chosen','starvolt_box_saving',
+   'starvolt_optimisation_chosen','starvolt_optimisation_tariff_id','starvolt_optimisation_saving',
+   'starvolt_optimisation_tariff_nom','starvolt_acc_chosen','starvolt_acc_saving',
+   'starvolt_baisse_facture','starvolt_acc_price_ht'].forEach(k=>localStorage.removeItem(k));
+}
 function fmtKwh(v){return v>=1000?`${(v/1000).toFixed(1)} MWh`:`${Math.round(v)} kWh`;}
 function fmtGrand(v){if(v==null||isNaN(v))return'–';const r=v>999?Math.round(v/100)*100:Math.round(v);return r.toLocaleString('fr-FR');}
 function haversine(lat1,lon1,lat2,lon2){const R=6371,dLat=(lat2-lat1)*Math.PI/180,dLon=(lon2-lon1)*Math.PI/180,a=Math.sin(dLat/2)**2+Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLon/2)**2;return R*2*Math.asin(Math.sqrt(a));}
@@ -3052,15 +3059,7 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations }) {
     catch(e){console.error(e);} finally{setImportingDemo(false);}
   };
 
-  const _clearPanierLS=()=>{
-    ['starvolt_solar_chosen','starvolt_solar_saving','starvolt_box_chosen','starvolt_box_saving',
-     'starvolt_optimisation_chosen','starvolt_optimisation_tariff_id','starvolt_optimisation_saving',
-     'starvolt_optimisation_tariff_nom','starvolt_acc_chosen','starvolt_acc_saving','starvolt_baisse_facture',
-     'starvolt_acc_price_ht'].forEach(k=>localStorage.removeItem(k));
-  };
   const persistActiveSite=(id)=>{
-    // Vide le panier à chaque changement de site (y compris au chargement initial)
-    if(id!==activeId) _clearPanierLS();
     setActiveId(id);
     if(id){ localStorage.setItem('starvolt_active_site_id',id); sb.from('profiles').update({active_site_id:id}).eq('id',user.id); }
     else{ localStorage.removeItem('starvolt_active_site_id'); sb.from('profiles').update({active_site_id:null}).eq('id',user.id); }
@@ -3318,7 +3317,7 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations }) {
               <div className="card" style={{padding:'8px 14px',marginBottom:8}}>
                 <div style={{display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}}>
                   {sites.length>1?(
-                    <select className="inp inp-sel" style={{fontSize:13,padding:'6px 30px 6px 10px',maxWidth:200,flexShrink:0}} value={activeId||''} onChange={e=>{persistActiveSite(e.target.value);setEditMode(false);setImportMsg(null);setShowDeleteConfirm(false);}}>
+                    <select className="inp inp-sel" style={{fontSize:13,padding:'6px 30px 6px 10px',maxWidth:200,flexShrink:0}} value={activeId||''} onChange={e=>{clearPanierLS();persistActiveSite(e.target.value);setEditMode(false);setImportMsg(null);setShowDeleteConfirm(false);}}>
                       {sites.map(s=><option key={s.id} value={s.id}>{s.nom}</option>)}
                     </select>
                   ):(
@@ -7000,6 +6999,14 @@ function App() {
       if (site?.conso_profil) return 'SIMULATIONS';
     }
     return 'HOME_LOGGED_IN';
+  }, []);
+
+  // Vide le panier une seule fois par session navigateur (rechargement de page)
+  useEffect(() => {
+    if (!sessionStorage.getItem('starvolt_session_started')) {
+      clearPanierLS();
+      sessionStorage.setItem('starvolt_session_started', '1');
+    }
   }, []);
 
   useEffect(() => {
