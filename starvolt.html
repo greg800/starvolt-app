@@ -3332,7 +3332,15 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations }) {
               <div className="card" style={{padding:'8px 14px',marginBottom:8}}>
                 <div style={{display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}}>
                   {sites.length>1?(
-                    <select className="inp inp-sel" style={{fontSize:13,padding:'6px 30px 6px 10px',maxWidth:200,flexShrink:0}} value={activeId||''} onChange={e=>{clearPanierLS();persistActiveSite(e.target.value);setEditMode(false);setImportMsg(null);setShowDeleteConfirm(false);}}>
+                    <select className="inp inp-sel" style={{fontSize:13,padding:'6px 30px 6px 10px',maxWidth:200,flexShrink:0}} value={activeId||''} onChange={e=>{
+   clearPanierLS();
+   persistActiveSite(e.target.value);
+   // Réinitialise les services cochés lors d'un changement de site
+   const _reset={id:1,opti_solaire:true,opti_tarif:true,opti_flex:false,opti_acc:false};
+   sb.from('parametres_nationaux').upsert(_reset,{onConflict:'id'});
+   setGlobalVars(v=>({...v,..._reset}));
+   setEditMode(false);setImportMsg(null);setShowDeleteConfirm(false);
+ }}>
                       {sites.map(s=><option key={s.id} value={s.id}>{s.nom}</option>)}
                     </select>
                   ):(
@@ -6019,6 +6027,8 @@ function PanierScreen({ user, onBack, onGoTo, onMonSite }) {
     ['starvolt_optimisation_chosen','starvolt_optimisation_saving','starvolt_optimisation_tariff_id','starvolt_solar_chosen',
      'starvolt_solar_saving','starvolt_box_chosen','starvolt_box_saving','starvolt_acc_chosen'].forEach(k => localStorage.removeItem(k));
     setItems({ optimisation:false, acc:false, box:false, solar:false });
+    // Réinitialise les services cochés quand on vide le panier
+    sb.from('parametres_nationaux').upsert({id:1,opti_solaire:true,opti_tarif:true,opti_flex:false,opti_acc:false},{onConflict:'id'});
   };
 
   // Année 1 = pas d'inflation ; année N = (N-1) augmentations
