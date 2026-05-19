@@ -4056,7 +4056,7 @@ function calcDynamicCost(tariff, consoProfile, spotMap, natParams, userProfile) 
 }
 
 // ─── OptimisationScreen ───────────────────────
-function OptimisationScreen({ user, userProfile, onBack, onPanier, onCartUpdate }) {
+function OptimisationScreen({ user, userProfile, onBack, onPanier, onMonSite, onCartUpdate }) {
   const [sites,           setSites]           = useState(null);
   const [activeId]                            = useState(() => localStorage.getItem('starvolt_active_site_id'));
   const [tariffs,         setTariffs]         = useState([]);
@@ -4142,7 +4142,7 @@ function OptimisationScreen({ user, userProfile, onBack, onPanier, onCartUpdate 
         </div>
       </div>
       <StickyFooter row onBack={onBack}>
-        <button className="btn btn-yes" onClick={onPanier}>🛒 Voir mon panier →</button>
+        <button className="btn btn-yes" onClick={onMonSite||onPanier}>Mon site →</button>
       </StickyFooter>
       </>
     );
@@ -4161,7 +4161,7 @@ function OptimisationScreen({ user, userProfile, onBack, onPanier, onCartUpdate 
     <>
     <StickyFooter row onBack={onBack}>
       {!loading && (showPanier ? (
-        <button className="btn btn-yes" onClick={onPanier}>🛒 Voir le panier →</button>
+        <button className="btn btn-yes" onClick={onMonSite||onPanier}>Mon site →</button>
       ) : heroSaving > 0 ? (
         <button className="btn btn-yes" onClick={() => {
           confetti({ particleCount:120, spread:70, origin:{y:.6} });
@@ -5299,7 +5299,7 @@ function AccMapScreen({ user, userProfile, onBack, onJoin, onCreate, onPanier })
 }
 
 // ─── AccResultScreen ──────────────────────────
-function AccResultScreen({ state, onBack, onPanier }) {
+function AccResultScreen({ state, onBack, onPanier, onMonSite }) {
   const isJoin = state.accAction === 'join';
   const { accSavings, accPriceKwh, eligibleSite, activeSite } = state;
   return (
@@ -5337,14 +5337,14 @@ function AccResultScreen({ state, onBack, onPanier }) {
       </div>
     </div>
     <StickyFooter row onBack={onBack}>
-      <button className="btn btn-yes" onClick={onPanier}>🛒 Voir le panier →</button>
+      <button className="btn btn-yes" onClick={onMonSite||onPanier}>Mon site →</button>
     </StickyFooter>
     </>
   );
 }
 
 // ─── BoxSimScreen ─────────────────────────────
-function BoxSimScreen({ user, userProfile, onBack, onPanier, onCartUpdate }) {
+function BoxSimScreen({ user, userProfile, onBack, onPanier, onMonSite, onCartUpdate }) {
   const [loading,      setLoading]      = useState(true);
   const [currentBill,  setCurrentBill]  = useState(null);
   const [isDynamic,    setIsDynamic]    = useState(false);
@@ -5440,7 +5440,7 @@ function BoxSimScreen({ user, userProfile, onBack, onPanier, onCartUpdate }) {
         </div>
       </div>
       <StickyFooter row onBack={onBack}>
-        <button className="btn btn-yes" onClick={onPanier}>🛒 Voir mon panier →</button>
+        <button className="btn btn-yes" onClick={onMonSite||onPanier}>Mon site →</button>
       </StickyFooter>
       </>
     );
@@ -5517,7 +5517,7 @@ function BoxSimScreen({ user, userProfile, onBack, onPanier, onCartUpdate }) {
 
       {!loading && (chosen ? (
         <StickyFooter row onBack={onBack}>
-          <button className="btn btn-yes" onClick={onPanier}>🛒 Voir le panier →</button>
+          <button className="btn btn-yes" onClick={onMonSite||onPanier}>Mon site →</button>
         </StickyFooter>
       ) : (
         <div className="sticky-footer">
@@ -5542,7 +5542,7 @@ function BoxSimScreen({ user, userProfile, onBack, onPanier, onCartUpdate }) {
 }
 
 // ─── SolarSimScreen ───────────────────────────
-function SolarSimScreen({ user, userProfile, onBack, onPanier, onCartUpdate }) {
+function SolarSimScreen({ user, userProfile, onBack, onPanier, onMonSite, onCartUpdate }) {
   const [loading,      setLoading]      = useState(true);
   const [currentBill,  setCurrentBill]  = useState(null);
   const [adjustedBill, setAdjustedBill] = useState(null);
@@ -5704,7 +5704,7 @@ function SolarSimScreen({ user, userProfile, onBack, onPanier, onCartUpdate }) {
         </div>
       </div>
       <StickyFooter row onBack={onBack}>
-        <button className="btn btn-yes" onClick={onPanier}>🛒 Voir mon panier →</button>
+        <button className="btn btn-yes" onClick={onMonSite||onPanier}>Mon site →</button>
       </StickyFooter>
       </>
     );
@@ -5811,7 +5811,7 @@ function SolarSimScreen({ user, userProfile, onBack, onPanier, onCartUpdate }) {
       {!loading && (
         chosen ? (
           <StickyFooter row onBack={onBack}>
-            <button className="btn btn-yes" onClick={onPanier}>🛒 Voir le panier →</button>
+            <button className="btn btn-yes" onClick={onMonSite||onPanier}>Mon site →</button>
           </StickyFooter>
         ) : (
           <StickyFooter onBack={onBack}>
@@ -5859,7 +5859,7 @@ function CartItemCard({ emoji, imgSrc, title, subtitle, saving, investment, colo
 }
 
 // ─── PanierScreen ─────────────────────────────
-function PanierScreen({ user, onBack, onGoTo }) {
+function PanierScreen({ user, onBack, onGoTo, onMonSite }) {
   const [loading,     setLoading]     = useState(true);
   const [currentBill, setCurrentBill] = useState(null);
   const [isDynamic,   setIsDynamic]   = useState(false);
@@ -6221,10 +6221,15 @@ function PanierScreen({ user, onBack, onGoTo }) {
           🗑 Vider
         </button>
       )}
+      {onMonSite && (
+        <button className="btn btn-sec" style={{flexShrink:0, fontSize:15, padding:'12px 18px'}} onClick={onMonSite}>
+          Mon site →
+        </button>
+      )}
       <button className="btn btn-yes" style={{flex:1, fontSize:15, opacity: itemsCount===0 ? .5 : 1}}
         disabled={itemsCount===0}
         onClick={() => { if(itemsCount>0) { confetti({particleCount:150,spread:80,origin:{y:.6}}); setValidated(true); } }}>
-        Valider mon projet {itemsCount>0 ? `(${itemsCount} action${itemsCount>1?'s':''})` : ''} →
+        Valider panier →
       </button>
     </StickyFooter>
     </>
@@ -7163,16 +7168,16 @@ function App() {
       }
 
       case 'PANIER':
-        return <PanierScreen user={user} onBack={()=>goTo('SIMULATIONS')} onGoTo={goTo}/>;
+        return <PanierScreen user={user} onBack={()=>goTo('SIMULATIONS')} onGoTo={goTo} onMonSite={()=>goTo('MA_CONSO')}/>;
 
       case 'BOX_SIM':
-        return <BoxSimScreen user={user} userProfile={profile} onBack={goBack} onPanier={()=>goTo('PANIER')} onCartUpdate={updateCart}/>;
+        return <BoxSimScreen user={user} userProfile={profile} onBack={goBack} onPanier={()=>goTo('PANIER')} onMonSite={()=>goTo('MA_CONSO')} onCartUpdate={updateCart}/>;
 
       case 'SOLAR_SIM':
-        return <SolarSimScreen user={user} userProfile={profile} onBack={goBack} onPanier={()=>goTo('PANIER')} onCartUpdate={updateCart}/>;
+        return <SolarSimScreen user={user} userProfile={profile} onBack={goBack} onPanier={()=>goTo('PANIER')} onMonSite={()=>goTo('MA_CONSO')} onCartUpdate={updateCart}/>;
 
       case 'OPTIMISATION':
-        return <OptimisationScreen user={user} userProfile={profile} onBack={goBack} onPanier={()=>goTo('PANIER')} onCartUpdate={updateCart}/>;
+        return <OptimisationScreen user={user} userProfile={profile} onBack={goBack} onPanier={()=>goTo('PANIER')} onMonSite={()=>goTo('MA_CONSO')} onCartUpdate={updateCart}/>;
 
       case 'ACC_MAP':
         return <AccMapScreen user={user} userProfile={profile} onBack={goBack}
@@ -7181,7 +7186,7 @@ function App() {
           onPanier={()=>goTo('PANIER')}/>;
 
       case 'ACC_RESULT':
-        return <AccResultScreen state={state} onBack={()=>goTo('SIMULATIONS')} onPanier={()=>goTo('PANIER')}/>;
+        return <AccResultScreen state={state} onBack={()=>goTo('SIMULATIONS')} onPanier={()=>goTo('PANIER')} onMonSite={()=>goTo('MA_CONSO')}/>;
 
       case 'AUTH_SIGNUP':
         return <AuthSignupScreen
