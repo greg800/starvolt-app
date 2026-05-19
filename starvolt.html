@@ -3052,7 +3052,15 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations }) {
     catch(e){console.error(e);} finally{setImportingDemo(false);}
   };
 
+  const _clearPanierLS=()=>{
+    ['starvolt_solar_chosen','starvolt_solar_saving','starvolt_box_chosen','starvolt_box_saving',
+     'starvolt_optimisation_chosen','starvolt_optimisation_tariff_id','starvolt_optimisation_saving',
+     'starvolt_optimisation_tariff_nom','starvolt_acc_chosen','starvolt_acc_saving','starvolt_baisse_facture',
+     'starvolt_acc_price_ht'].forEach(k=>localStorage.removeItem(k));
+  };
   const persistActiveSite=(id)=>{
+    // Vide le panier à chaque changement de site (y compris au chargement initial)
+    if(id!==activeId) _clearPanierLS();
     setActiveId(id);
     if(id){ localStorage.setItem('starvolt_active_site_id',id); sb.from('profiles').update({active_site_id:id}).eq('id',user.id); }
     else{ localStorage.removeItem('starvolt_active_site_id'); sb.from('profiles').update({active_site_id:null}).eq('id',user.id); }
@@ -3502,8 +3510,9 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations }) {
                     }
                     accSavings=Math.round(accSavings);
                   }
-                  // Baisse totale : bilan énergie + flex + acc
+                  // Baisse totale : bilan énergie + flex + acc — source unique pour le panier
                   const baisseTotale=(baisseFacture||0)+flexRevenue+accSavings;
+                  if(baisseTotale>0) localStorage.setItem('starvolt_baisse_facture',String(baisseTotale));
                   return(<>
                     {/* ── Rangée 1 : PROFIL · kWc · Autoconso · Autoprod (si solaire au panier) ── */}
                     <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
@@ -6023,7 +6032,9 @@ function PanierScreen({ user, onBack, onGoTo }) {
   };
 
   const activeItems        = Object.entries(items).filter(([,v])=>v);
-  const totalAnnualSaving  = activeItems.reduce((s,[k])=>s+(savings[k]||0),0);
+  // Source unique de la réduction : baisse facture calculée par Mon site (inclut énergie + flex + acc)
+  const baisseLS           = parseInt(localStorage.getItem('starvolt_baisse_facture')||'0') || 0;
+  const totalAnnualSaving  = baisseLS || activeItems.reduce((s,[k])=>s+(savings[k]||0),0);
   const totalInvestment    = activeItems.reduce((s,[k])=>s+(investments[k]||0),0);
   const billedAfter        = currentBill ? Math.max(0, currentBill - totalAnnualSaving) : null;
   const roiGlobal          = totalInvestment > 0 && totalAnnualSaving > 0 ? Math.ceil(totalInvestment / totalAnnualSaving) : null;
@@ -6112,6 +6123,11 @@ function PanierScreen({ user, onBack, onGoTo }) {
           {totalAnnualSaving > 0 && (
             <div className="card" style={{padding:'20px 18px',marginBottom:14,border:'1.5px solid rgba(125,217,64,.35)'}}>
               <div style={{fontSize:14,color:'rgba(125,217,64,.9)',fontWeight:700,textTransform:'uppercase',letterSpacing:'.5px',marginBottom:14}}>Impact de votre panier</div>
+              {/* Réduction totale — source unique Mon site */}
+              <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:14,padding:'12px 16px',background:'rgba(125,217,64,.1)',borderRadius:12,border:'1px solid rgba(125,217,64,.3)'}}>
+                <div style={{fontSize:16,color:'rgba(255,255,255,.9)',fontWeight:600}}>Réduction de facture</div>
+                <div style={{fontSize:26,fontWeight:900,color:'#7dd940'}}>−{fmtGrand(totalAnnualSaving)} €<span style={{fontSize:16,fontWeight:700}}>/an</span></div>
+              </div>
               <div style={{display:'grid',gridTemplateColumns:'2fr 1fr 1fr',gap:'6px 8px',marginBottom:14}}>
                 <div></div>
                 <div style={{fontSize:14,color:'rgba(255,150,110,.9)',fontWeight:700,textAlign:'center'}}>Sans action</div>
@@ -6158,31 +6174,28 @@ function PanierScreen({ user, onBack, onGoTo }) {
       {items.optimisation && (
         <CartItemCard imgSrc="/optimisation.png" title="Optimisation fournisseur"
           subtitle={(() => { const n = localStorage.getItem('starvolt_optimisation_tariff_nom'); return n ? `Passage chez ${n} — sans frais` : 'Changement de tarif électricité — sans frais'; })()}
-          saving={savings.optimisation} investment={0} color="#7dd940" onRemove={()=>removeItem('optimisation')}
+          investment={0} color="#7dd940" onRemove={()=>removeItem('optimisation')}
           onClick={()=>onGoTo&&onGoTo('OPTIMISATION')}/>
       )}
       {items.acc && (
         <CartItemCard imgSrc="/acc.png" title="Autoconsommation collective" subtitle="Énergie solaire locale à prix réduit — sans frais"
-          saving={savings.acc} investment={0} color="#7dd940" onRemove={()=>removeItem('acc')}
+          investment={0} color="#7dd940" onRemove={()=>removeItem('acc')}
           onClick={()=>onGoTo&&onGoTo('ACC_MAP')}/>
       )}
       {items.box && (
         <CartItemCard imgSrc="/comwatt-box.png" title="Box Comwatt"
           subtitle={boxChoice==='buy' ? 'Achat direct — 550 €' : 'Box gratuite — cagnotte reversée 3 ans'}
-          saving={savings.box} investment={investments.box}
+          investment={investments.box}
           color="#7dd940" onRemove={()=>removeItem('box')}
           onClick={()=>onGoTo&&onGoTo('BOX_SIM')}/>
       )}
-      {items.solar && (()=>{
-        const baisseLS=parseInt(localStorage.getItem('starvolt_baisse_facture')||'0');
-        const baisseVal=baisseLS||savings.solar;
-        const baisseStr=baisseVal>0?' · Baisse de la facture : −'+baisseVal.toLocaleString('fr-FR')+' €TTC/an':'';
-        return <CartItemCard imgSrc="/maison.png" title="Installation solaire"
-          subtitle={`${solarChoice==='solar_box'?'Panneaux + batterie + Box Comwatt':'Panneaux solaires + batterie'}${baisseStr}`}
-          saving={savings.solar} investment={13000}
+      {items.solar && (
+        <CartItemCard imgSrc="/maison.png" title="Installation solaire"
+          subtitle={solarChoice==='solar_box'?'Panneaux + batterie + Box Comwatt':'Panneaux solaires + batterie'}
+          investment={13000}
           color="#fbbf24" onRemove={()=>removeItem('solar')}
-          onClick={()=>onGoTo&&onGoTo('SOLAR_SIM')}/>;
-      })()}
+          onClick={()=>onGoTo&&onGoTo('SOLAR_SIM')}/>
+      )}
 
       {itemsCount === 0 && !loading && (
         <div className="card" style={{textAlign:'center',padding:'32px 20px',marginBottom:14}}>
