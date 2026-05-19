@@ -2541,6 +2541,10 @@ function computeCombinedOptimization(consoProfile, prodNorm, pvKwc, batKwh, ther
     localSeuil  = 0;
   }
 
+  // L'optimisation tarifaire (HC/HP ou spot) n'est utile que si le tarif a une dimension
+  // temporelle. Sur un tarif plat, optiTarif n'a aucun effet → on retombe sur optiSolaire.
+  const canOptiTarif = optiTarif && (isDynamic || hasHC_fixed);
+
   // ── Boucle horaire (scénario optimisé) ────────────────────────────────────
   let varCostHT_with = 0, annInjKwh = 0;
   let batSOC = batCapWh * 0.5, thermSOC = thermCapWh * 0.5;
@@ -2555,8 +2559,8 @@ function computeCombinedOptimization(consoProfile, prodNorm, pvKwc, batKwh, ther
         const price  = getPrice(m, d, h);
 
         // Prix négatif : on est payé pour consommer → arrêt onduleurs PV + charge stockage à fond
-        // Uniquement si l'optimisation tarifaire est active (optiTarif)
-        if (price < 0 && optiTarif) {
+        // Uniquement si l'optimisation tarifaire est active ET le tarif est dynamique
+        if (price < 0 && canOptiTarif) {
           let chargeWh = 0;
           if (thermCapWh > 0) { const ci=Math.min(thermPowWh,thermCapWh-thermSOC); if(ci>0){thermSOC+=ci;chargeWh+=ci;} }
           if (batCapWh > 0 && batEff > 0) { const room=batCapWh-batSOC; const ci=Math.min(batPowWh,room>0?room/batEff:0); if(ci>0){batSOC+=ci*batEff;chargeWh+=ci;} }
@@ -2580,7 +2584,7 @@ function computeCombinedOptimization(consoProfile, prodNorm, pvKwc, batKwh, ther
           injectWh = free;
         } else {
           let need = -surplus;
-          if (optiTarif) {
+          if (canOptiTarif) {
             // Look-ahead 24h glissantes : surplus PV attendu dans les 24 prochaines heures.
             // Si ce surplus dépasse la place dispo → pas de charge réseau, tout réservé au solaire.
             // Sinon : roomForGrid = place restante après réservation PV → optimisation tarifaire sur cette marge.
