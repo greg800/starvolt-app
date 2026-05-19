@@ -3029,9 +3029,9 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations }) {
   const[showGaps,setShowGaps]=useState(false);
   const[showDeleteConfirm,setShowDeleteConfirm]=useState(false);
   const[importingDemo,setImportingDemo]=useState(false);
-  const[pvKwc,setPvKwc]=useState(()=>{try{return JSON.parse(localStorage.getItem('starvolt_solar_defaults'))?.pvKwc||'6';}catch{return'6';}});
-  const[batKwh,setBatKwh]=useState(()=>{try{return JSON.parse(localStorage.getItem('starvolt_solar_defaults'))?.batKwh||'10';}catch{return'10';}});
-  const[thermKwh,setThermKwh]=useState(()=>{try{return JSON.parse(localStorage.getItem('starvolt_solar_defaults'))?.thermKwh||'5';}catch{return'5';}});
+  const[pvKwc,setPvKwc]=useState(()=>{const hasSol=!!localStorage.getItem('starvolt_solar_chosen');try{const d=JSON.parse(localStorage.getItem('starvolt_solar_defaults'));return hasSol?(d?.pvKwc||'6'):'0';}catch{return hasSol?'6':'0';}});
+  const[batKwh,setBatKwh]=useState(()=>{const hasSol=!!localStorage.getItem('starvolt_solar_chosen');try{const d=JSON.parse(localStorage.getItem('starvolt_solar_defaults'));return hasSol?(d?.batKwh||'10'):'0';}catch{return hasSol?'10':'0';}});
+  const[thermKwh,setThermKwh]=useState(()=>{const hasSol=!!localStorage.getItem('starvolt_solar_chosen');try{const d=JSON.parse(localStorage.getItem('starvolt_solar_defaults'));return hasSol?(d?.thermKwh||'10'):'0';}catch{return hasSol?'10':'0';}});
   const[prodProfilId,setProdProfilId]=useState('');
   const[prodProfilData,setProdProfilData]=useState(null);
   const[balance,setBalance]=useState(null);
@@ -3077,10 +3077,16 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations }) {
   // Règle : si solar au panier → valeurs de la page solaire (panier) ; sinon → valeurs DB ou défauts
   useEffect(()=>{
     // Source unique : starvolt_solar_defaults (partagé avec la page solaire) > DB > défauts
+    // Si solar au panier → 6/10/10 ou valeurs configurées ; sinon → 0 (pas d'équipement)
     const solarDef=(()=>{try{return JSON.parse(localStorage.getItem('starvolt_solar_defaults'))||{};}catch{return{};}})();
-    setPvKwc(solarDef.pvKwc||(site?.puissance_pv_kwc>0?String(site.puissance_pv_kwc):'6'));
-    setBatKwh(solarDef.batKwh||(site?.batterie_capacite_kwh>0?String(site.batterie_capacite_kwh):'10'));
-    setThermKwh(solarDef.thermKwh||'5');
+    const hasSolarPanier=!!localStorage.getItem('starvolt_solar_chosen');
+    if(hasSolarPanier){
+      setPvKwc(solarDef.pvKwc||(site?.puissance_pv_kwc>0?String(site.puissance_pv_kwc):'6'));
+      setBatKwh(solarDef.batKwh||(site?.batterie_capacite_kwh>0?String(site.batterie_capacite_kwh):'10'));
+      setThermKwh(solarDef.thermKwh||'10');
+    } else {
+      setPvKwc('0'); setBatKwh('0'); setThermKwh('0');
+    }
     setProdProfilId(site?.profil_production_id||'');
     setProdProfilData(null); setBalance(null);
   },[activeId]);
@@ -3412,7 +3418,8 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations }) {
             </div>
 
             {/* ── Tuile Ma production, mon stockage et ma box ── */}
-            <div className="card" style={{padding:0,marginBottom:8,overflow:'hidden'}}>
+            {/* Masquée tant que le panier est vide */}
+            {(!!localStorage.getItem('starvolt_box_chosen')||!!localStorage.getItem('starvolt_solar_chosen')||!!localStorage.getItem('starvolt_optimisation_chosen')||localStorage.getItem('starvolt_acc_chosen')==='true')&&<div className="card" style={{padding:0,marginBottom:8,overflow:'hidden'}}>
               <div
                 style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'10px 14px 8px',borderBottom: prodOpen ? '1px solid rgba(255,255,255,.07)' : 'none',cursor:'pointer',userSelect:'none'}}
                 onClick={()=>setProdOpen(v=>!v)}
@@ -3468,6 +3475,35 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations }) {
                   const hasSolar=!!localStorage.getItem('starvolt_solar_chosen');
                   // hasBox : box choisie seule OU incluse dans solar_box
                   const hasBox=!!localStorage.getItem('starvolt_box_chosen')||localStorage.getItem('starvolt_solar_chosen')==='solar_box';
+                  const hasAcc=localStorage.getItem('starvolt_acc_chosen')==='true';
+                  const optiFlex=!!(globalVars?.opti_flex)&&hasBox;
+                  const optiAcc=!!(globalVars?.opti_acc)&&hasAcc;
+                  // Flex revenue : 80€/kW/an bat + 40€/kW/an therm → 1/3 au client
+                  const _ratio=(globalVars?.ratio_puissance_stockage??50)/100;
+                  const batPowKw=(parseFloat(batKwh)||0)*_ratio;
+                  const thermPowKw=(parseFloat(thermKwh)||0)*_ratio;
+                  const flexRevenue=optiFlex?Math.round((batPowKw*80+thermPowKw*40)/3):0;
+                  // ACC savings post-balance : heures 9–17, accTTC < normalTTC
+                  let accSavings=0;
+                  if(optiAcc&&balance?.hourly&&hourlyPrices){
+                    const _accPHT=parseFloat(localStorage.getItem('starvolt_acc_price_ht')||'0.11');
+                    const _tva=(globalVars?.tva??20)/100;
+                    const _accise=(globalVars?.accise||0)/100;
+                    const _hcw=[
+                      {s:parseHcHour(site?.heure_debut_hc1??globalVars?.hc_debut1),e:parseHcHour(site?.heure_fin_hc1??globalVars?.hc_fin1)},
+                      {s:parseHcHour(site?.heure_debut_hc2??globalVars?.hc_debut2),e:parseHcHour(site?.heure_fin_hc2??globalVars?.hc_fin2)},
+                    ].filter(w=>w.s!==null&&w.e!==null);
+                    for(const pt of balance.hourly){
+                      if(!pt||pt.grid_buy<=0||pt.h<9||pt.h>17) continue;
+                      const _ni=profIdx(pt.m,pt.d,pt.h);
+                      const normalTTC=hourlyPrices[_ni];
+                      const accTTC=(_accPHT+getTurpeRate(pt.m,pt.h,globalVars,_hcw)+_accise)*(1+_tva);
+                      if(normalTTC>accTTC) accSavings+=pt.grid_buy*(normalTTC-accTTC);
+                    }
+                    accSavings=Math.round(accSavings);
+                  }
+                  // Baisse totale : bilan énergie + flex + acc
+                  const baisseTotale=(baisseFacture||0)+flexRevenue+accSavings;
                   return(<>
                     {/* ── Rangée 1 : PROFIL · kWc · Autoconso · Autoprod (si solaire au panier) ── */}
                     <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
@@ -3490,27 +3526,38 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations }) {
                           onBlur={()=>{const v=parseFloat(pvKwc);updateSite({puissance_pv_kwc:isNaN(v)?null:v});}}
                           step={0.5} min={0} placeholder="6"/>
                       </div>
-                      {/* Baisse facture €TTC + Réduction % */}
+                      {/* Baisse facture €TTC */}
                       {balance&&<>
                         <div style={{...T,alignItems:'center',justifyContent:'center',textAlign:'center'}}>
                           <div style={LBL}>BAISSE FACTURE</div>
                           <div style={{fontSize:isMobile?19:26,fontWeight:900,color:'#7dd940',lineHeight:1.1}}>
-                            {baisseFacture!==null?baisseFacture.toLocaleString('fr-FR'):'—'}<span style={{fontSize:isMobile?10:13}}> €TTC</span>
+                            {baisseTotale>0?baisseTotale.toLocaleString('fr-FR'):'—'}<span style={{fontSize:isMobile?10:13}}> €TTC</span>
                           </div>
-                          {!isMobile&&<div style={{fontSize:11,color:'rgba(255,255,255,.45)'}}>Prix avant − prix après · /an</div>}
+                          {!isMobile&&<div style={{fontSize:11,color:'rgba(255,255,255,.45)'}}>
+                            {baisseFacture>0?`Énergie ${baisseFacture.toLocaleString('fr-FR')} €`:''}
+                            {flexRevenue>0?` · Flex ${flexRevenue} €`:''}
+                            {accSavings>0?` · ACC ${accSavings} €`:''}
+                          </div>}
                         </div>
-                        <div style={{...T,flexDirection:'column',gap:6,justifyContent:'center'}}>
-                          <div style={{fontSize:9,color:'rgba(255,255,255,.4)',fontWeight:700,letterSpacing:'0.08em',textTransform:'uppercase'}}>Optimisation box</div>
-                          {[['opti_solaire','☀️ Solaire'],['opti_tarif','⚡ Tarif réseau']].map(([key,label])=>(
-                            <label key={key} style={{display:'flex',alignItems:'center',gap:6,cursor:'pointer'}}>
+                        {/* Activation des services */}
+                        <div style={{...T,flexDirection:'column',gap:5,justifyContent:'center',minWidth:155}}>
+                          <div style={{fontSize:9,color:'rgba(255,255,255,.4)',fontWeight:700,letterSpacing:'0.08em',textTransform:'uppercase'}}>Activation des services</div>
+                          {[
+                            {key:'opti_solaire', label:'☀️ Optimisation solaire', enabled:hasBox, def:true},
+                            {key:'opti_tarif',   label:'⚡ Optimisation tarifaire', enabled:hasBox, def:true},
+                            {key:'opti_flex',    label:'🔄 Flex', enabled:hasBox, def:false},
+                            {key:'opti_acc',     label:'🤝 ACC', enabled:hasAcc, def:false},
+                          ].map(({key,label,enabled,def})=>(
+                            <label key={key} style={{display:'flex',alignItems:'center',gap:6,cursor:enabled?'pointer':'not-allowed',opacity:enabled?1:0.35}}>
                               <input type="checkbox"
-                                checked={!!(globalVars?.[key]??true)}
-                                onChange={e=>{
+                                disabled={!enabled}
+                                checked={!!(globalVars?.[key]??def)}
+                                onChange={enabled?e=>{
                                   const val=e.target.checked;
                                   setGlobalVars(prev=>({...prev,[key]:val}));
                                   sb.from('parametres_nationaux').upsert({id:1,[key]:val},{onConflict:'id'});
-                                }}
-                                style={{accentColor:'#7dd940',width:14,height:14,cursor:'pointer'}}
+                                }:undefined}
+                                style={{accentColor:'#7dd940',width:14,height:14,cursor:enabled?'pointer':'not-allowed'}}
                               />
                               <span style={{fontSize:11,color:'rgba(255,255,255,.85)',fontWeight:600}}>{label}</span>
                             </label>
@@ -3671,7 +3718,7 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations }) {
                   </>);
                 })()}
               </div>}
-            </div>
+            </div>}
 
             {/* Suppression */}
             {showDeleteConfirm&&(
@@ -7105,7 +7152,7 @@ function App() {
 
       case 'ACC_MAP':
         return <AccMapScreen user={user} userProfile={profile} onBack={goBack}
-          onJoin={(data) => { localStorage.setItem('starvolt_acc_chosen','true'); updateCart(); goTo('ACC_RESULT', { ...data, accAction:'join' }); }}
+          onJoin={(data) => { localStorage.setItem('starvolt_acc_chosen','true'); if(data.accPriceKwh) localStorage.setItem('starvolt_acc_price_ht',String(data.accPriceKwh)); updateCart(); goTo('ACC_RESULT', { ...data, accAction:'join' }); }}
           onCreate={(data) => { localStorage.setItem('starvolt_acc_chosen','true'); updateCart(); goTo('ACC_RESULT', { ...data, accAction:'create' }); }}
           onPanier={()=>goTo('PANIER')}/>;
 
