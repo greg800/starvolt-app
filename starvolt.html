@@ -1854,6 +1854,18 @@ const PROF_DAYS=[31,29,31,30,31,30,31,31,30,31,30,31];
 const MOIS_ABBR=['Jan','Fév','Mar','Avr','Mai','Jun','Jul','Aoû','Sep','Oct','Nov','Déc'];
 const MOIS_FULL=['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
 function profIdx(m,d,h){let o=0;for(let i=1;i<m;i++)o+=PROF_DAYS[i-1]*24;return o+(d-1)*24+h;}
+// Interpolation linéaire dans une table de prix [[val, prix], ...]
+function interpPrix(val, table) {
+  if (!table || table.length === 0 || !(val > 0)) return 0;
+  const sorted = [...table].sort((a,b) => a[0]-b[0]);
+  if (val <= sorted[0][0]) return sorted[0][1];
+  if (val >= sorted[sorted.length-1][0]) return sorted[sorted.length-1][1];
+  for (let i = 0; i < sorted.length-1; i++) {
+    const [x0,y0] = sorted[i], [x1,y1] = sorted[i+1];
+    if (val >= x0 && val <= x1) return Math.round(y0 + (y1-y0)*(val-x0)/(x1-x0));
+  }
+  return sorted[sorted.length-1][1];
+}
 // Vide toutes les clés panier du localStorage
 function clearPanierLS(){
   ['starvolt_solar_chosen','starvolt_solar_saving','starvolt_box_chosen','starvolt_box_saving',
@@ -3047,6 +3059,7 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations }) {
   const[chartMonth,setChartMonth]=useState(null);
   const[chartDay,setChartDay]=useState(null);
   const[globalVars,setGlobalVars]=useState(null);
+  const[prixMat,setPrixMat]=useState(null);
   const[spotMap,setSpotMap]=useState(null);
   const[isMobile,setIsMobile]=useState(window.innerWidth<640);
   const[consoOpen,setConsoOpen]=useState(true);
@@ -3225,6 +3238,8 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations }) {
   useEffect(()=>{
     sb.from('parametres_nationaux').select('*').eq('id',1).maybeSingle()
       .then(({data})=>setGlobalVars(data));
+    sb.from('prix_materiaux').select('*').eq('id',1).maybeSingle()
+      .then(({data})=>setPrixMat(data));
     const handler=()=>setIsMobile(window.innerWidth<640);
     window.addEventListener('resize',handler);
     return()=>window.removeEventListener('resize',handler);
@@ -3512,6 +3527,12 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations }) {
                   // Baisse totale : bilan énergie + flex + acc — source unique pour le panier
                   const baisseTotale=(baisseFacture||0)+flexRevenue+accSavings;
                   if(baisseTotale>0) localStorage.setItem('starvolt_baisse_facture',String(baisseTotale));
+                  // Investissement global (PV + batterie + box) depuis les tarifs admin
+                  const _pvInv = interpPrix(parseFloat(pvKwc)||0, prixMat?.pv_prices||[]);
+                  const _batInv = interpPrix(parseFloat(batKwh)||0, prixMat?.bat_prices||[]);
+                  const _boxInv = hasBox ? ((prixMat?.box_prix||500)+(prixMat?.box_installation||100)) : 0;
+                  const totalInvestissement = _pvInv + _batInv + _boxInv;
+                  if(totalInvestissement>0) localStorage.setItem('starvolt_investissement_total',String(Math.round(totalInvestissement)));
                   return(<>
                     {/* ── Rangée 1 : PROFIL · kWc · Autoconso · Autoprod (si solaire au panier) ── */}
                     <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
@@ -3546,6 +3567,7 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations }) {
                             {flexRevenue>0?` · Flex ${flexRevenue} €`:''}
                             {accSavings>0?` · ACC ${accSavings} €`:''}
                           </div>}
+                          {totalInvestissement>0 && <div style={{fontSize:11,color:'rgba(255,255,255,.35)',marginTop:2}}>Invest. {totalInvestissement.toLocaleString('fr-FR')} €</div>}
                         </div>
                         {/* Activation des services */}
                         <div style={{...T,flexDirection:'column',gap:5,justifyContent:'center',minWidth:155}}>
@@ -5881,6 +5903,7 @@ function PanierScreen({ user, onBack, onGoTo, onMonSite }) {
   const boxChoice   = localStorage.getItem('starvolt_box_chosen');
   const solarChoice = localStorage.getItem('starvolt_solar_chosen');
   const investments = { optimisation:0, acc:0, box: boxChoice==='buy' ? 550 : 0, solar:13000 };
+  const investLS = parseInt(localStorage.getItem('starvolt_investissement_total')||'0') || 0;
 
   useEffect(() => {
     const siteId = localStorage.getItem('starvolt_active_site_id');
@@ -6038,7 +6061,7 @@ function PanierScreen({ user, onBack, onGoTo, onMonSite }) {
   // Source unique de la réduction : baisse facture calculée par Mon site (inclut énergie + flex + acc)
   const baisseLS           = parseInt(localStorage.getItem('starvolt_baisse_facture')||'0') || 0;
   const totalAnnualSaving  = baisseLS || activeItems.reduce((s,[k])=>s+(savings[k]||0),0);
-  const totalInvestment    = activeItems.reduce((s,[k])=>s+(investments[k]||0),0);
+  const totalInvestment    = investLS || activeItems.reduce((s,[k])=>s+(investments[k]||0),0);
   const billedAfter        = currentBill ? Math.max(0, currentBill - totalAnnualSaving) : null;
   const roiGlobal          = totalInvestment > 0 && totalAnnualSaving > 0 ? Math.ceil(totalInvestment / totalAnnualSaving) : null;
   const gainNet25          = currentBill ? Math.max(0, projCum(currentBill) - projCumBilledAfter() - totalInvestment) : 0;
@@ -6380,8 +6403,152 @@ function AdminProductionScreen({ onBack }) {
   );
 }
 
+// ─── AdminPrixMateriauxScreen ─────────────────
+function AdminPrixMateriauxScreen({ onBack }) {
+  const [data, setData] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [msg, setMsg] = useState(null);
+
+  useEffect(() => {
+    sb.from('prix_materiaux').select('*').eq('id',1).maybeSingle()
+      .then(({data:d}) => {
+        if (d) setData(d);
+        else setData({pv_prices:[],bat_prices:[],box_prix:500,box_installation:100,box_satellite:200,box_module_deporte:50,box_pinces:100});
+      });
+  }, []);
+
+  const save = async () => {
+    setSaving(true); setMsg(null);
+    const payload = {
+      id:1,
+      pv_prices: data.pv_prices,
+      bat_prices: data.bat_prices,
+      box_prix: Number(data.box_prix)||0,
+      box_installation: Number(data.box_installation)||0,
+      box_satellite: Number(data.box_satellite)||0,
+      box_module_deporte: Number(data.box_module_deporte)||0,
+      box_pinces: Number(data.box_pinces)||0,
+    };
+    const {error} = await sb.from('prix_materiaux').upsert(payload, {onConflict:'id'});
+    setSaving(false);
+    setMsg(error ? {ok:false,text:'Erreur : '+error.message} : {ok:true,text:'Sauvegardé ✓'});
+    setTimeout(()=>setMsg(null),3000);
+  };
+
+  const updPvRow = (i, col, v) => setData(prev => {
+    const arr = prev.pv_prices.map((r,ri) => ri===i ? [col===0?Number(v):r[0], col===1?Number(v):r[1]] : r);
+    return {...prev, pv_prices: arr};
+  });
+  const delPvRow = i => setData(prev => ({...prev, pv_prices: prev.pv_prices.filter((_,ri)=>ri!==i)}));
+  const addPvRow = () => setData(prev => ({...prev, pv_prices: [...prev.pv_prices, [0,0]]}));
+
+  const updBatRow = (i, col, v) => setData(prev => {
+    const arr = prev.bat_prices.map((r,ri) => ri===i ? [col===0?Number(v):r[0], col===1?Number(v):r[1]] : r);
+    return {...prev, bat_prices: arr};
+  });
+  const delBatRow = i => setData(prev => ({...prev, bat_prices: prev.bat_prices.filter((_,ri)=>ri!==i)}));
+  const addBatRow = () => setData(prev => ({...prev, bat_prices: [...prev.bat_prices, [0,0]]}));
+
+  const INP = {background:'rgba(255,255,255,.08)',border:'1px solid rgba(255,255,255,.2)',borderRadius:6,color:'white',fontSize:13,padding:'4px 8px',width:'100%',fontFamily:'inherit'};
+  const TH = {fontSize:11,color:'rgba(255,255,255,.45)',fontWeight:700,textTransform:'uppercase',letterSpacing:'.4px',padding:'4px 6px',textAlign:'left'};
+  const TD = {padding:'3px 4px',verticalAlign:'middle'};
+
+  if (!data) return <div className="screen fade-in"><div style={{textAlign:'center',padding:40}}><div className="spinner" style={{margin:'0 auto'}}/></div></div>;
+
+  const tableStyle = {width:'100%',borderCollapse:'collapse'};
+
+  return (
+    <>
+    <div className="screen fade-in">
+      <div style={{marginBottom:18,marginTop:4}}>
+        <div style={{fontSize:13,color:'rgba(125,217,64,.9)',fontWeight:700,textTransform:'uppercase',letterSpacing:'.8px',marginBottom:6}}>Administration</div>
+        <div style={{fontSize:22,fontWeight:900,color:'white'}}>Prix matériel et pose</div>
+        <div style={{fontSize:13,color:'rgba(255,255,255,.45)',marginTop:4}}>Tarifs fourniture + pose pour le calcul du ROI</div>
+      </div>
+
+      {/* ── PV ── */}
+      <div className="card" style={{padding:'16px',marginBottom:12}}>
+        <div style={{fontWeight:700,fontSize:14,color:'#fbbf24',marginBottom:10}}>☀️ Installation PV — fourniture + pose</div>
+        <div style={{overflowY:'auto',maxHeight:260}}>
+          <table style={tableStyle}>
+            <thead><tr>
+              <th style={TH}>kWc</th>
+              <th style={TH}>Prix € TTC</th>
+              <th style={{...TH,width:32}}></th>
+            </tr></thead>
+            <tbody>
+              {data.pv_prices.map((row,i) => (
+                <tr key={i}>
+                  <td style={TD}><input type="number" style={INP} step="0.5" min="0" value={row[0]} onChange={e=>updPvRow(i,0,e.target.value)}/></td>
+                  <td style={TD}><input type="number" style={INP} step="100" min="0" value={row[1]} onChange={e=>updPvRow(i,1,e.target.value)}/></td>
+                  <td style={TD}><button onClick={()=>delPvRow(i)} style={{background:'rgba(255,80,80,.15)',border:'1px solid rgba(255,80,80,.3)',borderRadius:5,color:'#ff6b6b',cursor:'pointer',fontSize:13,padding:'2px 7px'}}>✕</button></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <button onClick={addPvRow} style={{marginTop:8,background:'rgba(255,255,255,.07)',border:'1px solid rgba(255,255,255,.2)',borderRadius:7,color:'rgba(255,255,255,.7)',fontSize:12,padding:'5px 12px',cursor:'pointer',fontFamily:'inherit'}}>+ Ajouter une ligne</button>
+      </div>
+
+      {/* ── Batterie ── */}
+      <div className="card" style={{padding:'16px',marginBottom:12}}>
+        <div style={{fontWeight:700,fontSize:14,color:'#38bdf8',marginBottom:10}}>🔋 Batterie chimique — fourniture + pose</div>
+        <div style={{overflowY:'auto',maxHeight:220}}>
+          <table style={tableStyle}>
+            <thead><tr>
+              <th style={TH}>kWh</th>
+              <th style={TH}>Prix € TTC</th>
+              <th style={{...TH,width:32}}></th>
+            </tr></thead>
+            <tbody>
+              {data.bat_prices.map((row,i) => (
+                <tr key={i}>
+                  <td style={TD}><input type="number" style={INP} step="0.5" min="0" value={row[0]} onChange={e=>updBatRow(i,0,e.target.value)}/></td>
+                  <td style={TD}><input type="number" style={INP} step="100" min="0" value={row[1]} onChange={e=>updBatRow(i,1,e.target.value)}/></td>
+                  <td style={TD}><button onClick={()=>delBatRow(i)} style={{background:'rgba(255,80,80,.15)',border:'1px solid rgba(255,80,80,.3)',borderRadius:5,color:'#ff6b6b',cursor:'pointer',fontSize:13,padding:'2px 7px'}}>✕</button></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <button onClick={addBatRow} style={{marginTop:8,background:'rgba(255,255,255,.07)',border:'1px solid rgba(255,255,255,.2)',borderRadius:7,color:'rgba(255,255,255,.7)',fontSize:12,padding:'5px 12px',cursor:'pointer',fontFamily:'inherit'}}>+ Ajouter une ligne</button>
+      </div>
+
+      {/* ── Box ── */}
+      <div className="card" style={{padding:'16px',marginBottom:12}}>
+        <div style={{fontWeight:700,fontSize:14,color:'#7dd940',marginBottom:12}}>📦 Box Comwatt — fourniture et pose séparées</div>
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'10px 14px'}}>
+          {[
+            ['box_prix','Box Comwatt (fourniture)','€'],
+            ['box_installation','Pose / installation','€'],
+            ['box_satellite','Box satellite','€'],
+            ['box_module_deporte','Module déporté','€'],
+            ['box_pinces','Pinces forte puissance','€'],
+          ].map(([key,label])=>(
+            <div key={key}>
+              <div style={{fontSize:11,color:'rgba(255,255,255,.45)',marginBottom:4}}>{label}</div>
+              <input type="number" style={INP} step="10" min="0" value={data[key]??''} onChange={e=>setData(p=>({...p,[key]:e.target.value}))}/>
+            </div>
+          ))}
+        </div>
+        <div style={{marginTop:10,fontSize:11,color:'rgba(255,255,255,.35)'}}>Pour le ROI : investissement box = fourniture + pose</div>
+      </div>
+
+      {msg && <div style={{padding:'10px 14px',borderRadius:8,marginBottom:10,background:msg.ok?'rgba(125,217,64,.15)':'rgba(255,80,80,.15)',color:msg.ok?'#7dd940':'#ff6b6b',fontSize:13,fontWeight:600}}>{msg.text}</div>}
+
+      <div style={{height:80}}/>
+    </div>
+    <StickyFooter row onBack={onBack}>
+      <button className="btn btn-yes" style={{flex:1,fontSize:15}} onClick={save} disabled={saving}>
+        {saving?'Sauvegarde…':'Sauvegarder les prix'}
+      </button>
+    </StickyFooter>
+    </>
+  );
+}
+
 // ─── AdminScreen ──────────────────────────────
-function AdminScreen({ onTariffs, onUsers, onSpot, onAcc, onProduction, onGlobalVars, onBack }) {
+function AdminScreen({ onTariffs, onUsers, onSpot, onAcc, onProduction, onGlobalVars, onPrix, onBack }) {
   return (
     <>
     <div className="screen fade-in">
@@ -6395,6 +6562,14 @@ function AdminScreen({ onTariffs, onUsers, onSpot, onAcc, onProduction, onGlobal
           <div className="sim-text">
             <div className="sim-title">Variables globales</div>
             <div className="sim-sub">Hypothèses stockage, TURPE, inflation, plages HC</div>
+          </div>
+          <span className="sim-arrow">→</span>
+        </button>
+        <button className="sim-btn" onClick={onPrix}>
+          <span className="sim-icon">💰</span>
+          <div className="sim-text">
+            <div className="sim-title">Prix matériel et pose</div>
+            <div className="sim-sub">Tarifs PV, batterie, box Comwatt</div>
           </div>
           <span className="sim-arrow">→</span>
         </button>
@@ -7111,7 +7286,11 @@ function App() {
           onAcc={()=>goTo('ADMIN_ACC')}
           onProduction={()=>goTo('ADMIN_PRODUCTION')}
           onGlobalVars={()=>goTo('ADMIN_GLOBAL_VARS')}
+          onPrix={()=>goTo('ADMIN_PRIX_MATERIAUX')}
           onBack={goBack}/>;
+
+      case 'ADMIN_PRIX_MATERIAUX':
+        return <AdminPrixMateriauxScreen onBack={goBack}/>;
 
       case 'ADMIN_GLOBAL_VARS':
         return <GlobalVarsScreen onBack={goBack}/>;
