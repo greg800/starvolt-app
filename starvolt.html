@@ -1871,7 +1871,7 @@ function clearPanierLS(){
   ['starvolt_solar_chosen','starvolt_solar_saving','starvolt_box_chosen','starvolt_box_saving',
    'starvolt_optimisation_chosen','starvolt_optimisation_tariff_id','starvolt_optimisation_saving',
    'starvolt_optimisation_tariff_nom','starvolt_acc_chosen','starvolt_acc_saving',
-   'starvolt_baisse_facture','starvolt_acc_price_ht'].forEach(k=>localStorage.removeItem(k));
+   'starvolt_baisse_facture','starvolt_acc_price_ht','starvolt_global_vars_cache'].forEach(k=>localStorage.removeItem(k));
 }
 function fmtKwh(v){return v>=1000?`${(v/1000).toFixed(1)} MWh`:`${Math.round(v)} kWh`;}
 function fmtGrand(v){if(v==null||isNaN(v))return'–';const r=v>999?Math.round(v/100)*100:Math.round(v);return r.toLocaleString('fr-FR');}
@@ -3058,7 +3058,7 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations }) {
   const[chartLevel,setChartLevel]=useState('month');
   const[chartMonth,setChartMonth]=useState(null);
   const[chartDay,setChartDay]=useState(null);
-  const[globalVars,setGlobalVars]=useState(null);
+  const[globalVars,setGlobalVars]=useState(()=>{try{const c=localStorage.getItem('starvolt_global_vars_cache');return c?JSON.parse(c):null;}catch{return null;}});
   const[prixMat,setPrixMat]=useState(null);
   const[spotMap,setSpotMap]=useState(null);
   const[isMobile,setIsMobile]=useState(window.innerWidth<640);
@@ -3237,7 +3237,7 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations }) {
   // Charger variables globales + listener mobile
   useEffect(()=>{
     sb.from('parametres_nationaux').select('*').eq('id',1).maybeSingle()
-      .then(({data})=>setGlobalVars(data));
+      .then(({data})=>{setGlobalVars(data);if(data)try{localStorage.setItem('starvolt_global_vars_cache',JSON.stringify(data));}catch{}});
     sb.from('prix_materiaux').select('*').eq('id',1).maybeSingle()
       .then(({data})=>setPrixMat(data));
     const handler=()=>setIsMobile(window.innerWidth<640);
@@ -3333,7 +3333,7 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations }) {
                 <div style={{display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}}>
                   {sites.length>1?(
                     <select className="inp inp-sel" style={{fontSize:13,padding:'6px 30px 6px 10px',maxWidth:200,flexShrink:0}} value={activeId||''} onChange={e=>{
-   clearPanierLS();
+   clearPanierLS(); // efface aussi starvolt_global_vars_cache
    persistActiveSite(e.target.value);
    // Réinitialise les services cochés lors d'un changement de site
    const _reset={id:1,opti_solaire:true,opti_tarif:true,opti_flex:false,opti_acc:false};
@@ -3597,7 +3597,7 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations }) {
                                 checked={!!(globalVars?.[key]??def)}
                                 onChange={enabled?e=>{
                                   const val=e.target.checked;
-                                  setGlobalVars(prev=>({...prev,[key]:val}));
+                                  setGlobalVars(prev=>{const next={...prev,[key]:val};try{localStorage.setItem('starvolt_global_vars_cache',JSON.stringify(next));}catch{}return next;});
                                   sb.from('parametres_nationaux').upsert({id:1,[key]:val},{onConflict:'id'});
                                 }:undefined}
                                 style={{accentColor:'#7dd940',width:14,height:14,cursor:enabled?'pointer':'not-allowed'}}
@@ -6006,7 +6006,7 @@ function PanierScreen({ user, onBack, onGoTo, onMonSite }) {
 
   const clearPanier = () => {
     ['starvolt_optimisation_chosen','starvolt_optimisation_saving','starvolt_optimisation_tariff_id','starvolt_solar_chosen',
-     'starvolt_solar_saving','starvolt_box_chosen','starvolt_box_saving','starvolt_acc_chosen'].forEach(k => localStorage.removeItem(k));
+     'starvolt_solar_saving','starvolt_box_chosen','starvolt_box_saving','starvolt_acc_chosen','starvolt_global_vars_cache'].forEach(k => localStorage.removeItem(k));
     setItems({ optimisation:false, acc:false, box:false, solar:false });
     // Réinitialise les services cochés quand on vide le panier
     sb.from('parametres_nationaux').upsert({id:1,opti_solaire:true,opti_tarif:true,opti_flex:false,opti_acc:false},{onConflict:'id'});
