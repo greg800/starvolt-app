@@ -3540,17 +3540,19 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations }) {
                   const _batInv = interpPrix(parseFloat(batKwh)||0, prixMat?.bat_prices||[]);
                   const _boxInv = hasBox ? ((prixMat?.box_prix||500)+(prixMat?.box_installation||100)) : 0;
                   const totalInvestissement = _pvInv + _batInv + _boxInv;
-                  if(totalInvestissement>0) localStorage.setItem('starvolt_investissement_total',String(Math.round(totalInvestissement)));
+                  // Toujours écrire (même 0) pour éviter que l'ancienne valeur persiste
+                  localStorage.setItem('starvolt_investissement_total',String(Math.round(totalInvestissement)));
                   return(<>
                     {/* ── Rangée 1 : PROFIL · kWc · Autoconso · Autoprod (si solaire au panier) ── */}
                     <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
-                      {/* TARIF */}
+                      {/* ACHATS */}
                       <div style={T}>
-                        <div style={LBL}>TARIF</div>
+                        <div style={LBL}>ACHATS</div>
                         {effectiveTariff?(
                           <div style={{display:'flex',flexDirection:'column',gap:3}}>
                             <div style={{fontSize:13,color:'white',fontWeight:700,lineHeight:1.2}}>{effectiveTariff.nom}</div>
                             {(()=>{const optiChosen=!!localStorage.getItem('starvolt_optimisation_chosen');return optiChosen?<div style={{fontSize:10,color:'rgba(125,217,64,.8)',fontWeight:600}}>Offre panier</div>:<div style={{fontSize:10,color:'rgba(255,255,255,.4)'}}>Tarif par défaut</div>;})()}
+                            {totalInvestissement>0&&<div style={{fontSize:11,color:'rgba(255,210,80,.85)',fontWeight:700,marginTop:2}}>Invest. {Math.round(totalInvestissement).toLocaleString('fr-FR')} €</div>}
                           </div>
                         ):(
                           <div style={{fontSize:13,color:'rgba(255,255,255,.4)'}}>Non défini</div>
@@ -3575,7 +3577,6 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations }) {
                             {flexRevenue>0?` · Flex ${flexRevenue} €`:''}
                             {accSavings>0?` · ACC ${accSavings} €`:''}
                           </div>}
-                          {totalInvestissement>0 && <div style={{fontSize:11,color:'rgba(255,255,255,.35)',marginTop:2}}>Invest. {totalInvestissement.toLocaleString('fr-FR')} €</div>}
                         </div>
                         {/* Activation des services */}
                         <div style={{...T,flexDirection:'column',gap:5,justifyContent:'center',minWidth:155}}>
