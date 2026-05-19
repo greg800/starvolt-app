@@ -5762,41 +5762,21 @@ function SolarSimScreen({ user, userProfile, onBack, onPanier, onMonSite, onCart
           <div style={{ textAlign:'center', padding:40 }}><div className="spinner" style={{ margin:'0 auto' }}/></div>
         ) : (<>
 
-          {/* ── 2. Paramètres installation (kWc, bat, therm) ── */}
-          <div className="card" style={{ padding:'12px 14px', marginBottom:10 }}>
-            <div style={{ fontSize:10, color:'rgba(255,255,255,.4)', fontWeight:700, letterSpacing:'.5px', marginBottom:8 }}>PERSONNALISEZ VOTRE INSTALLATION</div>
-            <div style={{ display:'flex', gap:8, flexWrap:'wrap' }}>
-              <div style={{ flex:'1 1 80px' }}>
-                <div style={{ fontSize:10, color:'rgba(255,255,255,.4)', fontWeight:700, marginBottom:4 }}>Panneaux (kWc)</div>
-                <StepInput compact value={pvKwc} onChange={setPvKwc} step={0.5} min={0} placeholder="6"/>
-              </div>
-              <div style={{ flex:'1 1 80px' }}>
-                <div style={{ fontSize:10, color:'rgba(255,255,255,.4)', fontWeight:700, marginBottom:4 }}>Batterie (kWh)</div>
-                <StepInput compact value={batKwh} onChange={setBatKwh} step={0.5} min={0} placeholder="10"/>
-              </div>
-              <div style={{ flex:'1 1 80px' }}>
-                <div style={{ fontSize:10, color:'rgba(255,255,255,.4)', fontWeight:700, marginBottom:4 }}>Thermique (kWh)</div>
-                <StepInput compact value={thermKwh} onChange={setThermKwh} step={0.5} min={0} placeholder="10"/>
-              </div>
-            </div>
-            {(()=>{
-              const displayed = realSaving ?? (parseInt(localStorage.getItem('starvolt_baisse_facture')||'0') || null);
-              if(!displayed) return null;
-              return (
-                <div style={{ marginTop:10, paddingTop:10, borderTop:'1px solid rgba(255,255,255,.08)' }}>
-                  <div style={{ fontSize:10, color:'rgba(255,255,255,.4)', fontWeight:700, letterSpacing:'.5px', marginBottom:6 }}>BAISSE DE LA FACTURE</div>
-                  <div style={{ display:'flex', alignItems:'baseline', gap:10, flexWrap:'wrap', marginBottom:4 }}>
-                    <div style={{ fontSize:24, fontWeight:900, color:'#7dd940' }}>-{displayed.toLocaleString('fr-FR')} €TTC/an</div>
-                    {currentBill && (()=>{const pct=Math.min(100,Math.round(displayed/currentBill*100));return(<div style={{fontSize:16,fontWeight:700,color:'#7dd940'}}>-{pct}%</div>);})()}
-                  </div>
-                  {currentBill && <div style={{fontSize:12,color:'rgba(255,255,255,.35)'}}>Nouvelle facture estimée : {Math.max(0,currentBill-displayed).toLocaleString('fr-FR')} €/an (vs {currentBill.toLocaleString('fr-FR')} €)</div>}
+          {/* ── 2. Baisse de la facture ── */}
+          {(()=>{
+            const displayed = realSaving ?? (parseInt(localStorage.getItem('starvolt_baisse_facture')||'0') || null);
+            if(!displayed) return null;
+            return (
+              <div className="card" style={{ padding:'12px 14px', marginBottom:10 }}>
+                <div style={{ fontSize:10, color:'rgba(255,255,255,.4)', fontWeight:700, letterSpacing:'.5px', marginBottom:6 }}>BAISSE DE LA FACTURE</div>
+                <div style={{ display:'flex', alignItems:'baseline', gap:10, flexWrap:'wrap', marginBottom:4 }}>
+                  <div style={{ fontSize:24, fontWeight:900, color:'#7dd940' }}>-{displayed.toLocaleString('fr-FR')} €TTC/an</div>
+                  {currentBill && (()=>{const pct=Math.min(100,Math.round(displayed/currentBill*100));return(<div style={{fontSize:16,fontWeight:700,color:'#7dd940'}}>-{pct}%</div>);})()}
                 </div>
-              );
-            })()}
-            {!prodData && !loading && (
-              <div style={{ marginTop:8, fontSize:11, color:'rgba(255,200,80,.6)' }}>⚠ Importez votre conso dans Mon site pour un calcul personnalisé</div>
-            )}
-          </div>
+                {currentBill && <div style={{fontSize:12,color:'rgba(255,255,255,.35)'}}>Nouvelle facture estimée : {Math.max(0,currentBill-displayed).toLocaleString('fr-FR')} €/an (vs {currentBill.toLocaleString('fr-FR')} €)</div>}
+              </div>
+            );
+          })()}
 
           {/* ── 3. Énergie potagère ── */}
           <div className="card" style={{ padding:'18px 16px', marginBottom:12 }}>
@@ -5846,7 +5826,7 @@ function SolarSimScreen({ user, userProfile, onBack, onPanier, onMonSite, onCart
           </StickyFooter>
         ) : (
           <StickyFooter onBack={onBack}>
-            <button className="btn btn-yes" onClick={() => { localStorage.setItem('starvolt_solar_chosen','solar_box'); if(solarBoxSaving) localStorage.setItem('starvolt_solar_saving',String(solarBoxSaving)); localStorage.removeItem('starvolt_box_chosen'); localStorage.removeItem('starvolt_box_saving'); setChosen('solar_box'); setJustConfirmed(true); if(onCartUpdate) onCartUpdate(); }}>
+            <button className="btn btn-yes" onClick={() => { localStorage.setItem('starvolt_solar_chosen','solar_box'); localStorage.setItem('starvolt_solar_defaults',JSON.stringify({pvKwc:'6',batKwh:'10',thermKwh:'10'})); if(solarBoxSaving) localStorage.setItem('starvolt_solar_saving',String(solarBoxSaving)); localStorage.removeItem('starvolt_box_chosen'); localStorage.removeItem('starvolt_box_saving'); setChosen('solar_box'); setJustConfirmed(true); if(onCartUpdate) onCartUpdate(); }}>
               ☀️ Je veux des panneaux + batterie + Box
             </button>
           </StickyFooter>
@@ -6256,11 +6236,14 @@ function PanierScreen({ user, onBack, onGoTo, onMonSite }) {
         </button>
       )}
       {onMonSite && (
-        <button className="btn btn-sec" style={{flexShrink:0, fontSize:15, padding:'12px 18px'}} onClick={onMonSite}>
+        <button className="btn btn-yes" style={{flexShrink:0, fontSize:15, padding:'12px 18px'}} onClick={onMonSite}>
           Mon site →
         </button>
       )}
-      <button className="btn btn-yes" style={{flex:1, fontSize:15, opacity: itemsCount===0 ? .5 : 1}}
+      <button style={{flex:1, fontSize:15, fontFamily:'inherit', fontWeight:700, padding:'12px 18px',
+        background:'rgba(255,255,255,.1)', border:'1px solid rgba(255,255,255,.2)', borderRadius:12,
+        color: itemsCount===0 ? 'rgba(255,255,255,.3)' : 'rgba(255,255,255,.85)', cursor: itemsCount===0 ? 'default' : 'pointer',
+        opacity: itemsCount===0 ? .5 : 1}}
         disabled={itemsCount===0}
         onClick={() => { if(itemsCount>0) { confetti({particleCount:150,spread:80,origin:{y:.6}}); setValidated(true); } }}>
         Valider panier →
