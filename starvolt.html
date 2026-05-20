@@ -4258,7 +4258,7 @@ function OptimisationScreen({ user, userProfile, onBack, onPanier, onMonSite, on
   const effectiveSelectedId = selectedTariffId || savedTariffId || (ranked.length > 0 ? ranked[0].t.id : null);
   const selectedRanked = effectiveSelectedId ? ranked.find(r => r.t.id === effectiveSelectedId) : ranked[0];
   const heroSaving = currentRanked && selectedRanked && currentRanked.t.id !== effectiveSelectedId
-    ? Math.max(0, Math.round(currentRanked.result.total - selectedRanked.result.total))
+    ? Math.round(currentRanked.result.total - selectedRanked.result.total)
     : null;
   const isNewSelection = alreadyChosen && effectiveSelectedId && effectiveSelectedId !== savedTariffId;
   const showPanier = alreadyChosen && !isNewSelection;
@@ -4314,9 +4314,9 @@ function OptimisationScreen({ user, userProfile, onBack, onPanier, onMonSite, on
     <StickyFooter row onBack={onBack}>
       {!loading && (showPanier ? (
         <button className="btn btn-yes" onClick={onMonSite||onPanier}>Mon site →</button>
-      ) : heroSaving > 0 ? (
+      ) : heroSaving !== null ? (
         <button className="btn btn-yes" onClick={() => {
-          confetti({ particleCount:120, spread:70, origin:{y:.6} });
+          if (heroSaving > 0) confetti({ particleCount:120, spread:70, origin:{y:.6} });
           setChosen(true); setJustConfirmed(true);
           localStorage.setItem('starvolt_optimisation_chosen','true');
           localStorage.setItem('starvolt_optimisation_tariff_id', effectiveSelectedId);
