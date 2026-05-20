@@ -3194,9 +3194,17 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations }) {
     const bk=parseFloat(batKwh)||0;
     const tk=parseFloat(thermKwh)||0;
 
-    // Flags de configuration de la box (défaut : tout activé)
-    const optiSolaire = globalVars?.opti_solaire ?? true;
-    const optiTarif   = globalVars?.opti_tarif   ?? true;
+    // ── Box souscrite ? ──────────────────────────────────────────────────────
+    // Le stockage ne se charge/décharge que si l'utilisateur a une box Starvolt.
+    // Sans box, les flags opti_tarif et opti_solaire sont forcés à false
+    // pour que le calcul reflète uniquement le changement de tarif, pas l'optimisation.
+    const hasBoxLS = !!localStorage.getItem('starvolt_box_chosen')
+                  || localStorage.getItem('starvolt_solar_chosen') === 'solar_box';
+    const effectiveGlobalVars = globalVars ? {
+      ...globalVars,
+      opti_tarif:   hasBoxLS ? (globalVars.opti_tarif   ?? true) : false,
+      opti_solaire: hasBoxLS ? (globalVars.opti_solaire ?? true) : false,
+    } : globalVars;
 
     // ── Helpers tarif ─────────────────────────────────────────────────────────
     const getEffectiveTariff = () => {
@@ -3223,7 +3231,7 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations }) {
       // ── Chemin PV + stockage ──
       if(curT){
         if(curT.tarif_dynamique&&!spotMap){setBalance(null);return;}
-        setBalance(computeCombinedOptimization(site.conso_profil,prodProfilData,kw,batKwh,thermKwh,globalVars,curT,getBaseTariff(curT),site,spotMap));
+        setBalance(computeCombinedOptimization(site.conso_profil,prodProfilData,kw,batKwh,thermKwh,effectiveGlobalVars,curT,getBaseTariff(curT),site,spotMap));
         return;
       }
       // Pas de tarif → graphique PV seul
@@ -3238,7 +3246,7 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations }) {
     // ── Chemin tarif pur (kw=0 ou profil prod absent) ──
     if(curT){
       if(curT.tarif_dynamique&&!spotMap){setBalance(null);return;}
-      setBalance(computeStorageOptimization(site.conso_profil,curT,getBaseTariff(curT),site,bk,tk,globalVars,spotMap));
+      setBalance(computeStorageOptimization(site.conso_profil,curT,getBaseTariff(curT),site,bk,tk,effectiveGlobalVars,spotMap));
       return;
     }
     setBalance(null);
