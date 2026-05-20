@@ -3308,15 +3308,14 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations }) {
       }
     }
     // Si ACC au panier : remplacer le prix heures 9–17 par le prix ACC TTC
-    // Formule : (prix_vente_ACC + TURPE_HC_été) × (1 + TVA) — sans accise
-    // N'applique que si ACC est moins cher que le tarif normal de cette heure
+    // Formule : (prix_vente_ACC + TURPE_4_taux(m,h)) × (1 + TVA) — sans accise
+    // TURPE variable selon saison (été/hiver) et HC/HP — mois début/fin été configurables
     if(localStorage.getItem('starvolt_acc_chosen')==='true'){
       const _accPHT=parseFloat(localStorage.getItem('starvolt_acc_price_ht')||'0.09');
-      const _turpeHcEte=(globalVars?.turpe_hc_ete??1.16)/100;
       const _tva=(globalVars?.tva??20)/100;
-      const accTTC=(_accPHT+_turpeHcEte)*(1+_tva);
       for(let m=1;m<=12;m++) for(let d=1;d<=PROF_DAYS[m-1];d++) for(let h=9;h<18;h++){
         const idx=profIdx(m,d,h);
+        const accTTC=(_accPHT+getTurpeRate(m,h,globalVars,hcWin))*(1+_tva);
         if(accTTC<arr[idx]) arr[idx]=accTTC;
       }
     }
@@ -3553,20 +3552,20 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations }) {
                   const thermPowKw=(parseFloat(thermKwh)||0)*_ratio;
                   const flexRevenue=optiFlex?Math.round((batPowKw*80+thermPowKw*40)/3):0;
                   // ACC savings post-balance : heures 9–17, accTTC < normalTTC
-                  // Formule ACC TTC : (prix_vente_ACC + TURPE_HC_été) × (1+TVA) — sans accise
-                  // normalTTC calculé directement depuis le tarif (sans override ACC) pour éviter savings=0
+                  // Formule ACC TTC : (prix_vente_ACC + TURPE_4_taux(m,h)) × (1+TVA) — sans accise
+                  // TURPE variable selon saison et HC/HP ; normalTTC depuis tarif brut (pas hourlyPrices)
                   let accSavings=0;
                   if(optiAcc&&balance?.hourly){
                     const _accPHT=parseFloat(localStorage.getItem('starvolt_acc_price_ht')||'0.09');
                     const _tva=(globalVars?.tva??20)/100;
-                    const _turpeHcEte=(globalVars?.turpe_hc_ete??1.16)/100;
-                    const accTTC=(_accPHT+_turpeHcEte)*(1+_tva);
                     const _hcw=[
                       {s:parseHcHour(site?.heure_debut_hc1??globalVars?.hc_debut1),e:parseHcHour(site?.heure_fin_hc1??globalVars?.hc_fin1)},
                       {s:parseHcHour(site?.heure_debut_hc2??globalVars?.hc_debut2),e:parseHcHour(site?.heure_fin_hc2??globalVars?.hc_fin2)},
                     ].filter(w=>w.s!==null&&w.e!==null);
                     for(const pt of balance.hourly){
                       if(!pt||pt.grid_buy<=0||pt.h<9||pt.h>=18) continue;
+                      // Prix ACC TTC de l'heure : TURPE 4 taux (été/hiver × HC/HP), sans accise
+                      const accTTC=(_accPHT+getTurpeRate(pt.m,pt.h,globalVars,_hcw))*(1+_tva);
                       // Prix normal de l'heure (sans ACC) calculé depuis le tarif brut
                       const normalTTC=(()=>{
                         if(effectiveTariff?.tarif_dynamique&&spotMap){
@@ -4079,7 +4078,9 @@ function calcTariffCost(tariff, kwh_hc, kwh_hp, dynamicCtx = null) {
 
 // ─── Helpers TURPE / TTC / Spot ───────────────
 function getTurpeRate(mois, heure, natParams, hcWindows) {
-  const isEte = mois >= 4 && mois <= 10;
+  const debut = natParams?.turpe_ete_debut ?? 4;
+  const fin   = natParams?.turpe_ete_fin   ?? 10;
+  const isEte = mois >= debut && mois <= fin;
   const isHc  = hcWindows?.length > 0 && isHcHour(heure, hcWindows);
   if (isEte  && isHc)  return (natParams?.turpe_hc_ete   || 0) / 100;
   if (isEte  && !isHc) return (natParams?.turpe_hp_ete   || 0) / 100;
@@ -4724,6 +4725,8 @@ function GlobalVarsScreen({ onBack }) {
           ratio_puissance_stockage_thermique: n.ratio_puissance_stockage_thermique ?? 50,
           pertes_thermique:                   n.pertes_thermique                   ?? 0,
           seuil_optimisation_stockage:        n.seuil_optimisation_stockage        ?? 10,
+          turpe_ete_debut:          n.turpe_ete_debut          ?? 4,
+          turpe_ete_fin:            n.turpe_ete_fin            ?? 10,
           turpe_hp_hiver:                     n.turpe_hp_hiver                     ?? '',
           turpe_hc_hiver:           n.turpe_hc_hiver           ?? '',
           turpe_hp_ete:             n.turpe_hp_ete             ?? '',
@@ -4755,6 +4758,8 @@ function GlobalVarsScreen({ onBack }) {
       ratio_puissance_stockage_thermique:           num(globalForm.ratio_puissance_stockage_thermique),
       pertes_thermique:                             num(globalForm.pertes_thermique),
       seuil_optimisation_stockage:                  num(globalForm.seuil_optimisation_stockage),
+      turpe_ete_debut:              intr(globalForm.turpe_ete_debut),
+      turpe_ete_fin:                intr(globalForm.turpe_ete_fin),
       turpe_hp_hiver:                               num(globalForm.turpe_hp_hiver),
       turpe_hc_hiver:               num(globalForm.turpe_hc_hiver),
       turpe_hp_ete:                 num(globalForm.turpe_hp_ete),
@@ -4887,6 +4892,18 @@ function GlobalVarsScreen({ onBack }) {
 
         {/* ── TURPE ── */}
         <div style={{...SL,marginTop:10}}>TURPE variable (c€/kWh) — 4 combinaisons</div>
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:6,marginBottom:8}}>
+          <div>
+            <div style={FL}>Début été (mois, ex: 4 = avril)</div>
+            <input className="inp" type="number" step="1" min="1" max="12" placeholder="4" value={String(globalForm.turpe_ete_debut)}
+              onChange={e=>setGlobalForm(p=>({...p,turpe_ete_debut:e.target.value}))} style={F}/>
+          </div>
+          <div>
+            <div style={FL}>Fin été (mois, ex: 10 = octobre)</div>
+            <input className="inp" type="number" step="1" min="1" max="12" placeholder="10" value={String(globalForm.turpe_ete_fin)}
+              onChange={e=>setGlobalForm(p=>({...p,turpe_ete_fin:e.target.value}))} style={F}/>
+          </div>
+        </div>
         <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:6,marginBottom:10}}>
           {[['HP Hiver','turpe_hp_hiver','ex: 1.47'],['HC Hiver','turpe_hc_hiver','ex: 0.89'],['HP Été (avr–oct)','turpe_hp_ete','ex: 0.86'],['HC Été','turpe_hc_ete','ex: 0.52']].map(([lbl,key,ph])=>(
             <div key={key}>
