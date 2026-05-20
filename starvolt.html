@@ -3302,12 +3302,18 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations }) {
     } else {
       const ph=parseFloat(effectiveTariff.prix_hp)||0;
       const pc=effectiveTariff.prix_hc!=null?parseFloat(effectiveTariff.prix_hc)||0:ph;
+      // Abonnement amorti sur la conso annuelle achetée au réseau (prix frontal réel)
+      const abo=effectiveTariff.abo_annuel||0;
+      const kwhGrid=balance
+        ?balance.monthly.reduce((s,m)=>s+m.grid_buy,0)
+        :(site?.conso_annuelle_kwh||null);
+      const aboKwh=abo>0&&kwhGrid>0?abo/kwhGrid:0;
       for(let m=1;m<=12;m++) for(let d=1;d<=PROF_DAYS[m-1];d++) for(let h=0;h<24;h++){
         const idx=profIdx(m,d,h);
-        arr[idx]=hcWin.length>0&&isHcHour(h,hcWin)?pc:ph;
+        arr[idx]=(hcWin.length>0&&isHcHour(h,hcWin)?pc:ph)+aboKwh;
       }
     }
-    // Si ACC au panier : remplacer le prix heures 9–17 par le prix ACC TTC
+    // Si ACC au panier : remplacer le prix heures prod non nulle par le prix ACC TTC
     // Formule : (prix_vente_ACC + TURPE_4_taux(m,h)) × (1 + TVA) — sans accise
     // TURPE variable selon saison (été/hiver) et HC/HP — mois début/fin été configurables
     if(localStorage.getItem('starvolt_acc_chosen')==='true'){
@@ -3321,7 +3327,7 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations }) {
       }
     }
     return arr;
-  },[effectiveTariff,site?.heure_debut_hc1,site?.heure_fin_hc1,site?.heure_debut_hc2,site?.heure_fin_hc2,globalVars,spotMap,prodProfilData]);
+  },[effectiveTariff,site?.heure_debut_hc1,site?.heure_fin_hc1,site?.heure_debut_hc2,site?.heure_fin_hc2,globalVars,spotMap,prodProfilData,balance,site?.conso_annuelle_kwh]);
 
   // Charger les données spot si tarif dynamique (avec ou sans PV)
   useEffect(()=>{
