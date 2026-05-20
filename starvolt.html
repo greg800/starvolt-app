@@ -3307,6 +3307,19 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations }) {
         arr[idx]=hcWin.length>0&&isHcHour(h,hcWin)?pc:ph;
       }
     }
+    // Si ACC au panier : remplacer le prix heures 9–17 par le prix ACC TTC
+    // Formule : (prix_vente_ACC + TURPE_HC_été) × (1 + TVA) — sans accise
+    // N'applique que si ACC est moins cher que le tarif normal de cette heure
+    if(localStorage.getItem('starvolt_acc_chosen')==='true'){
+      const _accPHT=parseFloat(localStorage.getItem('starvolt_acc_price_ht')||'0.09');
+      const _turpeHcEte=(globalVars?.turpe_hc_ete??1.16)/100;
+      const _tva=(globalVars?.tva??20)/100;
+      const accTTC=(_accPHT+_turpeHcEte)*(1+_tva);
+      for(let m=1;m<=12;m++) for(let d=1;d<=PROF_DAYS[m-1];d++) for(let h=9;h<18;h++){
+        const idx=profIdx(m,d,h);
+        if(accTTC<arr[idx]) arr[idx]=accTTC;
+      }
+    }
     return arr;
   },[effectiveTariff,site?.heure_debut_hc1,site?.heure_fin_hc1,site?.heure_debut_hc2,site?.heure_fin_hc2,globalVars,spotMap]);
 
@@ -3540,20 +3553,31 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations }) {
                   const thermPowKw=(parseFloat(thermKwh)||0)*_ratio;
                   const flexRevenue=optiFlex?Math.round((batPowKw*80+thermPowKw*40)/3):0;
                   // ACC savings post-balance : heures 9–17, accTTC < normalTTC
+                  // Formule ACC TTC : (prix_vente_ACC + TURPE_HC_été) × (1+TVA) — sans accise
+                  // normalTTC calculé directement depuis le tarif (sans override ACC) pour éviter savings=0
                   let accSavings=0;
-                  if(optiAcc&&balance?.hourly&&hourlyPrices){
-                    const _accPHT=parseFloat(localStorage.getItem('starvolt_acc_price_ht')||'0.11');
+                  if(optiAcc&&balance?.hourly){
+                    const _accPHT=parseFloat(localStorage.getItem('starvolt_acc_price_ht')||'0.09');
                     const _tva=(globalVars?.tva??20)/100;
-                    const _accise=(globalVars?.accise||0)/100;
+                    const _turpeHcEte=(globalVars?.turpe_hc_ete??1.16)/100;
+                    const accTTC=(_accPHT+_turpeHcEte)*(1+_tva);
                     const _hcw=[
                       {s:parseHcHour(site?.heure_debut_hc1??globalVars?.hc_debut1),e:parseHcHour(site?.heure_fin_hc1??globalVars?.hc_fin1)},
                       {s:parseHcHour(site?.heure_debut_hc2??globalVars?.hc_debut2),e:parseHcHour(site?.heure_fin_hc2??globalVars?.hc_fin2)},
                     ].filter(w=>w.s!==null&&w.e!==null);
                     for(const pt of balance.hourly){
-                      if(!pt||pt.grid_buy<=0||pt.h<9||pt.h>17) continue;
-                      const _ni=profIdx(pt.m,pt.d,pt.h);
-                      const normalTTC=hourlyPrices[_ni];
-                      const accTTC=(_accPHT+getTurpeRate(pt.m,pt.h,globalVars,_hcw)+_accise)*(1+_tva);
+                      if(!pt||pt.grid_buy<=0||pt.h<9||pt.h>=18) continue;
+                      // Prix normal de l'heure (sans ACC) calculé depuis le tarif brut
+                      const normalTTC=(()=>{
+                        if(effectiveTariff?.tarif_dynamique&&spotMap){
+                          const spot=spotMap[`${pt.m}_${pt.d}_${pt.h}`]||0;
+                          const marge=(effectiveTariff.marge_fournisseur_ceur_kwh||0)/100;
+                          return(spot+getTurpeRate(pt.m,pt.h,globalVars,_hcw)+(globalVars?.accise||0)/100+marge)*(1+_tva);
+                        }
+                        const ph=parseFloat(effectiveTariff?.prix_hp)||0;
+                        const pc=effectiveTariff?.prix_hc!=null?parseFloat(effectiveTariff.prix_hc)||0:ph;
+                        return _hcw.length>0&&isHcHour(pt.h,_hcw)?pc:ph;
+                      })();
                       if(normalTTC>accTTC) accSavings+=pt.grid_buy*(normalTTC-accTTC);
                     }
                     accSavings=Math.round(accSavings);
