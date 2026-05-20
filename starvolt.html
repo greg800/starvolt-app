@@ -3584,7 +3584,7 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations }) {
                           step={0.5} min={0} placeholder="6"/>
                       </div>
                       {/* Baisse facture €TTC */}
-                      {balance&&<>
+                      {balance&&
                         <div style={{...T,alignItems:'center',justifyContent:'center',textAlign:'center'}}>
                           <div style={LBL}>BAISSE FACTURE</div>
                           <div style={{fontSize:isMobile?19:26,fontWeight:900,color:'#7dd940',lineHeight:1.1}}>
@@ -3596,8 +3596,9 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations }) {
                             {accSavings>0?` · ACC ${accSavings} €`:''}
                           </div>}
                         </div>
-                        {/* Activation des services */}
-                        <div style={{...T,flexDirection:'column',gap:5,justifyContent:'center',minWidth:155}}>
+                      }
+                      {/* Activation des services — affiché dès que box ou ACC en panier, sans attendre le bilan */}
+                      {(hasBox||hasAcc)&&<div style={{...T,flexDirection:'column',gap:5,justifyContent:'center',minWidth:155}}>
                           <div style={{fontSize:9,color:'rgba(255,255,255,.4)',fontWeight:700,letterSpacing:'0.08em',textTransform:'uppercase'}}>Activation des services</div>
                           {(()=>{
                             const hasStorage=(parseFloat(batKwh)||0)>0||(parseFloat(thermKwh)||0)>0;
@@ -3624,7 +3625,7 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations }) {
                             </label>
                           ))}
                         </div>
-                      </>}
+                      }
                       {/* Messages quand pas encore de bilan */}
                       {prodProfilId&&!balance&&site?.conso_profil&&(
                         <div style={{...T,alignItems:'center',justifyContent:'center',color:'rgba(255,255,255,.35)',fontSize:13}}>Calcul…</div>
