@@ -2390,8 +2390,9 @@ function computeStorageOptimization(consoProfile, tariff, baseTariff, site, batK
   const hasHC_fixed = !tariff.tarif_dynamique && tariff.prix_hc != null && tariff.prix_hc !== tariff.prix_hp;
 
   if (!isDynamic && !hasHC_fixed) {
-    // Tarif plat : aucun déplacement de charge possible, stockage inactif
+    // Tarif plat ou multi-période : aucun déplacement de charge possible, stockage inactif
     // billWithStorage = conso × nouveau tarif (sans stockage)
+    const isMulti = tariff.type_tarif === 'multi' && tariff.periodes?.length > 0;
     let billWithStorage = tariff.abo_annuel || 0;
     for (let m = 1; m <= 12; m++)
       for (let d = 1; d <= PROF_DAYS[m-1]; d++)
@@ -2400,7 +2401,7 @@ function computeStorageOptimization(consoProfile, tariff, baseTariff, site, batK
           const gb  = (consoProfile[idx] || 0) / 1000;
           monthly[m-1].grid_buy += gb;
           hourly[idx] = {on_site:0, grid_buy:gb, injection:0, via_bat:0, via_therm:0, m, d, h};
-          billWithStorage += gb * (tariff.prix_hp || 0);
+          billWithStorage += gb * (isMulti ? getPrixMulti(m, d, h, tariff.periodes) : (tariff.prix_hp || 0));
         }
     billWithStorage = Math.round(billWithStorage);
     const saving = Math.max(0, billWithoutBase - billWithStorage);
@@ -2560,10 +2561,15 @@ function computeCombinedOptimization(consoProfile, prodNorm, pvKwc, batKwh, ther
   const isDynamic = !!(tariff.tarif_dynamique && spotMap);
   const hasHC_fixed = !tariff.tarif_dynamique && tariff.prix_hc != null && tariff.prix_hc !== tariff.prix_hp && hcWinArr.length > 0;
 
+  const isMultiPeriod = tariff.type_tarif === 'multi' && tariff.periodes?.length > 0;
   let getDailyAvg, localSeuil;
   if (isDynamic) {
     getDailyAvg = (m, d) => { let s = 0; for (let h = 0; h < 24; h++) s += getPrice(m, d, h); return s / 24; };
     localSeuil  = seuil;
+  } else if (isMultiPeriod) {
+    // Multi-période : la moyenne journalière varie selon le jour — utilise le prix réel
+    getDailyAvg = (m, d) => { let s = 0; for (let h = 0; h < 24; h++) s += getPrixMulti(m, d, h, tariff.periodes); return s / 24; };
+    localSeuil  = seuil; // Permet au stockage de se positionner sur les heures bon marché
   } else if (hasHC_fixed) {
     let hcCount = 0;
     for (let h = 0; h < 24; h++) if (isHcHour(h, hcWinArr)) hcCount++;
@@ -2577,7 +2583,7 @@ function computeCombinedOptimization(consoProfile, prodNorm, pvKwc, batKwh, ther
 
   // L'optimisation tarifaire (HC/HP ou spot) n'est utile que si le tarif a une dimension
   // temporelle. Sur un tarif plat, optiTarif n'a aucun effet → on retombe sur optiSolaire.
-  const canOptiTarif = optiTarif && (isDynamic || hasHC_fixed);
+  const canOptiTarif = optiTarif && (isDynamic || hasHC_fixed || isMultiPeriod);
 
   // ── Boucle horaire (scénario optimisé) ────────────────────────────────────
   let varCostHT_with = 0, annInjKwh = 0;
