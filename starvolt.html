@@ -2288,6 +2288,8 @@ function computeStorageOptimization(consoProfile, tariff, baseTariff, site, batK
           if (t.tarif_dynamique && spotMap) {
             const marge = (t.marge_fournisseur_ceur_kwh||0)/100, accise = (globalVars?.accise||0)/100;
             p = (spotMap[`${m}_${d}_${h}`]||0) + getTurpeRate(m,h,globalVars,hcWinCommon) + accise + marge;
+          } else if (t.type_tarif === 'multi' && t.periodes?.length > 0) {
+            p = getPrixMulti(m, d, h, t.periodes);
           } else if (t.prix_hc != null && t.prix_hc !== t.prix_hp && hcWinCommon.length > 0) {
             p = isHcHour(h, hcWinCommon) ? t.prix_hc : t.prix_hp;
           } else {
@@ -2524,6 +2526,9 @@ function computeCombinedOptimization(consoProfile, prodNorm, pvKwc, batKwh, ther
       const marge  = (t.marge_fournisseur_ceur_kwh || 0) / 100;
       const accise = (globalVars?.accise || 0) / 100;
       return (m, d, h) => (spotMap[`${m}_${d}_${h}`] || 0) + getTurpeRate(m, h, globalVars, hcWinArr) + accise + marge;
+    }
+    if (t.type_tarif === 'multi' && t.periodes?.length > 0) {
+      return (m, d, h) => getPrixMulti(m, d, h, t.periodes);
     }
     if (t.prix_hc != null && t.prix_hc !== t.prix_hp && hcWinArr.length > 0) {
       return (m, d, h) => isHcHour(h, hcWinArr) ? t.prix_hc : t.prix_hp;
@@ -3299,6 +3304,15 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations }) {
         const spot=spotMap[`${m}_${d}_${h}`]||0;
         arr[idx]=(spot+getTurpeRate(m,h,globalVars,hcWin)+accise+marge)*(1+tva);
       }
+    } else if(effectiveTariff.type_tarif==='multi'&&effectiveTariff.periodes?.length>0){
+      const periodes=effectiveTariff.periodes;
+      const abo=effectiveTariff.abo_annuel||0;
+      const kwhGrid=balance
+        ?balance.monthly.reduce((s,m)=>s+m.grid_buy,0)
+        :(site?.conso_annuelle_kwh||null);
+      const aboKwh=abo>0&&kwhGrid>0?abo/kwhGrid:0;
+      for(let m=1;m<=12;m++) for(let d=1;d<=PROF_DAYS[m-1];d++) for(let h=0;h<24;h++)
+        arr[profIdx(m,d,h)]=getPrixMulti(m,d,h,periodes)+aboKwh;
     } else {
       const ph=parseFloat(effectiveTariff.prix_hp)||0;
       const pc=effectiveTariff.prix_hc!=null?parseFloat(effectiveTariff.prix_hc)||0:ph;
@@ -4089,10 +4103,18 @@ function calcHcHp(consoProfile, userProfile) {
 }
 
 function calcTariffCost(tariff, kwh_hc, kwh_hp, dynamicCtx = null) {
-  if (tariff.tarif_dynamique) {
+  if (tariff.tarif_dynamique || tariff.type_tarif === 'dynamique') {
     const { consoProfile, spotMap, natParams, site } = dynamicCtx || {};
     if (!consoProfile || !spotMap || !natParams) return null;
     return calcDynamicCost(tariff, consoProfile, spotMap, natParams, site);
+  }
+  if (tariff.type_tarif === 'multi' && tariff.periodes?.length > 0) {
+    const consoProfile = dynamicCtx?.consoProfile;
+    if (!consoProfile) return null;
+    let varCost = 0;
+    for (let m=1;m<=12;m++) for(let d=1;d<=PROF_DAYS[m-1];d++) for(let h=0;h<24;h++)
+      varCost += (consoProfile[profIdx(m,d,h)]||0)/1000 * getPrixMulti(m,d,h,tariff.periodes);
+    return { total: Math.round((tariff.abo_annuel||0) + varCost), abo: tariff.abo_annuel||0, is_base: false };
   }
   const abo = tariff.abo_annuel || 0;
   const hp  = tariff.prix_hp || 0;
@@ -4101,6 +4123,29 @@ function calcTariffCost(tariff, kwh_hc, kwh_hp, dynamicCtx = null) {
 }
 
 // ─── Helpers TURPE / TTC / Spot ───────────────
+// ─── Multi-période helpers ─────────────────────
+function isInDateRange(m, d, sm, sd, em, ed) {
+  const cur=m*100+d, s=sm*100+sd, e=em*100+ed;
+  return s<=e?(cur>=s&&cur<=e):(cur>=s||cur<=e);
+}
+function getPrixMulti(m, d, h, periodes) {
+  if (!periodes?.length) return 0;
+  for (const p of periodes) {
+    if (!p.date_debut||!p.date_fin||p.heure_debut===''||p.heure_fin===''||p.prix==='') continue;
+    const parts1=p.date_debut.split('/'), parts2=p.date_fin.split('/');
+    if(parts1.length<2||parts2.length<2) continue;
+    const [dj,dm]=[parseInt(parts1[0]),parseInt(parts1[1])];
+    const [fj,fm]=[parseInt(parts2[0]),parseInt(parts2[1])];
+    if(!dj||!dm||!fj||!fm) continue;
+    if(!isInDateRange(m,d,dm,dj,fm,fj)) continue;
+    const hD=parseInt(p.heure_debut), hF=parseInt(p.heure_fin);
+    if(isNaN(hD)||isNaN(hF)) continue;
+    const overnight=hF<=hD;
+    if(overnight?(h>=hD||h<hF):(h>=hD&&h<hF)) return parseFloat(p.prix)||0;
+  }
+  return 0;
+}
+
 function getTurpeRate(mois, heure, natParams, hcWindows) {
   const debut = natParams?.turpe_ete_debut ?? 4;
   const fin   = natParams?.turpe_ete_fin   ?? 10;
@@ -6811,50 +6856,79 @@ function TariffField({ label, fkey, type='text', placeholder='', value, onChange
 // ─── AdminTariffEditScreen ────────────────────
 function AdminTariffEditScreen({ tariff, onSave, onDelete, onBack }) {
   const isNew = !tariff?.id;
+
+  const getInitType = (t) => {
+    if (!t) return 'fixe';
+    if (t.type_tarif === 'multi') return 'multi';
+    if (t.tarif_dynamique || t.type_tarif === 'dynamique') return 'dynamique';
+    if (t.prix_hc != null && parseFloat(t.prix_hc) !== parseFloat(t.prix_hp)) return 'hchp';
+    return 'fixe';
+  };
+
   const [f, setF] = useState({
-    nom:               tariff?.nom || '',
-    abo_annuel:        tariff?.abo_annuel ?? '',
-    prix_hp:           tariff?.prix_hp ?? '',
-    prix_hc:           tariff?.prix_hc ?? '',
-    bat_virtuelle:     tariff?.bat_virtuelle || false,
-    surcout_abonnement:tariff?.surcout_abonnement ?? '',
-    acheminement_hp:   tariff?.acheminement_hp ?? '',
-    acheminement_hc:   tariff?.acheminement_hc ?? '',
-    tarif_dynamique:           tariff?.tarif_dynamique || false,
+    nom:                       tariff?.nom || '',
+    abo_annuel:                tariff?.abo_annuel ?? '',
+    type_tarif:                getInitType(tariff),
+    prix_hp:                   tariff?.prix_hp ?? '',
+    prix_hc:                   tariff?.prix_hc ?? '',
     turpe_fixe:                tariff?.turpe_fixe ?? '',
     cta_fixe:                  tariff?.cta_fixe ?? '',
-    marge_fournisseur_ceur_kwh: tariff?.marge_fournisseur_ceur_kwh ?? '',
+    marge_fournisseur_ceur_kwh:tariff?.marge_fournisseur_ceur_kwh ?? '',
   });
-  const [loading, setLoading] = useState(false);
-  const [error,   setError]   = useState(null);
+  const [periodes, setPeriodes] = useState(() => tariff?.periodes || []);
+  const [loading,  setLoading]  = useState(false);
+  const [error,    setError]    = useState(null);
 
   const upd = useCallback((k, v) => setF(p => ({...p, [k]: v})), []);
-  const n = (v) => v === '' || v === null || v === undefined ? null : parseFloat(v);
+  const n   = (v) => v === '' || v === null || v === undefined ? null : parseFloat(v);
+
+  const addPeriode = () => setPeriodes(p => [...p, {date_debut:'',date_fin:'',heure_debut:'',heure_fin:'',prix:''}]);
+  const delPeriode = (i) => setPeriodes(p => p.filter((_,idx)=>idx!==i));
+  const updPeriode = (i,k,v) => setPeriodes(p => p.map((row,idx)=>idx===i?{...row,[k]:v}:row));
+
+  // Compteur d'heures couvertes
+  const { covered, remaining } = useMemo(() => {
+    const covSet = new Set();
+    for (const p of periodes) {
+      if (!p.date_debut||!p.date_fin||p.heure_debut===''||p.heure_fin===''||p.prix==='') continue;
+      const parts1=p.date_debut.split('/'), parts2=p.date_fin.split('/');
+      if(parts1.length<2||parts2.length<2) continue;
+      const dj=parseInt(parts1[0]),dm=parseInt(parts1[1]),fj=parseInt(parts2[0]),fm=parseInt(parts2[1]);
+      if(!dj||!dm||!fj||!fm) continue;
+      const hD=parseInt(p.heure_debut),hF=parseInt(p.heure_fin);
+      if(isNaN(hD)||isNaN(hF)) continue;
+      const overnight=hF<=hD;
+      for(let m=1;m<=12;m++) for(let d=1;d<=PROF_DAYS[m-1];d++){
+        const cur=m*100+d,s=dm*100+dj,e=fm*100+fj;
+        if(!(s<=e?(cur>=s&&cur<=e):(cur>=s||cur<=e))) continue;
+        for(let h=0;h<24;h++) if(overnight?(h>=hD||h<hF):(h>=hD&&h<hF)) covSet.add(profIdx(m,d,h));
+      }
+    }
+    return { covered:covSet.size, remaining:8760-covSet.size };
+  }, [periodes]);
 
   const handleSave = async () => {
     if (!f.nom.trim()) { setError('Le nom est obligatoire.'); return; }
+    if (f.type_tarif === 'multi' && remaining > 0) { setError(`${remaining} h non couvertes — toute l'année doit être définie.`); return; }
     setLoading(true); setError(null);
+    const isDyn = f.type_tarif === 'dynamique';
     const payload = {
-      nom: f.nom.trim(),
-      abo_annuel: n(f.abo_annuel),
-      prix_hp: f.tarif_dynamique ? null : n(f.prix_hp),
-      prix_hc: f.tarif_dynamique ? null : n(f.prix_hc),
-      bat_virtuelle:   f.bat_virtuelle,
-      surcout_abonnement: f.bat_virtuelle ? n(f.surcout_abonnement) : null,
-      acheminement_hp:    f.bat_virtuelle ? n(f.acheminement_hp) : null,
-      acheminement_hc:    f.bat_virtuelle ? n(f.acheminement_hc) : null,
-      tarif_dynamique: f.tarif_dynamique,
-      turpe_fixe:                  f.tarif_dynamique ? n(f.turpe_fixe) : null,
-      cta_fixe:                    f.tarif_dynamique ? n(f.cta_fixe)   : null,
-      marge_fournisseur_ceur_kwh:  f.tarif_dynamique ? n(f.marge_fournisseur_ceur_kwh) : null,
+      nom:              f.nom.trim(),
+      abo_annuel:       n(f.abo_annuel),
+      type_tarif:       f.type_tarif,
+      tarif_dynamique:  isDyn,
+      prix_hp:          (f.type_tarif==='fixe'||f.type_tarif==='hchp') ? n(f.prix_hp) : null,
+      prix_hc:          f.type_tarif==='hchp' ? n(f.prix_hc) : null,
+      periodes:         f.type_tarif==='multi' ? periodes : null,
+      turpe_fixe:       isDyn ? n(f.turpe_fixe) : null,
+      cta_fixe:         isDyn ? n(f.cta_fixe)   : null,
+      marge_fournisseur_ceur_kwh: isDyn ? n(f.marge_fournisseur_ceur_kwh) : null,
+      bat_virtuelle: false, surcout_abonnement: null, acheminement_hp: null, acheminement_hc: null,
       last_modified: new Date().toISOString(),
     };
     let err;
-    if (isNew) {
-      ({ error: err } = await sb.from('tarifs_electricite').insert(payload));
-    } else {
-      ({ error: err } = await sb.from('tarifs_electricite').update(payload).eq('id', tariff.id));
-    }
+    if (isNew) ({ error: err } = await sb.from('tarifs_electricite').insert(payload));
+    else       ({ error: err } = await sb.from('tarifs_electricite').update(payload).eq('id', tariff.id));
     setLoading(false);
     if (err) { setError(err.message); return; }
     onSave();
@@ -6866,6 +6940,8 @@ function AdminTariffEditScreen({ tariff, onSave, onDelete, onBack }) {
     onDelete();
   };
 
+  const iS = {background:'rgba(255,255,255,.08)',border:'1px solid rgba(255,255,255,.12)',borderRadius:8,color:'white',padding:'5px 7px',fontSize:12,width:'100%',fontFamily:'inherit',boxSizing:'border-box'};
+
   return (
     <>
       <div className="screen fade-in">
@@ -6876,29 +6952,71 @@ function AdminTariffEditScreen({ tariff, onSave, onDelete, onBack }) {
         <div className="form-card">
           <TariffField label="Nom du tarif *" fkey="nom" value={f.nom} onChange={upd} placeholder="EDF TRV HC HP"/>
           <TariffField label="Abonnement annuel (€/an)" fkey="abo_annuel" type="number" value={String(f.abo_annuel)} onChange={upd} placeholder="237.72"/>
-          <TariffToggle label="Tarif dynamique (prix spot)" val={f.tarif_dynamique} onChange={v=>upd('tarif_dynamique',v)}/>
-          {f.tarif_dynamique ? (
-            <>
-              <div className="inp-row">
-                <TariffField label="TURPE fixe (€/an)" fkey="turpe_fixe" type="number" value={String(f.turpe_fixe)} onChange={upd} placeholder="129.79"/>
-                <TariffField label="CTA fixe (€/an)" fkey="cta_fixe" type="number" value={String(f.cta_fixe)} onChange={upd} placeholder="19.47"/>
-              </div>
-              <TariffField label="Marge fournisseur (c€/kWh)" fkey="marge_fournisseur_ceur_kwh" type="number" value={String(f.marge_fournisseur_ceur_kwh)} onChange={upd} placeholder="ex: 1.5"/>
-            </>
-          ) : (
+
+          {/* Type de tarif */}
+          <div style={{marginBottom:14}}>
+            <div style={{fontSize:11,color:'rgba(255,255,255,.45)',marginBottom:7,textTransform:'uppercase',letterSpacing:'.5px'}}>Type de tarif</div>
+            <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
+              {[['fixe','Fixe'],['hchp','HC / HP'],['multi','Multi-périodes'],['dynamique','Dynamique']].map(([v,lbl])=>(
+                <label key={v} style={{display:'flex',alignItems:'center',gap:5,cursor:'pointer',fontSize:13,color:f.type_tarif===v?'#7dd940':'rgba(255,255,255,.7)',padding:'5px 10px',borderRadius:8,background:f.type_tarif===v?'rgba(125,217,64,.12)':'rgba(255,255,255,.05)',border:`1px solid ${f.type_tarif===v?'rgba(125,217,64,.4)':'rgba(255,255,255,.1)'}`,transition:'all .15s'}}>
+                  <input type="radio" name="type_tarif" value={v} checked={f.type_tarif===v} onChange={()=>upd('type_tarif',v)} style={{accentColor:'#7dd940',margin:0}}/>
+                  {lbl}
+                </label>
+              ))}
+            </div>
+          </div>
+
+          {f.type_tarif==='fixe' && (
+            <TariffField label="Prix (€/kWh TTC)" fkey="prix_hp" type="number" value={String(f.prix_hp)} onChange={upd} placeholder="0.2081"/>
+          )}
+          {f.type_tarif==='hchp' && (
             <div className="inp-row">
-              <TariffField label="Prix HP (€/kWh)" fkey="prix_hp" type="number" value={String(f.prix_hp)} onChange={upd} placeholder="0.2081"/>
-              <TariffField label="Prix HC (€/kWh)" fkey="prix_hc" type="number" value={String(f.prix_hc)} onChange={upd} placeholder="0.1635"/>
+              <TariffField label="Prix HP (€/kWh TTC)" fkey="prix_hp" type="number" value={String(f.prix_hp)} onChange={upd} placeholder="0.2081"/>
+              <TariffField label="Prix HC (€/kWh TTC)" fkey="prix_hc" type="number" value={String(f.prix_hc)} onChange={upd} placeholder="0.1635"/>
             </div>
           )}
-          <TariffToggle label="Batterie virtuelle" val={f.bat_virtuelle} onChange={v=>upd('bat_virtuelle',v)}/>
-          {f.bat_virtuelle && (<>
-            <TariffField label="Surcout abonnement (€/an)" fkey="surcout_abonnement" type="number" value={String(f.surcout_abonnement)} onChange={upd} placeholder="86.4"/>
+          {f.type_tarif==='dynamique' && (<>
             <div className="inp-row">
-              <TariffField label="Acheminement HP (€/kWh)" fkey="acheminement_hp" type="number" value={String(f.acheminement_hp)} onChange={upd} placeholder="0.0953"/>
-              <TariffField label="Acheminement HC (€/kWh)" fkey="acheminement_hc" type="number" value={String(f.acheminement_hc)} onChange={upd} placeholder="0.078"/>
+              <TariffField label="TURPE fixe (€/an)" fkey="turpe_fixe" type="number" value={String(f.turpe_fixe)} onChange={upd} placeholder="129.79"/>
+              <TariffField label="CTA fixe (€/an)" fkey="cta_fixe" type="number" value={String(f.cta_fixe)} onChange={upd} placeholder="19.47"/>
             </div>
+            <TariffField label="Marge fournisseur (c€/kWh)" fkey="marge_fournisseur_ceur_kwh" type="number" value={String(f.marge_fournisseur_ceur_kwh)} onChange={upd} placeholder="ex: 1.5"/>
           </>)}
+
+          {f.type_tarif==='multi' && (
+            <div style={{marginTop:4}}>
+              <div style={{fontSize:11,color:'rgba(255,255,255,.4)',marginBottom:8}}>
+                Dates : JJ/MM · Heures : 0–23 · Le total doit atteindre 8 760 h/an
+              </div>
+              {/* En-têtes */}
+              <div style={{display:'grid',gridTemplateColumns:'68px 68px 52px 52px 1fr 30px',gap:4,marginBottom:4}}>
+                {['Deb. date','Fin date','H.deb.','H.fin','€/kWh TTC',''].map((h,i)=>(
+                  <div key={i} style={{fontSize:10,color:'rgba(255,255,255,.3)',textAlign:'center'}}>{h}</div>
+                ))}
+              </div>
+              {/* Lignes */}
+              {periodes.map((p,i)=>(
+                <div key={i} style={{display:'grid',gridTemplateColumns:'68px 68px 52px 52px 1fr 30px',gap:4,marginBottom:5,alignItems:'center'}}>
+                  <input style={iS} placeholder="01/04" value={p.date_debut}   onChange={e=>updPeriode(i,'date_debut',  e.target.value)}/>
+                  <input style={iS} placeholder="30/10" value={p.date_fin}     onChange={e=>updPeriode(i,'date_fin',    e.target.value)}/>
+                  <input style={iS} type="number" min="0" max="23" placeholder="0"  value={p.heure_debut} onChange={e=>updPeriode(i,'heure_debut',e.target.value)}/>
+                  <input style={iS} type="number" min="0" max="24" placeholder="24" value={p.heure_fin}   onChange={e=>updPeriode(i,'heure_fin',  e.target.value)}/>
+                  <input style={iS} type="number" step="0.0001" placeholder="0.0987" value={p.prix}       onChange={e=>updPeriode(i,'prix',        e.target.value)}/>
+                  <button onClick={()=>delPeriode(i)} style={{background:'rgba(248,113,113,.15)',border:'1px solid rgba(248,113,113,.3)',borderRadius:7,color:'#f87171',cursor:'pointer',padding:'5px 0',fontSize:15,lineHeight:1,width:'100%'}}>−</button>
+                </div>
+              ))}
+              <button onClick={addPeriode} style={{fontSize:12,background:'rgba(125,217,64,.08)',border:'1px solid rgba(125,217,64,.25)',borderRadius:8,color:'#7dd940',cursor:'pointer',padding:'6px 14px',fontFamily:'inherit',marginTop:4}}>
+                + Ajouter une ligne
+              </button>
+              {/* Compteur */}
+              <div style={{marginTop:10,padding:'8px 12px',borderRadius:8,background:remaining===0?'rgba(74,222,128,.08)':'rgba(255,255,255,.04)',border:`1px solid ${remaining===0?'rgba(74,222,128,.3)':'rgba(255,255,255,.08)'}`}}>
+                <span style={{fontSize:13,color:remaining===0?'#4ade80':'rgba(255,255,255,.55)',fontWeight:600}}>
+                  {remaining===0?'✓ 8 760 h couvertes':`${covered} h couvertes · ${remaining} h restantes`}
+                </span>
+              </div>
+            </div>
+          )}
+
           {error && <div className="auth-error">{error}</div>}
         </div>
         {!isNew && (
@@ -6908,8 +7026,8 @@ function AdminTariffEditScreen({ tariff, onSave, onDelete, onBack }) {
         )}
       </div>
       <StickyFooter>
-        <button className="btn btn-yes" onClick={handleSave} disabled={loading}>
-          {loading ? 'Enregistrement…' : '✓ Enregistrer'}
+        <button className="btn btn-yes" onClick={handleSave} disabled={loading||(f.type_tarif==='multi'&&remaining>0)}>
+          {loading?'Enregistrement…':'✓ Enregistrer'}
         </button>
         <button className="btn btn-sec" onClick={onBack}>Annuler</button>
       </StickyFooter>
