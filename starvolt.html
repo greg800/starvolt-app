@@ -3313,14 +3313,15 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations }) {
     if(localStorage.getItem('starvolt_acc_chosen')==='true'){
       const _accPHT=parseFloat(localStorage.getItem('starvolt_acc_price_ht')||'0.09');
       const _tva=(globalVars?.tva??20)/100;
-      for(let m=1;m<=12;m++) for(let d=1;d<=PROF_DAYS[m-1];d++) for(let h=9;h<18;h++){
+      for(let m=1;m<=12;m++) for(let d=1;d<=PROF_DAYS[m-1];d++) for(let h=0;h<24;h++){
         const idx=profIdx(m,d,h);
+        if(prodProfilData?!(prodProfilData[idx]>0):(h<9||h>=18)) continue;
         const accTTC=(_accPHT+getTurpeRate(m,h,globalVars,hcWin))*(1+_tva);
         if(accTTC<arr[idx]) arr[idx]=accTTC;
       }
     }
     return arr;
-  },[effectiveTariff,site?.heure_debut_hc1,site?.heure_fin_hc1,site?.heure_debut_hc2,site?.heure_fin_hc2,globalVars,spotMap]);
+  },[effectiveTariff,site?.heure_debut_hc1,site?.heure_fin_hc1,site?.heure_debut_hc2,site?.heure_fin_hc2,globalVars,spotMap,prodProfilData]);
 
   // Charger les données spot si tarif dynamique (avec ou sans PV)
   useEffect(()=>{
@@ -3563,7 +3564,7 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations }) {
                       {s:parseHcHour(site?.heure_debut_hc2??globalVars?.hc_debut2),e:parseHcHour(site?.heure_fin_hc2??globalVars?.hc_fin2)},
                     ].filter(w=>w.s!==null&&w.e!==null);
                     for(const pt of balance.hourly){
-                      if(!pt||pt.grid_buy<=0||pt.h<9||pt.h>=18) continue;
+                      if(!pt||pt.grid_buy<=0||!(prodProfilData?.[profIdx(pt.m,pt.d,pt.h)]>0)) continue;
                       // Prix ACC TTC de l'heure : TURPE 4 taux (été/hiver × HC/HP), sans accise
                       const accTTC=(_accPHT+getTurpeRate(pt.m,pt.h,globalVars,_hcw))*(1+_tva);
                       // Prix normal de l'heure (sans ACC) calculé depuis le tarif brut
@@ -3882,19 +3883,32 @@ function SimulationsScreen({ onACC, onBox, onSolar, onOptimisation, onBack, onMo
           const curBill = cur?.result?.total || (kwh_total * 0.18);
           const bSav = Math.round(140 + curBill * (isDynamic ? 0.20 : 0.10));
           if (bSav > 0) setBoxSaving(bSav);
-          const accSavEst = (() => { let k=0; for(let m=1;m<=12;m++) for(let d=1;d<=PROF_DAYS[m-1];d++) for(let h=9;h<18;h++) k+=(site.conso_profil[profIdx(m,d,h)]||0)/1000; return Math.max(0,Math.round(k*((site.tarif_id?tariffs.find(t=>t.id===site.tarif_id)?.prix_hp||0.24:0.24)-0.11))); })();
-          const adjBillSolar = Math.max(0, curBill - (saving||0) - accSavEst);
-          // Calcul réel des économies solaires (si profil de prod disponible)
+          // Charger le profil de production (utilisé pour estim ACC + solar)
+          let _prodProfil = null;
           if (site.profil_production_id && site.conso_profil) {
             const { data: pp } = await sb.from('profils_production').select('profil').eq('id', site.profil_production_id).single();
-            if (pp?.profil) {
+            _prodProfil = pp?.profil || null;
+          }
+          // accSavEst : heures prod non nulle (ou 9h–18h si pas de profil)
+          const accSavEst = (() => {
+            let k=0;
+            for(let m=1;m<=12;m++) for(let d=1;d<=PROF_DAYS[m-1];d++) for(let h=0;h<24;h++){
+              const idx=profIdx(m,d,h);
+              if(_prodProfil?!(_prodProfil[idx]>0):(h<9||h>=18)) continue;
+              k+=(site.conso_profil[idx]||0)/1000;
+            }
+            return Math.max(0,Math.round(k*((site.tarif_id?tariffs.find(t=>t.id===site.tarif_id)?.prix_hp||0.24:0.24)-0.11)));
+          })();
+          const adjBillSolar = Math.max(0, curBill - (saving||0) - accSavEst);
+          // Calcul réel des économies solaires
+          if (_prodProfil) {
               const ratioBat   = ((nat?.ratio_puissance_stockage              ?? 50) / 100);
               const ratioTherm = ((nat?.ratio_puissance_stockage_thermique    ?? 50) / 100);
               const pBat   = nat?.pertes_batterie   ?? 10;
               const pTherm = nat?.pertes_thermique  ?? 0;
               const solDef=(()=>{try{return JSON.parse(localStorage.getItem('starvolt_solar_defaults'))||{};}catch{return{};}})();
               const kw=parseFloat(solDef.pvKwc)||6, bk=parseFloat(solDef.batKwh)||10, tk=parseFloat(solDef.thermKwh)||5;
-              const bal = computeEnergyBalance(site.conso_profil, pp.profil, kw,
+              const bal = computeEnergyBalance(site.conso_profil, _prodProfil, kw,
                 bk*ratioBat*1000, bk, pBat, tk*ratioTherm, tk, pTherm);
               const gridBuy = bal.monthly.reduce((s,m) => s + m.grid_buy, 0);
               const injKwh  = bal.monthly.reduce((s,m) => s + m.injection, 0);
@@ -3903,25 +3917,29 @@ function SimulationsScreen({ onACC, onBox, onSolar, onOptimisation, onBack, onMo
               const nouvFact = Math.max(0, gridBuy * prixMoyen - injKwh * prixRachat);
               const realSav = Math.max(0, Math.round(curBill - nouvFact));
               setSolarSaving(realSav > 0 ? realSav : Math.round(adjBillSolar * 0.70));
-              // Stocker pour projection correcte (inflation sur achat réseau uniquement)
               setSolGridKwh(gridBuy); setSolInjKwh(injKwh);
               setSolPrixBase(prixMoyen); setSolPrixRachat(prixRachat);
-            } else {
-              setSolarSaving(Math.round(adjBillSolar * 0.70));
-            }
           } else {
             setSolarSaving(Math.round(adjBillSolar * 0.70));
           }
         }
       }
 
-      // ACC savings (9h–18h vs tarif actuel)
+      // ACC savings : heures prod non nulle (ou 9h–18h si pas de profil)
       if (site.conso_profil) {
+        let _prodProfilAcc = null;
+        if (site.profil_production_id) {
+          const { data: pp } = await sb.from('profils_production').select('profil').eq('id', site.profil_production_id).single();
+          _prodProfilAcc = pp?.profil || null;
+        }
         let kwh918 = 0;
         for (let m=1; m<=12; m++)
           for (let d=1; d<=PROF_DAYS[m-1]; d++)
-            for (let h=9; h<18; h++)
-              kwh918 += (site.conso_profil[profIdx(m,d,h)]||0)/1000;
+            for (let h=0; h<24; h++) {
+              const idx=profIdx(m,d,h);
+              if(_prodProfilAcc?!(_prodProfilAcc[idx]>0):(h<9||h>=18)) continue;
+              kwh918 += (site.conso_profil[idx]||0)/1000;
+            }
         let priceRef = 0.24;
         if (site.tarif_id && tariffs?.length) {
           const t = tariffs.find(x=>x.id===site.tarif_id);
@@ -5110,13 +5128,14 @@ function SpotPricesScreen({ onBack }) {
 
 // ─── AccMapScreen ─────────────────────────────
 function AccMapScreen({ user, userProfile, onBack, onJoin, onCreate, onPanier }) {
-  const [accSites,    setAccSites]    = useState(null);
-  const [activeSite,  setActiveSite]  = useState(null);
-  const [activeTariff,setActiveTariff]= useState(null);
-  const [loading,     setLoading]     = useState(true);
-  const [siteLatLng,  setSiteLatLng]  = useState(null);
-  const [nearbyAcc,   setNearbyAcc]   = useState([]);
-  const [popup,       setPopup]       = useState(null);
+  const [accSites,      setAccSites]      = useState(null);
+  const [activeSite,    setActiveSite]    = useState(null);
+  const [activeTariff,  setActiveTariff]  = useState(null);
+  const [activeProdData,setActiveProdData]= useState(null);
+  const [loading,       setLoading]       = useState(true);
+  const [siteLatLng,    setSiteLatLng]    = useState(null);
+  const [nearbyAcc,     setNearbyAcc]     = useState([]);
+  const [popup,         setPopup]         = useState(null);
   const mapDivRef = useRef(null);
   const leafletRef = useRef(null);
 
@@ -5126,12 +5145,16 @@ function AccMapScreen({ user, userProfile, onBack, onJoin, onCreate, onPanier })
     Promise.all([
       sb.from('sites_acc').select('*').order('created_at'),
       siteId
-        ? sb.from('sites').select('id,nom,adresse_ligne1,code_postal,ville,conso_profil,tarif_id').eq('id', siteId).maybeSingle()
+        ? sb.from('sites').select('id,nom,adresse_ligne1,code_postal,ville,conso_profil,tarif_id,profil_production_id').eq('id', siteId).maybeSingle()
         : Promise.resolve({ data: null }),
     ]).then(async ([{ data: acc }, { data: site }]) => {
       const accList = acc || [];
       setAccSites(accList);
       setActiveSite(site || null);
+      if (site?.profil_production_id) {
+        sb.from('profils_production').select('profil').eq('id', site.profil_production_id).single()
+          .then(({data}) => { if(data?.profil) setActiveProdData(data.profil); });
+      }
       if (site?.tarif_id) {
         const { data: t } = await sb.from('tarifs_electricite').select('prix_hp,prix_hc,nom').eq('id', site.tarif_id).maybeSingle();
         setActiveTariff(t);
@@ -5260,10 +5283,13 @@ function AccMapScreen({ user, userProfile, onBack, onJoin, onCreate, onPanier })
     let k = 0;
     for (let m=1; m<=12; m++)
       for (let d=1; d<=PROF_DAYS[m-1]; d++)
-        for (let h=9; h<18; h++)
-          k += (activeSite.conso_profil[profIdx(m,d,h)]||0)/1000;
+        for (let h=0; h<24; h++) {
+          const idx = profIdx(m,d,h);
+          if (activeProdData ? !(activeProdData[idx] > 0) : (h < 9 || h >= 18)) continue;
+          k += (activeSite.conso_profil[idx]||0)/1000;
+        }
     return Math.round(k);
-  }, [activeSite]);
+  }, [activeSite, activeProdData]);
 
   const priceRef = activeTariff?.prix_hp || 0.24;
   const accPriceKwh = eligibleSite?.prix_vente_ttc || 0.11;
@@ -5694,10 +5720,21 @@ function SolarSimScreen({ user, userProfile, onBack, onPanier, onMonSite, onCart
       if (!bill && siteKwh > 0) bill = Math.round(siteKwh * 0.18);
       const roundedBill = bill ? Math.round(bill) : null;
       const optiSavLS = parseInt(localStorage.getItem('starvolt_optimisation_saving')||'0');
+      // Charger le profil de production en premier (utilisé pour accSavComp + calcul solaire)
+      let _pp = null;
+      if (site.profil_production_id) {
+        const { data: ppData } = await sb.from('profils_production').select('profil').eq('id', site.profil_production_id).single();
+        _pp = ppData?.profil || null;
+        if (_pp) setProdData(_pp);
+      }
       let accSavComp = 0;
       if (site.conso_profil) {
         let kwh918 = 0;
-        for (let m=1;m<=12;m++) for (let d=1;d<=PROF_DAYS[m-1];d++) for (let h=9;h<18;h++) kwh918+=(site.conso_profil[profIdx(m,d,h)]||0)/1000;
+        for (let m=1;m<=12;m++) for (let d=1;d<=PROF_DAYS[m-1];d++) for (let h=0;h<24;h++) {
+          const idx=profIdx(m,d,h);
+          if (_pp ? !(_pp[idx]>0) : (h<9||h>=18)) continue;
+          kwh918+=(site.conso_profil[idx]||0)/1000;
+        }
         accSavComp = Math.max(0, Math.round(kwh918*((curTariff?.prix_hp||0.24)-0.11)));
       }
       const adj = roundedBill ? Math.max(0, roundedBill - optiSavLS - accSavComp) : null;
@@ -5705,11 +5742,6 @@ function SolarSimScreen({ user, userProfile, onBack, onPanier, onMonSite, onCart
       setAdjustedBill(adj || roundedBill);
       setGlobalVars(nat);
       setSiteRef({ conso_profil: site.conso_profil, currentBill: roundedBill, curTariff, site, kwh_total: siteKwh, kwh_hc, kwh_hp });
-      // Charger le profil de production
-      if (site.profil_production_id) {
-        const { data: pp } = await sb.from('profils_production').select('profil').eq('id', site.profil_production_id).single();
-        if (pp?.profil) setProdData(pp.profil);
-      }
       setLoading(false);
     });
   }, []);
@@ -5991,6 +6023,12 @@ function PanierScreen({ user, onBack, onGoTo, onMonSite }) {
       }
       if (!bill && kwh_total > 0) bill = Math.round(kwh_total * 0.18);
       bill = bill ? Math.round(bill) : null;
+      // Charger le profil de production une fois (ACC + projection solaire)
+      let _prodProfil = null;
+      if (site.profil_production_id) {
+        const { data: pp } = await sb.from('profils_production').select('profil').eq('id', site.profil_production_id).single();
+        _prodProfil = pp?.profil || null;
+      }
       setCurrentBill(bill);
 
       if (bill) {
@@ -6003,7 +6041,11 @@ function PanierScreen({ user, onBack, onGoTo, onMonSite }) {
         let accSav = parseInt(localStorage.getItem('starvolt_acc_saving')||'0');
         if (!accSav && site.conso_profil) {
           let kwh918 = 0;
-          for (let m=1;m<=12;m++) for (let d=1;d<=PROF_DAYS[m-1];d++) for (let h=9;h<18;h++) kwh918 += (site.conso_profil[profIdx(m,d,h)]||0)/1000;
+          for (let m=1;m<=12;m++) for (let d=1;d<=PROF_DAYS[m-1];d++) for (let h=0;h<24;h++) {
+            const idx=profIdx(m,d,h);
+            if (_prodProfil ? !(_prodProfil[idx]>0) : (h<9||h>=18)) continue;
+            kwh918 += (site.conso_profil[idx]||0)/1000;
+          }
           accSav = Math.max(0, Math.round(kwh918 * ((curTariff?.prix_hp||0.24) - 0.11)));
         }
         const shiftPctBox = curTariff?.tarif_dynamique ? 0.20 : 0.10;
@@ -6038,9 +6080,8 @@ function PanierScreen({ user, onBack, onGoTo, onMonSite }) {
           const ratioTherm = ((nat?.ratio_puissance_stockage_thermique    ??50)/100);
           const pBat   = nat?.pertes_batterie  ?? 10;
           const pTherm = nat?.pertes_thermique ?? 0;
-          const { data: pp } = await sb.from('profils_production').select('profil').eq('id', site.profil_production_id).single();
-          if (pp?.profil) {
-            const bal = computeEnergyBalance(site.conso_profil, pp.profil, kw,
+          if (_prodProfil) {
+            const bal = computeEnergyBalance(site.conso_profil, _prodProfil, kw,
               bk*ratioBat*1000, bk, pBat, tk*ratioTherm, tk, pTherm);
             const gridBuy = bal.monthly.reduce((s,m) => s+m.grid_buy, 0);
             const injKwh  = bal.monthly.reduce((s,m) => s+m.injection, 0);
