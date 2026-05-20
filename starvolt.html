@@ -3080,9 +3080,9 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations }) {
   const[showGaps,setShowGaps]=useState(false);
   const[showDeleteConfirm,setShowDeleteConfirm]=useState(false);
   const[importingDemo,setImportingDemo]=useState(false);
-  const[pvKwc,setPvKwc]=useState(()=>{const hasSol=!!localStorage.getItem('starvolt_solar_chosen');try{const d=JSON.parse(localStorage.getItem('starvolt_solar_defaults'));return hasSol?(d?.pvKwc||'6'):'0';}catch{return hasSol?'6':'0';}});
-  const[batKwh,setBatKwh]=useState(()=>{const hasSol=!!localStorage.getItem('starvolt_solar_chosen');try{const d=JSON.parse(localStorage.getItem('starvolt_solar_defaults'));return hasSol?(d?.batKwh||'10'):'0';}catch{return hasSol?'10':'0';}});
-  const[thermKwh,setThermKwh]=useState(()=>{const hasSol=!!localStorage.getItem('starvolt_solar_chosen');const hasBox=!!localStorage.getItem('starvolt_box_chosen');try{const d=JSON.parse(localStorage.getItem('starvolt_solar_defaults'));return hasSol?(d?.thermKwh||'10'):hasBox?'10':'0';}catch{return hasSol?'10':hasBox?'10':'0';}});
+  const[pvKwc,setPvKwc]=useState(()=>{try{const d=JSON.parse(localStorage.getItem('starvolt_solar_defaults'));if(d?.pvKwc!=null)return d.pvKwc;}catch{}return!!localStorage.getItem('starvolt_solar_chosen')?'6':'0';});
+  const[batKwh,setBatKwh]=useState(()=>{try{const d=JSON.parse(localStorage.getItem('starvolt_solar_defaults'));if(d?.batKwh!=null)return d.batKwh;}catch{}return!!localStorage.getItem('starvolt_solar_chosen')?'10':'0';});
+  const[thermKwh,setThermKwh]=useState(()=>{try{const d=JSON.parse(localStorage.getItem('starvolt_solar_defaults'));if(d?.thermKwh!=null)return d.thermKwh;}catch{}const hasSol=!!localStorage.getItem('starvolt_solar_chosen');return hasSol?'10':!!localStorage.getItem('starvolt_box_chosen')?'10':'0';});
   const[prodProfilId,setProdProfilId]=useState('');
   const[prodProfilData,setProdProfilData]=useState(null);
   const[balance,setBalance]=useState(null);
@@ -3138,9 +3138,15 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations }) {
       setBatKwh(solarDef.batKwh||(site?.batterie_capacite_kwh>0?String(site.batterie_capacite_kwh):'10'));
       setThermKwh(solarDef.thermKwh||'10');
     } else if(hasBoxOnlyPanier){
-      setPvKwc('0'); setBatKwh('0'); setThermKwh('10');
+      // Box seule : conserver les valeurs déjà saisies, thermique à 10 par défaut
+      setPvKwc(solarDef.pvKwc||'0');
+      setBatKwh(solarDef.batKwh||'0');
+      setThermKwh(solarDef.thermKwh||'10');
     } else {
-      setPvKwc('0'); setBatKwh('0'); setThermKwh('0');
+      // Aucun équipement au panier : conserver les valeurs saisies (ne pas remettre à 0)
+      setPvKwc(solarDef.pvKwc||'0');
+      setBatKwh(solarDef.batKwh||'0');
+      setThermKwh(solarDef.thermKwh||'0');
     }
     setProdProfilId(site?.profil_production_id||'');
     setProdProfilData(null); setBalance(null);
