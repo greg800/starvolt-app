@@ -6904,7 +6904,8 @@ function AdminTariffEditScreen({ tariff, onSave, onDelete, onBack }) {
         for(let h=0;h<24;h++) if(overnight?(h>=hD||h<hF):(h>=hD&&h<hF)) covSet.add(profIdx(m,d,h));
       }
     }
-    return { covered:covSet.size, remaining:8760-covSet.size };
+    const totalH=PROF_DAYS.reduce((s,d)=>s+d,0)*24;
+    return { covered:covSet.size, remaining:totalH-covSet.size, totalH };
   }, [periodes]);
 
   const handleSave = async () => {
@@ -6986,7 +6987,7 @@ function AdminTariffEditScreen({ tariff, onSave, onDelete, onBack }) {
           {f.type_tarif==='multi' && (
             <div style={{marginTop:4}}>
               <div style={{fontSize:11,color:'rgba(255,255,255,.4)',marginBottom:8}}>
-                Dates : JJ/MM · Heures : 0–23 · Le total doit atteindre 8 760 h/an
+                Dates : JJ/MM · Heures : 0–23 · Le total doit atteindre 8 784 h/an (année bissextile)
               </div>
               {/* En-têtes */}
               <div style={{display:'grid',gridTemplateColumns:'68px 68px 52px 52px 1fr 30px',gap:4,marginBottom:4}}>
@@ -7011,7 +7012,7 @@ function AdminTariffEditScreen({ tariff, onSave, onDelete, onBack }) {
               {/* Compteur */}
               <div style={{marginTop:10,padding:'8px 12px',borderRadius:8,background:remaining===0?'rgba(74,222,128,.08)':'rgba(255,255,255,.04)',border:`1px solid ${remaining===0?'rgba(74,222,128,.3)':'rgba(255,255,255,.08)'}`}}>
                 <span style={{fontSize:13,color:remaining===0?'#4ade80':'rgba(255,255,255,.55)',fontWeight:600}}>
-                  {remaining===0?'✓ 8 760 h couvertes':`${covered} h couvertes · ${remaining} h restantes`}
+                  {remaining===0?'✓ 8 784 h couvertes':`${covered} h couvertes · ${remaining} h restantes`}
                 </span>
               </div>
             </div>
