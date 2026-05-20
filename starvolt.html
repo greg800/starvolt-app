@@ -2374,7 +2374,10 @@ function computeStorageOptimization(consoProfile, tariff, baseTariff, site, batK
 
           varCostHT_with += (gridBillableWh / 1000) * price;
 
-          const gb = gridConsumedWh / 1000, vb = viaBat / 1000, vt = viaTherm / 1000;
+          // grid_buy = achat réel au réseau (inclut la charge du stockage, pas juste la conso nette)
+          // → thermique sans pertes : grid_buy constant sur l'année
+          // → batterie avec 10% pertes : grid_buy légèrement supérieur à la conso
+          const gb = gridBillableWh / 1000, vb = viaBat / 1000, vt = viaTherm / 1000;
           hourly[idx] = {on_site:0, grid_buy:gb, injection:0, via_bat:vb, via_therm:vt, m, d, h};
           monthly[m-1].grid_buy  += gb;
           monthly[m-1].via_bat   += vb;
