@@ -5550,6 +5550,120 @@ function AccResultScreen({ state, onBack, onPanier, onMonSite }) {
   );
 }
 
+// ─── ThermaleForm ─────────────────────────────
+function ThermaleForm({ onDone, onBack }) {
+  const [chauffage, setChauffage] = useState(null);
+  const [ecs,       setEcs]       = useState(null);
+  const [surface,   setSurface]   = useState(null);
+
+  function handleDone() {
+    const idx = surface === 'small' ? 0 : surface === 'medium' ? 1 : 2;
+    let kw = 0;
+    if (chauffage === 'elec' || chauffage === 'pac') kw += [3, 7, 12][idx];
+    if (ecs === 'elec') kw += [2, 3, 4][idx];
+    try {
+      const d = JSON.parse(localStorage.getItem('starvolt_solar_defaults') || '{}');
+      d.thermKwh = String(kw);
+      localStorage.setItem('starvolt_solar_defaults', JSON.stringify(d));
+    } catch {}
+    onDone(kw);
+  }
+
+  const ready = chauffage && ecs && surface;
+  let previewKw = null;
+  if (ready) {
+    const idx = surface === 'small' ? 0 : surface === 'medium' ? 1 : 2;
+    previewKw = 0;
+    if (chauffage === 'elec' || chauffage === 'pac') previewKw += [3, 7, 12][idx];
+    if (ecs === 'elec') previewKw += [2, 3, 4][idx];
+  }
+
+  const bS = (active) => ({
+    flex: 1, padding: '13px 6px', borderRadius: 12,
+    border: `2px solid ${active ? '#7dd940' : 'rgba(255,255,255,.13)'}`,
+    background: active ? 'rgba(125,217,64,.11)' : 'rgba(255,255,255,.04)',
+    color: 'white', cursor: 'pointer', fontFamily: 'inherit', textAlign: 'center',
+  });
+  const lS = (active) => ({ fontSize: 12, fontWeight: active ? 800 : 600, color: active ? '#7dd940' : 'rgba(255,255,255,.75)' });
+  const sec = { fontSize: 11, fontWeight: 700, color: 'rgba(255,255,255,.4)', textTransform: 'uppercase', letterSpacing: '.6px', marginBottom: 10 };
+
+  return (
+    <>
+      <div className="screen fade-in">
+        <div style={{ marginBottom: 22, marginTop: 4 }}>
+          <div style={{ fontSize: 9, letterSpacing: '.8px', color: 'rgba(125,217,64,.85)', fontWeight: 700, textTransform: 'uppercase', marginBottom: 6 }}>Votre logement</div>
+          <div style={{ fontSize: 19, fontWeight: 900, color: 'white', lineHeight: 1.25 }}>Quelques infos pour<br/>affiner votre simulation</div>
+        </div>
+
+        <div className="card" style={{ padding: '16px', marginBottom: 10 }}>
+          <div style={sec}>Type de chauffage</div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button onClick={() => setChauffage('elec')} style={bS(chauffage==='elec')}>
+              <div style={{ fontSize: 22, marginBottom: 5 }}>⚡</div>
+              <div style={lS(chauffage==='elec')}>Électrique</div>
+            </button>
+            <button onClick={() => setChauffage('pac')} style={bS(chauffage==='pac')}>
+              <div style={{ fontSize: 22, marginBottom: 5 }}>♨️</div>
+              <div style={lS(chauffage==='pac')}>PAC</div>
+            </button>
+            <button onClick={() => setChauffage('autre')} style={bS(chauffage==='autre')}>
+              <div style={{ fontSize: 22, marginBottom: 5 }}>🔥</div>
+              <div style={lS(chauffage==='autre')}>Autre</div>
+            </button>
+          </div>
+        </div>
+
+        <div className="card" style={{ padding: '16px', marginBottom: 10 }}>
+          <div style={sec}>Eau chaude sanitaire</div>
+          <div style={{ display: 'flex', gap: 10 }}>
+            <button onClick={() => setEcs('elec')} style={bS(ecs==='elec')}>
+              <div style={{ fontSize: 22, marginBottom: 5 }}>⚡</div>
+              <div style={lS(ecs==='elec')}>Électrique</div>
+            </button>
+            <button onClick={() => setEcs('autre')} style={bS(ecs==='autre')}>
+              <div style={{ fontSize: 22, marginBottom: 5 }}>🔥</div>
+              <div style={lS(ecs==='autre')}>Autre</div>
+            </button>
+          </div>
+        </div>
+
+        <div className="card" style={{ padding: '16px', marginBottom: 10 }}>
+          <div style={sec}>Surface du logement</div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button onClick={() => setSurface('small')} style={bS(surface==='small')}>
+              <div style={lS(surface==='small')}>{'< 70 m²'}</div>
+            </button>
+            <button onClick={() => setSurface('medium')} style={bS(surface==='medium')}>
+              <div style={lS(surface==='medium')}>{'70–150 m²'}</div>
+            </button>
+            <button onClick={() => setSurface('large')} style={bS(surface==='large')}>
+              <div style={lS(surface==='large')}>{' > 150 m²'}</div>
+            </button>
+          </div>
+        </div>
+
+        {previewKw !== null && (
+          <div style={{ textAlign: 'center', padding: '14px 0 4px' }}>
+            <div style={{ fontSize: 11, color: 'rgba(255,255,255,.4)', marginBottom: 4 }}>Stockage thermique estimé</div>
+            {previewKw > 0
+              ? <div style={{ fontSize: 34, fontWeight: 900, color: '#7dd940', lineHeight: 1 }}>
+                  {previewKw} <span style={{ fontSize: 18, fontWeight: 600, color: 'rgba(125,217,64,.7)' }}>kWh</span>
+                </div>
+              : <div style={{ fontSize: 15, fontWeight: 700, color: 'rgba(255,255,255,.35)' }}>Stockage thermique non applicable</div>
+            }
+          </div>
+        )}
+      </div>
+      <StickyFooter row onBack={onBack}>
+        <button className="btn btn-yes" onClick={handleDone} disabled={!ready}
+          style={{ opacity: ready ? 1 : 0.35, flex: 1 }}>
+          Continuer →
+        </button>
+      </StickyFooter>
+    </>
+  );
+}
+
 // ─── BoxSimScreen ─────────────────────────────
 function BoxSimScreen({ user, userProfile, onBack, onPanier, onMonSite, onCartUpdate }) {
   const [loading,      setLoading]      = useState(true);
@@ -5557,6 +5671,7 @@ function BoxSimScreen({ user, userProfile, onBack, onPanier, onMonSite, onCartUp
   const [isDynamic,    setIsDynamic]    = useState(false);
   const [chosen,       setChosen]       = useState(() => localStorage.getItem('starvolt_box_chosen') || null);
   const [justConfirmed,setJustConfirmed]= useState(false);
+  const [showThermForm,setShowThermForm]= useState(false);
 
   useEffect(() => {
     const siteId = localStorage.getItem('starvolt_active_site_id');
@@ -5592,6 +5707,13 @@ function BoxSimScreen({ user, userProfile, onBack, onPanier, onMonSite, onCartUp
   const shiftGain = currentBill ? Math.round(currentBill * shiftPct) : null;
   const totalGain = flexGain + (shiftGain || 0);
   const newBill   = currentBill ? Math.round(currentBill - (shiftGain || 0)) : null;
+
+  if (showThermForm) {
+    return <ThermaleForm
+      onBack={() => setShowThermForm(false)}
+      onDone={() => { setShowThermForm(false); setJustConfirmed(true); if(onCartUpdate) onCartUpdate(); }}
+    />;
+  }
 
   if (justConfirmed) {
     return (
@@ -5730,12 +5852,12 @@ function BoxSimScreen({ user, userProfile, onBack, onPanier, onMonSite, onCartUp
         <div className="sticky-footer">
           <div className="sticky-footer-inner row">
             <button onClick={onBack} style={{ flexGrow:0, flexShrink:0, background:'rgba(255,255,255,.06)', border:'1px solid rgba(255,255,255,.12)', borderRadius:10, color:'rgba(255,255,255,.5)', fontSize:11, fontWeight:600, fontFamily:'inherit', padding:'10px 12px', cursor:'pointer', whiteSpace:'nowrap' }}>← Retour</button>
-            <button onClick={() => { localStorage.setItem('starvolt_box_chosen','free'); if(totalGain>0) localStorage.setItem('starvolt_box_saving',String(Math.round(totalGain))); setPanierServicesChecked({opti_tarif:true,opti_flex:true}); setChosen('free'); setJustConfirmed(true); if(onCartUpdate) onCartUpdate(); }}
+            <button onClick={() => { localStorage.setItem('starvolt_box_chosen','free'); if(totalGain>0) localStorage.setItem('starvolt_box_saving',String(Math.round(totalGain))); setPanierServicesChecked({opti_tarif:true,opti_flex:true}); setChosen('free'); setShowThermForm(true); }}
               style={{ flex:1, background:'rgba(255,255,255,.07)', border:'2px solid rgba(125,217,64,.55)', borderRadius:14, color:'white', padding:'13px 8px', cursor:'pointer', fontFamily:'inherit', textAlign:'center', lineHeight:1.3 }}>
               <div style={{ fontSize:17, fontWeight:900, color:'#7dd940', marginBottom:3 }}>🎁 Box gratuite</div>
               <div style={{ fontSize:12, color:'rgba(255,255,255,.75)' }}>Cagnotte reversée 3 ans</div>
             </button>
-            <button onClick={() => { localStorage.setItem('starvolt_box_chosen','buy'); if(totalGain>0) localStorage.setItem('starvolt_box_saving',String(Math.round(totalGain))); setPanierServicesChecked({opti_tarif:true,opti_flex:true}); setChosen('buy'); setJustConfirmed(true); if(onCartUpdate) onCartUpdate(); }}
+            <button onClick={() => { localStorage.setItem('starvolt_box_chosen','buy'); if(totalGain>0) localStorage.setItem('starvolt_box_saving',String(Math.round(totalGain))); setPanierServicesChecked({opti_tarif:true,opti_flex:true}); setChosen('buy'); setShowThermForm(true); }}
               style={{ flex:1, background:'rgba(255,255,255,.07)', border:'2px solid rgba(255,215,0,.4)', borderRadius:14, color:'white', padding:'13px 8px', cursor:'pointer', fontFamily:'inherit', textAlign:'center', lineHeight:1.3 }}>
               <div style={{ fontSize:17, fontWeight:900, color:'#fbbf24', marginBottom:2 }}>📦 Acheter</div>
               <div style={{ fontSize:18, fontWeight:900, color:'white', marginBottom:2 }}>550 €</div>
@@ -5756,6 +5878,7 @@ function SolarSimScreen({ user, userProfile, onBack, onPanier, onMonSite, onCart
   const [isDynamic,    setIsDynamic]    = useState(false);
   const [chosen,       setChosen]       = useState(() => localStorage.getItem('starvolt_solar_chosen') || null);
   const [justConfirmed,setJustConfirmed]= useState(false);
+  const [showThermForm,setShowThermForm]= useState(false);
   // Params installation — init depuis starvolt_solar_defaults (source partagée avec Ma prod)
   const [pvKwc,    setPvKwc]    = useState(()=>{try{return JSON.parse(localStorage.getItem('starvolt_solar_defaults'))?.pvKwc||'6';}catch{return'6';}});
   const [batKwh,   setBatKwh]   = useState(()=>{try{return JSON.parse(localStorage.getItem('starvolt_solar_defaults'))?.batKwh||'10';}catch{return'10';}});
@@ -5867,6 +5990,13 @@ function SolarSimScreen({ user, userProfile, onBack, onPanier, onMonSite, onCart
   // Gains box (rappel)
   const shiftPct  = isDynamic ? 0.20 : 0.10;
   const shiftGain = currentBill ? Math.round(currentBill * shiftPct) : null;
+
+  if (showThermForm) {
+    return <ThermaleForm
+      onBack={() => setShowThermForm(false)}
+      onDone={(kw) => { setThermKwh(String(kw)); setShowThermForm(false); setJustConfirmed(true); if(onCartUpdate) onCartUpdate(); }}
+    />;
+  }
 
   if (justConfirmed) {
     return (
@@ -6008,7 +6138,7 @@ function SolarSimScreen({ user, userProfile, onBack, onPanier, onMonSite, onCart
           </StickyFooter>
         ) : (
           <StickyFooter onBack={onBack}>
-            <button className="btn btn-yes" onClick={() => { localStorage.setItem('starvolt_solar_chosen','solar_box'); localStorage.setItem('starvolt_solar_defaults',JSON.stringify({pvKwc:'6',batKwh:'10',thermKwh:'10'})); if(solarBoxSaving) localStorage.setItem('starvolt_solar_saving',String(solarBoxSaving)); localStorage.removeItem('starvolt_box_chosen'); localStorage.removeItem('starvolt_box_saving'); setPanierServicesChecked({opti_solaire:true,opti_tarif:true,opti_flex:true}); setChosen('solar_box'); setJustConfirmed(true); if(onCartUpdate) onCartUpdate(); }}>
+            <button className="btn btn-yes" onClick={() => { localStorage.setItem('starvolt_solar_chosen','solar_box'); try{const d=JSON.parse(localStorage.getItem('starvolt_solar_defaults')||'{}');localStorage.setItem('starvolt_solar_defaults',JSON.stringify({...d,pvKwc:'6',batKwh:'10'}));}catch{localStorage.setItem('starvolt_solar_defaults',JSON.stringify({pvKwc:'6',batKwh:'10',thermKwh:'0'}));} if(solarBoxSaving) localStorage.setItem('starvolt_solar_saving',String(solarBoxSaving)); localStorage.removeItem('starvolt_box_chosen'); localStorage.removeItem('starvolt_box_saving'); setPanierServicesChecked({opti_solaire:true,opti_tarif:true,opti_flex:true}); setChosen('solar_box'); setShowThermForm(true); }}>
               ☀️ Je veux des panneaux + batterie + Box
             </button>
           </StickyFooter>
