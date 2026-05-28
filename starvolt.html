@@ -3149,7 +3149,83 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations }) {
   const[isMobile,setIsMobile]=useState(window.innerWidth<640);
   const[consoOpen,setConsoOpen]=useState(true);
   const[prodOpen,setProdOpen]=useState(true);
+  const[linkyStatus,setLinkyStatus]=useState(null); // null | 'loading' | 'pending' | 'ordering' | 'done' | 'error'
+  const[linkyUserUrl,setLinkyUserUrl]=useState(null);
+  const[linkyRequestId,setLinkyRequestId]=useState(null);
+  const[linkyError,setLinkyError]=useState(null);
+  const linkyPollRef=useRef(null);
   const fileRef=useRef(null);
+
+  // Poll Switchgrid Edge Function while request is in-flight
+  React.useEffect(()=>{
+    if(!linkyRequestId||linkyStatus==='done'||linkyStatus==='error') return;
+    clearInterval(linkyPollRef.current);
+    linkyPollRef.current=setInterval(async()=>{
+      try{
+        const { data:{session} } = await sb.auth.getSession();
+        if(!session) return;
+        const res=await fetch(
+          `https://hkxkhwegqkapdbsisxwv.supabase.co/functions/v1/switchgrid?request_id=${linkyRequestId}`,
+          {headers:{Authorization:`Bearer ${session.access_token}`,'apikey':'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhreGtod2VncWthcGRic2lzeHd2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc0MjY4NjksImV4cCI6MjA5MzAwMjg2OX0.9-_oHRJfwXZkl3bRYDMb5K56UzB8O1NOfa5QfrXFfkQ'}}
+        );
+        const d=await res.json();
+        setLinkyStatus(d.status||'pending');
+        if(d.userUrl) setLinkyUserUrl(d.userUrl);
+        if(d.status==='done'){
+          clearInterval(linkyPollRef.current);
+          // Reload site data — conso_profil has been written by the Edge Function
+          setTimeout(()=>load(),800);
+        }
+        if(d.status==='error'){
+          clearInterval(linkyPollRef.current);
+          setLinkyError(d.error_message||'Erreur inconnue');
+        }
+      }catch(e){console.warn('linky poll error',e);}
+    },8000);
+    return ()=>clearInterval(linkyPollRef.current);
+  },[linkyRequestId,linkyStatus]);
+
+  const handleLinkyImport=async(site)=>{
+    if(!site) return;
+    const pdl=(site.pdl||'').trim();
+    if(!pdl||pdl.length<14){
+      alert('Renseignez d\'abord le PDL du compteur (14 chiffres) dans le champ ci-dessus.');
+      return;
+    }
+    setLinkyStatus('loading'); setLinkyError(null); setLinkyUserUrl(null); setLinkyRequestId(null);
+    try{
+      const { data:{session} } = await sb.auth.getSession();
+      if(!session) throw new Error('Non connecté');
+      const res=await fetch(
+        'https://hkxkhwegqkapdbsisxwv.supabase.co/functions/v1/switchgrid',
+        {
+          method:'POST',
+          headers:{
+            'Content-Type':'application/json',
+            Authorization:`Bearer ${session.access_token}`,
+            'apikey':'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhreGtod2VncWthcGRic2lzeHd2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc0MjY4NjksImV4cCI6MjA5MzAwMjg2OX0.9-_oHRJfwXZkl3bRYDMb5K56UzB8O1NOfa5QfrXFfkQ',
+          },
+          body:JSON.stringify({
+            site_id: site.id,
+            pdl,
+            firstName: userProfile?.prenom || '',
+            lastName:  userProfile?.nom   || '',
+            address:   site.adresse_ligne1 || userProfile?.adresse_ligne1 || '',
+            codePostal:site.code_postal    || userProfile?.code_postal    || '',
+            commune:   site.ville          || userProfile?.ville          || '',
+          }),
+        }
+      );
+      const d=await res.json();
+      if(d.error) throw new Error(d.error);
+      setLinkyRequestId(d.request_id);
+      setLinkyStatus(d.status||'pending');
+      if(d.userUrl) setLinkyUserUrl(d.userUrl);
+    }catch(e){
+      setLinkyStatus('error');
+      setLinkyError(e.message);
+    }
+  };
 
   const handleImportDemo=async()=>{
     setImportingDemo(true);
@@ -3541,8 +3617,47 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations }) {
                       </select>
                     </div>
                     <div>
-                      <label style={{fontSize:10,color:'rgba(255,255,255,.45)',fontWeight:700,letterSpacing:'.5px',display:'block',marginBottom:4}}>PDL (optionnel)</label>
-                      <div style={{maxWidth:260}}><PDLInput value={site.pdl||''} onSave={v=>updateSite({pdl:v})}/></div>
+                      <label style={{fontSize:10,color:'rgba(255,255,255,.45)',fontWeight:700,letterSpacing:'.5px',display:'block',marginBottom:4}}>PDL (numéro compteur Linky)</label>
+                      <div style={{display:'flex',gap:8,alignItems:'center',flexWrap:'wrap'}}>
+                        <div style={{flex:'1 1 180px',maxWidth:220}}><PDLInput value={site.pdl||''} onSave={v=>updateSite({pdl:v})}/></div>
+                        <button
+                          onClick={()=>handleLinkyImport(site)}
+                          disabled={linkyStatus==='loading'||linkyStatus==='pending'||linkyStatus==='ordering'}
+                          style={{
+                            background: linkyStatus==='done'?'#7dd940':linkyStatus==='error'?'rgba(255,50,50,.25)':'rgba(247,201,72,.15)',
+                            border: `1px solid ${linkyStatus==='done'?'#7dd940':linkyStatus==='error'?'#ff6b6b':'rgba(247,201,72,.5)'}`,
+                            borderRadius:8, color: linkyStatus==='done'?'#061e2a':linkyStatus==='error'?'#ff9090':'#f7c948',
+                            fontSize:12, fontWeight:700, padding:'8px 12px', cursor:'pointer',
+                            opacity:(linkyStatus==='loading'||linkyStatus==='pending'||linkyStatus==='ordering')?0.6:1,
+                            whiteSpace:'nowrap',
+                          }}
+                        >
+                          {linkyStatus==='loading'?'⏳ Connexion…':linkyStatus==='pending'?'⏳ En attente…':linkyStatus==='ordering'?'⏳ Téléchargement…':linkyStatus==='done'?'✅ Importé !':linkyStatus==='error'?'⚠️ Réessayer':'⚡ Récupérer depuis Linky'}
+                        </button>
+                      </div>
+                      {/* Status messages */}
+                      {linkyStatus==='pending'&&linkyUserUrl&&(
+                        <div style={{marginTop:8,background:'rgba(247,201,72,.1)',border:'1px solid rgba(247,201,72,.3)',borderRadius:8,padding:'10px 12px'}}>
+                          <div style={{color:'#f7c948',fontWeight:700,fontSize:12,marginBottom:6}}>⚡ Autorisation ENEDIS requise</div>
+                          <div style={{color:'rgba(255,255,255,.7)',fontSize:11,marginBottom:8,lineHeight:1.5}}>Cliquez sur le lien ci-dessous pour autoriser Starvolt à accéder à vos données ENEDIS. La page se mettra à jour automatiquement une fois validé.</div>
+                          <a href={linkyUserUrl} target="_blank" rel="noopener noreferrer"
+                            style={{display:'inline-block',background:'#f7c948',color:'#061e2a',fontWeight:800,fontSize:12,borderRadius:7,padding:'8px 14px',textDecoration:'none'}}>
+                            Autoriser sur ENEDIS →
+                          </a>
+                        </div>
+                      )}
+                      {linkyStatus==='pending'&&!linkyUserUrl&&(
+                        <div style={{marginTop:6,color:'rgba(255,255,255,.5)',fontSize:11}}>En attente de la réponse Switchgrid…</div>
+                      )}
+                      {linkyStatus==='ordering'&&(
+                        <div style={{marginTop:6,color:'rgba(255,255,255,.5)',fontSize:11}}>⬇️ Téléchargement de la courbe de charge en cours…</div>
+                      )}
+                      {linkyStatus==='done'&&(
+                        <div style={{marginTop:6,color:'#7dd940',fontSize:11,fontWeight:700}}>✅ Données Linky importées avec succès !</div>
+                      )}
+                      {linkyStatus==='error'&&linkyError&&(
+                        <div style={{marginTop:6,color:'#ff9090',fontSize:11}}>⚠️ {linkyError}</div>
+                      )}
                     </div>
                     {importMsg?.type==='err'&&<div style={{color:'#ff6b6b',fontSize:12,padding:'6px 10px',background:'rgba(255,50,50,.1)',borderRadius:8}}>⚠️ {importMsg.text}</div>}
                     {importMsg?.type==='ok'&&<div style={{color:'#7dd940',fontSize:12,padding:'6px 10px',background:'rgba(255,255,255,.05)',borderRadius:8}}>✅ {importMsg.kwh.toLocaleString('fr-FR')} kWh/an{importMsg.gaps>0?` · ${importMsg.gaps} trou(s) rebouché(s)`:''}</div>}
