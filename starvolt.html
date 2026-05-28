@@ -3598,8 +3598,10 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations }) {
                   const hasAcc=localStorage.getItem('starvolt_acc_chosen')==='true';
                   const optiFlex=!!(globalVars?.opti_flex)&&hasBox;
                   const optiAcc=!!(globalVars?.opti_acc)&&hasAcc;
-                  // Flex revenue : 14 €/an/kW de puissance thermique pilotée
-                  const flexRevenue=optiFlex?Math.round((parseFloat(thermKwh)||0)*14):0;
+                  // Flex revenue : thermique 14 €/kW/an + batterie 27 €/kW/an (puissance = capacité × ratio)
+                  const _ratio=(globalVars?.ratio_puissance_stockage??50)/100;
+                  const batPowKw=(parseFloat(batKwh)||0)*_ratio;
+                  const flexRevenue=optiFlex?Math.round((parseFloat(thermKwh)||0)*14+batPowKw*27):0;
                   // ACC savings post-balance : heures 9–17, accTTC < normalTTC
                   // Formule ACC TTC : (prix_vente_ACC + TURPE_4_taux(m,h)) × (1+TVA) — sans accise
                   // TURPE variable selon saison et HC/HP ; normalTTC depuis tarif brut (pas hourlyPrices)
@@ -3933,7 +3935,8 @@ function SimulationsScreen({ onACC, onBox, onSolar, onOptimisation, onBack, onMo
           const bkv=parseFloat(solDef.batKwh)||0, tkv=parseFloat(solDef.thermKwh)||0;
           const sp = spotRows ? buildSpotMap(spotRows) : null;
           const storRes = curTariff ? computeStorageOptimization(site.conso_profil, curTariff, curTariff, site, bkv, tkv, {...nat, opti_tarif:true}, sp) : null;
-          const flexGainSim = Math.round((parseFloat(solDef.thermKwh) || 10) * 14);
+          const _ratioSim = (nat?.ratio_puissance_stockage ?? 50) / 100;
+          const flexGainSim = Math.round((parseFloat(solDef.thermKwh)||10)*14 + (parseFloat(solDef.batKwh)||10)*_ratioSim*27);
           const bSav = Math.round(flexGainSim + (storRes?.saving || 0));
           if (bSav > 0) setBoxSaving(bSav);
           // Charger le profil de production (utilisé pour estim ACC + solar)
@@ -5675,6 +5678,7 @@ function BoxSimScreen({ user, userProfile, onBack, onPanier, onMonSite, onCartUp
   const [justConfirmed,setJustConfirmed]= useState(false);
   const [showThermForm,setShowThermForm]= useState(false);
   const [shiftSaving,  setShiftSaving]  = useState(0);
+  const [storageRatio, setStorageRatio] = useState(0.5);
 
   useEffect(() => {
     const siteId = localStorage.getItem('starvolt_active_site_id');
@@ -5709,12 +5713,15 @@ function BoxSimScreen({ user, userProfile, onBack, onPanier, onMonSite, onCartUp
         const res = computeStorageOptimization(site.conso_profil, curTariff, curTariff, site, bkv, tkv, {...nat, opti_tarif:true}, sp);
         setShiftSaving(res?.saving || 0);
       }
+      setStorageRatio((nat?.ratio_puissance_stockage ?? 50) / 100);
       setLoading(false);
     });
   }, []);
 
-  const thermKwhFlex = (() => { try { return parseFloat(JSON.parse(localStorage.getItem('starvolt_solar_defaults'))?.thermKwh) || 10; } catch { return 10; } })();
-  const flexGain  = Math.round(thermKwhFlex * 14);
+  const _solDef = (() => { try { return JSON.parse(localStorage.getItem('starvolt_solar_defaults')) || {}; } catch { return {}; } })();
+  const thermKwhFlex = parseFloat(_solDef.thermKwh) || 10;
+  const batKwhFlex   = parseFloat(_solDef.batKwh)   || 10;
+  const flexGain  = Math.round(thermKwhFlex * 14 + batKwhFlex * storageRatio * 27);
   const shiftGain = shiftSaving > 0 ? shiftSaving : null;
   const totalGain = flexGain + (shiftGain || 0);
   const newBill   = currentBill ? Math.round(currentBill - (shiftGain || 0)) : null;
@@ -6281,7 +6288,8 @@ function PanierScreen({ user, onBack, onGoTo, onMonSite }) {
           boxSav = shiftSavP; // flex reversée à Starvolt, l'utilisateur garde le gain de déplacement
         } else {
           boxSav = parseInt(localStorage.getItem('starvolt_box_saving')||'0');
-          const flexGainP = Math.round((parseFloat(solDefP.thermKwh) || 10) * 14);
+          const _ratioP = (nat?.ratio_puissance_stockage ?? 50) / 100;
+          const flexGainP = Math.round((parseFloat(solDefP.thermKwh)||0)*14 + bkvP*_ratioP*27);
           if (!boxSav) boxSav = Math.round(flexGainP + shiftSavP);
         }
         // Solar savings : utiliser baisse facture calculée (MaProd) si dispo, sinon estimation 70%
