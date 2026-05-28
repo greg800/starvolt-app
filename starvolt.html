@@ -3910,8 +3910,9 @@ function SimulationsScreen({ onACC, onBox, onSolar, onOptimisation, onBack, onMo
         ? sb.from('sites').select('id,conso_profil,tarif_id,profil_production_id,heure_debut_hc1,heure_fin_hc1,heure_debut_hc2,heure_fin_hc2').eq('id', activeId).maybeSingle()
         : sb.from('sites').select('id,conso_profil,tarif_id,profil_production_id,heure_debut_hc1,heure_fin_hc1,heure_debut_hc2,heure_fin_hc2').eq('user_id', user.id).not('conso_profil','is',null).order('created_at').limit(1).maybeSingle(),
       sb.from('tarifs_electricite').select('*').order('nom'),
-      sb.from('parametres_nationaux').select('prix_rachat_injection,ratio_puissance_stockage,pertes_batterie,ratio_puissance_stockage_thermique,pertes_thermique').eq('id',1).maybeSingle(),
-    ]).then(async ([{ data: siteData }, { data: tariffs }, { data: nat }]) => {
+      sb.from('parametres_nationaux').select('*').eq('id',1).maybeSingle(),
+      sb.rpc('get_spot_json'),
+    ]).then(async ([{ data: siteData }, { data: tariffs }, { data: nat }, { data: spotRows }]) => {
       const site = Array.isArray(siteData) ? siteData[0] : siteData;
       if (!site?.conso_profil) return;
       setHasConso(true);
@@ -3928,13 +3929,14 @@ function SimulationsScreen({ onACC, onBox, onSolar, onOptimisation, onBack, onMo
           setMaxSaving(saving);
           if (saving > 0) setBestTariffName(ranked[0].t.nom);
 
-          // Box saving: 140€ flex + déplacement conso (seulement si HC/HP ou dynamique)
+          // Box saving: 140€ flex + gain réel du stockage calculé heure par heure
           const curTariff = site.tarif_id ? tariffs.find(t => t.id === site.tarif_id) : null;
-          const isDynamic = curTariff?.tarif_dynamique === true;
-          const isHcHpTariff = !!(curTariff?.prix_hc && parseFloat(curTariff.prix_hc) > 0);
           const curBill = cur?.result?.total || (kwh_total * 0.18);
-          const shiftPctSim = isDynamic ? 0.20 : isHcHpTariff ? 0.10 : 0;
-          const bSav = Math.round(140 + curBill * shiftPctSim);
+          const solDef=(()=>{try{return JSON.parse(localStorage.getItem('starvolt_solar_defaults'))||{};}catch{return{};}})();
+          const bkv=parseFloat(solDef.batKwh)||0, tkv=parseFloat(solDef.thermKwh)||0;
+          const sp = spotRows ? buildSpotMap(spotRows) : null;
+          const storRes = curTariff ? computeStorageOptimization(site.conso_profil, curTariff, curTariff, site, bkv, tkv, {...nat, opti_tarif:true}, sp) : null;
+          const bSav = Math.round(140 + (storRes?.saving || 0));
           if (bSav > 0) setBoxSaving(bSav);
           // Charger le profil de production (utilisé pour estim ACC + solar)
           let _prodProfil = null;
@@ -5674,7 +5676,7 @@ function BoxSimScreen({ user, userProfile, onBack, onPanier, onMonSite, onCartUp
   const [chosen,       setChosen]       = useState(() => localStorage.getItem('starvolt_box_chosen') || null);
   const [justConfirmed,setJustConfirmed]= useState(false);
   const [showThermForm,setShowThermForm]= useState(false);
-  const [isHcHp,       setIsHcHp]       = useState(false);
+  const [shiftSaving,  setShiftSaving]  = useState(0);
 
   useEffect(() => {
     const siteId = localStorage.getItem('starvolt_active_site_id');
@@ -5701,15 +5703,20 @@ function BoxSimScreen({ user, userProfile, onBack, onPanier, onMonSite, onCartUp
       }
       if (!bill && kwh_total > 0) bill = Math.round(kwh_total * 0.18);
       setCurrentBill(bill ? Math.round(bill) : null);
-      // Déplacement de conso n'a de valeur que si le tarif distingue HP et HC
-      setIsHcHp(!!(curTariff?.prix_hc && parseFloat(curTariff.prix_hc) > 0));
+      // Gain réel du déplacement de consommation calculé heure par heure
+      const solDef=(()=>{try{return JSON.parse(localStorage.getItem('starvolt_solar_defaults'))||{};}catch{return{};}})();
+      const bkv=parseFloat(solDef.batKwh)||0, tkv=parseFloat(solDef.thermKwh)||0;
+      if (curTariff && (bkv > 0 || tkv > 0)) {
+        const sp = spotRows ? buildSpotMap(spotRows) : null;
+        const res = computeStorageOptimization(site.conso_profil, curTariff, curTariff, site, bkv, tkv, {...nat, opti_tarif:true}, sp);
+        setShiftSaving(res?.saving || 0);
+      }
       setLoading(false);
     });
   }, []);
 
   const flexGain  = 140;
-  const shiftPct  = isDynamic ? 0.20 : isHcHp ? 0.10 : 0;
-  const shiftGain = currentBill ? Math.round(currentBill * shiftPct) : null;
+  const shiftGain = shiftSaving > 0 ? shiftSaving : null;
   const totalGain = flexGain + (shiftGain || 0);
   const newBill   = currentBill ? Math.round(currentBill - (shiftGain || 0)) : null;
 
@@ -6265,13 +6272,17 @@ function PanierScreen({ user, onBack, onGoTo, onMonSite }) {
           }
           accSav = Math.max(0, Math.round(kwh918 * ((curTariff?.prix_hp||0.24) - 0.11)));
         }
-        const shiftPctBox = curTariff?.tarif_dynamique ? 0.20 : (curTariff?.prix_hc && parseFloat(curTariff.prix_hc) > 0) ? 0.10 : 0;
+        const solDefP=(()=>{try{return JSON.parse(localStorage.getItem('starvolt_solar_defaults'))||{};}catch{return{};}})();
+        const bkvP=parseFloat(solDefP.batKwh)||0, tkvP=parseFloat(solDefP.thermKwh)||0;
+        const spP = spotRows ? buildSpotMap(spotRows) : null;
+        const storResP = curTariff ? computeStorageOptimization(site.conso_profil, curTariff, curTariff, site, bkvP, tkvP, {...nat, opti_tarif:true}, spP) : null;
+        const shiftSavP = storResP?.saving || 0;
         let boxSav;
         if (localStorage.getItem('starvolt_box_chosen') === 'free') {
-          boxSav = Math.round(bill * shiftPctBox); // flex reversée à Starvolt
+          boxSav = shiftSavP; // flex reversée à Starvolt, l'utilisateur garde le gain de déplacement
         } else {
           boxSav = parseInt(localStorage.getItem('starvolt_box_saving')||'0');
-          if (!boxSav) boxSav = Math.round(140 + bill * shiftPctBox);
+          if (!boxSav) boxSav = Math.round(140 + shiftSavP);
         }
         // Solar savings : utiliser baisse facture calculée (MaProd) si dispo, sinon estimation 70%
         const adjBillSolar = Math.max(0, bill - optSav - accSav);
