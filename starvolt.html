@@ -1631,10 +1631,14 @@ function InstallBanner() {
 
 // ─── AuthSignupScreen ─────────────────────────
 function AuthSignupScreen({ onGoToLogin, onSignedUp, onDemoImported }) {
-  const [prenom,  setPrenom]  = useState('');
-  const [nom,     setNom]     = useState('');
-  const [email,   setEmail]   = useState('');
-  const [pwd,     setPwd]     = useState('');
+  const [prenom,        setPrenom]        = useState('');
+  const [nom,           setNom]           = useState('');
+  const [email,         setEmail]         = useState('');
+  const [pwd,           setPwd]           = useState('');
+  const [adresse,       setAdresse]       = useState('');
+  const [codePostal,    setCodePostal]    = useState('');
+  const [ville,         setVille]         = useState('');
+  const [enedisConsent, setEnedisConsent] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error,   setError]   = useState(null);
   const [checkEmail, setCheckEmail] = useState(false);
@@ -1643,8 +1647,14 @@ function AuthSignupScreen({ onGoToLogin, onSignedUp, onDemoImported }) {
     if (!prenom.trim() || !nom.trim() || !email.trim() || !pwd) {
       setError('Tous les champs sont obligatoires.'); return;
     }
+    if (!adresse.trim() || !codePostal.trim() || !ville.trim()) {
+      setError('Veuillez renseigner votre adresse complète.'); return;
+    }
     if (pwd.length < 6) {
       setError('Le mot de passe doit contenir au moins 6 caractères.'); return;
+    }
+    if (!enedisConsent) {
+      setError("Veuillez cocher l'autorisation ENEDIS pour continuer."); return;
     }
     setLoading(true); setError(null);
     // Préremplir le profil AVANT signUp pour que pendingProfileRef soit prêt
@@ -1658,7 +1668,15 @@ function AuthSignupScreen({ onGoToLogin, onSignedUp, onDemoImported }) {
     const { data, error: err } = await sb.auth.signUp({ email: email.trim(), password: pwd });
     if (err) { setError(err.message); setLoading(false); return; }
     if (data.user) {
-      await sb.from('profiles').insert({ id: data.user.id, prenom: prenom.trim(), nom: nom.trim() });
+      await sb.from('profiles').insert({
+        id: data.user.id,
+        prenom: prenom.trim(),
+        nom: nom.trim(),
+        adresse_ligne1: adresse.trim(),
+        code_postal: codePostal.trim(),
+        ville: ville.trim(),
+        enedis_consent: enedisConsent,
+      });
       // Copie les sites témoins + définit le 1er comme site actif
       // (évite d'avoir à passer par MaConsoScreen avant que les simulations fonctionnent)
       try {
@@ -1722,6 +1740,41 @@ function AuthSignupScreen({ onGoToLogin, onSignedUp, onDemoImported }) {
             <label className="inp-label">Mot de passe</label>
             <input className="inp" type="password" value={pwd} onChange={e=>setPwd(e.target.value)} placeholder="••••••••"/>
           </div>
+          <div className="inp-group">
+            <label className="inp-label">Adresse</label>
+            <input className="inp" value={adresse} onChange={e=>setAdresse(e.target.value)} placeholder="12 rue de la Paix"/>
+          </div>
+          <div className="inp-row">
+            <div className="inp-group" style={{flex:'0 0 38%'}}>
+              <label className="inp-label">Code postal</label>
+              <input className="inp" value={codePostal} onChange={e=>setCodePostal(e.target.value)} placeholder="75001" maxLength={5} inputMode="numeric"/>
+            </div>
+            <div className="inp-group">
+              <label className="inp-label">Ville</label>
+              <input className="inp" value={ville} onChange={e=>setVille(e.target.value)} placeholder="Paris"/>
+            </div>
+          </div>
+          <label style={{display:'flex',alignItems:'flex-start',gap:12,marginTop:8,cursor:'pointer',padding:'12px 0 4px'}}>
+            <span style={{position:'relative',flexShrink:0,marginTop:2}}>
+              <input
+                type="checkbox"
+                checked={enedisConsent}
+                onChange={e=>setEnedisConsent(e.target.checked)}
+                style={{position:'absolute',opacity:0,width:22,height:22,cursor:'pointer',margin:0}}
+              />
+              <span style={{
+                display:'flex',alignItems:'center',justifyContent:'center',
+                width:22,height:22,borderRadius:6,
+                border:`2px solid ${enedisConsent?'#f7c948':'rgba(255,255,255,0.25)'}`,
+                background:enedisConsent?'#f7c948':'transparent',transition:'all .2s'
+              }}>
+                {enedisConsent && <span style={{fontSize:13,color:'#061e2a',fontWeight:900,lineHeight:1}}>✓</span>}
+              </span>
+            </span>
+            <span style={{fontSize:13,lineHeight:1.5,color:'rgba(255,255,255,0.75)',userSelect:'none'}}>
+              J'autorise Starvolt à contacter ENEDIS de ma part afin de récupérer mes données de consommation et de comptage, puissance souscrite, heures pleines / heures creuses.
+            </span>
+          </label>
           {error && <div className="auth-error">{error}</div>}
         </div>
         <button className="btn-link" onClick={onGoToLogin}>Déjà membre ? Se connecter</button>
