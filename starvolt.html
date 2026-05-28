@@ -1638,6 +1638,7 @@ function AuthSignupScreen({ onGoToLogin, onSignedUp, onDemoImported }) {
   const [adresse,       setAdresse]       = useState('');
   const [codePostal,    setCodePostal]    = useState('');
   const [ville,         setVille]         = useState('');
+  const [pdl,           setPdl]           = useState('');
   const [enedisConsent, setEnedisConsent] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error,   setError]   = useState(null);
@@ -1668,6 +1669,7 @@ function AuthSignupScreen({ onGoToLogin, onSignedUp, onDemoImported }) {
     const { data, error: err } = await sb.auth.signUp({ email: email.trim(), password: pwd });
     if (err) { setError(err.message); setLoading(false); return; }
     if (data.user) {
+      const pdlTrimmed = pdl.trim() || null;
       await sb.from('profiles').insert({
         id: data.user.id,
         prenom: prenom.trim(),
@@ -1675,24 +1677,26 @@ function AuthSignupScreen({ onGoToLogin, onSignedUp, onDemoImported }) {
         adresse_ligne1: adresse.trim(),
         code_postal: codePostal.trim(),
         ville: ville.trim(),
+        pdl: pdlTrimmed,
         enedis_consent: enedisConsent,
       });
-      // Copie les sites témoins + définit le 1er comme site actif
-      // (évite d'avoir à passer par MaConsoScreen avant que les simulations fonctionnent)
+      // Créer le site principal de l'utilisateur
       try {
-        await sb.rpc('import_demo_sites', { target_user_id: data.user.id });
-        const { data: demoSites } = await sb.from('sites')
-          .select('id')
-          .eq('user_id', data.user.id)
-          .order('created_at')
-          .limit(1);
-        const firstId = demoSites?.[0]?.id;
-        if (firstId) {
-          localStorage.setItem('starvolt_active_site_id', firstId);
-          sb.from('profiles').update({ active_site_id: firstId }).eq('id', data.user.id);
+        const { data: newSite } = await sb.from('sites').insert({
+          user_id: data.user.id,
+          nom: `Site de ${prenom.trim()}`,
+          adresse_ligne1: adresse.trim(),
+          code_postal: codePostal.trim(),
+          ville: ville.trim(),
+          pdl: pdlTrimmed,
+          tarif_id: '5f805745-8e02-46bc-bbda-caaa28390370', // EDF TRV légal
+        }).select().single();
+        if (newSite) {
+          localStorage.setItem('starvolt_active_site_id', newSite.id);
+          sb.from('profiles').update({ active_site_id: newSite.id }).eq('id', data.user.id);
         }
         onDemoImported?.();
-      } catch(e) { console.warn('import_demo_sites failed', e); }
+      } catch(e) { console.warn('site creation failed', e); }
     }
     if (!data.session) setCheckEmail(true);
     setLoading(false);
@@ -1753,6 +1757,10 @@ function AuthSignupScreen({ onGoToLogin, onSignedUp, onDemoImported }) {
               <label className="inp-label">Ville</label>
               <input className="inp" value={ville} onChange={e=>setVille(e.target.value)} placeholder="Paris"/>
             </div>
+          </div>
+          <div className="inp-group">
+            <label className="inp-label">Numéro PDL <span style={{fontWeight:400,color:'rgba(255,255,255,0.4)',fontSize:11}}>(optionnel — 14 chiffres, sur votre facture)</span></label>
+            <input className="inp" value={pdl} onChange={e=>setPdl(e.target.value)} placeholder="12345678901234" maxLength={14} inputMode="numeric"/>
           </div>
           <label style={{display:'flex',alignItems:'flex-start',gap:12,marginTop:8,cursor:'pointer',padding:'12px 0 4px'}}>
             <span style={{position:'relative',flexShrink:0,marginTop:2}}>
@@ -2171,11 +2179,14 @@ function PDLInput({value,onSave}){
 }
 
 // ─── SiteFormCard ─────────────────────────────
+const EDF_TRV_ID = '5f805745-8e02-46bc-bbda-caaa28390370';
+
 function SiteFormCard({initial={},onSave,onCancel}){
   const[nom,setNom]=React.useState(initial.nom||'');
   const[adr,setAdr]=React.useState(initial.adresse_ligne1||'');
   const[cp,setCp]=React.useState(initial.code_postal||'');
   const[ville,setVille]=React.useState(initial.ville||'');
+  const[pdl,setPdl]=React.useState(initial.pdl||'');
   const[hc1s,setHc1s]=React.useState(initial.heure_debut_hc1||'');
   const[hc1e,setHc1e]=React.useState(initial.heure_fin_hc1||'');
   const[hc2s,setHc2s]=React.useState(initial.heure_debut_hc2||'');
@@ -2190,6 +2201,7 @@ function SiteFormCard({initial={},onSave,onCancel}){
           <input className="inp" placeholder="Code postal" value={cp} onChange={e=>setCp(e.target.value)} style={{flex:'0 0 120px'}}/>
           <input className="inp" placeholder="Ville" value={ville} onChange={e=>setVille(e.target.value)}/>
         </div>
+        <input className="inp" placeholder="PDL (14 chiffres, optionnel)" value={pdl} onChange={e=>setPdl(e.target.value)} maxLength={14} inputMode="numeric"/>
         <div style={{fontSize:10,color:'rgba(255,255,255,.4)',fontWeight:700,textTransform:'uppercase',letterSpacing:.5,marginTop:6}}>
           Heures creuses Linky (optionnel)
         </div>
@@ -2217,6 +2229,8 @@ function SiteFormCard({initial={},onSave,onCancel}){
           <button className="btn btn-primary" style={{flex:1,fontSize:13,padding:'10px 0'}}
             onClick={()=>nom.trim()&&onSave({
               nom:nom.trim(),adresse_ligne1:adr,code_postal:cp,ville,
+              pdl:pdl.trim()||null,
+              tarif_id: initial.tarif_id || EDF_TRV_ID,
               heure_debut_hc1:hc1s||null,heure_fin_hc1:hc1e||null,
               heure_debut_hc2:hc2s||null,heure_fin_hc2:hc2e||null,
             })}>
@@ -3518,7 +3532,7 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations }) {
 
   if(sites===null)return(<><div className="screen fade-in"><div style={{textAlign:'center',padding:40,color:'rgba(255,255,255,.5)'}}>Chargement…</div></div><StickyFooter onBack={onBack}/></>);
 
-  const firstDefault=sites.length===0?{adresse_ligne1:userProfile?.adresse_ligne1||'',code_postal:userProfile?.code_postal||'',ville:userProfile?.ville||''}:{};
+  const firstDefault=sites.length===0?{adresse_ligne1:userProfile?.adresse_ligne1||'',code_postal:userProfile?.code_postal||'',ville:userProfile?.ville||'',pdl:userProfile?.pdl||''}:{};
   const showActions=!showAdd&&!editMode;
 
   return(
@@ -7744,7 +7758,7 @@ function App() {
   // Charge le profil, hydrate le site actif, et retourne l'écran cible
   const fetchProfile = useCallback(async (userId) => {
     const { data } = await sb.from('profiles')
-      .select('prenom, nom, pseudo, adresse_ligne1, code_postal, ville, telephone, active_site_id')
+      .select('prenom, nom, pseudo, adresse_ligne1, code_postal, ville, telephone, pdl, active_site_id')
       .eq('id', userId).single();
     if (data) {
       setProfile(data);
