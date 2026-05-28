@@ -3928,11 +3928,13 @@ function SimulationsScreen({ onACC, onBox, onSolar, onOptimisation, onBack, onMo
           setMaxSaving(saving);
           if (saving > 0) setBestTariffName(ranked[0].t.nom);
 
-          // Box saving: 140€ flex + 10% (HC/HP) or 20% (dynamic) of current bill
+          // Box saving: 140€ flex + déplacement conso (seulement si HC/HP ou dynamique)
           const curTariff = site.tarif_id ? tariffs.find(t => t.id === site.tarif_id) : null;
           const isDynamic = curTariff?.tarif_dynamique === true;
+          const isHcHpTariff = !!(curTariff?.prix_hc && parseFloat(curTariff.prix_hc) > 0);
           const curBill = cur?.result?.total || (kwh_total * 0.18);
-          const bSav = Math.round(140 + curBill * (isDynamic ? 0.20 : 0.10));
+          const shiftPctSim = isDynamic ? 0.20 : isHcHpTariff ? 0.10 : 0;
+          const bSav = Math.round(140 + curBill * shiftPctSim);
           if (bSav > 0) setBoxSaving(bSav);
           // Charger le profil de production (utilisé pour estim ACC + solar)
           let _prodProfil = null;
@@ -5672,6 +5674,7 @@ function BoxSimScreen({ user, userProfile, onBack, onPanier, onMonSite, onCartUp
   const [chosen,       setChosen]       = useState(() => localStorage.getItem('starvolt_box_chosen') || null);
   const [justConfirmed,setJustConfirmed]= useState(false);
   const [showThermForm,setShowThermForm]= useState(false);
+  const [isHcHp,       setIsHcHp]       = useState(false);
 
   useEffect(() => {
     const siteId = localStorage.getItem('starvolt_active_site_id');
@@ -5698,12 +5701,14 @@ function BoxSimScreen({ user, userProfile, onBack, onPanier, onMonSite, onCartUp
       }
       if (!bill && kwh_total > 0) bill = Math.round(kwh_total * 0.18);
       setCurrentBill(bill ? Math.round(bill) : null);
+      // Déplacement de conso n'a de valeur que si le tarif distingue HP et HC
+      setIsHcHp(!!(curTariff?.prix_hc && parseFloat(curTariff.prix_hc) > 0));
       setLoading(false);
     });
   }, []);
 
   const flexGain  = 140;
-  const shiftPct  = isDynamic ? 0.20 : 0.10;
+  const shiftPct  = isDynamic ? 0.20 : isHcHp ? 0.10 : 0;
   const shiftGain = currentBill ? Math.round(currentBill * shiftPct) : null;
   const totalGain = flexGain + (shiftGain || 0);
   const newBill   = currentBill ? Math.round(currentBill - (shiftGain || 0)) : null;
@@ -6260,7 +6265,7 @@ function PanierScreen({ user, onBack, onGoTo, onMonSite }) {
           }
           accSav = Math.max(0, Math.round(kwh918 * ((curTariff?.prix_hp||0.24) - 0.11)));
         }
-        const shiftPctBox = curTariff?.tarif_dynamique ? 0.20 : 0.10;
+        const shiftPctBox = curTariff?.tarif_dynamique ? 0.20 : (curTariff?.prix_hc && parseFloat(curTariff.prix_hc) > 0) ? 0.10 : 0;
         let boxSav;
         if (localStorage.getItem('starvolt_box_chosen') === 'free') {
           boxSav = Math.round(bill * shiftPctBox); // flex reversée à Starvolt
