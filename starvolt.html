@@ -3936,7 +3936,8 @@ function SimulationsScreen({ onACC, onBox, onSolar, onOptimisation, onBack, onMo
           const bkv=parseFloat(solDef.batKwh)||0, tkv=parseFloat(solDef.thermKwh)||0;
           const sp = spotRows ? buildSpotMap(spotRows) : null;
           const storRes = curTariff ? computeStorageOptimization(site.conso_profil, curTariff, curTariff, site, bkv, tkv, {...nat, opti_tarif:true}, sp) : null;
-          const bSav = Math.round(140 + (storRes?.saving || 0));
+          const flexGainSim = Math.round((parseFloat(solDef.thermKwh) || 10) * 14);
+          const bSav = Math.round(flexGainSim + (storRes?.saving || 0));
           if (bSav > 0) setBoxSaving(bSav);
           // Charger le profil de production (utilisé pour estim ACC + solar)
           let _prodProfil = null;
@@ -5715,7 +5716,8 @@ function BoxSimScreen({ user, userProfile, onBack, onPanier, onMonSite, onCartUp
     });
   }, []);
 
-  const flexGain  = 140;
+  const thermKwhFlex = (() => { try { return parseFloat(JSON.parse(localStorage.getItem('starvolt_solar_defaults'))?.thermKwh) || 10; } catch { return 10; } })();
+  const flexGain  = Math.round(thermKwhFlex * 14);
   const shiftGain = shiftSaving > 0 ? shiftSaving : null;
   const totalGain = flexGain + (shiftGain || 0);
   const newBill   = currentBill ? Math.round(currentBill - (shiftGain || 0)) : null;
@@ -5763,7 +5765,7 @@ function BoxSimScreen({ user, userProfile, onBack, onPanier, onMonSite, onCartUp
               <div style={{ fontSize:11, color:'rgba(255,255,255,.5)', marginBottom:2 }}>Économies annuelles estimées</div>
               <div style={{ fontSize:24, fontWeight:900, color:'#7dd940' }}>-{totalGain.toLocaleString('fr-FR')} €/an</div>
               <div style={{ fontSize:10, color:'rgba(255,255,255,.35)', marginTop:2 }}>
-                dont 140 € de cagnotte flexibilité + {shiftGain || 0} € de déplacement des consommations
+                dont {flexGain} € de cagnotte flexibilité + {shiftGain || 0} € de déplacement des consommations
               </div>
             </div>
             {chosen === 'buy' && (
@@ -5827,7 +5829,7 @@ function BoxSimScreen({ user, userProfile, onBack, onPanier, onMonSite, onCartUp
                 </div>
                 <div style={{ fontSize:14, color:'rgba(255,255,255,.65)', lineHeight:1.55 }}>
                   La box adapte votre consommation aux besoins du réseau électrique national.
-                  En contrepartie, <strong style={{color:'white'}}>Starvolt vous crédite 140 €/an</strong> sur votre cagnotte flexibilité.
+                  En contrepartie, <strong style={{color:'white'}}>Starvolt vous crédite {flexGain} €/an</strong> sur votre cagnotte flexibilité.
                 </div>
               </div>
             </div>
@@ -5864,12 +5866,12 @@ function BoxSimScreen({ user, userProfile, onBack, onPanier, onMonSite, onCartUp
         <div className="sticky-footer">
           <div className="sticky-footer-inner row">
             <button onClick={onBack} style={{ flexGrow:0, flexShrink:0, background:'rgba(255,255,255,.06)', border:'1px solid rgba(255,255,255,.12)', borderRadius:10, color:'rgba(255,255,255,.5)', fontSize:11, fontWeight:600, fontFamily:'inherit', padding:'10px 12px', cursor:'pointer', whiteSpace:'nowrap' }}>← Retour</button>
-            <button onClick={() => { localStorage.setItem('starvolt_box_chosen','free'); if(totalGain>0) localStorage.setItem('starvolt_box_saving',String(Math.round(totalGain))); setPanierServicesChecked({opti_tarif:true,opti_flex:true}); setChosen('free'); setShowThermForm(true); }}
+            <button onClick={() => { localStorage.setItem('starvolt_box_chosen','free'); localStorage.removeItem('starvolt_box_saving'); setPanierServicesChecked({opti_tarif:true,opti_flex:true}); setChosen('free'); setShowThermForm(true); }}
               style={{ flex:1, background:'rgba(255,255,255,.07)', border:'2px solid rgba(125,217,64,.55)', borderRadius:14, color:'white', padding:'13px 8px', cursor:'pointer', fontFamily:'inherit', textAlign:'center', lineHeight:1.3 }}>
               <div style={{ fontSize:17, fontWeight:900, color:'#7dd940', marginBottom:3 }}>🎁 Box gratuite</div>
               <div style={{ fontSize:12, color:'rgba(255,255,255,.75)' }}>Cagnotte reversée 3 ans</div>
             </button>
-            <button onClick={() => { localStorage.setItem('starvolt_box_chosen','buy'); if(totalGain>0) localStorage.setItem('starvolt_box_saving',String(Math.round(totalGain))); setPanierServicesChecked({opti_tarif:true,opti_flex:true}); setChosen('buy'); setShowThermForm(true); }}
+            <button onClick={() => { localStorage.setItem('starvolt_box_chosen','buy'); localStorage.removeItem('starvolt_box_saving'); setPanierServicesChecked({opti_tarif:true,opti_flex:true}); setChosen('buy'); setShowThermForm(true); }}
               style={{ flex:1, background:'rgba(255,255,255,.07)', border:'2px solid rgba(255,215,0,.4)', borderRadius:14, color:'white', padding:'13px 8px', cursor:'pointer', fontFamily:'inherit', textAlign:'center', lineHeight:1.3 }}>
               <div style={{ fontSize:17, fontWeight:900, color:'#fbbf24', marginBottom:2 }}>📦 Acheter</div>
               <div style={{ fontSize:18, fontWeight:900, color:'white', marginBottom:2 }}>550 €</div>
@@ -6282,7 +6284,8 @@ function PanierScreen({ user, onBack, onGoTo, onMonSite }) {
           boxSav = shiftSavP; // flex reversée à Starvolt, l'utilisateur garde le gain de déplacement
         } else {
           boxSav = parseInt(localStorage.getItem('starvolt_box_saving')||'0');
-          if (!boxSav) boxSav = Math.round(140 + shiftSavP);
+          const flexGainP = Math.round((parseFloat(solDefP.thermKwh) || 10) * 14);
+          if (!boxSav) boxSav = Math.round(flexGainP + shiftSavP);
         }
         // Solar savings : utiliser baisse facture calculée (MaProd) si dispo, sinon estimation 70%
         const adjBillSolar = Math.max(0, bill - optSav - accSav);
