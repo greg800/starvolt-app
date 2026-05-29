@@ -3672,7 +3672,13 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations }) {
                     <div>
                       <label style={{fontSize:10,color:'rgba(255,255,255,.45)',fontWeight:700,letterSpacing:'.5px',display:'block',marginBottom:4}}>PDL (numéro compteur Linky)</label>
                       <PDLInput value={site.pdl||''} onSave={v=>updateSite({pdl:v})}/>
-                      {(site.titulaire_prenom||site.titulaire_nom)&&<div style={{fontSize:11,color:'rgba(255,255,255,.5)',marginTop:3,fontWeight:600}}>{[site.titulaire_prenom,site.titulaire_nom].filter(Boolean).join(' ')}</div>}
+                      <div style={{marginTop:5}}>
+                        <label style={{fontSize:10,color:'rgba(255,255,255,.35)',fontWeight:700,letterSpacing:'.5px',display:'block',marginBottom:4}}>TITULAIRE DU CONTRAT ENEDIS</label>
+                        <div style={{display:'flex',gap:6}}>
+                          <TxtInput value={site.titulaire_prenom||''} placeholder="Prénom" onSave={v=>updateSite({titulaire_prenom:v.trim()||null})} style={{flex:1}}/>
+                          <TxtInput value={site.titulaire_nom||''} placeholder="Nom" onSave={v=>updateSite({titulaire_nom:v.trim()||null})} style={{flex:1}}/>
+                        </div>
+                      </div>
                       <div style={{marginTop:6}}>
                         <label style={{fontSize:10,color:'rgba(255,255,255,.35)',fontWeight:700,letterSpacing:'.5px',display:'block',marginBottom:4}}>ADRESSE DU COMPTEUR (doit correspondre à ENEDIS)</label>
                         <div style={{display:'flex',flexDirection:'column',gap:5}}>
