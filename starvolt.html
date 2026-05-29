@@ -2197,10 +2197,10 @@ function SiteFormCard({initial={},onSave,onCancel}){
   const[cp,setCp]=React.useState(initial.code_postal||'');
   const[ville,setVille]=React.useState(initial.ville||'');
   const[pdl,setPdl]=React.useState(initial.pdl||'');
-  const[hc1s,setHc1s]=React.useState(initial.heure_debut_hc1||'');
-  const[hc1e,setHc1e]=React.useState(initial.heure_fin_hc1||'');
-  const[hc2s,setHc2s]=React.useState(initial.heure_debut_hc2||'');
-  const[hc2e,setHc2e]=React.useState(initial.heure_fin_hc2||'');
+  const[hc1s,setHc1s]=React.useState(initial.hc_debut1||initial.heure_debut_hc1||'');
+  const[hc1e,setHc1e]=React.useState(initial.hc_fin1||initial.heure_fin_hc1||'');
+  const[hc2s,setHc2s]=React.useState(initial.hc_debut2||initial.heure_debut_hc2||'');
+  const[hc2e,setHc2e]=React.useState(initial.hc_fin2||initial.heure_fin_hc2||'');
   return(
     <div className="card" style={{padding:'14px 16px',marginBottom:10}}>
       <div style={{fontWeight:700,fontSize:14,color:'white',marginBottom:12}}>{initial.id?'Modifier le site':'Nouveau site'}</div>
@@ -2251,6 +2251,8 @@ function SiteFormCard({initial={},onSave,onCancel}){
               adresse_ligne1:adr,code_postal:cp,ville,
               pdl:pdl.trim()||null,
               tarif_id: initial.tarif_id || EDF_TRV_ID,
+              hc_debut1:hc1s||null,hc_fin1:hc1e||null,
+              hc_debut2:hc2s||null,hc_fin2:hc2e||null,
               heure_debut_hc1:hc1s||null,heure_fin_hc1:hc1e||null,
               heure_debut_hc2:hc2s||null,heure_fin_hc2:hc2e||null,
             })}>
@@ -3786,6 +3788,20 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations }) {
                             {site.enedis_option_tarifaire&&<span style={{background:'rgba(100,160,255,.12)',border:'1px solid rgba(100,160,255,.25)',borderRadius:5,color:'rgba(120,170,255,.85)',fontSize:10,fontWeight:700,padding:'2px 7px'}}>{labelOptionTarifaire(site.enedis_option_tarifaire)}</span>}
                           </div>
                         )}
+                        {(()=>{
+                          const d1=site.hc_debut1??site.heure_debut_hc1, f1=site.hc_fin1??site.heure_fin_hc1;
+                          const d2=site.hc_debut2??site.heure_debut_hc2, f2=site.hc_fin2??site.heure_fin_hc2;
+                          const seg1=(d1&&f1)?`${fmtHcTime(d1)} → ${fmtHcTime(f1)}`:null;
+                          const seg2=(d2&&f2)?`${fmtHcTime(d2)} → ${fmtHcTime(f2)}`:null;
+                          if(!seg1&&!seg2)return null;
+                          return(
+                            <div style={{display:'flex',alignItems:'center',gap:5,flexWrap:'wrap',marginTop:5}}>
+                              <span style={{fontSize:10,color:'rgba(255,255,255,.3)',fontWeight:700,letterSpacing:.5}}>HC</span>
+                              {seg1&&<span style={{background:'rgba(250,200,80,.1)',border:'1px solid rgba(250,200,80,.22)',borderRadius:5,color:'rgba(250,200,80,.8)',fontSize:10,fontWeight:700,padding:'2px 7px'}}>🌙 {seg1}</span>}
+                              {seg2&&<span style={{background:'rgba(250,200,80,.1)',border:'1px solid rgba(250,200,80,.22)',borderRadius:5,color:'rgba(250,200,80,.8)',fontSize:10,fontWeight:700,padding:'2px 7px'}}>🌙 {seg2}</span>}
+                            </div>
+                          );
+                        })()}
                         {site.conso_gaps?.length>0&&(
                           <>
                             <button style={{background:'none',border:'none',color:'rgba(255,255,255,.45)',fontSize:11,cursor:'pointer',padding:'2px 0'}} onClick={()=>setShowGaps(!showGaps)}>
@@ -4379,6 +4395,17 @@ function SimulationsScreen({ onACC, onBox, onSolar, onOptimisation, onBack, onMo
 
 // ─── Optimisation utilities ───────────────────
 function parseHcHour(s) { if (s == null || s === '') return null; if (typeof s === 'number') return Math.round(s); const n = parseInt(String(s).split(':')[0]); return isNaN(n) ? null : n; }
+
+// Formatte une heure HC pour affichage : "1H36" → "01:36", "07:00" → "07:00"
+function fmtHcTime(v) {
+  if (!v && v !== 0) return null;
+  const s = String(v).trim();
+  const hm = s.match(/^(\d{1,2})H(\d{2})$/i);
+  if (hm) return `${hm[1].padStart(2,'0')}:${hm[2]}`;
+  const co = s.match(/^(\d{1,2}):(\d{2})/);
+  if (co) return `${co[1].padStart(2,'0')}:${co[2]}`;
+  return s;
+}
 
 // Libellé court de l'option tarifaire ENEDIS à partir du code C68 (ex: "BTINFMU4" → "HC/HP")
 function labelOptionTarifaire(code) {
@@ -7637,9 +7664,16 @@ function AdminAccEditScreen({ site, onSave, onDelete, onBack }) {
 
 // ─── AdminUsersScreen ─────────────────────────
 function AdminUsersScreen({ onBack }) {
-  const [users,      setUsers]      = useState([]);
-  const [loading,    setLoading]    = useState(true);
-  const [confirmDel, setConfirmDel] = useState(null); // id à supprimer
+  const [users,           setUsers]           = useState([]);
+  const [loading,         setLoading]         = useState(true);
+  const [confirmDel,      setConfirmDel]      = useState(null);
+  // Copy-site dialog state
+  const [copyDialog,      setCopyDialog]      = useState(null);  // { userId, userName }
+  const [copySites,       setCopySites]       = useState([]);
+  const [copySrcSiteId,   setCopySrcSiteId]   = useState('');
+  const [copyTargetUserId,setCopyTargetUserId]= useState('');
+  const [copying,         setCopying]         = useState(false);
+  const [copyDone,        setCopyDone]        = useState(false);
 
   const load = () => {
     setLoading(true);
@@ -7658,9 +7692,45 @@ function AdminUsersScreen({ onBack }) {
     load();
   };
 
+  const openCopyDialog = async (u) => {
+    setCopySrcSiteId('');
+    setCopyTargetUserId('');
+    setCopyDone(false);
+    const { data: sites } = await sb.from('sites').select('id,nom').eq('user_id', u.id).order('nom');
+    setCopySites(sites || []);
+    setCopyDialog({ userId: u.id, userName: `${u.prenom||''} ${u.nom||''}`.trim() });
+  };
+
+  const handleCopySite = async () => {
+    if (!copySrcSiteId || !copyTargetUserId) return;
+    setCopying(true);
+    // Fetch all site data
+    const { data: src } = await sb.from('sites').select('*').eq('id', copySrcSiteId).single();
+    if (!src) { setCopying(false); return; }
+    const { id: _id, created_at: _ca, ...rest } = src;
+    await sb.from('sites').insert({ ...rest, user_id: copyTargetUserId });
+    setCopying(false);
+    setCopyDone(true);
+  };
+
+  const closeCopyDialog = () => {
+    setCopyDialog(null);
+    setCopySites([]);
+    setCopySrcSiteId('');
+    setCopyTargetUserId('');
+    setCopyDone(false);
+  };
+
   const fmtDate = (d) => d ? new Date(d).toLocaleDateString('fr-FR') : '—';
 
-  const cols = ['', 'Prénom Nom', 'Email', 'Inscription', 'Dernière co.', 'Connexions', 'Rôle'];
+  const cols = ['', 'Prénom Nom', 'Email', 'Inscription', 'Dernière co.', 'Connexions', 'Rôle', 'Site'];
+
+  // Users sorted alphabetically for target dropdown
+  const sortedUsers = [...users].sort((a,b) => {
+    const na = `${a.prenom||''} ${a.nom||''}`.trim().toLowerCase();
+    const nb = `${b.prenom||''} ${b.nom||''}`.trim().toLowerCase();
+    return na.localeCompare(nb, 'fr');
+  });
 
   return (
     <>
@@ -7672,7 +7742,7 @@ function AdminUsersScreen({ onBack }) {
 
       {loading ? <div style={{textAlign:'center',padding:40}}><div className="spinner" style={{margin:'0 auto'}}/></div> : (
         <div style={{overflowX:'auto', padding:'0 16px'}}>
-          <table style={{width:'100%', minWidth:860, borderCollapse:'collapse', fontSize:13}}>
+          <table style={{width:'100%', minWidth:960, borderCollapse:'collapse', fontSize:13}}>
             <thead>
               <tr>
                 {cols.map(c => (
@@ -7730,6 +7800,14 @@ function AdminUsersScreen({ onBack }) {
                       <option value="admin">Admin</option>
                     </select>
                   </td>
+                  <td style={{padding:'10px 8px'}}>
+                    <button onClick={() => openCopyDialog(u)} style={{
+                      background:'rgba(255,255,255,.08)', border:'1px solid rgba(255,255,255,.15)',
+                      borderRadius:6, color:'rgba(255,255,255,.8)', fontSize:11,
+                      padding:'4px 8px', cursor:'pointer', fontFamily:'inherit',
+                      whiteSpace:'nowrap'
+                    }}>📋 Copier un site</button>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -7737,6 +7815,94 @@ function AdminUsersScreen({ onBack }) {
         </div>
       )}
     </div>
+
+    {/* ── Dialog copier un site ── */}
+    {copyDialog&&(
+      <div style={{
+        position:'fixed',inset:0,zIndex:9999,
+        background:'rgba(0,0,0,.7)',
+        display:'flex',alignItems:'center',justifyContent:'center',
+        padding:'0 16px'
+      }} onClick={e=>{if(e.target===e.currentTarget)closeCopyDialog();}}>
+        <div style={{
+          background:'#1a1d2b',border:'1px solid rgba(255,255,255,.12)',
+          borderRadius:14,padding:'22px 20px',width:'100%',maxWidth:480
+        }}>
+          <div style={{fontWeight:700,fontSize:15,color:'white',marginBottom:4}}>
+            📋 Copier un site
+          </div>
+          <div style={{fontSize:12,color:'rgba(255,255,255,.4)',marginBottom:18}}>
+            Depuis <strong style={{color:'rgba(255,255,255,.7)'}}>{copyDialog.userName||'cet utilisateur'}</strong> vers un autre compte
+          </div>
+
+          {copyDone ? (
+            <div style={{textAlign:'center',padding:'20px 0'}}>
+              <div style={{fontSize:28,marginBottom:8}}>✅</div>
+              <div style={{color:'rgba(125,217,64,.9)',fontWeight:700,fontSize:14}}>Site copié avec succès !</div>
+              <button onClick={closeCopyDialog} style={{
+                marginTop:18,background:'rgba(255,255,255,.1)',border:'1px solid rgba(255,255,255,.2)',
+                borderRadius:8,color:'#fff',fontSize:13,padding:'9px 28px',cursor:'pointer'
+              }}>Fermer</button>
+            </div>
+          ) : (
+            <>
+              <div style={{display:'flex',gap:12,marginBottom:18}}>
+                {/* Colonne gauche : site source */}
+                <div style={{flex:1}}>
+                  <div style={{fontSize:10,color:'rgba(255,255,255,.4)',fontWeight:700,textTransform:'uppercase',letterSpacing:.5,marginBottom:6}}>Site à copier</div>
+                  {copySites.length===0
+                    ? <div style={{fontSize:12,color:'rgba(255,255,255,.35)',padding:'8px 0'}}>Aucun site pour cet utilisateur</div>
+                    : <select value={copySrcSiteId} onChange={e=>setCopySrcSiteId(e.target.value)} style={{
+                        width:'100%',background:'rgba(255,255,255,.08)',border:'1px solid rgba(255,255,255,.2)',
+                        borderRadius:8,color:'#fff',padding:'8px 10px',fontSize:13,
+                        cursor:'pointer',fontFamily:'inherit'
+                      }}>
+                        <option value="">— Choisir un site —</option>
+                        {copySites.map(s=><option key={s.id} value={s.id}>{s.nom||'Site sans nom'}</option>)}
+                      </select>
+                  }
+                </div>
+                {/* Colonne droite : utilisateur cible */}
+                <div style={{flex:1}}>
+                  <div style={{fontSize:10,color:'rgba(255,255,255,.4)',fontWeight:700,textTransform:'uppercase',letterSpacing:.5,marginBottom:6}}>Vers l'utilisateur</div>
+                  <select value={copyTargetUserId} onChange={e=>setCopyTargetUserId(e.target.value)} style={{
+                    width:'100%',background:'rgba(255,255,255,.08)',border:'1px solid rgba(255,255,255,.2)',
+                    borderRadius:8,color:'#fff',padding:'8px 10px',fontSize:13,
+                    cursor:'pointer',fontFamily:'inherit'
+                  }}>
+                    <option value="">— Choisir un utilisateur —</option>
+                    {sortedUsers.map(u=><option key={u.id} value={u.id}>
+                      {`${u.prenom||''} ${u.nom||''}`.trim()||u.email}
+                    </option>)}
+                  </select>
+                </div>
+              </div>
+
+              <div style={{display:'flex',gap:10}}>
+                <button
+                  disabled={!copySrcSiteId||!copyTargetUserId||copying}
+                  onClick={handleCopySite}
+                  style={{
+                    flex:1,padding:'11px 0',borderRadius:9,border:'none',
+                    background:(!copySrcSiteId||!copyTargetUserId)?'rgba(125,217,64,.2)':'rgba(125,217,64,.85)',
+                    color:(!copySrcSiteId||!copyTargetUserId)?'rgba(255,255,255,.3)':'#0a1a04',
+                    fontWeight:700,fontSize:14,cursor:(!copySrcSiteId||!copyTargetUserId)?'not-allowed':'pointer',
+                    transition:'background .2s'
+                  }}>
+                  {copying?'Copie en cours…':'Copier le site'}
+                </button>
+                <button onClick={closeCopyDialog} style={{
+                  flex:1,padding:'11px 0',borderRadius:9,
+                  background:'rgba(255,255,255,.08)',border:'1px solid rgba(255,255,255,.18)',
+                  color:'rgba(255,255,255,.8)',fontWeight:700,fontSize:14,cursor:'pointer'
+                }}>Annuler</button>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    )}
+
     <StickyFooter onBack={onBack}/>
     </>
   );
