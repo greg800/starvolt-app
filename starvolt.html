@@ -969,6 +969,16 @@
       0%,100% { opacity: .4; }
       50%      { opacity: .9; }
     }
+    @keyframes confettiFall {
+      0%   { transform: translateY(0) rotate(0deg) scale(1); opacity: 1; }
+      80%  { opacity: 1; }
+      100% { transform: translateY(110vh) rotate(720deg) scale(.6); opacity: 0; }
+    }
+    @keyframes confettiWobble {
+      0%,100% { margin-left: 0; }
+      25%  { margin-left: 18px; }
+      75%  { margin-left: -18px; }
+    }
     /* Override Leaflet default background in dark UI */
     .leaflet-container { background: #e8e0d8; }
     /* Circle distance labels */
@@ -1629,8 +1639,110 @@ function InstallBanner() {
   );
 }
 
+// ─── Confetti ─────────────────────────────────
+function Confetti() {
+  const pieces = React.useMemo(() => {
+    const colors = ['#f7c948','#7dd940','#4ae8b0','#6499ff','#ff7b4a','#e040fb','#fff','#ffd700'];
+    return Array.from({length:70}, (_,i) => ({
+      id: i,
+      left:     (i * 137.5) % 100,          // distribution déterministe
+      size:     6 + (i % 7),
+      color:    colors[i % colors.length],
+      delay:    (i * 0.06) % 2.2,
+      duration: 1.8 + (i % 5) * 0.35,
+      round:    i % 3 !== 0,
+    }));
+  }, []);
+  return (
+    <div style={{position:'fixed',inset:0,pointerEvents:'none',overflow:'hidden',zIndex:9000}}>
+      {pieces.map(p=>(
+        <div key={p.id} style={{
+          position:'absolute',
+          left:`${p.left}%`,
+          top:'-20px',
+          width:p.size,
+          height:p.size,
+          borderRadius: p.round ? '50%' : '2px',
+          background: p.color,
+          animation:`confettiFall ${p.duration}s ease-in ${p.delay}s forwards, confettiWobble ${p.duration*0.6}s ease-in-out ${p.delay}s infinite`,
+        }}/>
+      ))}
+    </div>
+  );
+}
+
+// ─── SignupSuccessScreen ───────────────────────
+function SignupSuccessScreen({ email, firstName, consentUrl, onContinue }) {
+  const [showConfetti, setShowConfetti] = React.useState(true);
+  React.useEffect(()=>{ const t=setTimeout(()=>setShowConfetti(false),5500); return()=>clearTimeout(t); },[]);
+  return (
+    <>
+      {showConfetti && <Confetti/>}
+      <div className="screen fade-in" style={{padding:'0 0 100px'}}>
+        <div className="auth-header">
+          <div className="welcome-tag" style={{color:'#7dd940'}}>✦ La constellation vous accueille</div>
+          <h1 className="welcome-title">Bravo<br/><span className="accent">{firstName} !</span></h1>
+        </div>
+        <div style={{padding:'0 16px',display:'flex',flexDirection:'column',gap:14}}>
+
+          {/* Box principale */}
+          <div style={{
+            background:'rgba(125,217,64,.08)',border:'1px solid rgba(125,217,64,.2)',
+            borderRadius:16,padding:'20px 18px',
+          }}>
+            <div style={{fontSize:22,marginBottom:10,textAlign:'center'}}>⚡</div>
+            <p style={{color:'rgba(255,255,255,.9)',lineHeight:1.75,fontSize:14,margin:0}}>
+              Votre compte est créé ! Nous venons de lancer une demande à ENEDIS pour collecter vos données de consommation et vous préparer une <strong style={{color:'#7dd940'}}>proposition d'économie sur mesure</strong>.
+            </p>
+          </div>
+
+          {/* Box email + consentement */}
+          <div style={{
+            background:'rgba(247,201,72,.07)',border:'1px solid rgba(247,201,72,.2)',
+            borderRadius:16,padding:'20px 18px',
+          }}>
+            <p style={{color:'rgba(255,255,255,.85)',lineHeight:1.7,fontSize:14,margin:'0 0 14px'}}>
+              📧 Un email a été envoyé à <strong style={{color:'#f7c948'}}>{email}</strong>.<br/>
+              Cliquez sur le lien qu'il contient pour <strong>donner votre consentement à ENEDIS</strong>.
+            </p>
+
+            {consentUrl&&(
+              <a href={consentUrl} target="_blank" rel="noopener noreferrer" style={{
+                display:'block',width:'100%',padding:'13px 0',
+                background:'rgba(247,201,72,.85)',borderRadius:10,border:'none',
+                color:'#0a1a04',fontWeight:800,fontSize:14,textAlign:'center',
+                textDecoration:'none',cursor:'pointer',marginBottom:14,
+                boxShadow:'0 2px 12px rgba(247,201,72,.3)',
+              }}>✅ Donner mon consentement ENEDIS →</a>
+            )}
+
+            <p style={{color:'rgba(255,255,255,.55)',lineHeight:1.65,fontSize:13,margin:0}}>
+              Une fois le consentement donné, attendez quelques dizaines de secondes que la magie opère ✨ puis revenez dans l'app Starvolt pour découvrir votre profil de consommation et vos économies potentielles.
+            </p>
+          </div>
+
+          {!consentUrl&&(
+            <div style={{
+              background:'rgba(255,255,255,.05)',border:'1px solid rgba(255,255,255,.1)',
+              borderRadius:12,padding:'14px 16px',
+              color:'rgba(255,255,255,.5)',fontSize:13,lineHeight:1.6,
+            }}>
+              ℹ️ Confirmez votre email, puis revenez dans l'app et cliquez sur <strong style={{color:'rgba(255,255,255,.8)'}}>⚡ Récupérer depuis Linky</strong> sur votre page Mon site.
+            </div>
+          )}
+        </div>
+      </div>
+      <StickyFooter>
+        <button className="btn btn-yes" onClick={onContinue}>
+          Continuer dans l'app →
+        </button>
+      </StickyFooter>
+    </>
+  );
+}
+
 // ─── AuthSignupScreen ─────────────────────────
-function AuthSignupScreen({ onGoToLogin, onSignedUp, onDemoImported }) {
+function AuthSignupScreen({ onGoToLogin, onSignedUp }) {
   const [prenom,        setPrenom]        = useState('');
   const [nom,           setNom]           = useState('');
   const [email,         setEmail]         = useState('');
@@ -1638,85 +1750,117 @@ function AuthSignupScreen({ onGoToLogin, onSignedUp, onDemoImported }) {
   const [adresse,       setAdresse]       = useState('');
   const [codePostal,    setCodePostal]    = useState('');
   const [ville,         setVille]         = useState('');
-  const [pdl,           setPdl]           = useState('');
   const [enedisConsent, setEnedisConsent] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [error,   setError]   = useState(null);
-  const [checkEmail, setCheckEmail] = useState(false);
+  const [loading,       setLoading]       = useState(false);
+  const [error,         setError]         = useState(null);
+  // Après inscription réussie
+  const [successData,   setSuccessData]   = useState(null); // { email, firstName, consentUrl }
+
+  // Le bouton n'apparaît que quand tout est rempli
+  const allFilled = prenom.trim() && nom.trim() && email.trim() &&
+                    pwd.length >= 6 && adresse.trim() &&
+                    codePostal.trim() && ville.trim() && enedisConsent;
+
+  const ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhreGtod2VncWthcGRic2lzeHd2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc0MjY4NjksImV4cCI6MjA5MzAwMjg2OX0.9-_oHRJfwXZkl3bRYDMb5K56UzB8O1NOfa5QfrXFfkQ';
+  const EDGE_URL  = 'https://hkxkhwegqkapdbsisxwv.supabase.co/functions/v1/switchgrid';
 
   const handleSignup = async () => {
-    if (!prenom.trim() || !nom.trim() || !email.trim() || !pwd) {
-      setError('Tous les champs sont obligatoires.'); return;
-    }
-    if (!adresse.trim() || !codePostal.trim() || !ville.trim()) {
-      setError('Veuillez renseigner votre adresse complète.'); return;
-    }
-    if (pwd.length < 6) {
-      setError('Le mot de passe doit contenir au moins 6 caractères.'); return;
-    }
-    if (!enedisConsent) {
-      setError("Veuillez cocher l'autorisation ENEDIS pour continuer."); return;
-    }
     setLoading(true); setError(null);
-    // Préremplir le profil AVANT signUp pour que pendingProfileRef soit prêt
-    // quand l'event SIGNED_IN se déclenche (qui peut précéder onSignedUp)
+
+    // Pré-remplir le profil AVANT signUp pour que pendingProfileRef soit prêt
     onSignedUp?.({ prenom: prenom.trim(), nom: nom.trim() });
-    // Vider le panier localStorage avant la création du compte
+
+    // Vider le panier localStorage
     ['starvolt_solar_chosen','starvolt_solar_saving','starvolt_box_chosen','starvolt_box_saving',
      'starvolt_optimisation_chosen','starvolt_optimisation_tariff_id','starvolt_optimisation_saving',
      'starvolt_optimisation_tariff_nom','starvolt_acc_chosen','starvolt_acc_saving','starvolt_baisse_facture',
      'starvolt_solar_defaults'].forEach(k=>localStorage.removeItem(k));
+
     const { data, error: err } = await sb.auth.signUp({ email: email.trim(), password: pwd });
     if (err) { setError(err.message); setLoading(false); return; }
+
+    let consentUrl = null;
+
     if (data.user) {
-      const pdlTrimmed = pdl.trim() || null;
+      // Créer le profil
       await sb.from('profiles').insert({
-        id: data.user.id,
-        prenom: prenom.trim(),
-        nom: nom.trim(),
+        id:             data.user.id,
+        prenom:         prenom.trim(),
+        nom:            nom.trim(),
         adresse_ligne1: adresse.trim(),
-        code_postal: codePostal.trim(),
-        ville: ville.trim(),
-        pdl: pdlTrimmed,
-        enedis_consent: enedisConsent,
+        code_postal:    codePostal.trim(),
+        ville:          ville.trim(),
+        enedis_consent: true,
       });
-      // Créer le site principal de l'utilisateur
+
+      // Créer le site principal
+      let newSite = null;
       try {
-        const { data: newSite } = await sb.from('sites').insert({
-          user_id: data.user.id,
-          nom: `Site de ${prenom.trim()}`,
+        const { data: ns } = await sb.from('sites').insert({
+          user_id:        data.user.id,
+          nom:            `Site de ${prenom.trim()}`,
+          titulaire_prenom: prenom.trim(),
+          titulaire_nom:  nom.trim(),
           adresse_ligne1: adresse.trim(),
-          code_postal: codePostal.trim(),
-          ville: ville.trim(),
-          pdl: pdlTrimmed,
-          tarif_id: '5f805745-8e02-46bc-bbda-caaa28390370', // EDF TRV légal
+          code_postal:    codePostal.trim(),
+          ville:          ville.trim(),
+          tarif_id:       '5f805745-8e02-46bc-bbda-caaa28390370',
         }).select().single();
+        newSite = ns;
         if (newSite) {
           localStorage.setItem('starvolt_active_site_id', newSite.id);
           sb.from('profiles').update({ active_site_id: newSite.id }).eq('id', data.user.id);
         }
-        onDemoImported?.();
       } catch(e) { console.warn('site creation failed', e); }
+
+      // Lancer immédiatement le process Switchgrid si session disponible
+      if (data.session && newSite) {
+        try {
+          const sgRes = await fetch(EDGE_URL, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${data.session.access_token}`,
+              apikey: ANON_KEY,
+            },
+            body: JSON.stringify({
+              site_id:    newSite.id,
+              pdl:        '',
+              firstName:  prenom.trim(),
+              lastName:   nom.trim(),
+              address:    adresse.trim(),
+              codePostal: codePostal.trim(),
+              commune:    ville.trim(),
+            }),
+          });
+          const sgData = await sgRes.json();
+          if (sgData.request_id) {
+            consentUrl = sgData.userUrl || null;
+            localStorage.setItem(`starvolt_linky_${newSite.id}`, JSON.stringify({
+              requestId: sgData.request_id,
+              status:    sgData.status || 'pending',
+              userUrl:   consentUrl,
+            }));
+          }
+        } catch(e) { console.warn('Switchgrid auto-launch failed', e); }
+      }
     }
-    if (!data.session) setCheckEmail(true);
+
     setLoading(false);
+    setSuccessData({ email: email.trim(), firstName: prenom.trim(), consentUrl });
   };
 
-  if (checkEmail) return (
-    <>
-      <div className="screen fade-in">
-        <div className="auth-header">
-          <h1 className="welcome-title">Vérifiez<br/><span className="accent">votre email ✦</span></h1>
-          <p className="welcome-sub" style={{marginTop:12}}>
-            Un lien d'activation a été envoyé à <strong>{email}</strong>.
-          </p>
-        </div>
-      </div>
-      <StickyFooter>
-        <button className="btn btn-sec" onClick={onGoToLogin}>Retour à la connexion</button>
-      </StickyFooter>
-    </>
-  );
+  // Écran de succès après inscription
+  if (successData) {
+    return (
+      <SignupSuccessScreen
+        email={successData.email}
+        firstName={successData.firstName}
+        consentUrl={successData.consentUrl}
+        onContinue={()=>{ /* l'auth listener va détecter la session et naviguer */ }}
+      />
+    );
+  }
 
   return (
     <>
@@ -1741,11 +1885,11 @@ function AuthSignupScreen({ onGoToLogin, onSignedUp, onDemoImported }) {
             <input className="inp" type="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder="marie@exemple.fr"/>
           </div>
           <div className="inp-group">
-            <label className="inp-label">Mot de passe</label>
+            <label className="inp-label">Mot de passe <span style={{fontWeight:400,color:'rgba(255,255,255,.4)',fontSize:11}}>(6 caractères min.)</span></label>
             <input className="inp" type="password" value={pwd} onChange={e=>setPwd(e.target.value)} placeholder="••••••••"/>
           </div>
           <div className="inp-group">
-            <label className="inp-label">Adresse</label>
+            <label className="inp-label">Adresse du compteur</label>
             <input className="inp" value={adresse} onChange={e=>setAdresse(e.target.value)} placeholder="12 rue de la Paix"/>
           </div>
           <div className="inp-row">
@@ -1757,10 +1901,6 @@ function AuthSignupScreen({ onGoToLogin, onSignedUp, onDemoImported }) {
               <label className="inp-label">Ville</label>
               <input className="inp" value={ville} onChange={e=>setVille(e.target.value)} placeholder="Paris"/>
             </div>
-          </div>
-          <div className="inp-group">
-            <label className="inp-label">Numéro PDL <span style={{fontWeight:400,color:'rgba(255,255,255,0.4)',fontSize:11}}>(optionnel — 14 chiffres, sur votre facture)</span></label>
-            <input className="inp" value={pdl} onChange={e=>setPdl(e.target.value)} placeholder="12345678901234" maxLength={14} inputMode="numeric"/>
           </div>
           <label style={{display:'flex',alignItems:'flex-start',gap:12,marginTop:8,cursor:'pointer',padding:'12px 0 4px'}}>
             <span style={{position:'relative',flexShrink:0,marginTop:2}}>
@@ -1776,21 +1916,23 @@ function AuthSignupScreen({ onGoToLogin, onSignedUp, onDemoImported }) {
                 border:`2px solid ${enedisConsent?'#f7c948':'rgba(255,255,255,0.25)'}`,
                 background:enedisConsent?'#f7c948':'transparent',transition:'all .2s'
               }}>
-                {enedisConsent && <span style={{fontSize:13,color:'#061e2a',fontWeight:900,lineHeight:1}}>✓</span>}
+                {enedisConsent&&<span style={{fontSize:13,color:'#061e2a',fontWeight:900,lineHeight:1}}>✓</span>}
               </span>
             </span>
             <span style={{fontSize:13,lineHeight:1.5,color:'rgba(255,255,255,0.75)',userSelect:'none'}}>
               J'autorise Starvolt à contacter ENEDIS de ma part afin de récupérer mes données de consommation et de comptage, puissance souscrite, heures pleines / heures creuses.
             </span>
           </label>
-          {error && <div className="auth-error">{error}</div>}
+          {error&&<div className="auth-error">{error}</div>}
         </div>
         <button className="btn-link" onClick={onGoToLogin}>Déjà membre ? Se connecter</button>
       </div>
       <StickyFooter>
-        <button className="btn btn-yes" onClick={handleSignup} disabled={loading}>
-          {loading ? 'Création en cours…' : 'Créer mon compte ✦'}
-        </button>
+        {allFilled&&(
+          <button className="btn btn-yes" onClick={handleSignup} disabled={loading} style={{animation:'popIn .25s ease'}}>
+            {loading?'Création en cours…':'Créer mon compte ✦'}
+          </button>
+        )}
       </StickyFooter>
     </>
   );
@@ -7972,36 +8114,7 @@ function ResetPasswordScreen({ onDone }) {
   );
 }
 
-// ─── Popup sites témoins ─────────────────────
-function DemoSitesPopup({ onClose }) {
-  return (
-    <div style={{
-      position:'fixed',inset:0,zIndex:9999,
-      background:'rgba(0,0,0,.65)',
-      display:'flex',alignItems:'center',justifyContent:'center',
-      padding:24
-    }}>
-      <div style={{
-        background:'#0f2a35',borderRadius:18,padding:'28px 24px',
-        maxWidth:360,width:'100%',
-        border:'1px solid rgba(255,255,255,.15)',
-        boxShadow:'0 8px 40px rgba(0,0,0,.5)'
-      }}>
-        <div style={{fontSize:36,textAlign:'center',marginBottom:14}}>☀️</div>
-        <p style={{
-          color:'rgba(255,255,255,.9)',lineHeight:1.6,
-          marginBottom:24,textAlign:'center',fontSize:15
-        }}>
-          Nous avons chargé sur ce compte <strong style={{color:'#7fe0c2'}}>2 profils de charge de test</strong> pour la démo.<br/><br/>
-          À remplacer par votre profil réel au plus tôt — en manuel aujourd'hui, puis automatiquement via Linky bientôt.
-        </p>
-        <button className="btn btn-primary" style={{width:'100%'}} onClick={onClose}>
-          OK, j'ai compris
-        </button>
-      </div>
-    </div>
-  );
-}
+// DemoSitesPopup supprimé — les nouveaux comptes démarrent directement avec Linky
 
 // ─── MAIN APP — Machine d'états ──────────────
 
@@ -8021,7 +8134,7 @@ function App() {
   const [user,        setUser]       = useState(null);
   const [profile,     setProfile]    = useState(null);
   const [authLoading, setAuthLoading]= useState(true);
-  const [showDemoPopup, setShowDemoPopup] = useState(false);
+  // showDemoPopup supprimé — plus de popup démo
   const [cartVersion, setCartVersion]= useState(0);
   const pendingProfileRef            = useRef(null);
   const updateCart = () => setCartVersion(v => v + 1);
@@ -8238,8 +8351,7 @@ function App() {
       case 'AUTH_SIGNUP':
         return <AuthSignupScreen
           onGoToLogin={()=>goTo('AUTH_LOGIN')}
-          onSignedUp={(p)=>{ pendingProfileRef.current = {...p, pseudo:null, adresse_ligne1:null, code_postal:null, ville:null, telephone:null}; }}
-          onDemoImported={()=>setShowDemoPopup(true)}/>;
+          onSignedUp={(p)=>{ pendingProfileRef.current = {...p, pseudo:null, adresse_ligne1:null, code_postal:null, ville:null, telephone:null}; }}/>;
 
       case 'AUTH_LOGIN':
         return <AuthLoginScreen onGoToSignup={()=>goTo('AUTH_SIGNUP')}/>;
@@ -8337,7 +8449,7 @@ function App() {
         {['»','»','»','»'].map((c,i)=><span key={i}>{c}</span>)}
       </div>
       {render()}
-      {showDemoPopup && <DemoSitesPopup onClose={()=>setShowDemoPopup(false)}/>}
+      {/* DemoSitesPopup supprimé */}
       {isHome && (
         <StickyFooter row>
           <button className="btn-home" onClick={()=>goTo('MA_CONSO')}>
