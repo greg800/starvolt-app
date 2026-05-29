@@ -1761,8 +1761,9 @@ function AuthSignupScreen({ onGoToLogin, onSignedUp, onSuccessDone }) {
                     pwd.length >= 6 && adresse.trim() &&
                     codePostal.trim() && ville.trim() && enedisConsent;
 
-  const ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhreGtod2VncWthcGRic2lzeHd2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc0MjY4NjksImV4cCI6MjA5MzAwMjg2OX0.9-_oHRJfwXZkl3bRYDMb5K56UzB8O1NOfa5QfrXFfkQ';
-  const EDGE_URL  = 'https://hkxkhwegqkapdbsisxwv.supabase.co/functions/v1/switchgrid';
+  const ANON_KEY         = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhreGtod2VncWthcGRic2lzeHd2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc0MjY4NjksImV4cCI6MjA5MzAwMjg2OX0.9-_oHRJfwXZkl3bRYDMb5K56UzB8O1NOfa5QfrXFfkQ';
+  const EDGE_URL         = 'https://hkxkhwegqkapdbsisxwv.supabase.co/functions/v1/switchgrid';
+  const SEND_WELCOME_URL = 'https://hkxkhwegqkapdbsisxwv.supabase.co/functions/v1/send-welcome';
 
   const handleSignup = async () => {
     setLoading(true); setError(null);
@@ -1844,6 +1845,15 @@ function AuthSignupScreen({ onGoToLogin, onSignedUp, onSuccessDone }) {
           }
         } catch(e) { console.warn('Switchgrid auto-launch failed', e); }
       }
+    }
+
+    // Envoyer l'email de bienvenue — qu'il y ait un consentUrl ou non
+    if (data.session) {
+      fetch(SEND_WELCOME_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${data.session.access_token}`, apikey: ANON_KEY },
+        body: JSON.stringify({ email: email.trim(), firstName: prenom.trim(), consentUrl: consentUrl || null }),
+      }).catch(() => {});
     }
 
     setLoading(false);
