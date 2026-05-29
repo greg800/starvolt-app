@@ -3242,11 +3242,35 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations }) {
 
   const handleLinkyImport=async(site)=>{
     if(!site) return;
-    const pdl=(site.pdl||'').trim();
-    if(!pdl||pdl.length<14){
-      alert('Renseignez d\'abord le PDL du compteur (14 chiffres) dans le champ ci-dessus.');
+
+    const pdl         = (site.pdl||'').trim();
+    const firstName   = (site.titulaire_prenom || userProfile?.prenom || '').trim();
+    const lastName    = (site.titulaire_nom    || userProfile?.nom    || '').trim();
+    const rue         = (site.adresse_ligne1   || userProfile?.adresse_ligne1 || '').trim();
+    const cp          = (site.code_postal      || userProfile?.code_postal    || '').trim();
+    const ville       = (site.ville            || userProfile?.ville          || '').trim();
+    const hasAddress  = !!(rue && cp && ville);
+    const hasPdl      = pdl.length === 14 && /^\d{14}$/.test(pdl);
+
+    // ── Validation ──────────────────────────────────────────────────────────
+    if(!firstName || !lastName){
+      setLinkyStatus('error');
+      setLinkyError('Renseignez le prénom et le nom du titulaire du contrat ENEDIS.');
       return;
     }
+    if(!hasPdl && !hasAddress){
+      setLinkyStatus('error');
+      setLinkyError('Renseignez soit le PDL (14 chiffres), soit l\'adresse complète (rue, CP, ville).');
+      return;
+    }
+    if(!hasPdl && hasAddress){
+      // Switchgrid exige le PDL — la recherche automatique n'est pas encore disponible
+      setLinkyStatus('error');
+      setLinkyError('Le PDL est requis. Vous le trouverez sur vos factures EDF ou sur espace-client.enedis.fr · (La recherche automatique par adresse sera disponible prochainement)');
+      return;
+    }
+
+    // ── Appel Switchgrid ─────────────────────────────────────────────────────
     setLinkyStatus('loading'); setLinkyError(null); setLinkyUserUrl(null); setLinkyRequestId(null);
     try{
       const { data:{session} } = await sb.auth.getSession();
@@ -3257,11 +3281,10 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations }) {
         body:JSON.stringify({
           site_id: site.id,
           pdl,
-          firstName: site.titulaire_prenom || userProfile?.prenom || '',
-          lastName:  site.titulaire_nom    || userProfile?.nom    || '',
-          address:   site.adresse_ligne1   || userProfile?.adresse_ligne1 || '',
-          codePostal:site.code_postal      || userProfile?.code_postal    || '',
-          commune:   site.ville            || userProfile?.ville          || '',
+          firstName, lastName,
+          address:   rue,
+          codePostal: cp,
+          commune:   ville,
         }),
       });
       const d=await res.json();
