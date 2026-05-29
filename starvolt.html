@@ -3263,12 +3263,6 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations }) {
       setLinkyError('Renseignez soit le PDL (14 chiffres), soit l\'adresse complète (rue, CP, ville).');
       return;
     }
-    if(!hasPdl && hasAddress){
-      // Switchgrid exige le PDL — la recherche automatique n'est pas encore disponible
-      setLinkyStatus('error');
-      setLinkyError('Le PDL est requis. Vous le trouverez sur vos factures EDF ou sur espace-client.enedis.fr · (La recherche automatique par adresse sera disponible prochainement)');
-      return;
-    }
 
     // ── Appel Switchgrid ─────────────────────────────────────────────────────
     setLinkyStatus('loading'); setLinkyError(null); setLinkyUserUrl(null); setLinkyRequestId(null);
@@ -3288,7 +3282,22 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations }) {
         }),
       });
       const d=await res.json();
+
+      // Plusieurs compteurs trouvés → afficher la liste
+      if(d.error==='MULTIPLE_CONTRACTS'){
+        setLinkyStatus('error');
+        const list=d.results.map(r=>`• ${r.prm} — ${r.nom} (${r.adresse})`).join('\n');
+        setLinkyError(`${d.message}\n${list}`);
+        return;
+      }
+
       if(d.error) throw new Error(d.error);
+
+      // PDL auto-découvert par adresse → mettre à jour le site
+      if(d.pdl_found){
+        await updateSite({pdl:d.pdl_found});
+      }
+
       setLinkyRequestId(d.request_id);
       setLinkyStatus(d.status||'pending');
       if(d.userUrl) setLinkyUserUrl(d.userUrl);
