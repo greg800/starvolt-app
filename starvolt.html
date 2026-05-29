@@ -7704,12 +7704,13 @@ function AdminUsersScreen({ onBack }) {
   const handleCopySite = async () => {
     if (!copySrcSiteId || !copyTargetUserId) return;
     setCopying(true);
-    // Fetch all site data
-    const { data: src } = await sb.from('sites').select('*').eq('id', copySrcSiteId).single();
-    if (!src) { setCopying(false); return; }
-    const { id: _id, created_at: _ca, ...rest } = src;
-    await sb.from('sites').insert({ ...rest, user_id: copyTargetUserId });
+    // RPC SECURITY DEFINER : bypass RLS pour écrire dans le compte cible
+    const { data, error } = await sb.rpc('admin_copy_site', {
+      src_site_id: copySrcSiteId,
+      p_target_user_id: copyTargetUserId,
+    });
     setCopying(false);
+    if (error) { alert('Erreur lors de la copie : ' + error.message); return; }
     setCopyDone(true);
   };
 
