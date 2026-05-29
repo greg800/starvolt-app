@@ -2191,6 +2191,8 @@ const EDF_TRV_ID = '5f805745-8e02-46bc-bbda-caaa28390370';
 
 function SiteFormCard({initial={},onSave,onCancel}){
   const[nom,setNom]=React.useState(initial.nom||'');
+  const[prenom,setPrenom]=React.useState(initial.titulaire_prenom||'');
+  const[nomTit,setNomTit]=React.useState(initial.titulaire_nom||'');
   const[adr,setAdr]=React.useState(initial.adresse_ligne1||'');
   const[cp,setCp]=React.useState(initial.code_postal||'');
   const[ville,setVille]=React.useState(initial.ville||'');
@@ -2204,6 +2206,13 @@ function SiteFormCard({initial={},onSave,onCancel}){
       <div style={{fontWeight:700,fontSize:14,color:'white',marginBottom:12}}>{initial.id?'Modifier le site':'Nouveau site'}</div>
       <div style={{display:'flex',flexDirection:'column',gap:8}}>
         <input className="inp" placeholder="Nom du site *" value={nom} onChange={e=>setNom(e.target.value)}/>
+        <div style={{fontSize:10,color:'rgba(255,255,255,.4)',fontWeight:700,textTransform:'uppercase',letterSpacing:.5,marginTop:2}}>
+          Titulaire du contrat ENEDIS
+        </div>
+        <div style={{display:'flex',gap:8}}>
+          <input className="inp" placeholder="Prénom *" value={prenom} onChange={e=>setPrenom(e.target.value)} style={{flex:1}}/>
+          <input className="inp" placeholder="Nom *" value={nomTit} onChange={e=>setNomTit(e.target.value)} style={{flex:1}}/>
+        </div>
         <input className="inp" placeholder="Rue et numéro" value={adr} onChange={e=>setAdr(e.target.value)}/>
         <div style={{display:'flex',gap:8}}>
           <input className="inp" placeholder="Code postal" value={cp} onChange={e=>setCp(e.target.value)} style={{flex:'0 0 120px'}}/>
@@ -2236,7 +2245,10 @@ function SiteFormCard({initial={},onSave,onCancel}){
         <div style={{display:'flex',gap:8,marginTop:4}}>
           <button className="btn btn-primary" style={{flex:1,fontSize:13,padding:'10px 0'}}
             onClick={()=>nom.trim()&&onSave({
-              nom:nom.trim(),adresse_ligne1:adr,code_postal:cp,ville,
+              nom:nom.trim(),
+              titulaire_prenom:prenom.trim()||null,
+              titulaire_nom:nomTit.trim()||null,
+              adresse_ligne1:adr,code_postal:cp,ville,
               pdl:pdl.trim()||null,
               tarif_id: initial.tarif_id || EDF_TRV_ID,
               heure_debut_hc1:hc1s||null,heure_fin_hc1:hc1e||null,
@@ -3177,30 +3189,51 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations }) {
   const[linkyError,setLinkyError]=useState(null);
   const linkyPollRef=useRef(null);
   const fileRef=useRef(null);
+  const ANON_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhreGtod2VncWthcGRic2lzeHd2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc0MjY4NjksImV4cCI6MjA5MzAwMjg2OX0.9-_oHRJfwXZkl3bRYDMb5K56UzB8O1NOfa5QfrXFfkQ';
+  const EDGE_URL='https://hkxkhwegqkapdbsisxwv.supabase.co/functions/v1/switchgrid';
 
-  // Poll Switchgrid Edge Function while request is in-flight
+  // ── Restaurer l'état linky depuis localStorage quand le site actif change ──
+  React.useEffect(()=>{
+    clearInterval(linkyPollRef.current);
+    if(!activeId){ setLinkyRequestId(null);setLinkyStatus(null);setLinkyUserUrl(null);setLinkyError(null); return; }
+    try{
+      const saved=localStorage.getItem(`starvolt_linky_${activeId}`);
+      if(saved){
+        const{requestId,status,userUrl}=JSON.parse(saved);
+        if(requestId&&status!=='done'&&status!=='error'){
+          setLinkyRequestId(requestId); setLinkyStatus(status);
+          setLinkyUserUrl(userUrl||null); setLinkyError(null);
+          return;
+        }
+        localStorage.removeItem(`starvolt_linky_${activeId}`);
+      }
+    }catch{}
+    setLinkyRequestId(null);setLinkyStatus(null);setLinkyUserUrl(null);setLinkyError(null);
+  },[activeId]);
+
+  // ── Poll Edge Function tant qu'une demande est en cours ──
   React.useEffect(()=>{
     if(!linkyRequestId||linkyStatus==='done'||linkyStatus==='error') return;
+    const siteId=activeId; // capture dans la closure
     clearInterval(linkyPollRef.current);
     linkyPollRef.current=setInterval(async()=>{
       try{
         const { data:{session} } = await sb.auth.getSession();
         if(!session) return;
-        const res=await fetch(
-          `https://hkxkhwegqkapdbsisxwv.supabase.co/functions/v1/switchgrid?request_id=${linkyRequestId}`,
-          {headers:{Authorization:`Bearer ${session.access_token}`,'apikey':'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhreGtod2VncWthcGRic2lzeHd2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc0MjY4NjksImV4cCI6MjA5MzAwMjg2OX0.9-_oHRJfwXZkl3bRYDMb5K56UzB8O1NOfa5QfrXFfkQ'}}
-        );
+        const res=await fetch(`${EDGE_URL}?request_id=${linkyRequestId}`,
+          {headers:{Authorization:`Bearer ${session.access_token}`,'apikey':ANON_KEY}});
         const d=await res.json();
-        setLinkyStatus(d.status||'pending');
-        if(d.userUrl) setLinkyUserUrl(d.userUrl);
-        if(d.status==='done'){
+        const ns=d.status||'pending';
+        const nu=d.userUrl||null;
+        setLinkyStatus(ns);
+        if(nu) setLinkyUserUrl(nu);
+        if(ns==='done'||ns==='error'){
           clearInterval(linkyPollRef.current);
-          // Reload site data — conso_profil has been written by the Edge Function
-          setTimeout(()=>load(),800);
-        }
-        if(d.status==='error'){
-          clearInterval(linkyPollRef.current);
-          setLinkyError(d.error_message||'Erreur inconnue');
+          if(siteId) localStorage.removeItem(`starvolt_linky_${siteId}`);
+          if(ns==='done') setTimeout(()=>load(),800);
+          if(ns==='error') setLinkyError(d.error_message||'Erreur inconnue');
+        } else if(siteId){
+          localStorage.setItem(`starvolt_linky_${siteId}`,JSON.stringify({requestId:linkyRequestId,status:ns,userUrl:nu||linkyUserUrl}));
         }
       }catch(e){console.warn('linky poll error',e);}
     },8000);
@@ -3218,34 +3251,32 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations }) {
     try{
       const { data:{session} } = await sb.auth.getSession();
       if(!session) throw new Error('Non connecté');
-      const res=await fetch(
-        'https://hkxkhwegqkapdbsisxwv.supabase.co/functions/v1/switchgrid',
-        {
-          method:'POST',
-          headers:{
-            'Content-Type':'application/json',
-            Authorization:`Bearer ${session.access_token}`,
-            'apikey':'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhreGtod2VncWthcGRic2lzeHd2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc0MjY4NjksImV4cCI6MjA5MzAwMjg2OX0.9-_oHRJfwXZkl3bRYDMb5K56UzB8O1NOfa5QfrXFfkQ',
-          },
-          body:JSON.stringify({
-            site_id: site.id,
-            pdl,
-            firstName: userProfile?.prenom || '',
-            lastName:  userProfile?.nom   || '',
-            address:   site.adresse_ligne1 || userProfile?.adresse_ligne1 || '',
-            codePostal:site.code_postal    || userProfile?.code_postal    || '',
-            commune:   site.ville          || userProfile?.ville          || '',
-          }),
-        }
-      );
+      const res=await fetch(EDGE_URL,{
+        method:'POST',
+        headers:{'Content-Type':'application/json',Authorization:`Bearer ${session.access_token}`,'apikey':ANON_KEY},
+        body:JSON.stringify({
+          site_id: site.id,
+          pdl,
+          firstName: site.titulaire_prenom || userProfile?.prenom || '',
+          lastName:  site.titulaire_nom    || userProfile?.nom    || '',
+          address:   site.adresse_ligne1   || userProfile?.adresse_ligne1 || '',
+          codePostal:site.code_postal      || userProfile?.code_postal    || '',
+          commune:   site.ville            || userProfile?.ville          || '',
+        }),
+      });
       const d=await res.json();
       if(d.error) throw new Error(d.error);
       setLinkyRequestId(d.request_id);
       setLinkyStatus(d.status||'pending');
       if(d.userUrl) setLinkyUserUrl(d.userUrl);
+      // Persister pour survie au rechargement de page
+      localStorage.setItem(`starvolt_linky_${site.id}`,JSON.stringify({
+        requestId:d.request_id, status:d.status||'pending', userUrl:d.userUrl||null,
+      }));
     }catch(e){
       setLinkyStatus('error');
       setLinkyError(e.message);
+      if(site?.id) localStorage.removeItem(`starvolt_linky_${site.id}`);
     }
   };
 
