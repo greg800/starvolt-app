@@ -1742,7 +1742,7 @@ function SignupSuccessScreen({ email, firstName, consentUrl, onContinue }) {
 }
 
 // ─── AuthSignupScreen ─────────────────────────
-function AuthSignupScreen({ onGoToLogin, onSignedUp }) {
+function AuthSignupScreen({ onGoToLogin, onSignedUp, onSuccessDone }) {
   const [prenom,        setPrenom]        = useState('');
   const [nom,           setNom]           = useState('');
   const [email,         setEmail]         = useState('');
@@ -1754,7 +1754,7 @@ function AuthSignupScreen({ onGoToLogin, onSignedUp }) {
   const [loading,       setLoading]       = useState(false);
   const [error,         setError]         = useState(null);
   // Après inscription réussie
-  const [successData,   setSuccessData]   = useState(null); // { email, firstName, consentUrl }
+  const [successData,   setSuccessData]   = useState(null); // { email, firstName, consentUrl, userId }
 
   // Le bouton n'apparaît que quand tout est rempli
   const allFilled = prenom.trim() && nom.trim() && email.trim() &&
@@ -1847,7 +1847,7 @@ function AuthSignupScreen({ onGoToLogin, onSignedUp }) {
     }
 
     setLoading(false);
-    setSuccessData({ email: email.trim(), firstName: prenom.trim(), consentUrl });
+    setSuccessData({ email: email.trim(), firstName: prenom.trim(), consentUrl, userId: data.user?.id });
   };
 
   // Écran de succès après inscription
@@ -1857,7 +1857,7 @@ function AuthSignupScreen({ onGoToLogin, onSignedUp }) {
         email={successData.email}
         firstName={successData.firstName}
         consentUrl={successData.consentUrl}
-        onContinue={()=>{ /* l'auth listener va détecter la session et naviguer */ }}
+        onContinue={()=>{ onSuccessDone?.(successData.userId); }}
       />
     );
   }
@@ -8137,6 +8137,7 @@ function App() {
   // showDemoPopup supprimé — plus de popup démo
   const [cartVersion, setCartVersion]= useState(0);
   const pendingProfileRef            = useRef(null);
+  const justSignedUpRef              = useRef(false); // empêche la nav auto pendant l'écran de succès signup
   const updateCart = () => setCartVersion(v => v + 1);
 
   // Charge le profil, hydrate le site actif, et retourne l'écran cible
@@ -8202,6 +8203,9 @@ function App() {
           setProfile(pendingProfileRef.current);
           pendingProfileRef.current = null;
         }
+        // Si on vient de créer un compte, ne pas naviguer : le composant signup
+        // affiche l'écran de succès et appellera onSuccessDone pour naviguer.
+        if (justSignedUpRef.current) return;
         fetchProfile(session.user.id).then(screen => {
           setState(s => ({ ...s, screen }));
           setHistory([]);
@@ -8351,7 +8355,8 @@ function App() {
       case 'AUTH_SIGNUP':
         return <AuthSignupScreen
           onGoToLogin={()=>goTo('AUTH_LOGIN')}
-          onSignedUp={(p)=>{ pendingProfileRef.current = {...p, pseudo:null, adresse_ligne1:null, code_postal:null, ville:null, telephone:null}; }}/>;
+          onSignedUp={(p)=>{ justSignedUpRef.current = true; pendingProfileRef.current = {...p, pseudo:null, adresse_ligne1:null, code_postal:null, ville:null, telephone:null}; }}
+          onSuccessDone={(userId)=>{ justSignedUpRef.current = false; fetchProfile(userId).then(screen=>{ setState(s=>({...s,screen})); setHistory([]); }); }}/>;
 
       case 'AUTH_LOGIN':
         return <AuthLoginScreen onGoToSignup={()=>goTo('AUTH_SIGNUP')}/>;
