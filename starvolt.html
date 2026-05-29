@@ -2358,8 +2358,8 @@ function computeStorageOptimization(consoProfile, tariff, baseTariff, site, batK
 
   // Plages HC (communes à tous les modes)
   const hcWinCommon = [
-    { s: toHcH(site?.heure_debut_hc1 ?? globalVars?.hc_debut1), e: toHcH(site?.heure_fin_hc1 ?? globalVars?.hc_fin1) },
-    { s: toHcH(site?.heure_debut_hc2 ?? globalVars?.hc_debut2), e: toHcH(site?.heure_fin_hc2 ?? globalVars?.hc_fin2) },
+    { s: toHcH(site?.hc_debut1 ?? site?.heure_debut_hc1 ?? globalVars?.hc_debut1), e: toHcH(site?.hc_fin1 ?? site?.heure_fin_hc1 ?? globalVars?.hc_fin1) },
+    { s: toHcH(site?.hc_debut2 ?? site?.heure_debut_hc2 ?? globalVars?.hc_debut2), e: toHcH(site?.hc_fin2 ?? site?.heure_fin_hc2 ?? globalVars?.hc_fin2) },
   ].filter(w => w.s !== null && w.e !== null);
 
   // ── Helper : facture annuelle d'un tarif sur la conso brute (pas de PV ni stockage) ──
@@ -2507,8 +2507,8 @@ function computeStorageOptimization(consoProfile, tariff, baseTariff, site, batK
     const tva    = (globalVars?.tva     ?? 20) / 100;
     const fixedHT = (tariff.abo_annuel || 0) + (tariff.turpe_fixe || 0) + (tariff.cta_fixe || 0);
     const hcWin   = [
-      { s: toHcH(site?.heure_debut_hc1 ?? globalVars?.hc_debut1), e: toHcH(site?.heure_fin_hc1 ?? globalVars?.hc_fin1) },
-      { s: toHcH(site?.heure_debut_hc2 ?? globalVars?.hc_debut2), e: toHcH(site?.heure_fin_hc2 ?? globalVars?.hc_fin2) },
+      { s: toHcH(site?.hc_debut1 ?? site?.heure_debut_hc1 ?? globalVars?.hc_debut1), e: toHcH(site?.hc_fin1 ?? site?.heure_fin_hc1 ?? globalVars?.hc_fin1) },
+      { s: toHcH(site?.hc_debut2 ?? site?.heure_debut_hc2 ?? globalVars?.hc_debut2), e: toHcH(site?.hc_fin2 ?? site?.heure_fin_hc2 ?? globalVars?.hc_fin2) },
     ].filter(w => w.s !== null && w.e !== null);
 
     // Prix HT de l'heure (spot + TURPE + accise + marge)
@@ -2541,8 +2541,8 @@ function computeStorageOptimization(consoProfile, tariff, baseTariff, site, batK
     // Plages HC : site d'abord, sinon fallback sur les valeurs globales (parametres_nationaux)
     // toHcH() gère les entiers (DB) et les strings ("22" ou "22:00")
     const hcWindows = [
-      { s: toHcH(site?.heure_debut_hc1 ?? globalVars?.hc_debut1), e: toHcH(site?.heure_fin_hc1 ?? globalVars?.hc_fin1) },
-      { s: toHcH(site?.heure_debut_hc2 ?? globalVars?.hc_debut2), e: toHcH(site?.heure_fin_hc2 ?? globalVars?.hc_fin2) },
+      { s: toHcH(site?.hc_debut1 ?? site?.heure_debut_hc1 ?? globalVars?.hc_debut1), e: toHcH(site?.hc_fin1 ?? site?.heure_fin_hc1 ?? globalVars?.hc_fin1) },
+      { s: toHcH(site?.hc_debut2 ?? site?.heure_debut_hc2 ?? globalVars?.hc_debut2), e: toHcH(site?.hc_fin2 ?? site?.heure_fin_hc2 ?? globalVars?.hc_fin2) },
     ].filter(w => w.s !== null && w.e !== null);
 
     // Pas de plages HC renseignées → pas de déplacement possible, stockage inactif
@@ -2614,8 +2614,8 @@ function computeCombinedOptimization(consoProfile, prodNorm, pvKwc, batKwh, ther
 
   // Plages HC communes (depuis le site, avec fallback sur variables globales)
   const hcWinArr = [
-    { s: toHcH(site?.heure_debut_hc1 ?? globalVars?.hc_debut1), e: toHcH(site?.heure_fin_hc1 ?? globalVars?.hc_fin1) },
-    { s: toHcH(site?.heure_debut_hc2 ?? globalVars?.hc_debut2), e: toHcH(site?.heure_fin_hc2 ?? globalVars?.hc_fin2) },
+    { s: toHcH(site?.hc_debut1 ?? site?.heure_debut_hc1 ?? globalVars?.hc_debut1), e: toHcH(site?.hc_fin1 ?? site?.heure_fin_hc1 ?? globalVars?.hc_fin1) },
+    { s: toHcH(site?.hc_debut2 ?? site?.heure_debut_hc2 ?? globalVars?.hc_debut2), e: toHcH(site?.hc_fin2 ?? site?.heure_fin_hc2 ?? globalVars?.hc_fin2) },
   ].filter(w => w.s !== null && w.e !== null);
 
   // ── Helper : construit une fonction getPrice(m,d,h) pour un tarif donné ───
@@ -3504,8 +3504,8 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations }) {
   const hourlyPrices = useMemo(()=>{
     if(!effectiveTariff) return null;
     const hcWin=[
-      {s:parseHcHour(site?.heure_debut_hc1??globalVars?.hc_debut1), e:parseHcHour(site?.heure_fin_hc1??globalVars?.hc_fin1)},
-      {s:parseHcHour(site?.heure_debut_hc2??globalVars?.hc_debut2), e:parseHcHour(site?.heure_fin_hc2??globalVars?.hc_fin2)},
+      {s:parseHcHour(site?.hc_debut1??site?.heure_debut_hc1??globalVars?.hc_debut1), e:parseHcHour(site?.hc_fin1??site?.heure_fin_hc1??globalVars?.hc_fin1)},
+      {s:parseHcHour(site?.hc_debut2??site?.heure_debut_hc2??globalVars?.hc_debut2), e:parseHcHour(site?.hc_fin2??site?.heure_fin_hc2??globalVars?.hc_fin2)},
     ].filter(w=>w.s!==null&&w.e!==null);
     const arr=new Float32Array(8784);
     if(effectiveTariff.tarif_dynamique&&spotMap){
@@ -3672,6 +3672,7 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations }) {
                     <div>
                       <label style={{fontSize:10,color:'rgba(255,255,255,.45)',fontWeight:700,letterSpacing:'.5px',display:'block',marginBottom:4}}>PDL (numéro compteur Linky)</label>
                       <PDLInput value={site.pdl||''} onSave={v=>updateSite({pdl:v})}/>
+                      {(site.titulaire_prenom||site.titulaire_nom)&&<div style={{fontSize:11,color:'rgba(255,255,255,.5)',marginTop:3,fontWeight:600}}>{[site.titulaire_prenom,site.titulaire_nom].filter(Boolean).join(' ')}</div>}
                       <div style={{marginTop:6}}>
                         <label style={{fontSize:10,color:'rgba(255,255,255,.35)',fontWeight:700,letterSpacing:'.5px',display:'block',marginBottom:4}}>ADRESSE DU COMPTEUR (doit correspondre à ENEDIS)</label>
                         <div style={{display:'flex',flexDirection:'column',gap:5}}>
@@ -3713,7 +3714,7 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations }) {
                         <div style={{marginTop:6,color:'rgba(255,255,255,.5)',fontSize:11}}>En attente de la réponse Switchgrid…</div>
                       )}
                       {linkyStatus==='ordering'&&(
-                        <div style={{marginTop:6,color:'rgba(255,255,255,.5)',fontSize:11}}>⬇️ Téléchargement de la courbe de charge en cours…</div>
+                        <div style={{marginTop:6,color:'rgba(255,255,255,.5)',fontSize:11}}>⬇️ Téléchargement des données ENEDIS en cours…</div>
                       )}
                       {linkyStatus==='done'&&(
                         <div style={{marginTop:6,color:'#7dd940',fontSize:11,fontWeight:700}}>✅ Données Linky importées avec succès !</div>
@@ -3741,6 +3742,12 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations }) {
                           })()}
                         </div>
                         <div style={{fontSize:10,color:'rgba(255,255,255,.35)'}}>{new Date(site.conso_imported_at).toLocaleDateString('fr-FR',{day:'numeric',month:'short',year:'numeric'})}</div>
+                        {(site.puissance_souscrite_kva||site.enedis_option_tarifaire)&&(
+                          <div style={{display:'flex',gap:5,flexWrap:'wrap',marginTop:5}}>
+                            {site.puissance_souscrite_kva&&<span style={{background:'rgba(125,217,64,.12)',border:'1px solid rgba(125,217,64,.25)',borderRadius:5,color:'rgba(125,217,64,.85)',fontSize:10,fontWeight:700,padding:'2px 7px'}}>⚡ {site.puissance_souscrite_kva} kVA</span>}
+                            {site.enedis_option_tarifaire&&<span style={{background:'rgba(100,160,255,.12)',border:'1px solid rgba(100,160,255,.25)',borderRadius:5,color:'rgba(120,170,255,.85)',fontSize:10,fontWeight:700,padding:'2px 7px'}}>{labelOptionTarifaire(site.enedis_option_tarifaire)}</span>}
+                          </div>
+                        )}
                         {site.conso_gaps?.length>0&&(
                           <>
                             <button style={{background:'none',border:'none',color:'rgba(255,255,255,.45)',fontSize:11,cursor:'pointer',padding:'2px 0'}} onClick={()=>setShowGaps(!showGaps)}>
@@ -3841,8 +3848,8 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations }) {
                     const _accPHT=parseFloat(localStorage.getItem('starvolt_acc_price_ht')||'0.09');
                     const _tva=(globalVars?.tva??20)/100;
                     const _hcw=[
-                      {s:parseHcHour(site?.heure_debut_hc1??globalVars?.hc_debut1),e:parseHcHour(site?.heure_fin_hc1??globalVars?.hc_fin1)},
-                      {s:parseHcHour(site?.heure_debut_hc2??globalVars?.hc_debut2),e:parseHcHour(site?.heure_fin_hc2??globalVars?.hc_fin2)},
+                      {s:parseHcHour(site?.hc_debut1??site?.heure_debut_hc1??globalVars?.hc_debut1),e:parseHcHour(site?.hc_fin1??site?.heure_fin_hc1??globalVars?.hc_fin1)},
+                      {s:parseHcHour(site?.hc_debut2??site?.heure_debut_hc2??globalVars?.hc_debut2),e:parseHcHour(site?.hc_fin2??site?.heure_fin_hc2??globalVars?.hc_fin2)},
                     ].filter(w=>w.s!==null&&w.e!==null);
                     for(const pt of balance.hourly){
                       if(!pt||pt.grid_buy<=0||!(prodProfilData?.[profIdx(pt.m,pt.d,pt.h)]>0)) continue;
@@ -4334,6 +4341,16 @@ function SimulationsScreen({ onACC, onBox, onSolar, onOptimisation, onBack, onMo
 
 // ─── Optimisation utilities ───────────────────
 function parseHcHour(s) { if (s == null || s === '') return null; if (typeof s === 'number') return Math.round(s); const n = parseInt(String(s).split(':')[0]); return isNaN(n) ? null : n; }
+
+// Libellé court de l'option tarifaire ENEDIS à partir du code C68 (ex: "BTINFMU4" → "HC/HP")
+function labelOptionTarifaire(code) {
+  if (!code) return null;
+  const c = code.toUpperCase();
+  if (c.includes('MU'))    return 'HC/HP';
+  if (c.includes('EJP'))   return 'EJP';
+  if (c.includes('TEMPO')) return 'TEMPO';
+  return 'BASE';
+}
 
 function isHcHour(h, windows) {
   for (const { s, e } of windows) {
