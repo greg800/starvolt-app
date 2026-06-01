@@ -3970,11 +3970,16 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, cartVersion=0
                             <td style={{...tdD,color:hasModifs?'#7dd940':'rgba(255,255,255,.18)',fontWeight:700}}>{hasModifs?billApresNet.toLocaleString('fr-FR')+' €/an':dash}</td>
                             <td style={{...tdD,color:hasModifs?'rgba(125,217,64,.75)':'rgba(255,255,255,.18)',fontWeight:600}}>{hasModifs&&prixApres!=null?(prixApres*100).toFixed(1)+' c€/kWh':dash}</td>
                           </tr>
-                          {hasSaving&&<tr><td colSpan={3}></td><td style={{...tdD,borderTop:'1px solid rgba(125,217,64,.2)',paddingTop:6,whiteSpace:'nowrap'}}>
-                            <span style={{fontSize:20,fontWeight:900,color:'#7dd940'}}>-{Math.round(totalSaving).toLocaleString('fr-FR')} €/an</span>
-                            {totalReductionPct>0&&<span style={{fontSize:13,color:'rgba(125,217,64,.6)',marginLeft:4}}>({totalReductionPct}%)</span>}
-                            {flexRev>0&&<div style={{fontSize:12,color:'rgba(125,217,64,.5)',marginTop:3}}>dont {flexRev} € Flex</div>}
-                          </td></tr>}
+                          {hasSaving&&<tr>
+                            <td colSpan={2}></td>
+                            <td style={{...tdD,borderTop:'1px solid rgba(125,217,64,.2)',paddingTop:6,whiteSpace:'nowrap'}}>
+                              <span style={{fontSize:20,fontWeight:900,color:'#7dd940'}}>-{Math.round(totalSaving).toLocaleString('fr-FR')} €/an</span>
+                              {totalReductionPct>0&&<span style={{fontSize:13,color:'rgba(125,217,64,.6)',marginLeft:4}}>({totalReductionPct}%)</span>}
+                            </td>
+                            <td style={{...tdD,borderTop:'1px solid rgba(125,217,64,.2)',paddingTop:6,whiteSpace:'nowrap'}}>
+                              {flexRev>0&&<span style={{fontSize:13,color:'rgba(125,217,64,.5)'}}>dont {flexRev} € Flex</span>}
+                            </td>
+                          </tr>}
                           {!hasModifs&&<tr><td colSpan={4} style={{...tdD,textAlign:'right',color:'rgba(255,255,255,.2)',fontSize:12,paddingTop:3,paddingBottom:1}}>Ajoutez des équipements dans votre panier pour voir l'impact</td></tr>}
                         </tbody>
                       </table>
