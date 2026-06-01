@@ -4182,7 +4182,7 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, cartVersion=0
                       {s:parseHcHour(site?.hc_debut2??site?.heure_debut_hc2??globalVars?.hc_debut2),e:parseHcHour(site?.hc_fin2??site?.heure_fin_hc2??globalVars?.hc_fin2)},
                     ].filter(w=>w.s!==null&&w.e!==null);
                     for(const pt of balance.hourly){
-                      if(!pt||pt.grid_buy<=0||!(prodProfilData?.[profIdx(pt.m,pt.d,pt.h)]>0)) continue;
+                      if(!pt||pt.grid_buy<=0||!(prodProfilData?prodProfilData[profIdx(pt.m,pt.d,pt.h)]>0:(pt.h>=9&&pt.h<18))) continue;
                       // Prix ACC TTC de l'heure : TURPE 4 taux (été/hiver × HC/HP), sans accise
                       const accTTC=(_accPHT+getTurpeRate(pt.m,pt.h,globalVars,_hcw))*(1+_tva);
                       // Prix normal de l'heure (sans ACC) calculé depuis le tarif brut
