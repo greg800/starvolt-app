@@ -3827,10 +3827,16 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, cartVersion=0
                   ):(
                     <span style={{fontWeight:800,fontSize:14,color:'white',flexShrink:0}}>{site.nom}</span>
                   )}
-                  <div style={{display:'flex',gap:5,marginLeft:'auto',flexShrink:0}}>
-                    <button title="Ajouter un site" style={{background:'rgba(125,217,64,.15)',border:'1px solid rgba(125,217,64,.3)',color:'#7dd940',cursor:'pointer',fontSize:15,fontWeight:700,padding:'3px 10px',borderRadius:6,lineHeight:1}} onClick={()=>{setShowAdd(true);setEditMode(false);setShowDeleteConfirm(false);}}>+</button>
-                    {!showDeleteConfirm&&<button title="Supprimer ce site" style={{background:'rgba(255,80,80,.1)',border:'1px solid rgba(255,80,80,.25)',color:'#ff6b6b',cursor:'pointer',fontSize:15,fontWeight:700,padding:'3px 10px',borderRadius:6,lineHeight:1}} onClick={()=>setShowDeleteConfirm(true)}>−</button>}
-                    <button title="Modifier ce site" style={{background:'rgba(255,255,255,.07)',border:'1px solid rgba(255,255,255,.15)',color:'rgba(255,255,255,.6)',cursor:'pointer',fontSize:14,padding:'3px 9px',borderRadius:6,lineHeight:1}} onClick={()=>setEditMode(true)}>✏️</button>
+                  <div style={{display:'flex',gap:5,marginLeft:'auto',flexShrink:0,alignItems:'center'}}>
+                    {!showDeleteConfirm&&<button title="Ajouter un site" style={{background:'rgba(125,217,64,.15)',border:'1px solid rgba(125,217,64,.3)',color:'#7dd940',cursor:'pointer',fontSize:15,fontWeight:700,padding:'3px 10px',borderRadius:6,lineHeight:1}} onClick={()=>{setShowAdd(true);setEditMode(false);}}>+</button>}
+                    {!showDeleteConfirm
+                      ? <button title="Supprimer ce site" style={{background:'rgba(255,80,80,.1)',border:'1px solid rgba(255,80,80,.25)',color:'#ff6b6b',cursor:'pointer',fontSize:15,fontWeight:700,padding:'3px 10px',borderRadius:6,lineHeight:1}} onClick={()=>setShowDeleteConfirm(true)}>−</button>
+                      : <><span style={{fontSize:11,color:'#ff6b6b',fontWeight:700,whiteSpace:'nowrap'}}>Supprimer ?</span>
+                          <button style={{background:'rgba(255,80,80,.25)',border:'1px solid rgba(255,80,80,.5)',color:'#ff6b6b',cursor:'pointer',fontSize:11,fontWeight:700,padding:'3px 10px',borderRadius:6}} onClick={handleDeleteConfirmed}>Oui</button>
+                          <button style={{background:'rgba(255,255,255,.07)',border:'1px solid rgba(255,255,255,.15)',color:'rgba(255,255,255,.6)',cursor:'pointer',fontSize:11,fontWeight:700,padding:'3px 10px',borderRadius:6}} onClick={()=>setShowDeleteConfirm(false)}>Non</button>
+                        </>
+                    }
+                    {!showDeleteConfirm&&<button title="Modifier ce site" style={{background:'rgba(255,255,255,.07)',border:'1px solid rgba(255,255,255,.15)',color:'rgba(255,255,255,.6)',cursor:'pointer',fontSize:14,padding:'3px 9px',borderRadius:6,lineHeight:1}} onClick={()=>setEditMode(true)}>✏️</button>}
                   </div>
                 </div>
               </div>
@@ -4419,17 +4425,6 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, cartVersion=0
               </div>}
             </div>}
 
-            {/* Suppression */}
-            {showDeleteConfirm&&(
-              <div className="card" style={{padding:'14px 16px',border:'1px solid rgba(255,80,80,.3)',marginBottom:8}}>
-                <div style={{color:'#ff6b6b',fontWeight:700,marginBottom:6}}>⚠️ Supprimer « {site.nom} » ?</div>
-                <div style={{fontSize:12,color:'rgba(255,255,255,.6)',marginBottom:12}}>Toutes les données associées seront supprimées définitivement.</div>
-                <div style={{display:'flex',gap:8}}>
-                  <button className="btn btn-no" style={{flex:1,fontSize:13}} onClick={handleDeleteConfirmed}>Supprimer</button>
-                  <button className="btn btn-sec" style={{flex:1,fontSize:13}} onClick={()=>setShowDeleteConfirm(false)}>Annuler</button>
-                </div>
-              </div>
-            )}
           </>
         )}
       </div>
