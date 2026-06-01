@@ -3907,11 +3907,12 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, cartVersion=0
                     const th={padding:'4px 8px',fontWeight:800,fontSize:9,letterSpacing:1,textTransform:'uppercase',textAlign:'right',border:'none'};
                     const td={padding:'6px 8px',border:'none',textAlign:'right'};
                     const sep={borderTop:'1px solid rgba(255,255,255,.07)'};
-                    const U=({c})=><span style={{fontSize:'0.5em',fontWeight:400,marginLeft:3,verticalAlign:'middle',opacity:.75}}>{c}</span>;
+                    const U=({c,em=0.5})=><span style={{fontSize:em+'em',fontWeight:400,marginLeft:3,verticalAlign:'middle',opacity:.75}}>{c}</span>;
                     if(isMobile){
                       // Mobile : lignes = métriques, colonnes = Avant | Après
+                      const tblM={...tbl,fontSize:18};
                       return(
-                        <table style={tbl}>
+                        <table style={tblM}>
                           <thead>
                             <tr style={{borderBottom:'1px solid rgba(255,255,255,.1)'}}>
                               <th style={{...th,textAlign:'left',width:'40%',color:'transparent'}}> </th>
@@ -3922,23 +3923,23 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, cartVersion=0
                           <tbody>
                             <tr style={sep}>
                               <td style={{...td,textAlign:'left',color:'rgba(255,255,255,.5)',fontSize:11}}>Élec soutirée</td>
-                              <td style={{...td,color:'white',fontWeight:700}}>{Math.round(consoTot/1000)}<U c="MWh/an"/></td>
-                              <td style={{...td,color:hasModifs?'white':'rgba(255,255,255,.18)',fontWeight:700}}>{hasModifs?<>{Math.round(consoApres/1000)}<U c="MWh/an"/></>:dash}</td>
+                              <td style={{...td,color:'white',fontWeight:700}}>{Math.round(consoTot/1000)}<U c="MWh/an" em={0.4}/></td>
+                              <td style={{...td,color:hasModifs?'white':'rgba(255,255,255,.18)',fontWeight:700}}>{hasModifs?<>{Math.round(consoApres/1000)}<U c="MWh/an" em={0.4}/></>:dash}</td>
                             </tr>
                             <tr style={sep}>
                               <td style={{...td,textAlign:'left',color:'rgba(255,255,255,.5)',fontSize:11}}>Facture TTC</td>
-                              <td style={{...td,color:'#f0a050',fontWeight:700}}>{billAvant!=null?<>{billAvant.toLocaleString('fr-FR')}<U c="€/an"/></>:dash}</td>
-                              <td style={{...td,color:hasModifs?'#7dd940':'rgba(255,255,255,.18)',fontWeight:700}}>{hasModifs?<>{billApresNet.toLocaleString('fr-FR')}<U c="€/an"/></>:dash}</td>
+                              <td style={{...td,color:'#f0a050',fontWeight:700}}>{billAvant!=null?<>{billAvant.toLocaleString('fr-FR')}<U c="€/an" em={0.4}/></>:dash}</td>
+                              <td style={{...td,color:hasModifs?'#7dd940':'rgba(255,255,255,.18)',fontWeight:700}}>{hasModifs?<>{billApresNet.toLocaleString('fr-FR')}<U c="€/an" em={0.4}/></>:dash}</td>
                             </tr>
                             <tr style={sep}>
                               <td style={{...td,textAlign:'left',color:'rgba(255,255,255,.5)',fontSize:11}}>Prix / kWh</td>
-                              <td style={{...td,color:'rgba(255,255,255,.5)',fontWeight:600}}>{prixAvant!=null?<>{(prixAvant*100).toFixed(1)}<U c="c€"/></>:dash}</td>
-                              <td style={{...td,color:hasModifs?'rgba(125,217,64,.75)':'rgba(255,255,255,.18)',fontWeight:600}}>{hasModifs&&prixApres!=null?<>{(prixApres*100).toFixed(1)}<U c="c€"/></>:dash}</td>
+                              <td style={{...td,color:'rgba(255,255,255,.5)',fontWeight:600}}>{prixAvant!=null?<>{(prixAvant*100).toFixed(1)}<U c="c€" em={0.4}/></>:dash}</td>
+                              <td style={{...td,color:hasModifs?'rgba(125,217,64,.75)':'rgba(255,255,255,.18)',fontWeight:600}}>{hasModifs&&prixApres!=null?<>{(prixApres*100).toFixed(1)}<U c="c€" em={0.4}/></>:dash}</td>
                             </tr>
                             {hasSaving&&<tr><td></td><td></td><td style={{...td,borderTop:'1px solid rgba(125,217,64,.2)',paddingTop:6,whiteSpace:'nowrap'}}>
-                              <span style={{fontSize:13,fontWeight:900,color:'#7dd940'}}>-{Math.round(totalSaving).toLocaleString('fr-FR')}<U c="€/an"/></span>
-                              {totalReductionPct>0&&<span style={{fontSize:10,color:'rgba(125,217,64,.6)',marginLeft:3}}>({totalReductionPct}%)</span>}
-                              {flexRev>0&&<span style={{fontSize:9,color:'rgba(125,217,64,.5)',marginLeft:4}}>dont {flexRev}€ Flex</span>}
+                              <span style={{fontSize:20,fontWeight:900,color:'#7dd940'}}>-{Math.round(totalSaving).toLocaleString('fr-FR')}<U c="€/an" em={0.4}/></span>
+                              {totalReductionPct>0&&<span style={{fontSize:15,color:'rgba(125,217,64,.6)',marginLeft:3}}>({totalReductionPct}%)</span>}
+                              {flexRev>0&&<span style={{fontSize:11,color:'rgba(125,217,64,.5)',marginLeft:5}}>dont {flexRev}€ Flex</span>}
                             </td></tr>}
                             {!hasModifs&&<tr><td colSpan={3} style={{...td,textAlign:'center',color:'rgba(255,255,255,.2)',fontSize:10,paddingTop:5,paddingBottom:2}}>Ajoutez des équipements dans votre panier pour voir l'impact</td></tr>}
                           </tbody>
