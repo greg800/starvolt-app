@@ -3878,12 +3878,21 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, cartVersion=0
                           ?Math.round((baseTariff.abo_annuel||0)+site.conso_annuelle_kwh*(baseTariff.prix_hp||0))
                           :null);
                     const prixAvant=(billAvant&&consoTot)?billAvant/consoTot:null;
-                    // APRÈS
+                    // Flex revenue — même formule que la tuile Ma prod
+                    const _hasBox2=!!localStorage.getItem('starvolt_box_chosen')||localStorage.getItem('starvolt_solar_chosen')==='solar_box';
+                    const _optiFlex2=!!(globalVars?.opti_flex)&&_hasBox2;
+                    const _ratio2=(globalVars?.ratio_puissance_stockage??50)/100;
+                    const _batPow2=(parseFloat(batKwh)||0)*_ratio2;
+                    const flexRev=_optiFlex2?Math.round((parseFloat(thermKwh)||0)*14+_batPow2*27):0;
+                    // APRÈS — coût net = facture électricité − revenus flex
                     const hasBalance=balance&&typeof balance.billWithStorage==='number';
                     const consoApres=hasBalance?Math.round(balance.monthly.reduce((s,m)=>s+m.grid_buy,0)):null;
-                    const billApres=hasBalance?Math.round(balance.billWithStorage):null;
-                    const prixApres=(billApres!=null&&consoApres>0)?billApres/consoApres:null;
-                    const hasSaving=hasBalance&&balance.saving>0;
+                    const billApresElec=hasBalance?Math.round(balance.billWithStorage):null;
+                    const billApresNet=billApresElec!=null?billApresElec-flexRev:null;
+                    const prixApres=(billApresNet!=null&&consoApres>0)?billApresNet/consoApres:null;
+                    const totalSaving=hasBalance?(balance.saving+flexRev):0;
+                    const totalReductionPct=billAvant>0?Math.min(100,Math.round(totalSaving/billAvant*100)):0;
+                    const hasSaving=hasBalance&&totalSaving>0;
                     const hasModifs=hasBalance&&(
                       !!localStorage.getItem('starvolt_solar_chosen')||
                       !!localStorage.getItem('starvolt_box_chosen')||
@@ -3918,14 +3927,18 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, cartVersion=0
                             <tr style={sep}>
                               <td style={{...td,textAlign:'left',color:'rgba(255,255,255,.5)',fontSize:11}}>Facture TTC</td>
                               <td style={{...td,color:'#f0a050',fontWeight:700}}>{billAvant!=null?billAvant.toLocaleString('fr-FR')+' €/an':dash}</td>
-                              <td style={{...td,color:hasModifs?'#7dd940':'rgba(255,255,255,.18)',fontWeight:700}}>{hasModifs?billApres.toLocaleString('fr-FR')+' €/an':dash}</td>
+                              <td style={{...td,color:hasModifs?'#7dd940':'rgba(255,255,255,.18)',fontWeight:700}}>{hasModifs?billApresNet.toLocaleString('fr-FR')+' €/an':dash}</td>
                             </tr>
                             <tr style={sep}>
                               <td style={{...td,textAlign:'left',color:'rgba(255,255,255,.5)',fontSize:11}}>Prix / kWh</td>
                               <td style={{...td,color:'rgba(255,255,255,.5)',fontWeight:600}}>{prixAvant!=null?(prixAvant*100).toFixed(1)+' c€':dash}</td>
                               <td style={{...td,color:hasModifs?'rgba(125,217,64,.75)':'rgba(255,255,255,.18)',fontWeight:600}}>{hasModifs&&prixApres!=null?(prixApres*100).toFixed(1)+' c€':dash}</td>
                             </tr>
-                            {hasSaving&&<tr><td></td><td></td><td style={{...td,borderTop:'1px solid rgba(125,217,64,.2)',paddingTop:6}}><span style={{fontSize:13,fontWeight:900,color:'#7dd940'}}>-{Math.round(balance.saving).toLocaleString('fr-FR')} €/an</span>{balance.reductionPct>0&&<span style={{fontSize:10,color:'rgba(125,217,64,.6)',marginLeft:3}}>({Math.round(balance.reductionPct)}%)</span>}</td></tr>}
+                            {hasSaving&&<tr><td></td><td></td><td style={{...td,borderTop:'1px solid rgba(125,217,64,.2)',paddingTop:6}}>
+                              <span style={{fontSize:13,fontWeight:900,color:'#7dd940',whiteSpace:'nowrap'}}>-{Math.round(totalSaving).toLocaleString('fr-FR')} €/an</span>
+                              {totalReductionPct>0&&<span style={{fontSize:10,color:'rgba(125,217,64,.6)',marginLeft:3}}>({totalReductionPct}%)</span>}
+                              {flexRev>0&&<div style={{fontSize:9,color:'rgba(125,217,64,.5)',marginTop:2}}>dont {flexRev} € Flex</div>}
+                            </td></tr>}
                             {!hasModifs&&<tr><td colSpan={3} style={{...td,textAlign:'center',color:'rgba(255,255,255,.2)',fontSize:10,paddingTop:5,paddingBottom:2}}>Ajoutez des équipements dans votre panier pour voir l'impact</td></tr>}
                           </tbody>
                         </table>
@@ -3954,10 +3967,14 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, cartVersion=0
                           <tr style={{...sep,background:hasModifs?'rgba(125,217,64,.05)':'rgba(255,255,255,.02)'}}>
                             <td style={{...tdD,textAlign:'left',fontSize:14,fontWeight:800,letterSpacing:1,textTransform:'uppercase',color:aCol}}>Après</td>
                             <td style={{...tdD,color:hasModifs?'white':'rgba(255,255,255,.18)',fontWeight:700}}>{hasModifs?fmtE(consoApres):dash}</td>
-                            <td style={{...tdD,color:hasModifs?'#7dd940':'rgba(255,255,255,.18)',fontWeight:700}}>{hasModifs?billApres.toLocaleString('fr-FR')+' €/an':dash}</td>
+                            <td style={{...tdD,color:hasModifs?'#7dd940':'rgba(255,255,255,.18)',fontWeight:700}}>{hasModifs?billApresNet.toLocaleString('fr-FR')+' €/an':dash}</td>
                             <td style={{...tdD,color:hasModifs?'rgba(125,217,64,.75)':'rgba(255,255,255,.18)',fontWeight:600}}>{hasModifs&&prixApres!=null?(prixApres*100).toFixed(1)+' c€/kWh':dash}</td>
                           </tr>
-                          {hasSaving&&<tr><td colSpan={3}></td><td style={{...tdD,borderTop:'1px solid rgba(125,217,64,.2)',paddingTop:6,whiteSpace:'nowrap'}}><span style={{fontSize:20,fontWeight:900,color:'#7dd940'}}>-{Math.round(balance.saving).toLocaleString('fr-FR')} €/an</span>{balance.reductionPct>0&&<span style={{fontSize:13,color:'rgba(125,217,64,.6)',marginLeft:4}}>({Math.round(balance.reductionPct)}%)</span>}</td></tr>}
+                          {hasSaving&&<tr><td colSpan={3}></td><td style={{...tdD,borderTop:'1px solid rgba(125,217,64,.2)',paddingTop:6,whiteSpace:'nowrap'}}>
+                            <span style={{fontSize:20,fontWeight:900,color:'#7dd940'}}>-{Math.round(totalSaving).toLocaleString('fr-FR')} €/an</span>
+                            {totalReductionPct>0&&<span style={{fontSize:13,color:'rgba(125,217,64,.6)',marginLeft:4}}>({totalReductionPct}%)</span>}
+                            {flexRev>0&&<div style={{fontSize:12,color:'rgba(125,217,64,.5)',marginTop:3}}>dont {flexRev} € Flex</div>}
+                          </td></tr>}
                           {!hasModifs&&<tr><td colSpan={4} style={{...tdD,textAlign:'right',color:'rgba(255,255,255,.2)',fontSize:12,paddingTop:3,paddingBottom:1}}>Ajoutez des équipements dans votre panier pour voir l'impact</td></tr>}
                         </tbody>
                       </table>
@@ -4190,7 +4207,7 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, cartVersion=0
                     }
                     accSavings=Math.round(accSavings);
                   }
-                  // Baisse totale : bilan énergie + flex + acc — source unique pour le panier
+                  // Baisse totale : bilan énergie + flex + acc
                   const baisseTotale=(baisseFacture||0)+flexRevenue+accSavings;
                   if(baisseTotale>0) localStorage.setItem('starvolt_baisse_facture',String(baisseTotale));
                   // Investissement global (PV + batterie + box) depuis les tarifs admin
@@ -4230,7 +4247,7 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, cartVersion=0
                           <div style={{fontSize:isMobile?19:26,fontWeight:900,color:'#7dd940',lineHeight:1.1}}>
                             {baisseTotale>0?baisseTotale.toLocaleString('fr-FR'):'—'}<span style={{fontSize:isMobile?10:13}}> €TTC</span>
                           </div>
-                          {!isMobile&&<div style={{fontSize:11,color:'rgba(255,255,255,.45)'}}>
+                          {!isMobile&&(baisseFacture>0||flexRevenue>0||accSavings>0)&&<div style={{fontSize:11,color:'rgba(255,255,255,.45)'}}>
                             {baisseFacture>0?`Énergie ${baisseFacture.toLocaleString('fr-FR')} €`:''}
                             {flexRevenue>0?` · Flex ${flexRevenue} €`:''}
                             {accSavings>0?` · ACC ${accSavings} €`:''}
