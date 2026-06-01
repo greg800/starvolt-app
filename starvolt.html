@@ -3988,17 +3988,7 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, cartVersion=0
                   })()}
                   {/* Graphique bilan 12 mois avec zoom */}
                   {balance?(
-                    <>
-                      <div style={{fontWeight:700,fontSize:12,color:'rgba(255,255,255,.45)',marginBottom:5}}>
-                        {(()=>{
-                          let period='Année';
-                          if(chartLevel==='month') period=`Mois ${chartMonth}`;
-                          else if(chartLevel==='day') period=`${chartDay}/${chartMonth}`;
-                          return `Bilan · ${period}`;
-                        })()}
-                      </div>
-                      <EnergyBalanceChart balance={balance} level={chartLevel} selMonth={chartMonth} selDay={chartDay} setLevel={setChartLevel} setSelMonth={setChartMonth} setSelDay={setChartDay} hourlyPrices={hourlyPrices} isDynamic={isDynamicTariff}/>
-                    </>
+                    <EnergyBalanceChart balance={balance} level={chartLevel} selMonth={chartMonth} selDay={chartDay} setLevel={setChartLevel} setSelMonth={setChartMonth} setSelDay={setChartDay} hourlyPrices={hourlyPrices} isDynamic={isDynamicTariff}/>
                   ):(
                     <div style={{color:'rgba(255,255,255,.35)',fontSize:12,padding:'8px 0'}}>Sélectionnez un tarif dans « Ma conso » pour afficher le graphique.</div>
                   )}
