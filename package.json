@@ -2,18 +2,20 @@
   "name": "starvolt-app",
   "version": "1.0.0",
   "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "dev": "vite",
     "build": "vite build",
     "start": "node server.js"
   },
-  "dependencies": {
+  "dependencies": {},
+  "devDependencies": {
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "canvas-confetti": "^1.9.3",
-    "serve": "^14.2.4"
-  },
-  "devDependencies": {
+    "serve": "^14.2.4",
     "@vitejs/plugin-react": "^4.3.1",
     "vite": "^5.4.10"
   }
