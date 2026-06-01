@@ -3506,9 +3506,9 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, cartVersion=0
     const hasSolarPanier=!!localStorage.getItem('starvolt_solar_chosen');
     const hasBoxOnlyPanier=!!localStorage.getItem('starvolt_box_chosen')&&!hasSolarPanier;
     if(hasSolarPanier){
-      setPvKwc(solarDef.pvKwc||(site?.puissance_pv_kwc>0?String(site.puissance_pv_kwc):'6'));
-      setBatKwh(solarDef.batKwh||(site?.batterie_capacite_kwh>0?String(site.batterie_capacite_kwh):'10'));
-      setThermKwh(solarDef.thermKwh||'10');
+      setPvKwc(parseFloat(solarDef.pvKwc)>0?solarDef.pvKwc:(site?.puissance_pv_kwc>0?String(site.puissance_pv_kwc):'6'));
+      setBatKwh(parseFloat(solarDef.batKwh)>0?solarDef.batKwh:(site?.batterie_capacite_kwh>0?String(site.batterie_capacite_kwh):'10'));
+      setThermKwh(parseFloat(solarDef.thermKwh)>0?solarDef.thermKwh:'10');
     } else if(hasBoxOnlyPanier){
       // Box seule : conserver les valeurs déjà saisies, thermique à 10 par défaut
       setPvKwc(solarDef.pvKwc||'0');
@@ -3957,7 +3957,7 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, cartVersion=0
                             <td style={{...tdD,color:hasModifs?'#7dd940':'rgba(255,255,255,.18)',fontWeight:700}}>{hasModifs?billApres.toLocaleString('fr-FR')+' €/an':dash}</td>
                             <td style={{...tdD,color:hasModifs?'rgba(125,217,64,.75)':'rgba(255,255,255,.18)',fontWeight:600}}>{hasModifs&&prixApres!=null?(prixApres*100).toFixed(1)+' c€/kWh':dash}</td>
                           </tr>
-                          {hasSaving&&<tr><td colSpan={3}></td><td style={{...tdD,borderTop:'1px solid rgba(125,217,64,.2)',paddingTop:6}}><span style={{fontSize:20,fontWeight:900,color:'#7dd940'}}>-{Math.round(balance.saving).toLocaleString('fr-FR')} €/an</span>{balance.reductionPct>0&&<span style={{fontSize:13,color:'rgba(125,217,64,.6)',marginLeft:4}}>({Math.round(balance.reductionPct)}%)</span>}</td></tr>}
+                          {hasSaving&&<tr><td colSpan={3}></td><td style={{...tdD,borderTop:'1px solid rgba(125,217,64,.2)',paddingTop:6,whiteSpace:'nowrap'}}><span style={{fontSize:20,fontWeight:900,color:'#7dd940'}}>-{Math.round(balance.saving).toLocaleString('fr-FR')} €/an</span>{balance.reductionPct>0&&<span style={{fontSize:13,color:'rgba(125,217,64,.6)',marginLeft:4}}>({Math.round(balance.reductionPct)}%)</span>}</td></tr>}
                           {!hasModifs&&<tr><td colSpan={4} style={{...tdD,textAlign:'right',color:'rgba(255,255,255,.2)',fontSize:12,paddingTop:3,paddingBottom:1}}>Ajoutez des équipements dans votre panier pour voir l'impact</td></tr>}
                         </tbody>
                       </table>
@@ -6143,9 +6143,10 @@ function ThermaleForm({ onDone, onBack, siteId=null, initial=null }) {
       d.thermKwh = String(kw);
       localStorage.setItem('starvolt_solar_defaults', JSON.stringify(d));
     } catch {}
-    // Persiste en base si on connaît le siteId
+    // Persiste en base ET en localStorage si on connaît le siteId (évite la course DB/navigation)
     if (siteId) {
       sb.from('sites').update({flex_chauffage:chauffage,flex_ecs:ecs,flex_surface:surface}).eq('id',siteId);
+      try { localStorage.setItem('starvolt_flex_'+siteId, JSON.stringify({chauffage,ecs,surface})); } catch {}
     }
     onDone(kw);
   }
@@ -6269,7 +6270,9 @@ function BoxSimScreen({ user, userProfile, onBack, onPanier, onMonSite, onCartUp
     ]).then(([{ data: site }, { data: tariffs }, { data: spotRows }, { data: nat }]) => {
       if (!site?.conso_profil) { setLoading(false); return; }
       setActiveSiteId(siteId);
-      if(site.flex_chauffage&&site.flex_ecs&&site.flex_surface) setSiteFlex({chauffage:site.flex_chauffage,ecs:site.flex_ecs,surface:site.flex_surface});
+      const _lsFlex=(()=>{try{const v=localStorage.getItem('starvolt_flex_'+siteId);return v?JSON.parse(v):null;}catch{return null;}})();
+      const _flex=_lsFlex||(site.flex_chauffage&&site.flex_ecs&&site.flex_surface?{chauffage:site.flex_chauffage,ecs:site.flex_ecs,surface:site.flex_surface}:null);
+      if(_flex) setSiteFlex(_flex);
       const curTariff = site.tarif_id ? (tariffs || []).find(t => t.id === site.tarif_id) : null;
       const { kwh_hc, kwh_hp } = calcHcHp(site.conso_profil, site);
       const kwh_total = kwh_hc + kwh_hp;
@@ -6518,7 +6521,9 @@ function SolarSimScreen({ user, userProfile, onBack, onPanier, onMonSite, onCart
       sb.rpc('get_spot_json'),
       sb.from('parametres_nationaux').select('*').eq('id', 1).maybeSingle(),
     ]).then(async ([{ data: site }, { data: tariffs }, { data: spotRows }, { data: nat }]) => {
-      if(site?.flex_chauffage&&site.flex_ecs&&site.flex_surface) setSiteFlex({chauffage:site.flex_chauffage,ecs:site.flex_ecs,surface:site.flex_surface});
+      const _lsFlexS=(()=>{try{const v=localStorage.getItem('starvolt_flex_'+siteId);return v?JSON.parse(v):null;}catch{return null;}})();
+      const _flexS=_lsFlexS||(site?.flex_chauffage&&site.flex_ecs&&site.flex_surface?{chauffage:site.flex_chauffage,ecs:site.flex_ecs,surface:site.flex_surface}:null);
+      if(_flexS) setSiteFlex(_flexS);
       if (!site?.conso_profil) { setLoading(false); return; }
       const curTariff = site.tarif_id ? (tariffs || []).find(t => t.id === site.tarif_id) : null;
       const { kwh_hc, kwh_hp } = calcHcHp(site.conso_profil, site);
@@ -6764,7 +6769,7 @@ function SolarSimScreen({ user, userProfile, onBack, onPanier, onMonSite, onCart
           </StickyFooter>
         ) : (
           <StickyFooter onBack={onBack}>
-            <button className="btn btn-yes" onClick={() => { localStorage.setItem('starvolt_solar_chosen','solar_box'); try{const d=JSON.parse(localStorage.getItem('starvolt_solar_defaults')||'{}');localStorage.setItem('starvolt_solar_defaults',JSON.stringify({...d,pvKwc:'6',batKwh:'10'}));}catch{localStorage.setItem('starvolt_solar_defaults',JSON.stringify({pvKwc:'6',batKwh:'10',thermKwh:'0'}));} if(solarBoxSaving) localStorage.setItem('starvolt_solar_saving',String(solarBoxSaving)); localStorage.removeItem('starvolt_box_chosen'); localStorage.removeItem('starvolt_box_saving'); setPanierServicesChecked({opti_solaire:true,opti_tarif:true,opti_flex:true}); setChosen('solar_box'); if(siteFlex){applyExistingFlexSolar(siteFlex);setJustConfirmed(true);if(onCartUpdate)onCartUpdate();}else{setShowThermForm(true);} }}>
+            <button className="btn btn-yes" onClick={() => { localStorage.setItem('starvolt_solar_chosen','solar_box'); try{const d=JSON.parse(localStorage.getItem('starvolt_solar_defaults')||'{}');localStorage.setItem('starvolt_solar_defaults',JSON.stringify({...d,pvKwc:'6',batKwh:'10'}));}catch{localStorage.setItem('starvolt_solar_defaults',JSON.stringify({pvKwc:'6',batKwh:'10',thermKwh:'0'}));} setPvKwc('6'); setBatKwh('10'); if(solarBoxSaving) localStorage.setItem('starvolt_solar_saving',String(solarBoxSaving)); localStorage.removeItem('starvolt_box_chosen'); localStorage.removeItem('starvolt_box_saving'); setPanierServicesChecked({opti_solaire:true,opti_tarif:true,opti_flex:true}); setChosen('solar_box'); if(siteFlex){applyExistingFlexSolar(siteFlex);setJustConfirmed(true);if(onCartUpdate)onCartUpdate();}else{setShowThermForm(true);} }}>
               ☀️ Je veux des panneaux + batterie + Box
             </button>
           </StickyFooter>
