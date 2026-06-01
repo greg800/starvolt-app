@@ -3810,18 +3810,15 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, cartVersion=0
             {/* Info site — compact, sélecteur intégré si plusieurs sites */}
             {!editMode?(
               <div className="card" style={{padding:'8px 14px',marginBottom:8}}>
-                <div style={{display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}}>
+                <div style={{display:'flex',alignItems:'center',gap:8}}>
                   {sites.length>1?(
                     <select className="inp inp-sel" style={{fontSize:13,padding:'6px 30px 6px 10px',maxWidth:200,flexShrink:0}} value={activeId||''} onChange={e=>{
-   clearPanierLS(); // efface aussi starvolt_global_vars_cache + solar_defaults
+   clearPanierLS();
    persistActiveSite(e.target.value);
-   // Réinitialise les services cochés lors d'un changement de site
    const _reset={id:1,opti_solaire:true,opti_tarif:true,opti_flex:false,opti_acc:false};
    sb.from('parametres_nationaux').upsert(_reset,{onConflict:'id'});
    setGlobalVars(v=>({...v,..._reset}));
-   // Remet PV, stockage chimique et thermique à zéro
    setPvKwc('0'); setBatKwh('0'); setThermKwh('0');
-   // Replie Ma conso et Ma prod, garde la tuile Ma facture ouverte
    setConsoOpen(false); setProdOpen(false); setConsoChartOpen(true);
    setEditMode(false);setImportMsg(null);setShowDeleteConfirm(false);
  }}>
@@ -3830,18 +3827,11 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, cartVersion=0
                   ):(
                     <span style={{fontWeight:800,fontSize:14,color:'white',flexShrink:0}}>{site.nom}</span>
                   )}
-                  {(site.adresse_ligne1||site.ville)&&(
-                    <span style={{fontSize:11,color:'rgba(255,255,255,.45)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',flex:1}}>
-                      {[site.adresse_ligne1,site.code_postal,site.ville].filter(Boolean).join(' ')}
-                    </span>
-                  )}
                   <div style={{display:'flex',gap:6,marginLeft:'auto',flexShrink:0}}>
                     <button style={{background:'rgba(125,217,64,.15)',border:'1px solid rgba(125,217,64,.3)',color:'#7dd940',cursor:'pointer',fontSize:11,fontWeight:700,padding:'4px 10px',borderRadius:6}} onClick={()=>{setShowAdd(true);setEditMode(false);setShowDeleteConfirm(false);}}>+ Ajouter</button>
                     {!showDeleteConfirm&&<button style={{background:'rgba(255,80,80,.1)',border:'1px solid rgba(255,80,80,.25)',color:'#ff6b6b',cursor:'pointer',fontSize:11,fontWeight:700,padding:'4px 10px',borderRadius:6}} onClick={()=>setShowDeleteConfirm(true)}>🗑 Supprimer</button>}
-                    <button style={{background:'none',border:'none',color:'rgba(255,255,255,.35)',cursor:'pointer',fontSize:12,flexShrink:0}} onClick={()=>setEditMode(true)}>✏️</button>
                   </div>
                 </div>
-                <div style={{fontSize:10,color:'rgba(125,217,64,.65)',fontWeight:700,marginTop:4,display:'flex',alignItems:'center',gap:4}}><span>✦</span> Ce site sera utilisé dans tous les calculs d'économie</div>
               </div>
             ):(
               <SiteFormCard initial={site} onSave={async d=>{await updateSite(d);setEditMode(false);}} onCancel={()=>setEditMode(false)}/>
