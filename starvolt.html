@@ -3947,6 +3947,7 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, cartVersion=0
                     // Desktop : colonnes = métriques, lignes = Avant | Après
                     const thD={...th,fontSize:16,padding:'6px 14px'};
                     const tdD={...td,padding:'10px 14px'};
+                    const U=({c,s})=><span style={{fontSize:'0.5em',fontWeight:400,marginLeft:3,verticalAlign:'middle',opacity:.75}}>{s||c}</span>;
                     return(
                       <table style={tblD}>
                         <thead>
@@ -3960,20 +3961,20 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, cartVersion=0
                         <tbody>
                           <tr style={{...sep,background:'rgba(255,255,255,.04)'}}>
                             <td style={{...tdD,textAlign:'left',fontSize:14,fontWeight:800,letterSpacing:1,textTransform:'uppercase',color:'rgba(255,255,255,.38)'}}>Avant</td>
-                            <td style={{...tdD,color:'white',fontWeight:700}}>{fmtE(consoTot)}</td>
-                            <td style={{...tdD,color:'#f0a050',fontWeight:700}}>{billAvant!=null?billAvant.toLocaleString('fr-FR')+' €/an':dash}</td>
-                            <td style={{...tdD,color:'rgba(255,255,255,.5)',fontWeight:600}}>{prixAvant!=null?(prixAvant*100).toFixed(1)+' c€/kWh':dash}</td>
+                            <td style={{...tdD,color:'white',fontWeight:700}}>{Math.round(consoTot/1000)}<U c="MWh/an"/></td>
+                            <td style={{...tdD,color:'#f0a050',fontWeight:700}}>{billAvant!=null?<>{billAvant.toLocaleString('fr-FR')}<U c="€/an"/></>:dash}</td>
+                            <td style={{...tdD,color:'rgba(255,255,255,.5)',fontWeight:600}}>{prixAvant!=null?<>{(prixAvant*100).toFixed(1)}<U c="c€/kWh"/></>:dash}</td>
                           </tr>
                           <tr style={{...sep,background:hasModifs?'rgba(125,217,64,.05)':'rgba(255,255,255,.02)'}}>
                             <td style={{...tdD,textAlign:'left',fontSize:14,fontWeight:800,letterSpacing:1,textTransform:'uppercase',color:aCol}}>Après</td>
-                            <td style={{...tdD,color:hasModifs?'white':'rgba(255,255,255,.18)',fontWeight:700}}>{hasModifs?fmtE(consoApres):dash}</td>
-                            <td style={{...tdD,color:hasModifs?'#7dd940':'rgba(255,255,255,.18)',fontWeight:700}}>{hasModifs?billApresNet.toLocaleString('fr-FR')+' €/an':dash}</td>
-                            <td style={{...tdD,color:hasModifs?'rgba(125,217,64,.75)':'rgba(255,255,255,.18)',fontWeight:600}}>{hasModifs&&prixApres!=null?(prixApres*100).toFixed(1)+' c€/kWh':dash}</td>
+                            <td style={{...tdD,color:hasModifs?'white':'rgba(255,255,255,.18)',fontWeight:700}}>{hasModifs?<>{Math.round(consoApres/1000)}<U c="MWh/an"/></>:dash}</td>
+                            <td style={{...tdD,color:hasModifs?'#7dd940':'rgba(255,255,255,.18)',fontWeight:700}}>{hasModifs?<>{billApresNet.toLocaleString('fr-FR')}<U c="€/an"/></>:dash}</td>
+                            <td style={{...tdD,color:hasModifs?'rgba(125,217,64,.75)':'rgba(255,255,255,.18)',fontWeight:600}}>{hasModifs&&prixApres!=null?<>{(prixApres*100).toFixed(1)}<U c="c€/kWh"/></>:dash}</td>
                           </tr>
                           {hasSaving&&<tr>
                             <td colSpan={2}></td>
                             <td style={{...tdD,borderTop:'1px solid rgba(125,217,64,.2)',paddingTop:6,whiteSpace:'nowrap'}}>
-                              <span style={{fontSize:20,fontWeight:900,color:'#7dd940'}}>-{Math.round(totalSaving).toLocaleString('fr-FR')} €/an</span>
+                              <span style={{fontSize:20,fontWeight:900,color:'#7dd940'}}>-{Math.round(totalSaving).toLocaleString('fr-FR')}<U c="€/an"/></span>
                               {totalReductionPct>0&&<span style={{fontSize:13,color:'rgba(125,217,64,.6)',marginLeft:4}}>({totalReductionPct}%)</span>}
                             </td>
                             <td style={{...tdD,borderTop:'1px solid rgba(125,217,64,.2)',paddingTop:6,whiteSpace:'nowrap'}}>
