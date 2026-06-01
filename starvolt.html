@@ -2089,7 +2089,7 @@ function clearPanierLS(){
   ['starvolt_solar_chosen','starvolt_solar_saving','starvolt_box_chosen','starvolt_box_saving',
    'starvolt_optimisation_chosen','starvolt_optimisation_tariff_id','starvolt_optimisation_saving',
    'starvolt_optimisation_tariff_nom','starvolt_acc_chosen','starvolt_acc_saving',
-   'starvolt_baisse_facture','starvolt_acc_price_ht'].forEach(k=>localStorage.removeItem(k));
+   'starvolt_baisse_facture','starvolt_acc_price_ht','starvolt_solar_defaults'].forEach(k=>localStorage.removeItem(k));
   // Réinitialise les flags services à leurs valeurs par défaut (pas de suppression du cache)
   try{
     const cache=(()=>{try{return JSON.parse(localStorage.getItem('starvolt_global_vars_cache'));}catch{return {};}})();
@@ -3792,12 +3792,16 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations }) {
                 <div style={{display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}}>
                   {sites.length>1?(
                     <select className="inp inp-sel" style={{fontSize:13,padding:'6px 30px 6px 10px',maxWidth:200,flexShrink:0}} value={activeId||''} onChange={e=>{
-   clearPanierLS(); // efface aussi starvolt_global_vars_cache
+   clearPanierLS(); // efface aussi starvolt_global_vars_cache + solar_defaults
    persistActiveSite(e.target.value);
    // Réinitialise les services cochés lors d'un changement de site
    const _reset={id:1,opti_solaire:true,opti_tarif:true,opti_flex:false,opti_acc:false};
    sb.from('parametres_nationaux').upsert(_reset,{onConflict:'id'});
    setGlobalVars(v=>({...v,..._reset}));
+   // Remet PV, stockage chimique et thermique à zéro
+   setPvKwc('0'); setBatKwh('0'); setThermKwh('0');
+   // Replie Ma conso et Ma prod, garde la tuile Ma facture ouverte
+   setConsoOpen(false); setProdOpen(false); setConsoChartOpen(true);
    setEditMode(false);setImportMsg(null);setShowDeleteConfirm(false);
  }}>
                       {sites.map(s=><option key={s.id} value={s.id}>{s.nom}</option>)}
@@ -3830,7 +3834,7 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations }) {
                   onClick={()=>setConsoChartOpen(v=>!v)}
                 >
                   <div style={{fontWeight:800,fontSize:13,color:'white',display:'flex',alignItems:'center',gap:6,flexWrap:'wrap'}}>
-                    📊 Consommation annuelle
+                    📊 Ma facture heure par heure
                     {!consoChartOpen&&(
                       <span style={{fontSize:11,fontWeight:600,color:'rgba(255,255,255,.45)',marginLeft:4}}>
                         {Math.round(site.conso_annuelle_kwh).toLocaleString('fr-FR')} kWh/an
@@ -3841,22 +3845,70 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations }) {
                   <span style={{color:'rgba(255,255,255,.4)',fontSize:16,lineHeight:1,transition:'transform .2s',transform:consoChartOpen?'rotate(0deg)':'rotate(-90deg)',display:'inline-block'}}>▾</span>
                 </div>
                 {consoChartOpen&&<div style={{padding:'10px 14px 12px'}}>
-                  {/* Ligne de stats compacte */}
-                  <div style={{display:'flex',alignItems:'baseline',gap:6,flexWrap:'wrap',marginBottom:10}}>
-                    <span style={{fontSize:24,fontWeight:900,color:'white'}}>{Math.round(site.conso_annuelle_kwh).toLocaleString('fr-FR')}</span>
-                    <span style={{fontSize:12,color:'rgba(255,255,255,.6)',fontWeight:600}}>kWh/an</span>
-                    {(()=>{
-                      const curT=tariffs.find(t=>t.id===site.tarif_id);
-                      if(!curT||curT.tarif_dynamique)return null;
-                      const facture=Math.round((curT.abo_annuel||0)+site.conso_annuelle_kwh*(curT.prix_hp||0));
-                      const prix=facture>0&&site.conso_annuelle_kwh>0?facture/site.conso_annuelle_kwh:curT.prix_hp;
-                      return(<React.Fragment>
-                        {facture>0&&<><span style={{fontSize:12,color:'rgba(255,255,255,.25)'}}>·</span><span style={{fontSize:12,color:'#f0a050',fontWeight:700}}>{facture.toLocaleString('fr-FR')} €/an</span></>}
-                        {prix>0&&<><span style={{fontSize:12,color:'rgba(255,255,255,.25)'}}>·</span><span style={{fontSize:12,color:'rgba(255,255,255,.5)',fontWeight:600}}>{(prix*100).toFixed(1)} c€/kWh</span></>}
-                      </React.Fragment>);
-                    })()}
-                    {site.conso_imported_at&&<span style={{fontSize:10,color:'rgba(255,255,255,.3)',marginLeft:4}}>{new Date(site.conso_imported_at).toLocaleDateString('fr-FR',{day:'numeric',month:'short',year:'numeric'})}</span>}
-                  </div>
+                  {/* ── AVANT / APRÈS ── */}
+                  {(()=>{
+                    const baseTariff=tariffs.find(t=>t.id===site.tarif_id);
+                    const consoTot=Math.round(site.conso_annuelle_kwh);
+                    // AVANT
+                    let billAvant=balance?.billWithout!=null
+                      ? Math.round(balance.billWithout)
+                      : (baseTariff&&!baseTariff.tarif_dynamique
+                          ? Math.round((baseTariff.abo_annuel||0)+site.conso_annuelle_kwh*(baseTariff.prix_hp||0))
+                          : null);
+                    const prixAvant=(billAvant&&consoTot)?billAvant/consoTot:null;
+                    // APRÈS
+                    const hasBalance=balance&&typeof balance.billWithStorage==='number';
+                    const consoApres=hasBalance?Math.round(balance.monthly.reduce((s,m)=>s+m.grid_buy,0)):null;
+                    const billApres=hasBalance?Math.round(balance.billWithStorage):null;
+                    const prixApres=(billApres!=null&&consoApres>0)?billApres/consoApres:null;
+                    const hasSaving=hasBalance&&balance.saving>0;
+                    const hasModifs=hasBalance&&(
+                      !!localStorage.getItem('starvolt_solar_chosen')||
+                      !!localStorage.getItem('starvolt_box_chosen')||
+                      !!localStorage.getItem('starvolt_optimisation_chosen')||
+                      localStorage.getItem('starvolt_acc_chosen')==='true'||
+                      parseFloat(pvKwc)>0||parseFloat(batKwh)>0||parseFloat(thermKwh)>0
+                    );
+                    const FRow=({label,value,color})=>(
+                      <div style={{display:'flex',justifyContent:'space-between',alignItems:'baseline',marginBottom:5}}>
+                        <span style={{fontSize:11,color:'rgba(255,255,255,.5)'}}>{label}</span>
+                        <span style={{fontSize:13,fontWeight:700,color:color||'white'}}>{value}</span>
+                      </div>
+                    );
+                    return(
+                      <div style={{display:'flex',gap:8,marginBottom:14}}>
+                        {/* AVANT */}
+                        <div style={{flex:1,background:'rgba(255,255,255,.06)',border:'1px solid rgba(255,255,255,.12)',borderRadius:10,padding:'10px 12px'}}>
+                          <div style={{fontSize:9,fontWeight:800,letterSpacing:1.2,color:'rgba(255,255,255,.38)',marginBottom:8,textTransform:'uppercase'}}>Avant</div>
+                          <FRow label="Élec soutirée" value={consoTot.toLocaleString('fr-FR')+' kWh/an'}/>
+                          {billAvant!=null
+                            ? <FRow label="Facture TTC" value={billAvant.toLocaleString('fr-FR')+' €/an'} color='#f0a050'/>
+                            : <div style={{fontSize:11,color:'rgba(255,255,255,.25)',marginBottom:4}}>Sélectionnez un tarif dans « Ma conso »</div>}
+                          {prixAvant!=null&&<FRow label="Prix au kWh" value={(prixAvant*100).toFixed(1)+' c€/kWh'} color='rgba(255,255,255,.55)'/>}
+                          {site.conso_imported_at&&<div style={{fontSize:9,color:'rgba(255,255,255,.22)',marginTop:4}}>{new Date(site.conso_imported_at).toLocaleDateString('fr-FR',{day:'numeric',month:'short',year:'numeric'})}</div>}
+                        </div>
+                        {/* APRÈS */}
+                        <div style={{flex:1,background:hasModifs?'rgba(125,217,64,.08)':'rgba(255,255,255,.03)',border:hasModifs?'1px solid rgba(125,217,64,.25)':'1px dashed rgba(255,255,255,.1)',borderRadius:10,padding:'10px 12px'}}>
+                          <div style={{fontSize:9,fontWeight:800,letterSpacing:1.2,color:hasModifs?'rgba(125,217,64,.7)':'rgba(255,255,255,.2)',marginBottom:8,textTransform:'uppercase'}}>Après</div>
+                          {hasModifs?(
+                            <>
+                              <FRow label="Élec soutirée" value={consoApres.toLocaleString('fr-FR')+' kWh/an'}/>
+                              <FRow label="Facture TTC" value={billApres.toLocaleString('fr-FR')+' €/an'} color='#7dd940'/>
+                              {prixApres!=null&&<FRow label="Prix au kWh" value={(prixApres*100).toFixed(1)+' c€/kWh'} color='rgba(125,217,64,.7)'/>}
+                              {hasSaving&&(
+                                <div style={{borderTop:'1px solid rgba(125,217,64,.2)',marginTop:5,paddingTop:5,display:'flex',justifyContent:'flex-end',alignItems:'center',gap:5}}>
+                                  <span style={{fontSize:14,fontWeight:900,color:'#7dd940'}}>-{Math.round(balance.saving).toLocaleString('fr-FR')} €/an</span>
+                                  {balance.reductionPct>0&&<span style={{fontSize:10,color:'rgba(125,217,64,.6)'}}>({Math.round(balance.reductionPct)}%)</span>}
+                                </div>
+                              )}
+                            </>
+                          ):(
+                            <div style={{fontSize:11,color:'rgba(255,255,255,.22)',lineHeight:1.5,marginTop:2}}>Ajoutez des équipements dans votre panier pour voir l'impact</div>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })()}
                   {/* Graphique bilan 12 mois avec zoom */}
                   {balance?(
                     <>
