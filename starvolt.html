@@ -3885,6 +3885,7 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations }) {
                     const dash=<span style={{color:'rgba(255,255,255,.2)'}}>—</span>;
                     const aCol=hasModifs?'rgba(125,217,64,.7)':'rgba(255,255,255,.2)';
                     const tbl={width:'100%',borderCollapse:'collapse',marginBottom:12,fontSize:12};
+                    const tblD={...tbl,width:'auto',maxWidth:480};
                     const th={padding:'4px 8px',fontWeight:800,fontSize:9,letterSpacing:1,textTransform:'uppercase',textAlign:'right',border:'none'};
                     const td={padding:'6px 8px',border:'none',textAlign:'right'};
                     const sep={borderTop:'1px solid rgba(255,255,255,.07)'};
@@ -3923,7 +3924,7 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations }) {
                     }
                     // Desktop : colonnes = métriques, lignes = Avant | Après
                     return(
-                      <table style={tbl}>
+                      <table style={tblD}>
                         <thead>
                           <tr style={{borderBottom:'1px solid rgba(255,255,255,.1)'}}>
                             <th style={{...th,textAlign:'left',width:'10%'}}></th>
