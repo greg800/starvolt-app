@@ -984,9 +984,7 @@
     /* Circle distance labels */
     .acc-ring-lbl { background: rgba(6,30,42,.88) !important; border-radius: 10px !important; padding: 2px 7px !important; font-size: 10px !important; font-weight: 800 !important; white-space: nowrap !important; box-shadow: 0 1px 5px rgba(0,0,0,.4) !important; border: none !important; }
     .acc-ring-lbl::before { display: none !important; }
-    /* Distance ring km labels — lisibles, ×3 */
-    .acc-ring-km { background: rgba(4,20,32,.95) !important; border-radius: 8px !important; padding: 3px 10px !important; font-size: 30px !important; font-weight: 900 !important; white-space: nowrap !important; box-shadow: 0 2px 10px rgba(0,0,0,.7) !important; border: none !important; letter-spacing: .3px !important; line-height: 1.1 !important; }
-    .acc-ring-km::before { display: none !important; }
+    /* Labels km : style 100% inline, pas de classe Leaflet (évite le fond 12×12px par défaut) */
     /* Leaflet attribution */
     .leaflet-control-attribution { font-size: 8px !important; background: rgba(0,0,0,.35) !important; color: rgba(255,255,255,.4) !important; }
     .leaflet-control-attribution a { color: rgba(255,255,255,.5) !important; }
@@ -5899,28 +5897,37 @@ function AccMapScreen({ user, userProfile, onBack, onJoin, onCreate, onPanier })
     // Proximity rings + house marker if geocoded
     if (siteLatLng) {
       const [lat, lon] = siteLatLng;
-      const ringLabel = (rLat, rLon, radiusKm, text, color) => {
-        const dLon = radiusKm / (111.32 * Math.cos(rLat * Math.PI / 180));
-        L.marker([rLat, rLon + dLon], {
-          icon: L.divIcon({
-            className: 'acc-ring-km',
-            html: `<span style="color:${color}">${text}</span>`,
-            iconAnchor: [0, 20],
-          }),
-          interactive: false,
-        }).addTo(map);
-      };
-      [
+      const RINGS = [
         { r: 2,  color: '#16a34a', dash: null,   lbl: '2 km'  },
         { r: 10, color: '#0284c7', dash: '8 6',  lbl: '10 km' },
         { r: 20, color: '#6b7280', dash: '10 8', lbl: '20 km' },
-      ].forEach(({ r, color, dash, lbl }) => {
-        L.circle([lat, lon], {
-          radius: r * 1000, color, weight: 2,
-          fillOpacity: r === 2 ? 0.08 : 0.02, dashArray: dash, interactive: false,
-        }).addTo(map);
-        ringLabel(lat, lon, r, lbl, color);
+      ];
+      // Anneaux (ajoutés une seule fois)
+      RINGS.forEach(({ r, color, dash }) => {
+        L.circle([lat, lon], { radius:r*1000, color, weight:2, fillOpacity:r===2?0.08:0.02, dashArray:dash, interactive:false }).addTo(map);
       });
+      // Labels adaptatifs au zoom — reconstruits sur zoomend
+      const _ringLbls = [];
+      const _buildRingLabels = () => {
+        _ringLbls.forEach(m => map.removeLayer(m));
+        _ringLbls.length = 0;
+        const z = map.getZoom();
+        const fs = Math.max(10, Math.min(30, Math.round((z - 6) * 4)));
+        RINGS.forEach(({ r, color, lbl }) => {
+          const dLat = r / 111.32;
+          _ringLbls.push(L.marker([lat + dLat, lon], {
+            icon: L.divIcon({
+              className: '',
+              html: `<div style="background:rgba(4,20,32,.90);border-radius:7px;padding:2px 9px;display:inline-block;color:${color};font-size:${fs}px;font-weight:900;white-space:nowrap;box-shadow:0 2px 8px rgba(0,0,0,.6);font-family:Poppins,sans-serif;transform:translate(-50%,-105%)">${lbl}</div>`,
+              iconSize: null,
+              iconAnchor: [0, 0],
+            }),
+            interactive: false,
+          }).addTo(map));
+        });
+      };
+      _buildRingLabels();
+      map.on('zoomend', _buildRingLabels);
       const houseIcon = L.divIcon({
         className: '',
         html: '<div style="width:34px;height:34px;border-radius:50%;background:#dcfce7;border:2.5px solid #16a34a;box-shadow:0 2px 12px rgba(22,163,74,.5);display:flex;align-items:center;justify-content:center;font-size:17px">🏠</div>',
@@ -5942,21 +5949,35 @@ function AccMapScreen({ user, userProfile, onBack, onJoin, onCreate, onPanier })
     const L = window.L;
     const map = leafletRef.current;
     const [lat, lon] = siteLatLng;
-    const ringLabel = (rLat, rLon, radiusKm, text, color) => {
-      const dLon = radiusKm / (111.32 * Math.cos(rLat * Math.PI / 180));
-      L.marker([rLat, rLon + dLon], {
-        icon: L.divIcon({ className: 'acc-ring-km', html: `<span style="color:${color}">${text}</span>`, iconAnchor: [0, 20] }),
-        interactive: false,
-      }).addTo(map);
-    };
-    [
+    const RINGS2 = [
       { r: 2,  color: '#16a34a', dash: null,   lbl: '2 km'  },
       { r: 10, color: '#0284c7', dash: '8 6',  lbl: '10 km' },
       { r: 20, color: '#6b7280', dash: '10 8', lbl: '20 km' },
-    ].forEach(({ r, color, dash, lbl }) => {
-      L.circle([lat, lon], { radius: r*1000, color, weight:2, fillOpacity: r===2?0.08:0.02, dashArray:dash, interactive:false }).addTo(map);
-      ringLabel(lat, lon, r, lbl, color);
+    ];
+    RINGS2.forEach(({ r, color, dash }) => {
+      L.circle([lat, lon], { radius:r*1000, color, weight:2, fillOpacity:r===2?0.08:0.02, dashArray:dash, interactive:false }).addTo(map);
     });
+    const _ringLbls2 = [];
+    const _buildRingLabels2 = () => {
+      _ringLbls2.forEach(m => map.removeLayer(m));
+      _ringLbls2.length = 0;
+      const z = map.getZoom();
+      const fs = Math.max(10, Math.min(30, Math.round((z - 6) * 4)));
+      RINGS2.forEach(({ r, color, lbl }) => {
+        const dLat = r / 111.32;
+        _ringLbls2.push(L.marker([lat + dLat, lon], {
+          icon: L.divIcon({
+            className: '',
+            html: `<div style="background:rgba(4,20,32,.90);border-radius:7px;padding:2px 9px;display:inline-block;color:${color};font-size:${fs}px;font-weight:900;white-space:nowrap;box-shadow:0 2px 8px rgba(0,0,0,.6);font-family:Poppins,sans-serif;transform:translate(-50%,-105%)">${lbl}</div>`,
+            iconSize: null,
+            iconAnchor: [0, 0],
+          }),
+          interactive: false,
+        }).addTo(map));
+      });
+    };
+    _buildRingLabels2();
+    map.on('zoomend', _buildRingLabels2);
     const houseIcon = L.divIcon({
       className: '',
       html: '<div style="width:34px;height:34px;border-radius:50%;background:#dcfce7;border:2.5px solid #16a34a;box-shadow:0 2px 12px rgba(22,163,74,.5);display:flex;align-items:center;justify-content:center;font-size:17px">🏠</div>',
