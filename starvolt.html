@@ -3881,15 +3881,46 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, cartVersion=0
                     const _ratio2=(globalVars?.ratio_puissance_stockage??50)/100;
                     const _batPow2=(parseFloat(batKwh)||0)*_ratio2;
                     const flexRev=_optiFlex2?Math.round((parseFloat(thermKwh)||0)*14+_batPow2*27):0;
-                    // APRÈS — coût net = facture électricité − revenus flex
+                    // ACC savings — boucle m/d/h sur le profil de conso, même formule que la tuile Ma prod
+                    const _hasAcc2=localStorage.getItem('starvolt_acc_chosen')==='true';
+                    let accRev=0;
+                    if(_hasAcc2&&effectiveTariff&&site?.conso_profil){
+                      const _accPHT2=parseFloat(localStorage.getItem('starvolt_acc_price_ht')||'0.09');
+                      const _tva2=(globalVars?.tva??20)/100;
+                      const _hcw2=[
+                        {s:parseHcHour(site?.hc_debut1??site?.heure_debut_hc1??globalVars?.hc_debut1),e:parseHcHour(site?.hc_fin1??site?.heure_fin_hc1??globalVars?.hc_fin1)},
+                        {s:parseHcHour(site?.hc_debut2??site?.heure_debut_hc2??globalVars?.hc_debut2),e:parseHcHour(site?.hc_fin2??site?.heure_fin_hc2??globalVars?.hc_fin2)},
+                      ].filter(w=>w.s!==null&&w.e!==null);
+                      const _ph2=parseFloat(effectiveTariff.prix_hp)||0;
+                      const _pc2=effectiveTariff.prix_hc!=null?parseFloat(effectiveTariff.prix_hc)||0:_ph2;
+                      for(let _m=1;_m<=12;_m++) for(let _d=1;_d<=PROF_DAYS[_m-1];_d++) for(let _h=0;_h<24;_h++){
+                        const _idx=profIdx(_m,_d,_h);
+                        const _isSolar=prodProfilData?prodProfilData[_idx]>0:(_h>=9&&_h<18);
+                        if(!_isSolar) continue;
+                        const _gkwh=balance?.hourly?(balance.hourly[_idx]?.grid_buy||0):((site.conso_profil[_idx]||0)/1000);
+                        if(_gkwh<=0) continue;
+                        const _accTTC2=(_accPHT2+getTurpeRate(_m,_h,globalVars,_hcw2))*(1+_tva2);
+                        let _nTTC2;
+                        if(effectiveTariff.tarif_dynamique&&spotMap){
+                          const _spot=spotMap[`${_m}_${_d}_${_h}`]||0;
+                          const _marge=(effectiveTariff.marge_fournisseur_ceur_kwh||0)/100;
+                          _nTTC2=(_spot+getTurpeRate(_m,_h,globalVars,_hcw2)+(globalVars?.accise||0)/100+_marge)*(1+_tva2);
+                        } else {
+                          _nTTC2=_hcw2.length>0&&isHcHour(_h,_hcw2)?_pc2:_ph2;
+                        }
+                        if(_nTTC2>_accTTC2) accRev+=_gkwh*(_nTTC2-_accTTC2);
+                      }
+                      accRev=Math.round(accRev);
+                    }
+                    // APRÈS — coût net = facture électricité − revenus flex − économies ACC
                     const hasBalance=balance&&typeof balance.billWithStorage==='number';
                     const consoApres=hasBalance?Math.round(balance.monthly.reduce((s,m)=>s+m.grid_buy,0)):null;
                     const billApresElec=hasBalance?Math.round(balance.billWithStorage):null;
-                    const billApresNet=billApresElec!=null?billApresElec-flexRev:null;
+                    const billApresNet=billApresElec!=null?billApresElec-flexRev-accRev:null;
                     const prixApres=(billApresNet!=null&&consoApres>0)?billApresNet/consoApres:null;
-                    const totalSaving=hasBalance?(balance.saving+flexRev):0;
+                    const totalSaving=hasBalance?(balance.saving+flexRev+accRev):accRev;
                     const totalReductionPct=billAvant>0?Math.min(100,Math.round(totalSaving/billAvant*100)):0;
-                    const hasSaving=hasBalance&&totalSaving>0;
+                    const hasSaving=totalSaving>0;
                     const hasModifs=hasBalance&&(
                       !!localStorage.getItem('starvolt_solar_chosen')||
                       !!localStorage.getItem('starvolt_box_chosen')||
@@ -3936,7 +3967,7 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, cartVersion=0
                             {hasSaving&&<tr><td></td><td></td><td style={{...td,borderTop:'1px solid rgba(125,217,64,.2)',paddingTop:6,whiteSpace:'nowrap'}}>
                               <span style={{fontSize:20,fontWeight:900,color:'#7dd940'}}>-{Math.round(totalSaving).toLocaleString('fr-FR')}<U c="€/an" em={0.4}/></span>
                               {totalReductionPct>0&&<span style={{fontSize:15,color:'rgba(125,217,64,.6)',marginLeft:3}}>({totalReductionPct}%)</span>}
-                              {flexRev>0&&<span style={{fontSize:11,color:'rgba(125,217,64,.5)',marginLeft:5}}>dont {flexRev}€ Flex</span>}
+                              {flexRev>0&&<span style={{fontSize:11,color:'rgba(125,217,64,.5)',marginLeft:5}}>dont {flexRev}€ Flex</span>}{accRev>0&&<span style={{fontSize:11,color:'rgba(125,217,64,.5)',marginLeft:5}}>dont {accRev}€ ACC</span>}
                             </td></tr>}
                             {!hasModifs&&<tr><td colSpan={3} style={{...td,textAlign:'center',color:'rgba(255,255,255,.2)',fontSize:10,paddingTop:5,paddingBottom:2}}>Ajoutez des équipements dans votre panier pour voir l'impact</td></tr>}
                           </tbody>
@@ -3976,7 +4007,7 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, cartVersion=0
                               {totalReductionPct>0&&<span style={{fontSize:13,color:'rgba(125,217,64,.6)',marginLeft:4}}>({totalReductionPct}%)</span>}
                             </td>
                             <td style={{...tdD,borderTop:'1px solid rgba(125,217,64,.2)',paddingTop:6,whiteSpace:'nowrap'}}>
-                              {flexRev>0&&<span style={{fontSize:13,color:'rgba(125,217,64,.5)'}}>dont {flexRev} € Flex</span>}
+                              {flexRev>0&&<span style={{fontSize:13,color:'rgba(125,217,64,.5)'}}>dont {flexRev} € Flex</span>}{accRev>0&&<span style={{fontSize:13,color:'rgba(125,217,64,.5)',marginLeft:flexRev>0?8:0}}>dont {accRev} € ACC</span>}
                             </td>
                           </tr>}
                           {!hasModifs&&<tr><td colSpan={4} style={{...tdD,textAlign:'right',color:'rgba(255,255,255,.2)',fontSize:12,paddingTop:3,paddingBottom:1}}>Ajoutez des équipements dans votre panier pour voir l'impact</td></tr>}
@@ -4174,29 +4205,31 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, cartVersion=0
                   // Formule ACC TTC : (prix_vente_ACC + TURPE_4_taux(m,h)) × (1+TVA) — sans accise
                   // TURPE variable selon saison et HC/HP ; normalTTC depuis tarif brut (pas hourlyPrices)
                   let accSavings=0;
-                  if(optiAcc&&balance?.hourly){
+                  if(optiAcc&&effectiveTariff&&site?.conso_profil){
                     const _accPHT=parseFloat(localStorage.getItem('starvolt_acc_price_ht')||'0.09');
                     const _tva=(globalVars?.tva??20)/100;
                     const _hcw=[
                       {s:parseHcHour(site?.hc_debut1??site?.heure_debut_hc1??globalVars?.hc_debut1),e:parseHcHour(site?.hc_fin1??site?.heure_fin_hc1??globalVars?.hc_fin1)},
                       {s:parseHcHour(site?.hc_debut2??site?.heure_debut_hc2??globalVars?.hc_debut2),e:parseHcHour(site?.hc_fin2??site?.heure_fin_hc2??globalVars?.hc_fin2)},
                     ].filter(w=>w.s!==null&&w.e!==null);
-                    for(const pt of balance.hourly){
-                      if(!pt||pt.grid_buy<=0||!(prodProfilData?prodProfilData[profIdx(pt.m,pt.d,pt.h)]>0:(pt.h>=9&&pt.h<18))) continue;
-                      // Prix ACC TTC de l'heure : TURPE 4 taux (été/hiver × HC/HP), sans accise
-                      const accTTC=(_accPHT+getTurpeRate(pt.m,pt.h,globalVars,_hcw))*(1+_tva);
-                      // Prix normal de l'heure (sans ACC) calculé depuis le tarif brut
+                    const _ph=parseFloat(effectiveTariff.prix_hp)||0;
+                    const _pc=effectiveTariff.prix_hc!=null?parseFloat(effectiveTariff.prix_hc)||0:_ph;
+                    for(let _m=1;_m<=12;_m++) for(let _d=1;_d<=PROF_DAYS[_m-1];_d++) for(let _h=0;_h<24;_h++){
+                      const _idx=profIdx(_m,_d,_h);
+                      const _isSolar=prodProfilData?prodProfilData[_idx]>0:(_h>=9&&_h<18);
+                      if(!_isSolar) continue;
+                      const _gkwh=balance?.hourly?(balance.hourly[_idx]?.grid_buy||0):((site.conso_profil[_idx]||0)/1000);
+                      if(_gkwh<=0) continue;
+                      const accTTC=(_accPHT+getTurpeRate(_m,_h,globalVars,_hcw))*(1+_tva);
                       const normalTTC=(()=>{
-                        if(effectiveTariff?.tarif_dynamique&&spotMap){
-                          const spot=spotMap[`${pt.m}_${pt.d}_${pt.h}`]||0;
+                        if(effectiveTariff.tarif_dynamique&&spotMap){
+                          const spot=spotMap[`${_m}_${_d}_${_h}`]||0;
                           const marge=(effectiveTariff.marge_fournisseur_ceur_kwh||0)/100;
-                          return(spot+getTurpeRate(pt.m,pt.h,globalVars,_hcw)+(globalVars?.accise||0)/100+marge)*(1+_tva);
+                          return(spot+getTurpeRate(_m,_h,globalVars,_hcw)+(globalVars?.accise||0)/100+marge)*(1+_tva);
                         }
-                        const ph=parseFloat(effectiveTariff?.prix_hp)||0;
-                        const pc=effectiveTariff?.prix_hc!=null?parseFloat(effectiveTariff.prix_hc)||0:ph;
-                        return _hcw.length>0&&isHcHour(pt.h,_hcw)?pc:ph;
+                        return _hcw.length>0&&isHcHour(_h,_hcw)?_pc:_ph;
                       })();
-                      if(normalTTC>accTTC) accSavings+=pt.grid_buy*(normalTTC-accTTC);
+                      if(normalTTC>accTTC) accSavings+=_gkwh*(normalTTC-accTTC);
                     }
                     accSavings=Math.round(accSavings);
                   }
