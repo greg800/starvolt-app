@@ -4165,7 +4165,7 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, cartVersion=0
                   const hasBox=!!localStorage.getItem('starvolt_box_chosen')||localStorage.getItem('starvolt_solar_chosen')==='solar_box';
                   const hasAcc=localStorage.getItem('starvolt_acc_chosen')==='true';
                   const optiFlex=!!(globalVars?.opti_flex)&&hasBox;
-                  const optiAcc=!!(globalVars?.opti_acc)&&hasAcc;
+                  const optiAcc=hasAcc; // cohérent avec hourlyPrices qui lit starvolt_acc_chosen directement
                   // Flex revenue : thermique 14 €/kW/an + batterie 27 €/kW/an (puissance = capacité × ratio)
                   const _ratio=(globalVars?.ratio_puissance_stockage??50)/100;
                   const batPowKw=(parseFloat(batKwh)||0)*_ratio;
@@ -4257,7 +4257,7 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, cartVersion=0
                               {key:'opti_solaire', label:'☀️ Optimisation solaire', enabled:hasBox&&hasStorage&&hasPV, def:true},
                               {key:'opti_tarif',   label:'⚡ Optimisation tarifaire', enabled:hasBox&&hasStorage, def:true},
                               {key:'opti_flex',    label:'🔄 Flex', enabled:hasBox&&hasStorage, def:false},
-                              {key:'opti_acc',     label:'🤝 ACC', enabled:hasAcc, def:false},
+                              {key:'opti_acc',     label:'🤝 ACC', enabled:hasAcc, def:true},
                             ];
                           })().map(({key,label,enabled,def})=>(
                             <label key={key} style={{display:'flex',alignItems:'center',gap:6,cursor:enabled?'pointer':'not-allowed',opacity:enabled?1:0.35}}>
