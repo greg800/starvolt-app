@@ -4688,8 +4688,15 @@ function SimulationsScreen({ onACC, onBox, onSolar, onOptimisation, onBack, onMo
 
   // ── Offres depuis la DB ────────────────────────
   const [offres, setOffres] = useState([]);
+  const [filtresActifs, setFiltresActifs] = useState({ vitesse: true, investissement: true, economie: true });
   useEffect(() => {
     sb.from('offres').select('*').order('created_at').then(({data}) => setOffres(data || []));
+    sb.from('filtres_config').select('*').then(({ data }) => {
+      if (!data) return;
+      const map = { vitesse: true, investissement: true, economie: true };
+      data.forEach(r => { map[r.filtre_key] = r.actif; });
+      setFiltresActifs(map);
+    });
   }, []);
 
   // ── Calcul des valeurs snap pour chaque slider ─
@@ -4750,7 +4757,8 @@ function SimulationsScreen({ onACC, onBox, onSolar, onOptimisation, onBack, onMo
     return savings.length ? Math.max(...savings) : null;
   };
 
-  const showSliders = offres.length > 0 && (delaiFilter != null);
+  const anyFiltreActif = filtresActifs.vitesse || filtresActifs.investissement || filtresActifs.economie;
+  const showSliders = offres.length > 0 && anyFiltreActif && (delaiFilter != null);
 
   useEffect(() => {
     if (!user) return;
@@ -4983,15 +4991,15 @@ function SimulationsScreen({ onACC, onBox, onSolar, onOptimisation, onBack, onMo
             <button onClick={onBack} style={{background:'none',border:'none',color:'rgba(255,255,255,.35)',fontSize:11,cursor:'pointer',fontFamily:'inherit',padding:'2px 6px'}}>← Retour</button>
           </div>
           <div className="sliders-panel" style={{margin:0}}>
-            <GameSlider icon="⚡" label="Vitesse de déploiement"
+            {filtresActifs.vitesse && <GameSlider icon="⚡" label="Vitesse de déploiement"
               snapValues={delaiVals} value={delaiFilter}
-              onChange={setDelaiFilter} format={fmtDelai}/>
-            <GameSlider icon="💰" label="Investissement maximum"
+              onChange={setDelaiFilter} format={fmtDelai}/>}
+            {filtresActifs.investissement && <GameSlider icon="💰" label="Investissement maximum"
               snapValues={investVals} value={investFilter}
-              onChange={setInvestFilter} format={fmtInvest}/>
-            <GameSlider icon="📉" label="% d'économie minimum"
+              onChange={setInvestFilter} format={fmtInvest}/>}
+            {filtresActifs.economie && <GameSlider icon="📉" label="% d'économie minimum"
               snapValues={reductVals} value={reductFilter}
-              onChange={setReductFilter} format={fmtReduct}/>
+              onChange={setReductFilter} format={fmtReduct}/>}
           </div>
         </div>
       </div>
@@ -7962,7 +7970,7 @@ const TYPES_OFFRE = [
 ];
 
 // ─── AdminOffresScreen ────────────────────────────────────────────────────────
-function AdminOffresScreen({ onEdit, onNew, onBack }) {
+function AdminOffresScreen({ onEdit, onNew, onFiltres, onBack }) {
   const [offres, setOffres] = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -7982,6 +7990,16 @@ function AdminOffresScreen({ onEdit, onNew, onBack }) {
         <div className="welcome-tag" style={{color:'#ffb340'}}>Administration</div>
         <h1 className="welcome-title">Gestion<br/><span className="accent">des offres</span></h1>
       </div>
+      {/* Bouton Gestion des filtres */}
+      <button className="sim-btn" onClick={onFiltres} style={{marginBottom:16,padding:'10px 14px',gap:12}}>
+        <span className="sim-icon" style={{fontSize:22}}>👁</span>
+        <div className="sim-text">
+          <div className="sim-title">Gestion des filtres</div>
+          <div className="sim-sub">Choisir quels curseurs afficher dans Simulation</div>
+        </div>
+        <span className="sim-arrow">→</span>
+      </button>
+
       {loading ? <div style={{textAlign:'center',padding:40}}><div className="spinner" style={{margin:'0 auto'}}/></div> : (
         <div style={{display:'flex',flexDirection:'column',gap:8,marginBottom:80}}>
           {offres.length === 0 && (
@@ -8010,6 +8028,87 @@ function AdminOffresScreen({ onEdit, onNew, onBack }) {
     <StickyFooter row onBack={onBack}>
       <button className="btn btn-sec" style={{fontSize:13}} onClick={onNew}>+ Nouvelle offre</button>
     </StickyFooter>
+    </>
+  );
+}
+
+// ─── AdminFiltresScreen ───────────────────────────────────────────────────────
+const FILTRES_DEF = [
+  { key: 'vitesse',        label: 'Vitesse de déploiement',  icon: '⚡' },
+  { key: 'investissement', label: 'Investissement maximum',  icon: '💰' },
+  { key: 'economie',       label: '% d\'économie minimum',   icon: '📉' },
+];
+
+function EyeIcon({ open }) {
+  return open ? (
+    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+      <circle cx="12" cy="12" r="3"/>
+    </svg>
+  ) : (
+    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/>
+      <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/>
+      <line x1="1" y1="1" x2="23" y2="23"/>
+    </svg>
+  );
+}
+
+function AdminFiltresScreen({ onBack }) {
+  const [config, setConfig] = useState(null);
+  const [saving, setSaving] = useState(null);
+
+  useEffect(() => {
+    sb.from('filtres_config').select('*').then(({ data }) => {
+      const map = {};
+      (data || []).forEach(r => { map[r.filtre_key] = r.actif; });
+      // defaults true si absent
+      FILTRES_DEF.forEach(f => { if (!(f.key in map)) map[f.key] = true; });
+      setConfig(map);
+    });
+  }, []);
+
+  const toggle = async (key) => {
+    const newVal = !config[key];
+    setConfig(c => ({ ...c, [key]: newVal }));
+    setSaving(key);
+    await sb.from('filtres_config').upsert({ filtre_key: key, label: FILTRES_DEF.find(f=>f.key===key).label, actif: newVal }, { onConflict: 'filtre_key' });
+    setSaving(null);
+  };
+
+  return (
+    <>
+    <div className="screen fade-in">
+      <div className="auth-header">
+        <div className="welcome-tag" style={{color:'#ffb340'}}>Administration</div>
+        <h1 className="welcome-title">Gestion<br/><span className="accent">des filtres</span></h1>
+      </div>
+      <p style={{color:'rgba(255,255,255,.55)',fontSize:13,marginBottom:20,lineHeight:1.5}}>
+        Activez ou désactivez les curseurs de filtrage affichés dans la page Simulation.
+      </p>
+      {config === null ? (
+        <div style={{textAlign:'center',padding:40}}><div className="spinner" style={{margin:'0 auto'}}/></div>
+      ) : (
+        <div style={{display:'flex',flexDirection:'column',gap:10}}>
+          {FILTRES_DEF.map(f => {
+            const actif = config[f.key];
+            return (
+              <div key={f.key} className="tariff-row-item" style={{display:'flex',alignItems:'center',gap:14,padding:'14px 16px',cursor:'pointer'}} onClick={() => toggle(f.key)}>
+                <span style={{fontSize:22}}>{f.icon}</span>
+                <div style={{flex:1}}>
+                  <div className="tariff-row-name">{f.label}</div>
+                  <div className="tariff-row-meta">{actif ? 'Affiché dans Simulation' : 'Masqué dans Simulation'}</div>
+                </div>
+                <div style={{color: actif ? '#7dd940' : 'rgba(255,255,255,.3)', transition:'color .2s', opacity: saving===f.key ? .4 : 1}}>
+                  <EyeIcon open={actif}/>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+    <StickyFooter onBack={onBack}/>
     </>
   );
 }
@@ -9058,7 +9157,11 @@ function App() {
         return <AdminOffresScreen
           onEdit={(o)=>goTo('ADMIN_OFFRE_EDIT', {editOffre: o})}
           onNew={()=>goTo('ADMIN_OFFRE_EDIT', {editOffre: null})}
+          onFiltres={()=>goTo('ADMIN_FILTRES')}
           onBack={goBack}/>;
+
+      case 'ADMIN_FILTRES':
+        return <AdminFiltresScreen onBack={goBack}/>;
 
       case 'ADMIN_OFFRE_EDIT':
         return <AdminOffreEditScreen
