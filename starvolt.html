@@ -900,6 +900,11 @@
       border-radius: 6px; padding: 2px 8px; min-width: 64px; text-align: center;
       transition: all .15s;
     }
+    .gs-val-active {
+      font-size: 15px;
+      background: rgba(125,217,64,.22); border-color: rgba(125,217,64,.5);
+      box-shadow: 0 0 10px rgba(125,217,64,.3);
+    }
     .gs-track-wrap { position: relative; height: 36px; display: flex; align-items: center; cursor: pointer; }
     .gs-track {
       position: absolute; left: 0; right: 0; height: 6px;
@@ -4561,38 +4566,41 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, cartVersion=0
 
 // ─── SimulationsScreen ────────────────────────
 // ─── GameSlider ──────────────────────────────────────────────────────────────
+// Distribution uniforme des crans (pas proportionnelle aux valeurs)
+// Fix bord écran Android : padding interne + touch-action:none
+// Fix sensibilité : snap basé sur index, pas sur valeur brute
 function GameSlider({ icon, label, snapValues, value, onChange, format }) {
   const [dragging, setDragging] = React.useState(false);
   const trackRef = React.useRef(null);
+  const N = snapValues.length;
 
-  const min = snapValues[0];
-  const max = snapValues[snapValues.length - 1];
-  const pct = max === min ? 0 : ((value - min) / (max - min)) * 100;
+  // Position uniforme : chaque cran occupe 1/(N-1) de la largeur
+  const currentIdx = snapValues.indexOf(value);
+  const safeIdx    = currentIdx === -1 ? N - 1 : currentIdx;
+  const pct        = N <= 1 ? 100 : (safeIdx / (N - 1)) * 100;
 
-  const snapNearest = (raw) => {
-    const clamped = Math.max(min, Math.min(max, raw));
-    return snapValues.reduce((prev, curr) =>
-      Math.abs(curr - clamped) < Math.abs(prev - clamped) ? curr : prev, snapValues[0]);
-  };
-
-  const posToValue = (clientX) => {
+  // Convertit une position X en index de cran (distribution uniforme)
+  const posToIdx = (clientX) => {
     const rect = trackRef.current?.getBoundingClientRect();
-    if (!rect) return value;
-    const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
-    return snapNearest(min + ratio * (max - min));
+    if (!rect) return safeIdx;
+    // Marge interne pour éviter que le pouce touche les bords (fix Android)
+    const PAD  = 20;
+    const w    = Math.max(1, rect.width - PAD * 2);
+    const ratio = Math.max(0, Math.min(1, (clientX - rect.left - PAD) / w));
+    return Math.round(ratio * (N - 1));
   };
 
   const onPointerDown = (e) => {
     e.preventDefault();
     setDragging(true);
-    trackRef.current?.setPointerCapture?.(e.pointerId);
-    const newVal = posToValue(e.clientX);
-    if (newVal !== value) onChange(newVal);
+    trackRef.current?.setPointerCapture(e.pointerId);
+    const idx = posToIdx(e.clientX);
+    if (snapValues[idx] !== value) onChange(snapValues[idx]);
   };
   const onPointerMove = (e) => {
     if (!dragging) return;
-    const newVal = posToValue(e.clientX);
-    if (newVal !== value) onChange(newVal);
+    const idx = posToIdx(e.clientX);
+    if (snapValues[idx] !== value) onChange(snapValues[idx]);
   };
   const onPointerUp = () => setDragging(false);
 
@@ -4600,7 +4608,7 @@ function GameSlider({ icon, label, snapValues, value, onChange, format }) {
     <div className="gs-wrap">
       <div className="gs-header">
         <div className="gs-label"><span>{icon}</span>{label}</div>
-        <div className="gs-val">{format(value)}</div>
+        <div className={`gs-val${dragging?' gs-val-active':''}`}>{format(value)}</div>
       </div>
       <div className="gs-track-wrap"
         ref={trackRef}
@@ -4608,19 +4616,41 @@ function GameSlider({ icon, label, snapValues, value, onChange, format }) {
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
         onPointerCancel={onPointerUp}
+        style={{touchAction:'none', userSelect:'none'}}
       >
         <div className="gs-track">
           <div className="gs-fill" style={{width:`${pct}%`}}/>
-          <div className="gs-ticks">
-            {snapValues.map((v,i) => {
-              const p = max === min ? 0 : ((v - min) / (max - min)) * 100;
-              return <div key={i} className="gs-tick" style={{left:`${p}%`}}/>;
-            })}
-          </div>
+          {/* Crans uniformément répartis */}
+          {snapValues.map((v, i) => {
+            const p = N <= 1 ? 0 : (i / (N - 1)) * 100;
+            const active = i <= safeIdx;
+            return <div key={i} className="gs-tick" style={{
+              left:`${p}%`,
+              background: active ? 'rgba(125,217,64,.6)' : 'rgba(255,255,255,.2)',
+            }}/>;
+          })}
           <div className={`gs-thumb${dragging?' dragging':''}`} style={{left:`${pct}%`}}/>
         </div>
       </div>
-      <div className="gs-minmax"><span>{format(min)}</span><span>{format(max)}</span></div>
+      {/* Labels des crans uniformément répartis, plus grands */}
+      <div style={{position:'relative',height:22,marginTop:4}}>
+        {snapValues.map((v, i) => {
+          const p = N <= 1 ? 0 : (i / (N - 1)) * 100;
+          const active = i <= safeIdx;
+          return (
+            <div key={i} style={{
+              position:'absolute',
+              left:`${p}%`,
+              transform:'translateX(-50%)',
+              fontSize: i === safeIdx ? 13 : 10,
+              fontWeight: i === safeIdx ? 900 : 500,
+              color: active ? (i === safeIdx ? '#7dd940' : 'rgba(125,217,64,.55)') : 'rgba(255,255,255,.2)',
+              transition:'all .15s',
+              whiteSpace:'nowrap',
+            }}>{format(v)}</div>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -4879,30 +4909,32 @@ function SimulationsScreen({ onACC, onBox, onSolar, onOptimisation, onBack, onMo
       {/* ── Tuiles d'offres ── */}
       {offres.length > 0 ? (
         <div className="sim-btns">
-          {offres.map(o => {
-            const visible = offresFiltrees.includes(o);
-            const saving  = getSaving(o);
+          {offresFiltrees.map(o => {
+            const saving = getSaving(o);
             return (
               <button key={o.id}
-                className={`sim-btn ${visible ? 'sim-tile-visible' : 'sim-tile-hidden'}`}
+                className="sim-btn sim-tile-visible"
                 onClick={() => handleTileClick(o)}
-                style={visible ? {border:'1.5px solid rgba(125,217,64,.25)'} : {border:'1.5px solid rgba(255,255,255,.06)',cursor:'default'}}
+                style={{border:'1.5px solid rgba(125,217,64,.25)'}}
               >
-                <img src={getPicto(o)} alt={o.titre} className="sim-icon" style={{mixBlendMode:'screen',opacity:visible?1:.35,transition:'opacity .25s'}}/>
+                <img src={getPicto(o)} alt={o.titre} className="sim-icon" style={{mixBlendMode:'screen'}}/>
                 <div className="sim-text">
-                  <div className="sim-title" style={{opacity:visible?1:.4,transition:'opacity .25s'}}>{o.titre}</div>
-                  {saving && visible
+                  <div className="sim-title">{o.titre}</div>
+                  {saving
                     ? <div className="sim-sub" style={{color:'#7dd940',fontWeight:700}}>Jusqu'à -{saving.toLocaleString('fr-FR')} €/an d'économie</div>
-                    : <div className="sim-sub" style={{opacity:visible?1:.3}}>{o.sous_titre || '—'}</div>
+                    : <div className="sim-sub">{o.sous_titre || '—'}</div>
                   }
-                  {!visible && (
-                    <div style={{fontSize:10,color:'rgba(255,255,255,.3)',marginTop:2,fontStyle:'italic'}}>Ne correspond pas aux filtres</div>
-                  )}
                 </div>
-                <span className="sim-arrow" style={{opacity:visible?1:0,transition:'opacity .25s'}}>→</span>
+                <span className="sim-arrow">→</span>
               </button>
             );
           })}
+          {offresFiltrees.length === 0 && (
+            <div style={{textAlign:'center',padding:'32px 0',color:'rgba(255,255,255,.4)',fontSize:14}}>
+              Aucune offre ne correspond à ces critères.<br/>
+              <span style={{fontSize:12,color:'rgba(255,255,255,.25)'}}>Ajustez les filtres ci-dessus.</span>
+            </div>
+          )}
         </div>
       ) : (
         /* Fallback hardcodé si aucune offre en DB */
