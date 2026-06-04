@@ -8072,7 +8072,7 @@ function AdminFiltresScreen({ onBack }) {
     const newVal = !config[key];
     setConfig(c => ({ ...c, [key]: newVal }));
     setSaving(key);
-    await sb.from('filtres_config').upsert({ filtre_key: key, label: FILTRES_DEF.find(f=>f.key===key).label, actif: newVal }, { onConflict: 'filtre_key' });
+    await sb.from('filtres_config').update({ actif: newVal }).eq('filtre_key', key);
     setSaving(null);
   };
 
