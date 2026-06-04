@@ -884,6 +884,58 @@
       50%       { transform: translateX(5px); opacity: .6; }
     }
 
+    /* ══ GAME SLIDERS ══════════════════════════════════════════════ */
+    .sliders-panel {
+      display: flex; flex-direction: column; gap: 18px;
+      background: rgba(0,0,0,.28); border: 1px solid rgba(125,217,64,.18);
+      border-radius: 18px; padding: 18px 16px 14px; margin-bottom: 18px;
+    }
+    .gs-wrap { display: flex; flex-direction: column; gap: 6px; }
+    .gs-header { display: flex; justify-content: space-between; align-items: center; }
+    .gs-label { font-size: 11px; font-weight: 700; color: rgba(255,255,255,.5); text-transform: uppercase; letter-spacing: .6px; display: flex; align-items: center; gap: 5px; }
+    .gs-label span { font-size: 13px; }
+    .gs-val {
+      font-size: 13px; font-weight: 900; color: #7dd940;
+      background: rgba(125,217,64,.12); border: 1px solid rgba(125,217,64,.25);
+      border-radius: 6px; padding: 2px 8px; min-width: 64px; text-align: center;
+      transition: all .15s;
+    }
+    .gs-track-wrap { position: relative; height: 36px; display: flex; align-items: center; cursor: pointer; }
+    .gs-track {
+      position: absolute; left: 0; right: 0; height: 6px;
+      background: rgba(255,255,255,.1); border-radius: 3px; overflow: visible;
+    }
+    .gs-fill {
+      position: absolute; left: 0; height: 100%; border-radius: 3px;
+      background: linear-gradient(90deg, #065060, #7dd940);
+      box-shadow: 0 0 8px rgba(125,217,64,.5);
+      transition: width .1s ease;
+    }
+    .gs-ticks { position: absolute; left: 0; right: 0; top: 0; height: 100%; }
+    .gs-tick {
+      position: absolute; top: -3px; width: 1px; height: 12px;
+      background: rgba(255,255,255,.2); transform: translateX(-50%);
+    }
+    .gs-thumb {
+      position: absolute; top: 50%; width: 26px; height: 26px;
+      background: white; border-radius: 50%; transform: translate(-50%, -50%);
+      box-shadow: 0 0 0 3px rgba(125,217,64,.4), 0 0 14px rgba(125,217,64,.6), 0 2px 8px rgba(0,0,0,.5);
+      transition: box-shadow .15s, width .1s, height .1s;
+      cursor: grab; z-index: 2;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .gs-thumb::after { content: ''; width: 8px; height: 8px; border-radius: 50%; background: #7dd940; }
+    .gs-thumb.dragging {
+      width: 30px; height: 30px;
+      box-shadow: 0 0 0 5px rgba(125,217,64,.5), 0 0 24px rgba(125,217,64,.8), 0 2px 10px rgba(0,0,0,.5);
+      cursor: grabbing;
+    }
+    .gs-range { position: absolute; inset: 0; opacity: 0; width: 100%; cursor: pointer; height: 36px; }
+    .gs-minmax { display: flex; justify-content: space-between; font-size: 10px; color: rgba(255,255,255,.3); margin-top: 1px; }
+    .sim-tile-hidden { opacity: 0; transform: scale(.94) translateY(4px); pointer-events: none; }
+    .sim-tile-visible { opacity: 1; transform: scale(1) translateY(0); }
+    .sim-btn { transition: all .25s cubic-bezier(.34,1.56,.64,1); }
+
     /* ══ MA CONSO ══════════════════════════════════════════════════ */
     .coming-soon { text-align: center; padding: 48px 24px; }
     .inp-sel {
@@ -4508,6 +4560,79 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, cartVersion=0
 }
 
 // ─── SimulationsScreen ────────────────────────
+// ─── GameSlider ──────────────────────────────────────────────────────────────
+function GameSlider({ icon, label, snapValues, value, onChange, format }) {
+  const [dragging, setDragging] = React.useState(false);
+  const trackRef = React.useRef(null);
+
+  const min = snapValues[0];
+  const max = snapValues[snapValues.length - 1];
+  const pct = max === min ? 0 : ((value - min) / (max - min)) * 100;
+
+  const snapNearest = (raw) => {
+    const clamped = Math.max(min, Math.min(max, raw));
+    return snapValues.reduce((prev, curr) =>
+      Math.abs(curr - clamped) < Math.abs(prev - clamped) ? curr : prev, snapValues[0]);
+  };
+
+  const posToValue = (clientX) => {
+    const rect = trackRef.current?.getBoundingClientRect();
+    if (!rect) return value;
+    const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+    return snapNearest(min + ratio * (max - min));
+  };
+
+  const onPointerDown = (e) => {
+    e.preventDefault();
+    setDragging(true);
+    trackRef.current?.setPointerCapture?.(e.pointerId);
+    const newVal = posToValue(e.clientX);
+    if (newVal !== value) onChange(newVal);
+  };
+  const onPointerMove = (e) => {
+    if (!dragging) return;
+    const newVal = posToValue(e.clientX);
+    if (newVal !== value) onChange(newVal);
+  };
+  const onPointerUp = () => setDragging(false);
+
+  return (
+    <div className="gs-wrap">
+      <div className="gs-header">
+        <div className="gs-label"><span>{icon}</span>{label}</div>
+        <div className="gs-val">{format(value)}</div>
+      </div>
+      <div className="gs-track-wrap"
+        ref={trackRef}
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
+        onPointerCancel={onPointerUp}
+      >
+        <div className="gs-track">
+          <div className="gs-fill" style={{width:`${pct}%`}}/>
+          <div className="gs-ticks">
+            {snapValues.map((v,i) => {
+              const p = max === min ? 0 : ((v - min) / (max - min)) * 100;
+              return <div key={i} className="gs-tick" style={{left:`${p}%`}}/>;
+            })}
+          </div>
+          <div className={`gs-thumb${dragging?' dragging':''}`} style={{left:`${pct}%`}}/>
+        </div>
+      </div>
+      <div className="gs-minmax"><span>{format(min)}</span><span>{format(max)}</span></div>
+    </div>
+  );
+}
+
+// ─── Pictos par défaut (4 types en dur) ─────────────────────────────────────
+const PICTOS_DEFAUT = {
+  optimisation_fournisseur: '/optimisation.png',
+  acc:                      '/acc.png',
+  box:                      '/comwatt-box.png',
+  solaire:                  '/maison.png',
+};
+
 function SimulationsScreen({ onACC, onBox, onSolar, onOptimisation, onBack, onMonSite, user, userProfile }) {
   const [hasConso,  setHasConso]  = useState(false);
   const [maxSaving, setMaxSaving] = useState(null);
@@ -4521,6 +4646,72 @@ function SimulationsScreen({ onACC, onBox, onSolar, onOptimisation, onBack, onMo
   const [solPrixRachat, setSolPrixRachat] = useState(0.04);
   const [bestTariffName, setBestTariffName] = useState(null);
   const [changedTariff, setChangedTariff] = useState(false);
+
+  // ── Offres depuis la DB ────────────────────────
+  const [offres, setOffres] = useState([]);
+  useEffect(() => {
+    sb.from('offres').select('*').order('created_at').then(({data}) => setOffres(data || []));
+  }, []);
+
+  // ── Calcul des valeurs snap pour chaque slider ─
+  const delaiVals   = React.useMemo(() => { const v = [...new Set(offres.map(o=>o.delai_min_jours).filter(x=>x!=null))].sort((a,b)=>a-b); return v.length >= 2 ? v : (v.length===1 ? [0,v[0]] : [0,365]); }, [offres]);
+  const investVals  = React.useMemo(() => { const v = [...new Set(offres.map(o=>o.investissement_min).filter(x=>x!=null))].sort((a,b)=>a-b); return v.length >= 2 ? v : (v.length===1 ? [0,v[0]] : [0,10000]); }, [offres]);
+  const reductVals  = React.useMemo(() => { const v = [...new Set(offres.map(o=>o.reduction_pct).filter(x=>x!=null))].sort((a,b)=>a-b); return v.length >= 2 ? v : (v.length===1 ? [0,v[0]] : [0,100]); }, [offres]);
+
+  // ── État des sliders (initialisés au max/min permissif) ─
+  const [delaiFilter,  setDelaiFilter]  = useState(null);
+  const [investFilter, setInvestFilter] = useState(null);
+  const [reductFilter, setReductFilter] = useState(null);
+
+  // Init sliders quand les offres chargent
+  useEffect(() => {
+    if (offres.length === 0) return;
+    setDelaiFilter(v  => v  ?? delaiVals[delaiVals.length-1]);
+    setInvestFilter(v => v  ?? investVals[investVals.length-1]);
+    setReductFilter(v => v  ?? reductVals[0]);
+  }, [offres]);
+
+  const fmtDelai  = v => v === 0 ? 'Immédiat' : `${v}j`;
+  const fmtInvest = v => v === 0 ? '0 €' : `${v.toLocaleString('fr-FR')} €`;
+  const fmtReduct = v => `${v}%`;
+
+  // ── Mapping type → handler ─────────────────────
+  const typeHandler = { optimisation_fournisseur: onOptimisation, acc: onACC, box: onBox, solaire: onSolar };
+  const typeSaving  = React.useMemo(() => ({
+    optimisation_fournisseur: maxSaving,
+    acc:    accSaving,
+    box:    boxSaving,
+    solaire: parseInt(localStorage.getItem('starvolt_baisse_facture')||'0') || solarSaving,
+  }), [maxSaving, accSaving, boxSaving, solarSaving]);
+
+  // ── Filtrage des offres ───────────────────────
+  const offresFiltrees = React.useMemo(() => offres.filter(o => {
+    if (delaiFilter  != null && o.delai_min_jours    != null && o.delai_min_jours    > delaiFilter)  return false;
+    if (investFilter != null && o.investissement_min != null && o.investissement_min > investFilter) return false;
+    if (reductFilter != null && o.reduction_pct      != null && o.reduction_pct      < reductFilter) return false;
+    return true;
+  }), [offres, delaiFilter, investFilter, reductFilter]);
+
+  // ── Picto d'une offre ─────────────────────────
+  const getPicto = (o) => {
+    if (o.picto_url) return o.picto_url;
+    const firstType = (o.types_offre || [])[0];
+    return PICTOS_DEFAUT[firstType] || '/optimisation.png';
+  };
+
+  // ── Handler clic tuile ─────────────────────────
+  const handleTileClick = (o) => {
+    const firstType = (o.types_offre || []).find(t => typeHandler[t]);
+    if (firstType) typeHandler[firstType]?.();
+  };
+
+  // ── Économies pour une offre ──────────────────
+  const getSaving = (o) => {
+    const savings = (o.types_offre || []).map(t => typeSaving[t]).filter(s => s != null && s > 0);
+    return savings.length ? Math.max(...savings) : null;
+  };
+
+  const showSliders = offres.length > 0 && (delaiFilter != null);
 
   useEffect(() => {
     if (!user) return;
@@ -4669,51 +4860,89 @@ function SimulationsScreen({ onACC, onBox, onSolar, onOptimisation, onBack, onMo
         <div className="welcome-tag">Vos leviers d'économie</div>
         <h1 className="welcome-title">Simulations<br/><span className="accent">d'économie</span></h1>
       </div>
-      <div className="sim-btns">
-        {hasConso && (
-          <button className="sim-btn" onClick={onOptimisation} style={{border:'1.5px solid rgba(125,217,64,.35)'}}>
-            <img src="/optimisation.png" alt="Optimisation" className="sim-icon" style={{mixBlendMode:'screen'}}/>
+
+      {/* ── Sliders gaming ── */}
+      {showSliders && (
+        <div className="sliders-panel">
+          <GameSlider icon="⚡" label="Vitesse de déploiement"
+            snapValues={delaiVals} value={delaiFilter}
+            onChange={setDelaiFilter} format={fmtDelai}/>
+          <GameSlider icon="💰" label="Investissement maximum"
+            snapValues={investVals} value={investFilter}
+            onChange={setInvestFilter} format={fmtInvest}/>
+          <GameSlider icon="📉" label="% d'économie minimum"
+            snapValues={reductVals} value={reductFilter}
+            onChange={setReductFilter} format={fmtReduct}/>
+        </div>
+      )}
+
+      {/* ── Tuiles d'offres ── */}
+      {offres.length > 0 ? (
+        <div className="sim-btns">
+          {offres.map(o => {
+            const visible = offresFiltrees.includes(o);
+            const saving  = getSaving(o);
+            return (
+              <button key={o.id}
+                className={`sim-btn ${visible ? 'sim-tile-visible' : 'sim-tile-hidden'}`}
+                onClick={() => handleTileClick(o)}
+                style={visible ? {border:'1.5px solid rgba(125,217,64,.25)'} : {border:'1.5px solid rgba(255,255,255,.06)',cursor:'default'}}
+              >
+                <img src={getPicto(o)} alt={o.titre} className="sim-icon" style={{mixBlendMode:'screen',opacity:visible?1:.35,transition:'opacity .25s'}}/>
+                <div className="sim-text">
+                  <div className="sim-title" style={{opacity:visible?1:.4,transition:'opacity .25s'}}>{o.titre}</div>
+                  {saving && visible
+                    ? <div className="sim-sub" style={{color:'#7dd940',fontWeight:700}}>Jusqu'à -{saving.toLocaleString('fr-FR')} €/an d'économie</div>
+                    : <div className="sim-sub" style={{opacity:visible?1:.3}}>{o.sous_titre || '—'}</div>
+                  }
+                  {!visible && (
+                    <div style={{fontSize:10,color:'rgba(255,255,255,.3)',marginTop:2,fontStyle:'italic'}}>Ne correspond pas aux filtres</div>
+                  )}
+                </div>
+                <span className="sim-arrow" style={{opacity:visible?1:0,transition:'opacity .25s'}}>→</span>
+              </button>
+            );
+          })}
+        </div>
+      ) : (
+        /* Fallback hardcodé si aucune offre en DB */
+        <div className="sim-btns">
+          {hasConso && (
+            <button className="sim-btn" onClick={onOptimisation} style={{border:'1.5px solid rgba(125,217,64,.35)'}}>
+              <img src="/optimisation.png" alt="Optimisation" className="sim-icon" style={{mixBlendMode:'screen'}}/>
+              <div className="sim-text">
+                <div className="sim-title">Optimisation fournisseur</div>
+                {maxSaving > 0 ? <div className="sim-sub" style={{color:'#7dd940',fontWeight:700}}>Jusqu'à -{maxSaving.toLocaleString('fr-FR')} €/an</div> : <div className="sim-sub">Comparez tous les tarifs sur votre conso réelle</div>}
+              </div>
+              <span className="sim-arrow">→</span>
+            </button>
+          )}
+          <button className="sim-btn" onClick={onACC}>
+            <img src="/acc.png" alt="ACC" className="sim-icon"/>
             <div className="sim-text">
-              <div className="sim-title">Optimisation fournisseur</div>
-              {maxSaving !== null && maxSaving > 0
-                ? <div className="sim-sub green" style={{color:'#7dd940',fontWeight:700}}>Jusqu'à -{maxSaving.toLocaleString('fr-FR')} €/an d'économie</div>
-                : <div className="sim-sub">Comparez tous les tarifs sur votre conso réelle</div>
-              }
+              <div className="sim-title">Économiser avec l'ACC</div>
+              {accSaving > 0 ? <div className="sim-sub" style={{color:'#7dd940',fontWeight:700}}>Jusqu'à -{accSaving.toLocaleString('fr-FR')} €/an</div> : <div className="sim-sub">Autoconsommation collective locale</div>}
             </div>
             <span className="sim-arrow">→</span>
           </button>
-        )}
-        <button className="sim-btn" onClick={onACC}>
-          <img src="/acc.png" alt="ACC" className="sim-icon"/>
-          <div className="sim-text">
-            <div className="sim-title">Économiser avec l'ACC</div>
-            {accSaving !== null && accSaving > 0
-              ? <div className="sim-sub green" style={{color:'#7dd940',fontWeight:700}}>Jusqu'à -{accSaving.toLocaleString('fr-FR')} €/an d'économie</div>
-              : <div className="sim-sub">Autoconsommation collective locale</div>
-            }
-          </div>
-          <span className="sim-arrow">→</span>
-        </button>
-        <button className="sim-btn" onClick={onBox}>
-          <img src="/comwatt-box.png" alt="Box Comwatt" className="sim-icon"/>
-          <div className="sim-text">
-            <div className="sim-title">Économiser plus avec la Box</div>
-            {boxSaving !== null
-              ? <div className="sim-sub green" style={{color:'#7dd940',fontWeight:700}}>Jusqu'à -{boxSaving.toLocaleString('fr-FR')} €/an d'économie</div>
-              : <div className="sim-sub">Pilotage intelligent de votre consommation</div>
-            }
-          </div>
-          <span className="sim-arrow">→</span>
-        </button>
-        <button className="sim-btn" onClick={onSolar}>
-          <img src="/maison.png" alt="Solaire" className="sim-icon"/>
-          <div className="sim-text">
-            <div className="sim-title">Économiser avec le solaire</div>
-            {(()=>{const ls=parseInt(localStorage.getItem('starvolt_baisse_facture')||'0');const val=ls||solarSaving;return val>0?<div className="sim-sub green" style={{color:'#7dd940',fontWeight:700}}>Baisse de la facture : -{val.toLocaleString('fr-FR')} €TTC/an</div>:<div className="sim-sub">Panneaux solaires + batterie</div>;})()}
-          </div>
-          <span className="sim-arrow">→</span>
-        </button>
-      </div>
+          <button className="sim-btn" onClick={onBox}>
+            <img src="/comwatt-box.png" alt="Box" className="sim-icon"/>
+            <div className="sim-text">
+              <div className="sim-title">Économiser plus avec la Box</div>
+              {boxSaving > 0 ? <div className="sim-sub" style={{color:'#7dd940',fontWeight:700}}>Jusqu'à -{boxSaving.toLocaleString('fr-FR')} €/an</div> : <div className="sim-sub">Pilotage intelligent de votre consommation</div>}
+            </div>
+            <span className="sim-arrow">→</span>
+          </button>
+          <button className="sim-btn" onClick={onSolar}>
+            <img src="/maison.png" alt="Solaire" className="sim-icon"/>
+            <div className="sim-text">
+              <div className="sim-title">Économiser avec le solaire</div>
+              {(()=>{const v=parseInt(localStorage.getItem('starvolt_baisse_facture')||'0')||solarSaving;return v>0?<div className="sim-sub" style={{color:'#7dd940',fontWeight:700}}>-{v.toLocaleString('fr-FR')} €TTC/an</div>:<div className="sim-sub">Panneaux solaires + batterie</div>;})()}
+            </div>
+            <span className="sim-arrow">→</span>
+          </button>
+        </div>
+      )}
     </div>
     <StickyFooter row onBack={onBack}>
       {onMonSite&&<button className="btn btn-primary" style={{fontSize:13}} onClick={onMonSite}>Mon site →</button>}
@@ -7744,7 +7973,15 @@ function AdminOffreEditScreen({ offre, onSave, onDelete, onBack }) {
     investissement_min:  offre?.investissement_min  ?? '',
     reduction_pct:       offre?.reduction_pct       ?? '',
     types_offre:         offre?.types_offre         || [],
+    picto_url:           offre?.picto_url           || '',
   });
+
+  const PICTOS_PRESET = [
+    { url: '/optimisation.png', label: 'Optimisation' },
+    { url: '/acc.png',          label: 'ACC' },
+    { url: '/comwatt-box.png',  label: 'Box Comwatt' },
+    { url: '/maison.png',       label: 'Solaire' },
+  ];
   const [saving, setSaving] = useState(false);
   const [confirmDel, setConfirmDel] = useState(false);
   const [err, setErr] = useState('');
@@ -7770,6 +8007,7 @@ function AdminOffreEditScreen({ offre, onSave, onDelete, onBack }) {
       investissement_min: form.investissement_min !== '' ? Number(form.investissement_min) : null,
       reduction_pct:      form.reduction_pct !== '' ? Number(form.reduction_pct) : null,
       types_offre:        form.types_offre,
+      picto_url:          form.picto_url.trim() || null,
       updated_at:         new Date().toISOString(),
     };
     let error;
@@ -7829,6 +8067,32 @@ function AdminOffreEditScreen({ offre, onSave, onDelete, onBack }) {
           <label className="inp-label">Réduction de facture (%)</label>
           <input className="inp" type="number" min="0" max="100" step="0.1" value={form.reduction_pct} placeholder="Ex : 30"
             onChange={e => set('reduction_pct', e.target.value)}/>
+        </div>
+
+        <div className="inp-group">
+          <label className="inp-label" style={{marginBottom:10}}>Pictogramme</label>
+          <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:8,marginBottom:10}}>
+            {PICTOS_PRESET.map(p => (
+              <div key={p.url} onClick={() => set('picto_url', form.picto_url===p.url ? '' : p.url)}
+                style={{
+                  display:'flex',flexDirection:'column',alignItems:'center',gap:6,
+                  padding:'10px 6px',borderRadius:10,cursor:'pointer',border:'1.5px solid',
+                  borderColor: form.picto_url===p.url ? 'var(--green)' : 'rgba(255,255,255,.12)',
+                  background: form.picto_url===p.url ? 'rgba(125,217,64,.1)' : 'rgba(255,255,255,.04)',
+                }}>
+                <img src={p.url} alt={p.label} style={{width:36,height:36,objectFit:'contain',mixBlendMode:'screen'}}/>
+                <span style={{fontSize:9,color:'rgba(255,255,255,.5)',fontWeight:600,textAlign:'center'}}>{p.label}</span>
+              </div>
+            ))}
+          </div>
+          <input className="inp" value={form.picto_url} placeholder="Ou URL personnalisée (https://…)"
+            onChange={e => set('picto_url', e.target.value)}/>
+          {form.picto_url && !PICTOS_PRESET.find(p=>p.url===form.picto_url) && (
+            <div style={{marginTop:8,display:'flex',alignItems:'center',gap:8}}>
+              <img src={form.picto_url} alt="preview" style={{width:36,height:36,objectFit:'contain',borderRadius:6,background:'rgba(255,255,255,.05)'}} onError={e=>e.target.style.display='none'}/>
+              <span style={{fontSize:11,color:'rgba(255,255,255,.4)'}}>Aperçu URL personnalisée</span>
+            </div>
+          )}
         </div>
 
         <div className="inp-group">
