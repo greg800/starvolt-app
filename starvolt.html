@@ -7592,7 +7592,7 @@ function AdminPrixMateriauxScreen({ onBack }) {
 }
 
 // ─── AdminScreen ──────────────────────────────
-function AdminScreen({ onTariffs, onUsers, onSpot, onAcc, onProduction, onGlobalVars, onPrix, onBack }) {
+function AdminScreen({ onTariffs, onUsers, onSpot, onAcc, onProduction, onGlobalVars, onPrix, onOffres, onBack }) {
   return (
     <>
     <div className="screen fade-in">
@@ -7622,6 +7622,14 @@ function AdminScreen({ onTariffs, onUsers, onSpot, onAcc, onProduction, onGlobal
           <div className="sim-text">
             <div className="sim-title">Gestion des tarifs d'électricité</div>
             <div className="sim-sub">Créer et modifier les tarifs fournisseurs</div>
+          </div>
+          <span className="sim-arrow">→</span>
+        </button>
+        <button className="sim-btn" onClick={onOffres}>
+          <span className="sim-icon">🎯</span>
+          <div className="sim-text">
+            <div className="sim-title">Gestion des offres</div>
+            <div className="sim-sub">Créer et modifier les offres proposées aux clients</div>
           </div>
           <span className="sim-arrow">→</span>
         </button>
@@ -7665,6 +7673,219 @@ function AdminScreen({ onTariffs, onUsers, onSpot, onAcc, onProduction, onGlobal
 }
 
 // ─── AdminTariffsScreen ───────────────────────
+// ─── Types d'offres (définis en dur) ─────────────────────────────────────────
+const TYPES_OFFRE = [
+  { value: 'optimisation_fournisseur', label: 'Optimisation fournisseur' },
+  { value: 'acc',                      label: 'Économiser avec l\'ACC' },
+  { value: 'box',                      label: 'Économiser plus avec la Box' },
+  { value: 'solaire',                  label: 'Économiser avec le solaire' },
+];
+
+// ─── AdminOffresScreen ────────────────────────────────────────────────────────
+function AdminOffresScreen({ onEdit, onNew, onBack }) {
+  const [offres, setOffres] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    sb.from('offres').select('*').order('created_at')
+      .then(({ data }) => { setOffres(data || []); setLoading(false); });
+  }, []);
+
+  const typeLabel = (types) => (types || [])
+    .map(v => TYPES_OFFRE.find(t => t.value === v)?.label || v)
+    .join(', ') || '—';
+
+  return (
+    <>
+    <div className="screen fade-in">
+      <div className="auth-header">
+        <div className="welcome-tag" style={{color:'#ffb340'}}>Administration</div>
+        <h1 className="welcome-title">Gestion<br/><span className="accent">des offres</span></h1>
+      </div>
+      {loading ? <div style={{textAlign:'center',padding:40}}><div className="spinner" style={{margin:'0 auto'}}/></div> : (
+        <div style={{display:'flex',flexDirection:'column',gap:8,marginBottom:80}}>
+          {offres.length === 0 && (
+            <div style={{textAlign:'center',padding:'40px 0',color:'rgba(255,255,255,.4)',fontSize:14}}>
+              Aucune offre — cliquez sur + Nouvelle offre
+            </div>
+          )}
+          {offres.map(o => (
+            <div key={o.id} className="tariff-row-item" onClick={() => onEdit(o)}>
+              <div style={{flex:1}}>
+                <div className="tariff-row-name">{o.titre}</div>
+                {o.sous_titre && <div className="tariff-row-meta">{o.sous_titre}</div>}
+                <div className="tariff-row-meta" style={{marginTop:4,display:'flex',gap:10,flexWrap:'wrap'}}>
+                  {o.delai_min_jours != null && <span>⏱ {o.delai_min_jours}j min</span>}
+                  {o.investissement_min != null && <span>💰 {o.investissement_min.toLocaleString('fr-FR')} € min</span>}
+                  {o.reduction_pct != null && <span>📉 -{o.reduction_pct}%</span>}
+                </div>
+                <div className="tariff-row-meta" style={{marginTop:4}}>🏷 {typeLabel(o.types_offre)}</div>
+              </div>
+              <span style={{color:'rgba(255,255,255,.35)',fontSize:18,marginLeft:10}}>›</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+    <StickyFooter row onBack={onBack}>
+      <button className="btn btn-sec" style={{fontSize:13}} onClick={onNew}>+ Nouvelle offre</button>
+    </StickyFooter>
+    </>
+  );
+}
+
+// ─── AdminOffreEditScreen ─────────────────────────────────────────────────────
+function AdminOffreEditScreen({ offre, onSave, onDelete, onBack }) {
+  const isNew = !offre?.id;
+  const [form, setForm] = useState({
+    titre:               offre?.titre              || '',
+    sous_titre:          offre?.sous_titre          || '',
+    delai_min_jours:     offre?.delai_min_jours     ?? '',
+    investissement_min:  offre?.investissement_min  ?? '',
+    reduction_pct:       offre?.reduction_pct       ?? '',
+    types_offre:         offre?.types_offre         || [],
+  });
+  const [saving, setSaving] = useState(false);
+  const [confirmDel, setConfirmDel] = useState(false);
+  const [err, setErr] = useState('');
+
+  const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+
+  const toggleType = (val) => {
+    setForm(f => ({
+      ...f,
+      types_offre: f.types_offre.includes(val)
+        ? f.types_offre.filter(t => t !== val)
+        : [...f.types_offre, val],
+    }));
+  };
+
+  const handleSave = async () => {
+    if (!form.titre.trim()) { setErr('Le titre est obligatoire.'); return; }
+    setSaving(true); setErr('');
+    const payload = {
+      titre:              form.titre.trim(),
+      sous_titre:         form.sous_titre.trim() || null,
+      delai_min_jours:    form.delai_min_jours !== '' ? Number(form.delai_min_jours) : null,
+      investissement_min: form.investissement_min !== '' ? Number(form.investissement_min) : null,
+      reduction_pct:      form.reduction_pct !== '' ? Number(form.reduction_pct) : null,
+      types_offre:        form.types_offre,
+      updated_at:         new Date().toISOString(),
+    };
+    let error;
+    if (isNew) {
+      ({ error } = await sb.from('offres').insert(payload));
+    } else {
+      ({ error } = await sb.from('offres').update(payload).eq('id', offre.id));
+    }
+    setSaving(false);
+    if (error) { setErr('Erreur : ' + error.message); return; }
+    onSave();
+  };
+
+  const handleDelete = async () => {
+    setSaving(true);
+    await sb.from('offres').delete().eq('id', offre.id);
+    setSaving(false);
+    onDelete();
+  };
+
+  return (
+    <>
+    <div className="screen fade-in">
+      <div className="auth-header">
+        <div className="welcome-tag" style={{color:'#ffb340'}}>Administration</div>
+        <h1 className="welcome-title">{isNew ? 'Nouvelle' : 'Modifier'}<br/><span className="accent">offre</span></h1>
+      </div>
+      <div style={{display:'flex',flexDirection:'column',gap:0,marginBottom:80}}>
+
+        <div className="inp-group">
+          <label className="inp-label">Titre <span style={{color:'rgba(255,255,255,.4)',fontWeight:400}}>max 40 car.</span></label>
+          <input className="inp" maxLength={40} value={form.titre} placeholder="Ex : Réduisez votre facture maintenant"
+            onChange={e => set('titre', e.target.value)}/>
+          <div style={{textAlign:'right',fontSize:11,color:'rgba(255,255,255,.35)',marginTop:4}}>{form.titre.length}/40</div>
+        </div>
+
+        <div className="inp-group">
+          <label className="inp-label">Sous-titre <span style={{color:'rgba(255,255,255,.4)',fontWeight:400}}>max 50 car.</span></label>
+          <input className="inp" maxLength={50} value={form.sous_titre} placeholder="Ex : Économisez dès le premier mois"
+            onChange={e => set('sous_titre', e.target.value)}/>
+          <div style={{textAlign:'right',fontSize:11,color:'rgba(255,255,255,.35)',marginTop:4}}>{form.sous_titre.length}/50</div>
+        </div>
+
+        <div className="inp-group">
+          <label className="inp-label">Délai minimum de mise en œuvre (jours)</label>
+          <input className="inp" type="number" min="0" value={form.delai_min_jours} placeholder="Ex : 30"
+            onChange={e => set('delai_min_jours', e.target.value)}/>
+        </div>
+
+        <div className="inp-group">
+          <label className="inp-label">Investissement initial minimum (€)</label>
+          <input className="inp" type="number" min="0" value={form.investissement_min} placeholder="Ex : 500"
+            onChange={e => set('investissement_min', e.target.value)}/>
+        </div>
+
+        <div className="inp-group">
+          <label className="inp-label">Réduction de facture (%)</label>
+          <input className="inp" type="number" min="0" max="100" step="0.1" value={form.reduction_pct} placeholder="Ex : 30"
+            onChange={e => set('reduction_pct', e.target.value)}/>
+        </div>
+
+        <div className="inp-group">
+          <label className="inp-label" style={{marginBottom:10}}>Types d'offre <span style={{color:'rgba(255,255,255,.4)',fontWeight:400}}>(multi-sélection)</span></label>
+          {TYPES_OFFRE.map(t => (
+            <div key={t.value} onClick={() => toggleType(t.value)} style={{
+              display:'flex',alignItems:'center',gap:12,padding:'11px 14px',marginBottom:6,
+              borderRadius:10,cursor:'pointer',border:'1px solid',
+              borderColor: form.types_offre.includes(t.value) ? 'var(--green)' : 'rgba(255,255,255,.12)',
+              background: form.types_offre.includes(t.value) ? 'rgba(125,217,64,.1)' : 'rgba(255,255,255,.04)',
+            }}>
+              <div style={{
+                width:18,height:18,borderRadius:4,flexShrink:0,border:'1.5px solid',
+                borderColor: form.types_offre.includes(t.value) ? 'var(--green)' : 'rgba(255,255,255,.3)',
+                background: form.types_offre.includes(t.value) ? 'var(--green)' : 'transparent',
+                display:'flex',alignItems:'center',justifyContent:'center',
+              }}>
+                {form.types_offre.includes(t.value) && <span style={{color:'#0a1a04',fontSize:11,fontWeight:900}}>✓</span>}
+              </div>
+              <span style={{fontSize:13,color: form.types_offre.includes(t.value) ? 'white' : 'rgba(255,255,255,.65)'}}>{t.label}</span>
+            </div>
+          ))}
+        </div>
+
+        {err && <div style={{color:'#ff6b6b',fontSize:13,padding:'8px 0'}}>{err}</div>}
+
+        {!isNew && !confirmDel && (
+          <button onClick={() => setConfirmDel(true)} style={{
+            marginTop:16,background:'transparent',border:'1px solid rgba(255,80,80,.4)',
+            color:'rgba(255,100,100,.8)',borderRadius:10,padding:'10px',fontSize:13,cursor:'pointer',
+          }}>Supprimer cette offre</button>
+        )}
+        {confirmDel && (
+          <div style={{marginTop:16,padding:14,background:'rgba(255,50,50,.1)',borderRadius:10,border:'1px solid rgba(255,80,80,.3)'}}>
+            <p style={{color:'rgba(255,255,255,.8)',fontSize:13,margin:'0 0 12px'}}>Confirmer la suppression ?</p>
+            <div style={{display:'flex',gap:8}}>
+              <button onClick={handleDelete} disabled={saving} style={{flex:1,background:'rgba(255,60,60,.7)',border:'none',color:'white',borderRadius:8,padding:'9px',fontSize:13,cursor:'pointer',fontWeight:700}}>
+                {saving ? '…' : 'Supprimer'}
+              </button>
+              <button onClick={() => setConfirmDel(false)} style={{flex:1,background:'rgba(255,255,255,.1)',border:'none',color:'white',borderRadius:8,padding:'9px',fontSize:13,cursor:'pointer'}}>
+                Annuler
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+    <StickyFooter row onBack={onBack}>
+      <button className="btn btn-cta" style={{fontSize:13,flex:1}} onClick={handleSave} disabled={saving}>
+        {saving ? 'Enregistrement…' : isNew ? '+ Créer l\'offre' : 'Enregistrer'}
+      </button>
+    </StickyFooter>
+    </>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 function AdminTariffsScreen({ onEdit, onNew, onBack }) {
   const [tariffs, setTariffs] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -8406,13 +8627,8 @@ function App() {
         }
       }
     }
-    // Détermine l'écran cible : SIMULATIONS si conso disponible, sinon HOME
-    const siteId = localStorage.getItem('starvolt_active_site_id');
-    if (siteId) {
-      const { data: site } = await sb.from('sites').select('conso_profil').eq('id', siteId).maybeSingle();
-      if (site?.conso_profil) return 'SIMULATIONS';
-    }
-    return 'HOME_LOGGED_IN';
+    // Atterrir directement sur Mon site
+    return 'MA_CONSO';
   }, []);
 
   // Vide le panier une seule fois par session navigateur (rechargement de page)
@@ -8506,8 +8722,8 @@ function App() {
         return <ProfileScreen
           user={user}
           profile={profile}
-          onSave={(updated) => { setProfile(p => ({...p, ...updated})); goTo('HOME_LOGGED_IN'); }}
-          onCancel={() => goTo('HOME_LOGGED_IN')}
+          onSave={(updated) => { setProfile(p => ({...p, ...updated})); goTo('MA_CONSO'); }}
+          onCancel={() => goTo('MA_CONSO')}
           onLogout={handleLogout}
           onDeleted={() => { setUser(null); setProfile(null); setState(INIT); setHistory([]); }}/>;
 
@@ -8520,6 +8736,20 @@ function App() {
           onProduction={()=>goTo('ADMIN_PRODUCTION')}
           onGlobalVars={()=>goTo('ADMIN_GLOBAL_VARS')}
           onPrix={()=>goTo('ADMIN_PRIX_MATERIAUX')}
+          onOffres={()=>goTo('ADMIN_OFFRES')}
+          onBack={goBack}/>;
+
+      case 'ADMIN_OFFRES':
+        return <AdminOffresScreen
+          onEdit={(o)=>goTo('ADMIN_OFFRE_EDIT', {editOffre: o})}
+          onNew={()=>goTo('ADMIN_OFFRE_EDIT', {editOffre: null})}
+          onBack={goBack}/>;
+
+      case 'ADMIN_OFFRE_EDIT':
+        return <AdminOffreEditScreen
+          offre={state.editOffre}
+          onSave={()=>goTo('ADMIN_OFFRES')}
+          onDelete={()=>goTo('ADMIN_OFFRES')}
           onBack={goBack}/>;
 
       case 'ADMIN_PRIX_MATERIAUX':
@@ -8673,7 +8903,7 @@ function App() {
   };
 
   const isAuthScreen = ['AUTH_SIGNUP','AUTH_LOGIN'].includes(state.screen);
-  const isHome = !authLoading && user && state.screen === 'HOME_LOGGED_IN';
+  const isHome = false; // page d'accueil connecté supprimée
   const chipLabel = profile ? (profile.pseudo || profile.prenom || '') : state.name;
   const avatarName = profile ? `${profile.prenom || ''} ${profile.nom || ''}`.trim() : state.name;
   const showNameChip = profile ? true : state.screen !== 'WELCOME';
@@ -8691,7 +8921,7 @@ function App() {
         avatarName={avatarName}
         showName={!isAuthScreen && showNameChip}
         logoOnly={isAuthScreen}
-        onLogoClick={() => user ? goTo('HOME_LOGGED_IN') : goTo('WELCOME')}
+        onLogoClick={() => user ? goTo('MA_CONSO') : goTo('WELCOME')}
         onProfileClick={user ? () => goTo('PROFILE') : null}
         isAdmin={isAdmin}
         onAdmin={()=>goTo('ADMIN')}
