@@ -886,60 +886,69 @@
 
     /* ══ GAME SLIDERS ══════════════════════════════════════════════ */
     .sliders-panel {
-      display: flex; flex-direction: column; gap: 18px;
-      background: rgba(0,0,0,.28); border: 1px solid rgba(125,217,64,.18);
-      border-radius: 18px; padding: 18px 16px 14px; margin-bottom: 18px;
+      display: flex; flex-direction: column; gap: 8px;
+      background: rgba(0,0,0,.32); border: 1px solid rgba(125,217,64,.18);
+      border-radius: 14px; padding: 10px 14px 8px;
     }
-    .gs-wrap { display: flex; flex-direction: column; gap: 6px; }
-    .gs-header { display: flex; justify-content: space-between; align-items: center; }
-    .gs-label { font-size: 11px; font-weight: 700; color: rgba(255,255,255,.5); text-transform: uppercase; letter-spacing: .6px; display: flex; align-items: center; gap: 5px; }
-    .gs-label span { font-size: 13px; }
+    .gs-wrap { display: flex; flex-direction: column; gap: 2px; }
+    .gs-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1px; }
+    .gs-label { font-size: 10px; font-weight: 700; color: rgba(255,255,255,.45); text-transform: uppercase; letter-spacing: .5px; display: flex; align-items: center; gap: 4px; }
+    .gs-label span { font-size: 12px; }
     .gs-val {
-      font-size: 13px; font-weight: 900; color: #7dd940;
+      font-size: 12px; font-weight: 900; color: #7dd940;
       background: rgba(125,217,64,.12); border: 1px solid rgba(125,217,64,.25);
-      border-radius: 6px; padding: 2px 8px; min-width: 64px; text-align: center;
+      border-radius: 5px; padding: 1px 7px; min-width: 54px; text-align: center;
       transition: all .15s;
     }
     .gs-val-active {
-      font-size: 15px;
+      font-size: 13px;
       background: rgba(125,217,64,.22); border-color: rgba(125,217,64,.5);
-      box-shadow: 0 0 10px rgba(125,217,64,.3);
+      box-shadow: 0 0 8px rgba(125,217,64,.3);
     }
-    .gs-track-wrap { position: relative; height: 36px; display: flex; align-items: center; cursor: pointer; }
+    .gs-track-wrap { position: relative; height: 28px; display: flex; align-items: center; cursor: pointer; }
     .gs-track {
-      position: absolute; left: 0; right: 0; height: 6px;
+      position: absolute; left: 0; right: 0; height: 5px;
       background: rgba(255,255,255,.1); border-radius: 3px; overflow: visible;
     }
     .gs-fill {
       position: absolute; left: 0; height: 100%; border-radius: 3px;
       background: linear-gradient(90deg, #065060, #7dd940);
-      box-shadow: 0 0 8px rgba(125,217,64,.5);
+      box-shadow: 0 0 6px rgba(125,217,64,.5);
       transition: width .1s ease;
     }
     .gs-ticks { position: absolute; left: 0; right: 0; top: 0; height: 100%; }
     .gs-tick {
-      position: absolute; top: -3px; width: 1px; height: 12px;
+      position: absolute; top: -2px; width: 1px; height: 9px;
       background: rgba(255,255,255,.2); transform: translateX(-50%);
     }
     .gs-thumb {
-      position: absolute; top: 50%; width: 26px; height: 26px;
+      position: absolute; top: 50%; width: 22px; height: 22px;
       background: white; border-radius: 50%; transform: translate(-50%, -50%);
-      box-shadow: 0 0 0 3px rgba(125,217,64,.4), 0 0 14px rgba(125,217,64,.6), 0 2px 8px rgba(0,0,0,.5);
+      box-shadow: 0 0 0 3px rgba(125,217,64,.4), 0 0 10px rgba(125,217,64,.6), 0 2px 6px rgba(0,0,0,.5);
       transition: box-shadow .15s, width .1s, height .1s;
       cursor: grab; z-index: 2;
       display: flex; align-items: center; justify-content: center;
     }
-    .gs-thumb::after { content: ''; width: 8px; height: 8px; border-radius: 50%; background: #7dd940; }
+    .gs-thumb::after { content: ''; width: 7px; height: 7px; border-radius: 50%; background: #7dd940; }
     .gs-thumb.dragging {
-      width: 30px; height: 30px;
-      box-shadow: 0 0 0 5px rgba(125,217,64,.5), 0 0 24px rgba(125,217,64,.8), 0 2px 10px rgba(0,0,0,.5);
+      width: 26px; height: 26px;
+      box-shadow: 0 0 0 4px rgba(125,217,64,.5), 0 0 20px rgba(125,217,64,.8), 0 2px 8px rgba(0,0,0,.5);
       cursor: grabbing;
     }
-    .gs-range { position: absolute; inset: 0; opacity: 0; width: 100%; cursor: pointer; height: 36px; }
     .gs-minmax { display: flex; justify-content: space-between; font-size: 10px; color: rgba(255,255,255,.3); margin-top: 1px; }
-    .sim-tile-hidden { opacity: 0; transform: scale(.94) translateY(4px); pointer-events: none; }
     .sim-tile-visible { opacity: 1; transform: scale(1) translateY(0); }
     .sim-btn { transition: all .25s cubic-bezier(.34,1.56,.64,1); }
+    /* Sticky sliders footer */
+    .sticky-footer-sliders { padding: 10px 16px 18px; }
+    /* Mobile : titre réduit + sans tag */
+    @media (max-width: 600px) {
+      .sim-welcome-tag { display: none; }
+      .sim-title-h1 { font-size: 22px !important; line-height: 1.15 !important; margin-bottom: 10px !important; }
+      .sim-btn { padding: 10px 12px !important; }
+      .sim-icon { width: 34px !important; height: 34px !important; }
+      .sim-title { font-size: 13px !important; }
+      .sim-sub { font-size: 11px !important; }
+    }
 
     /* ══ MA CONSO ══════════════════════════════════════════════════ */
     .coming-soon { text-align: center; padding: 48px 24px; }
@@ -4883,41 +4892,29 @@ function SimulationsScreen({ onACC, onBox, onSolar, onOptimisation, onBack, onMo
     );
   }
 
+  // Padding bas pour laisser la place au sticky (sliders ou bouton retour)
+  const bottomPad = showSliders ? 210 : 80;
+
   return (
     <>
-    <div className="screen fade-in">
+    <div className="screen fade-in" style={{paddingBottom: bottomPad}}>
       <div className="sim-header">
-        <div className="welcome-tag">Vos leviers d'économie</div>
-        <h1 className="welcome-title">Simulations<br/><span className="accent">d'économie</span></h1>
+        <div className="welcome-tag sim-welcome-tag">Vos leviers d'économie</div>
+        <h1 className="welcome-title sim-title-h1" style={{marginBottom:14}}>Simulations<br/><span className="accent">d'économie</span></h1>
       </div>
-
-      {/* ── Sliders gaming ── */}
-      {showSliders && (
-        <div className="sliders-panel">
-          <GameSlider icon="⚡" label="Vitesse de déploiement"
-            snapValues={delaiVals} value={delaiFilter}
-            onChange={setDelaiFilter} format={fmtDelai}/>
-          <GameSlider icon="💰" label="Investissement maximum"
-            snapValues={investVals} value={investFilter}
-            onChange={setInvestFilter} format={fmtInvest}/>
-          <GameSlider icon="📉" label="% d'économie minimum"
-            snapValues={reductVals} value={reductFilter}
-            onChange={setReductFilter} format={fmtReduct}/>
-        </div>
-      )}
 
       {/* ── Tuiles d'offres ── */}
       {offres.length > 0 ? (
-        <div className="sim-btns">
+        <div className="sim-btns" style={{gap:6}}>
           {offresFiltrees.map(o => {
             const saving = getSaving(o);
             return (
               <button key={o.id}
                 className="sim-btn sim-tile-visible"
                 onClick={() => handleTileClick(o)}
-                style={{border:'1.5px solid rgba(125,217,64,.25)'}}
+                style={{border:'1.5px solid rgba(125,217,64,.25)', padding:'10px 14px', gap:12}}
               >
-                <img src={getPicto(o)} alt={o.titre} className="sim-icon" style={{mixBlendMode:'screen'}}/>
+                <img src={getPicto(o)} alt={o.titre} className="sim-icon" style={{mixBlendMode:'screen', width:36, height:36}}/>
                 <div className="sim-text">
                   <div className="sim-title">{o.titre}</div>
                   {saving
@@ -4930,18 +4927,18 @@ function SimulationsScreen({ onACC, onBox, onSolar, onOptimisation, onBack, onMo
             );
           })}
           {offresFiltrees.length === 0 && (
-            <div style={{textAlign:'center',padding:'32px 0',color:'rgba(255,255,255,.4)',fontSize:14}}>
+            <div style={{textAlign:'center',padding:'28px 0',color:'rgba(255,255,255,.4)',fontSize:14}}>
               Aucune offre ne correspond à ces critères.<br/>
-              <span style={{fontSize:12,color:'rgba(255,255,255,.25)'}}>Ajustez les filtres ci-dessus.</span>
+              <span style={{fontSize:12,color:'rgba(255,255,255,.25)'}}>Ajustez les filtres.</span>
             </div>
           )}
         </div>
       ) : (
         /* Fallback hardcodé si aucune offre en DB */
-        <div className="sim-btns">
+        <div className="sim-btns" style={{gap:6}}>
           {hasConso && (
-            <button className="sim-btn" onClick={onOptimisation} style={{border:'1.5px solid rgba(125,217,64,.35)'}}>
-              <img src="/optimisation.png" alt="Optimisation" className="sim-icon" style={{mixBlendMode:'screen'}}/>
+            <button className="sim-btn" onClick={onOptimisation} style={{border:'1.5px solid rgba(125,217,64,.35)',padding:'10px 14px',gap:12}}>
+              <img src="/optimisation.png" alt="Optimisation" className="sim-icon" style={{mixBlendMode:'screen',width:36,height:36}}/>
               <div className="sim-text">
                 <div className="sim-title">Optimisation fournisseur</div>
                 {maxSaving > 0 ? <div className="sim-sub" style={{color:'#7dd940',fontWeight:700}}>Jusqu'à -{maxSaving.toLocaleString('fr-FR')} €/an</div> : <div className="sim-sub">Comparez tous les tarifs sur votre conso réelle</div>}
@@ -4949,24 +4946,24 @@ function SimulationsScreen({ onACC, onBox, onSolar, onOptimisation, onBack, onMo
               <span className="sim-arrow">→</span>
             </button>
           )}
-          <button className="sim-btn" onClick={onACC}>
-            <img src="/acc.png" alt="ACC" className="sim-icon"/>
+          <button className="sim-btn" onClick={onACC} style={{padding:'10px 14px',gap:12}}>
+            <img src="/acc.png" alt="ACC" className="sim-icon" style={{width:36,height:36}}/>
             <div className="sim-text">
               <div className="sim-title">Économiser avec l'ACC</div>
               {accSaving > 0 ? <div className="sim-sub" style={{color:'#7dd940',fontWeight:700}}>Jusqu'à -{accSaving.toLocaleString('fr-FR')} €/an</div> : <div className="sim-sub">Autoconsommation collective locale</div>}
             </div>
             <span className="sim-arrow">→</span>
           </button>
-          <button className="sim-btn" onClick={onBox}>
-            <img src="/comwatt-box.png" alt="Box" className="sim-icon"/>
+          <button className="sim-btn" onClick={onBox} style={{padding:'10px 14px',gap:12}}>
+            <img src="/comwatt-box.png" alt="Box" className="sim-icon" style={{width:36,height:36}}/>
             <div className="sim-text">
               <div className="sim-title">Économiser plus avec la Box</div>
               {boxSaving > 0 ? <div className="sim-sub" style={{color:'#7dd940',fontWeight:700}}>Jusqu'à -{boxSaving.toLocaleString('fr-FR')} €/an</div> : <div className="sim-sub">Pilotage intelligent de votre consommation</div>}
             </div>
             <span className="sim-arrow">→</span>
           </button>
-          <button className="sim-btn" onClick={onSolar}>
-            <img src="/maison.png" alt="Solaire" className="sim-icon"/>
+          <button className="sim-btn" onClick={onSolar} style={{padding:'10px 14px',gap:12}}>
+            <img src="/maison.png" alt="Solaire" className="sim-icon" style={{width:36,height:36}}/>
             <div className="sim-text">
               <div className="sim-title">Économiser avec le solaire</div>
               {(()=>{const v=parseInt(localStorage.getItem('starvolt_baisse_facture')||'0')||solarSaving;return v>0?<div className="sim-sub" style={{color:'#7dd940',fontWeight:700}}>-{v.toLocaleString('fr-FR')} €TTC/an</div>:<div className="sim-sub">Panneaux solaires + batterie</div>;})()}
@@ -4976,9 +4973,31 @@ function SimulationsScreen({ onACC, onBox, onSolar, onOptimisation, onBack, onMo
         </div>
       )}
     </div>
-    <StickyFooter row onBack={onBack}>
-      {onMonSite&&<button className="btn btn-primary" style={{fontSize:13}} onClick={onMonSite}>Mon site →</button>}
-    </StickyFooter>
+
+    {/* ── Sticky : sliders en bas ── */}
+    {showSliders ? (
+      <div className="sticky-footer sticky-footer-sliders">
+        <div style={{maxWidth:520,margin:'0 auto'}}>
+          <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:6}}>
+            <span style={{fontSize:10,fontWeight:700,color:'rgba(255,255,255,.35)',textTransform:'uppercase',letterSpacing:'.5px'}}>Filtres</span>
+            <button onClick={onBack} style={{background:'none',border:'none',color:'rgba(255,255,255,.35)',fontSize:11,cursor:'pointer',fontFamily:'inherit',padding:'2px 6px'}}>← Retour</button>
+          </div>
+          <div className="sliders-panel" style={{margin:0}}>
+            <GameSlider icon="⚡" label="Vitesse de déploiement"
+              snapValues={delaiVals} value={delaiFilter}
+              onChange={setDelaiFilter} format={fmtDelai}/>
+            <GameSlider icon="💰" label="Investissement maximum"
+              snapValues={investVals} value={investFilter}
+              onChange={setInvestFilter} format={fmtInvest}/>
+            <GameSlider icon="📉" label="% d'économie minimum"
+              snapValues={reductVals} value={reductFilter}
+              onChange={setReductFilter} format={fmtReduct}/>
+          </div>
+        </div>
+      </div>
+    ) : (
+      <StickyFooter onBack={onBack}/>
+    )}
     </>
   );
 }
