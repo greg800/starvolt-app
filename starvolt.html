@@ -8085,7 +8085,7 @@ function AdminUsersScreen({ onBack }) {
     setCopySrcSiteId('');
     setCopyTargetUserId('');
     setCopyDone(false);
-    const { data: sites } = await sb.from('sites').select('id,nom').eq('user_id', u.id).order('nom');
+    const { data: sites } = await sb.rpc('admin_get_user_sites', { p_user_id: u.id });
     setCopySites(sites || []);
     setCopyDialog({ userId: u.id, userName: `${u.prenom||''} ${u.nom||''}`.trim() });
   };
