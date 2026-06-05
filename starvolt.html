@@ -2266,113 +2266,6 @@ function parseLocalISO(s){const m=s.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{
 function formatGapDate(iso){try{return new Date(iso).toLocaleString('fr-FR',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit',timeZone:'Europe/Paris'});}catch{return iso.substring(0,16);}}
 function localDayWE(loc){return[0,6].includes(new Date(Date.UTC(loc.year,loc.month-1,loc.day)).getUTCDay());}
 
-async function processConsoXLS(buf) {
-  const wb=XLSX.read(new Uint8Array(buf),{type:'array',raw:false});
-  const ws=wb.Sheets[wb.SheetNames[0]];
-  const rows=XLSX.utils.sheet_to_json(ws,{header:1,raw:false,defval:null});
-
-  const pts=[];
-  for(let i=1;i<rows.length;i++){
-    const r=rows[i]; if(!r||!r[0]||r[1]===null||r[1]===undefined)continue;
-    const s=String(r[0]).trim();
-    const utcMs=new Date(s).getTime();
-    const val=parseFloat(String(r[1]).replace(',','.'));
-    if(isNaN(utcMs)||isNaN(val))continue;
-    pts.push({utcMs,val,...(parseLocalISO(s)||utcToFR(utcMs))});
-  }
-  if(pts.length<2)return{error:'Fichier invalide ou données insuffisantes'};
-  pts.sort((a,b)=>a.utcMs-b.utcMs);
-
-  // Detect step (minutes)
-  const diffs={};
-  for(let i=1;i<Math.min(20,pts.length);i++){const d=Math.round((pts[i].utcMs-pts[i-1].utcMs)/60000);if(d>0&&d<=120)diffs[d]=(diffs[d]||0)+1;}
-  const stepMs=(+Object.entries(diffs).sort((a,b)=>b[1]-a[1])[0]?.[0]||60)*60000;
-  const slotsPerDay=Math.round(86400000/stepMs);
-
-  // Build map
-  const map=new Map(pts.map(p=>[p.utcMs,p]));
-  const start=pts[0].utcMs,end=pts[pts.length-1].utcMs;
-  const allTs=[];
-  for(let t=start;t<=end;t+=stepMs)allTs.push(t);
-
-  const gapsPatched=[];
-  let i=0;
-  while(i<allTs.length){
-    if(map.has(allTs[i])){i++;continue;}
-    const g0=i;
-    while(i<allTs.length&&!map.has(allTs[i]))i++;
-    const g1=i-1,gCount=g1-g0+1,gHours=gCount*stepMs/3600000;
-    let method;
-
-    if(gHours<=4){
-      method='interpolation';
-      const prev=[],next=[];
-      for(let j=g0-1;j>=Math.max(0,g0-2);j--){const r=map.get(allTs[j]);if(r)prev.push(r.val);}
-      for(let j=g1+1;j<=Math.min(allTs.length-1,g1+2);j++){const r=map.get(allTs[j]);if(r)next.push(r.val);}
-      const all=[...prev,...next];
-      const avg=all.length?all.reduce((a,b)=>a+b,0)/all.length:0;
-      for(let j=g0;j<=g1;j++){const ts=allTs[j];map.set(ts,{utcMs:ts,val:avg,...utcToFR(ts)});}
-    } else if(gHours<=12){
-      method='demi-journée précédente';
-      for(let j=g0;j<=g1;j++){const ts=allTs[j];const src=map.get(ts-12*3600000);map.set(ts,{utcMs:ts,val:src?.val??0,...utcToFR(ts)});}
-    } else if(gHours<=24){
-      method='jour précédent';
-      for(let j=g0;j<=g1;j++){const ts=allTs[j];const src=map.get(ts-86400000);map.set(ts,{utcMs:ts,val:src?.val??0,...utcToFR(ts)});}
-    } else {
-      method='moyenne semaine/week-end';
-      // Build day completeness map from current map state
-      const dayCnt=new Map();
-      for(const[,r]of map){const k=`${r.year}-${String(r.month).padStart(2,'0')}-${String(r.day).padStart(2,'0')}`;dayCnt.set(k,(dayCnt.get(k)||0)+1);}
-      const isComplete=k=>(dayCnt.get(k)||0)>=slotsPerDay;
-
-      for(let j=g0;j<=g1;j++){
-        const ts=allTs[j],loc=utcToFR(ts),we=localDayWE(loc);
-        let pv=null,nv=null;
-        for(let d=1;d<=90&&pv===null;d++){
-          const si=j-d*slotsPerDay; if(si<0)break;
-          const srcTs=allTs[si],cl=utcToFR(srcTs);
-          const ck=`${cl.year}-${String(cl.month).padStart(2,'0')}-${String(cl.day).padStart(2,'0')}`;
-          if(localDayWE(cl)===we&&isComplete(ck))pv=map.get(srcTs)?.val??null;
-        }
-        for(let d=1;d<=90&&nv===null;d++){
-          const si=j+d*slotsPerDay; if(si>=allTs.length)break;
-          const srcTs=allTs[si],cl=utcToFR(srcTs);
-          const ck=`${cl.year}-${String(cl.month).padStart(2,'0')}-${String(cl.day).padStart(2,'0')}`;
-          if(localDayWE(cl)===we&&isComplete(ck))nv=map.get(srcTs)?.val??null;
-        }
-        const val=pv!==null&&nv!==null?(pv+nv)/2:pv??nv??0;
-        map.set(ts,{utcMs:ts,val,...loc});
-      }
-    }
-    gapsPatched.push({start:new Date(allTs[g0]).toISOString(),end:new Date(allTs[g1]).toISOString(),hours:Math.round(gHours*10)/10,method});
-  }
-
-  // Aggregate to hourly (group by year/month/day/hour, average all sub-hour slots)
-  const hrMap=new Map();
-  for(const[,r]of map){
-    const k=`${r.year}-${r.month}-${r.day}-${r.hour}`;
-    if(!hrMap.has(k))hrMap.set(k,{sum:0,count:0,month:r.month,day:r.day,hour:r.hour});
-    const h=hrMap.get(k);h.sum+=r.val;h.count++;
-  }
-
-  // Build 8784-element profile
-  const profile=new Array(8784).fill(0);
-  const pcounts=new Int32Array(8784);
-  for(const[,h]of hrMap){
-    if(!h.count)continue;
-    const idx=profIdx(h.month,h.day,h.hour);
-    if(idx>=0&&idx<8784){profile[idx]+=h.sum/h.count;pcounts[idx]++;}
-  }
-  for(let k=0;k<8784;k++)if(pcounts[k]>1)profile[k]/=pcounts[k];
-
-  // Feb 29: copy Feb 28 if missing
-  for(let h=0;h<24;h++){const i29=profIdx(2,29,h);if(!pcounts[i29])profile[i29]=profile[profIdx(2,28,h)];}
-  // Isolated zero-count slots (e.g. DST spring-forward): interpolate
-  for(let k=1;k<8783;k++){if(!pcounts[k]&&pcounts[k-1]&&pcounts[k+1])profile[k]=(profile[k-1]+profile[k+1])/2;}
-
-  const annualKwh=profile.reduce((s,v)=>s+v,0)/1000;
-  return{profile,annualKwh,gapsPatched,error:null};
-}
 
 // ─── processProductionXLS ────────────────────────────────────────────
 // Fichier : 4 colonnes (mois, jour, heure, puissance W/kWc), 8760 lignes (année non bissextile)
@@ -3476,11 +3369,7 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, cartVersion=0
   const[prodProfils,setProdProfils]=useState([]);
   const[showAdd,setShowAdd]=useState(false);
   const[editMode,setEditMode]=useState(false);
-  const[importing,setImporting]=useState(false);
-  const[importMsg,setImportMsg]=useState(null);
-  const[showGaps,setShowGaps]=useState(false);
   const[showDeleteConfirm,setShowDeleteConfirm]=useState(false);
-  const[importingDemo,setImportingDemo]=useState(false);
   const[pvKwc,setPvKwc]=useState(()=>{try{const d=JSON.parse(localStorage.getItem('starvolt_solar_defaults'));if(d?.pvKwc!=null)return d.pvKwc;}catch{}return!!localStorage.getItem('starvolt_solar_chosen')?'6':'0';});
   const[batKwh,setBatKwh]=useState(()=>{try{const d=JSON.parse(localStorage.getItem('starvolt_solar_defaults'));if(d?.batKwh!=null)return d.batKwh;}catch{}return!!localStorage.getItem('starvolt_solar_chosen')?'10':'0';});
   const[thermKwh,setThermKwh]=useState(()=>{try{const d=JSON.parse(localStorage.getItem('starvolt_solar_defaults'));if(d?.thermKwh!=null)return d.thermKwh;}catch{}const hasSol=!!localStorage.getItem('starvolt_solar_chosen');return hasSol?'10':!!localStorage.getItem('starvolt_box_chosen')?'10':'0';});
@@ -3504,7 +3393,6 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, cartVersion=0
   const[linkyRequestId,setLinkyRequestId]=useState(null);
   const[linkyError,setLinkyError]=useState(null);
   const linkyPollRef=useRef(null);
-  const fileRef=useRef(null);
   const ANON_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhreGtod2VncWthcGRic2lzeHd2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc0MjY4NjksImV4cCI6MjA5MzAwMjg2OX0.9-_oHRJfwXZkl3bRYDMb5K56UzB8O1NOfa5QfrXFfkQ';
   const EDGE_URL='https://hkxkhwegqkapdbsisxwv.supabase.co/functions/v1/switchgrid';
 
@@ -3626,12 +3514,6 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, cartVersion=0
       setLinkyError(e.message);
       if(site?.id) localStorage.removeItem(`starvolt_linky_${site.id}`);
     }
-  };
-
-  const handleImportDemo=async()=>{
-    setImportingDemo(true);
-    try{ await sb.rpc('import_demo_sites',{target_user_id:user.id}); await load(); }
-    catch(e){console.error(e);} finally{setImportingDemo(false);}
   };
 
   const persistActiveSite=(id)=>{
@@ -3800,19 +3682,6 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, cartVersion=0
     persistActiveSite(null); setEditMode(false); setShowDeleteConfirm(false); await load();
   };
 
-  const handleImport=async(e)=>{
-    const file=e.target.files?.[0]; if(!file)return;
-    setImporting(true); setImportMsg(null);
-    try{
-      const result=await processConsoXLS(await file.arrayBuffer());
-      if(result.error){setImportMsg({type:'err',text:result.error});return;}
-      await updateSite({conso_profil:Array.from(result.profile),conso_annuelle_kwh:Math.round(result.annualKwh),conso_imported_at:new Date().toISOString(),conso_gaps:result.gapsPatched});
-      setImportMsg({type:'ok',kwh:Math.round(result.annualKwh),gaps:result.gapsPatched.length});
-      setShowGaps(result.gapsPatched.length>0);
-    }catch(err){setImportMsg({type:'err',text:String(err)});}
-    finally{setImporting(false);if(fileRef.current)fileRef.current.value='';}
-  };
-
   // Charger variables globales + listener mobile
   useEffect(()=>{
     sb.from('parametres_nationaux').select('*').eq('id',1).maybeSingle()
@@ -3955,10 +3824,9 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, cartVersion=0
           <div className="card" style={{textAlign:'center',padding:'24px 20px'}}>
             <div style={{fontSize:32,marginBottom:10}}>🏠</div>
             <div style={{color:'white',fontWeight:700,marginBottom:5}}>Aucun site configuré</div>
-            <div style={{color:'rgba(255,255,255,.55)',fontSize:13,marginBottom:16}}>Ajoutez votre site pour importer votre profil de consommation.</div>
+            <div style={{color:'rgba(255,255,255,.55)',fontSize:13,marginBottom:16}}>Ajoutez votre site pour connecter votre compteur Enedis.</div>
             <div style={{display:'flex',gap:10,justifyContent:'center',flexWrap:'wrap'}}>
               <button className="btn btn-primary" style={{fontSize:13}} onClick={()=>{setShowAdd(true);setEditMode(false);}}>🏠 Créer mon site</button>
-              <button className="btn btn-sec" style={{fontSize:13}} disabled={importingDemo} onClick={handleImportDemo}>{importingDemo?'⏳ Chargement…':'📂 Données témoins'}</button>
             </div>
           </div>
         )}
@@ -3978,7 +3846,7 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, cartVersion=0
    setGlobalVars(v=>({...v,..._reset}));
    setPvKwc('0'); setBatKwh('0'); setThermKwh('0');
    setConsoOpen(false); setProdOpen(false); setConsoChartOpen(true);
-   setEditMode(false);setImportMsg(null);setShowDeleteConfirm(false);
+   setEditMode(false);setShowDeleteConfirm(false);
  }}>
                       {sites.map(s=><option key={s.id} value={s.id}>{s.nom}</option>)}
                     </select>
@@ -4199,10 +4067,6 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, cartVersion=0
                   )}
                 </div>
                 <div style={{display:'flex',alignItems:'center',gap:8}} onClick={e=>e.stopPropagation()}>
-                  <button className="btn btn-sec" style={{fontSize:11,padding:'5px 14px',borderRadius:8,width:'auto',flexShrink:0}} onClick={()=>fileRef.current?.click()} disabled={importing}>
-                    {importing?'⏳ Traitement…':'📂 Importer'}
-                  </button>
-                  <input ref={fileRef} type="file" accept=".xlsx,.xls" style={{display:'none'}} onChange={handleImport}/>
                   {(()=>{
                     const total=5;
                     const filled=[site.flex_chauffage,site.flex_ecs,site.flex_surface,site.flex_type_logement,site.flex_statut].filter(Boolean).length;
@@ -4286,8 +4150,6 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, cartVersion=0
                       <div style={{marginTop:6,color:'#ff9090',fontSize:11}}>⚠️ {linkyError}</div>
                     )}
                   </div>
-                  {importMsg?.type==='err'&&<div style={{color:'#ff6b6b',fontSize:12,padding:'6px 10px',background:'rgba(255,50,50,.1)',borderRadius:8}}>⚠️ {importMsg.text}</div>}
-                  {importMsg?.type==='ok'&&<div style={{color:'#7dd940',fontSize:12,padding:'6px 10px',background:'rgba(255,255,255,.05)',borderRadius:8}}>✅ {importMsg.kwh.toLocaleString('fr-FR')} kWh/an{importMsg.gaps>0?` · ${importMsg.gaps} trou(s) rebouché(s)`:''}</div>}
                   {/* Heatmap */}
                   {site.conso_profil?.length===8784&&(
                     <div>
