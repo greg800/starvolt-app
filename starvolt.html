@@ -6616,7 +6616,7 @@ function ThermaleForm({ onDone, onBack, siteId=null, initial=null }) {
   const [ecs,       setEcs]       = useState(initial?.ecs||null);
   const [surface,   setSurface]   = useState(initial?.surface||null);
 
-  function handleDone() {
+  async function handleDone() {
     const idx = surface === 'small' ? 0 : surface === 'medium' ? 1 : 2;
     let kw = 0;
     if (chauffage === 'elec' || chauffage === 'pac') kw += [3, 7, 12][idx];
@@ -6626,9 +6626,9 @@ function ThermaleForm({ onDone, onBack, siteId=null, initial=null }) {
       d.thermKwh = String(kw);
       localStorage.setItem('starvolt_solar_defaults', JSON.stringify(d));
     } catch {}
-    // Persiste en base ET en localStorage si on connaît le siteId (évite la course DB/navigation)
+    // Persiste en base ET en localStorage si on connaît le siteId — await pour que load() voie les nouvelles valeurs
     if (siteId) {
-      sb.from('sites').update({flex_chauffage:chauffage,flex_ecs:ecs,flex_surface:surface}).eq('id',siteId);
+      await sb.from('sites').update({flex_chauffage:chauffage,flex_ecs:ecs,flex_surface:surface}).eq('id',siteId);
       try { localStorage.setItem('starvolt_flex_'+siteId, JSON.stringify({chauffage,ecs,surface})); } catch {}
     }
     onDone(kw);
