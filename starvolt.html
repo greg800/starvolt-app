@@ -938,6 +938,29 @@
     .gs-minmax { display: flex; justify-content: space-between; font-size: 10px; color: rgba(255,255,255,.3); margin-top: 1px; }
     .sim-tile-visible { opacity: 1; transform: scale(1) translateY(0); }
     .sim-btn { transition: all .25s cubic-bezier(.34,1.56,.64,1); }
+
+    /* ── Tuiles offres ── */
+    .offer-meta { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 5px; }
+    .offer-chip {
+      display: inline-flex; align-items: center; gap: 4px;
+      font-size: 11px; font-weight: 700;
+      background: rgba(255,255,255,.07); border: 1px solid rgba(255,255,255,.12);
+      border-radius: 20px; padding: 2px 8px 2px 5px;
+      color: rgba(255,255,255,.75);
+      cursor: default; position: relative;
+      transition: background .2s;
+    }
+    .offer-chip svg { flex-shrink: 0; opacity: .7; }
+    .offer-chip.chip-green {
+      background: rgba(125,217,64,.12); border-color: rgba(125,217,64,.3); color: #7dd940;
+    }
+    .offer-chip.chip-green svg { opacity: 1; }
+    .offer-chip.chip-free {
+      background: rgba(125,217,64,.18); border-color: rgba(125,217,64,.5); color: #7dd940; font-weight: 900;
+    }
+    .offer-chip:hover { background: rgba(255,255,255,.14); }
+    .offer-chip.chip-green:hover { background: rgba(125,217,64,.22); }
+    /* Tooltip natif via title — fonctionne au survol desktop */
     /* Sticky sliders footer */
     .sticky-footer-sliders { padding: 10px 16px 18px; }
     /* Mobile : titre réduit + sans tag */
@@ -4916,21 +4939,65 @@ function SimulationsScreen({ onACC, onBox, onSolar, onOptimisation, onBack, onMo
         <div className="sim-btns" style={{gap:6}}>
           {offresFiltrees.map(o => {
             const saving = getSaving(o);
+            const isFree = o.investissement_min === 0 || o.investissement_min == null;
             return (
               <button key={o.id}
                 className="sim-btn sim-tile-visible"
                 onClick={() => handleTileClick(o)}
-                style={{border:'1.5px solid rgba(125,217,64,.25)', padding:'10px 14px', gap:12}}
+                style={{border:'1.5px solid rgba(125,217,64,.25)', padding:'10px 14px', gap:12, alignItems:'flex-start'}}
               >
-                <img src={getPicto(o)} alt={o.titre} className="sim-icon" style={{mixBlendMode:'screen', width:36, height:36}}/>
-                <div className="sim-text">
+                <img src={getPicto(o)} alt={o.titre} className="sim-icon" style={{mixBlendMode:'screen', width:34, height:34, marginTop:2}}/>
+                <div className="sim-text" style={{flex:1}}>
                   <div className="sim-title">{o.titre}</div>
-                  {saving
-                    ? <div className="sim-sub" style={{color:'#7dd940',fontWeight:700}}>Jusqu'à -{saving.toLocaleString('fr-FR')} €/an d'économie</div>
-                    : <div className="sim-sub">{o.sous_titre || '—'}</div>
-                  }
+                  {o.sous_titre && <div className="sim-sub" style={{marginBottom:0}}>{o.sous_titre}</div>}
+                  <div className="offer-meta">
+                    {/* % économie */}
+                    {o.reduction_pct != null && (
+                      <span className="offer-chip chip-green" title="Pourcentage d'économie sur votre facture">
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/>
+                          <line x1="9" y1="15" x2="15" y2="9"/><circle cx="9.5" cy="9.5" r="1.5"/><circle cx="14.5" cy="14.5" r="1.5"/>
+                        </svg>
+                        -{o.reduction_pct}%
+                      </span>
+                    )}
+                    {/* Économies calculées */}
+                    {saving != null && (
+                      <span className="offer-chip chip-green" title="Économie estimée sur votre facture annuelle">
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                          <line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>
+                        </svg>
+                        -{saving.toLocaleString('fr-FR')} €/an
+                      </span>
+                    )}
+                    {/* Investissement */}
+                    {isFree ? (
+                      <span className="offer-chip chip-free" title="Aucun investissement requis">
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                          <circle cx="12" cy="12" r="10"/><polyline points="16 12 12 8 8 12"/><line x1="12" y1="16" x2="12" y2="8"/>
+                        </svg>
+                        Gratuit
+                      </span>
+                    ) : o.investissement_min != null && (
+                      <span className="offer-chip" title="Investissement initial estimé">
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                          <circle cx="12" cy="12" r="10"/><path d="M15 9H9a3 3 0 0 0 0 6h6"/><path d="M12 6v2m0 8v2"/>
+                        </svg>
+                        {o.investissement_min.toLocaleString('fr-FR')} €
+                      </span>
+                    )}
+                    {/* Délai */}
+                    {o.delai_min_jours != null && (
+                      <span className="offer-chip" title="Délai de mise en œuvre">
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                          <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
+                        </svg>
+                        {o.delai_min_jours === 0 ? 'Immédiat' : `${o.delai_min_jours}j`}
+                      </span>
+                    )}
+                  </div>
                 </div>
-                <span className="sim-arrow">→</span>
+                <span className="sim-arrow" style={{marginTop:2}}>→</span>
               </button>
             );
           })}
