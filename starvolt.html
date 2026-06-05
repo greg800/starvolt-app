@@ -5096,11 +5096,12 @@ function SimulationsScreen({ onACC, onBox, onSolar, onOptimisation, onBack, onMo
     {showSliders ? (
       <div className="sticky-footer sticky-footer-sliders">
         <div style={{maxWidth:520,margin:'0 auto'}}>
-          <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:6}}>
-            <button onClick={onMonSite} className="btn btn-cta" style={{fontSize:12,padding:'6px 14px',borderRadius:10,fontWeight:700,letterSpacing:.2}}>Mon site →</button>
+          <div style={{display:'flex',alignItems:'center',justifyContent:'flex-end',marginBottom:4}}>
             <button onClick={onBack} style={{background:'none',border:'none',color:'rgba(255,255,255,.35)',fontSize:11,cursor:'pointer',fontFamily:'inherit',padding:'2px 6px'}}>← Retour</button>
           </div>
-          <div className="sliders-panel" style={{margin:0}}>
+          <div style={{display:'flex',alignItems:'stretch',gap:8}}>
+            <button onClick={onMonSite} className="btn btn-cta" style={{fontSize:11,padding:'0 12px',borderRadius:10,fontWeight:700,whiteSpace:'nowrap',flexShrink:0}}>Mon<br/>site →</button>
+          <div className="sliders-panel" style={{margin:0,flex:1}}>
             {filtresActifs.vitesse && <GameSlider icon="⚡" label="Vitesse de déploiement"
               snapValues={delaiVals} value={delaiFilter}
               onChange={setDelaiFilter} format={fmtDelai}/>}
@@ -5110,7 +5111,8 @@ function SimulationsScreen({ onACC, onBox, onSolar, onOptimisation, onBack, onMo
             {filtresActifs.economie && <GameSlider icon="📉" label="% d'économie minimum"
               snapValues={reductVals} value={reductFilter}
               onChange={setReductFilter} format={fmtReduct}/>}
-          </div>
+          </div>{/* sliders-panel */}
+          </div>{/* flex row Mon site + sliders */}
         </div>
       </div>
     ) : (
