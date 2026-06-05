@@ -4805,19 +4805,13 @@ function SimulationsScreen({ onACC, onBox, onSolar, onOptimisation, onBack, onMo
     if (delaiFilter  != null && o.delai_min_jours    != null && o.delai_min_jours    > delaiFilter)  return false;
     if (investFilter != null && o.investissement_min != null && o.investissement_min > investFilter) return false;
     if (reductFilter != null && o.reduction_pct      != null && o.reduction_pct      < reductFilter) return false;
-    // Filtrage public cible : si l'offre a des cibles définies, vérifier le profil du site
-    const cibles = o.public_cibles;
-    if (cibles && cibles.length > 0) {
-      const typeLog = siteProfile?.type_logement; // 'maison' | 'collectif' | null
-      const statut  = siteProfile?.statut;         // 'proprietaire' | 'locataire' | null
-      // Séparer les cibles par catégorie
-      const typeLogCibles = cibles.filter(c => c === 'maison' || c === 'collectif');
-      const statutCibles  = cibles.filter(c => c === 'proprietaire' || c === 'locataire');
-      // Si l'offre cible un type de logement et que l'utilisateur en a renseigné un → filtrer
-      if (typeLogCibles.length > 0 && typeLog && !typeLogCibles.includes(typeLog)) return false;
-      // Si l'offre cible un statut et que l'utilisateur en a renseigné un → filtrer
-      if (statutCibles.length > 0 && statut && !statutCibles.includes(statut)) return false;
-      // Si l'utilisateur n'a pas renseigné le profil → on affiche quand même l'offre (pas d'exclusion sans info)
+    // Exclusion public : si le profil du site correspond à une case cochée → masquer l'offre
+    const exclusions = o.public_cibles;
+    if (exclusions && exclusions.length > 0 && siteProfile) {
+      const typeLog = siteProfile.type_logement; // 'maison' | 'collectif' | null
+      const statut  = siteProfile.statut;         // 'proprietaire' | 'locataire' | null
+      if (typeLog && exclusions.includes(typeLog)) return false;
+      if (statut  && exclusions.includes(statut))  return false;
     }
     return true;
   }), [offres, delaiFilter, investFilter, reductFilter, siteProfile]);
@@ -8457,8 +8451,8 @@ function AdminOffreEditScreen({ offre, onSave, onDelete, onBack }) {
         </div>
 
         <div className="inp-group">
-          <label className="inp-label" style={{marginBottom:4}}>Public cible <span style={{color:'rgba(255,255,255,.4)',fontWeight:400}}>(multi-sélection)</span></label>
-          <div style={{fontSize:11,color:'rgba(255,255,255,.4)',marginBottom:10}}>Si aucune case cochée, l'offre est visible par tous.</div>
+          <label className="inp-label" style={{marginBottom:4}}>Exclure ce public <span style={{color:'rgba(255,255,255,.4)',fontWeight:400}}>(multi-sélection)</span></label>
+          <div style={{fontSize:11,color:'rgba(255,255,255,.4)',marginBottom:10}}>Cocher = ne pas présenter l'offre à ce profil. Si aucune case cochée, l'offre est visible par tous.</div>
           {PUBLIC_CIBLES_OPTIONS.map(t => (
             <div key={t.value} onClick={() => togglePublicCible(t.value)} style={{
               display:'flex',alignItems:'center',gap:12,padding:'11px 14px',marginBottom:6,
