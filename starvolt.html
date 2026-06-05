@@ -7858,6 +7858,47 @@ function ImageImportBtn({ imgKey, data, setData, label }) {
   );
 }
 
+// ─── BoxItemRow : ligne catalogue Box avec image inline ───────────────
+function BoxItemRow({ priceKey, imgKey, label, step, data, setData, INP }) {
+  const fileRef = useRef(null);
+  const [processing, setProcessing] = useState(false);
+  const img = data?.[imgKey];
+  const THUMB = {width:48,height:38,objectFit:'contain',borderRadius:5,background:'repeating-conic-gradient(rgba(255,255,255,.06) 0% 25%,transparent 0% 50%) 0 0/8px 8px'};
+  return (
+    <div style={{display:'flex',alignItems:'center',gap:8,padding:'6px 0',borderBottom:'1px solid rgba(255,255,255,.06)'}}>
+      {/* Miniature ou placeholder */}
+      <div style={{...THUMB,flexShrink:0,display:'flex',alignItems:'center',justifyContent:'center',position:'relative',overflow:'hidden'}}>
+        {img
+          ? <img src={img} alt={label} style={{width:'100%',height:'100%',objectFit:'contain'}}/>
+          : <span style={{fontSize:18,opacity:.25}}>📷</span>
+        }
+      </div>
+      {/* Label */}
+      <div style={{flex:1,minWidth:0,fontSize:12,color:'rgba(255,255,255,.7)',fontWeight:600,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{label}</div>
+      {/* Prix */}
+      <input type="number" style={{...INP,width:80,flexShrink:0,textAlign:'right'}} step={step} min="0"
+        value={data[priceKey]??''} onChange={e=>setData(p=>({...p,[priceKey]:e.target.value}))}/>
+      <span style={{fontSize:11,color:'rgba(255,255,255,.35)',flexShrink:0}}>€</span>
+      {/* Bouton image */}
+      <button onClick={()=>fileRef.current?.click()} disabled={processing} title={img?'Changer l\'image':'Ajouter une image'}
+        style={{flexShrink:0,background:img?'rgba(125,217,64,.12)':'rgba(255,255,255,.07)',border:`1px solid ${img?'rgba(125,217,64,.3)':'rgba(255,255,255,.18)'}`,borderRadius:6,color:img?'#7dd940':'rgba(255,255,255,.5)',fontSize:11,padding:'4px 8px',cursor:'pointer',fontFamily:'inherit',whiteSpace:'nowrap'}}>
+        {processing ? '⏳' : img ? '🖼 ✓' : '🖼'}
+      </button>
+      {img && (
+        <button onClick={()=>setData(p=>({...p,[imgKey]:null}))} title="Supprimer l'image"
+          style={{flexShrink:0,background:'rgba(255,80,80,.12)',border:'1px solid rgba(255,80,80,.25)',borderRadius:6,color:'#ff6b6b',fontSize:11,padding:'4px 6px',cursor:'pointer'}}>✕</button>
+      )}
+      <input ref={fileRef} type="file" accept="image/*" style={{display:'none'}} onChange={async e=>{
+        const f=e.target.files?.[0]; if(!f)return;
+        setProcessing(true);
+        try{ const b64=await processImageTransparent(f); setData(p=>({...p,[imgKey]:b64})); }
+        catch(err){ alert('Erreur : '+err.message); }
+        finally{ setProcessing(false); if(fileRef.current)fileRef.current.value=''; }
+      }}/>
+    </div>
+  );
+}
+
 // ─── AdminPrixMateriauxScreen ─────────────────
 function AdminPrixMateriauxScreen({ onBack }) {
   const [data, setData] = useState(null);
@@ -7887,8 +7928,13 @@ function AdminPrixMateriauxScreen({ onBack }) {
       prise_installation: Number(data.prise_installation)||0,
       img_pv: data.img_pv||null,
       img_bat: data.img_bat||null,
-      img_box: data.img_box||null,
+      img_box_prix: data.img_box_prix||null,
+      img_box_installation: data.img_box_installation||null,
+      img_box_satellite: data.img_box_satellite||null,
+      img_box_module: data.img_box_module||null,
+      img_box_pinces: data.img_box_pinces||null,
       img_prise: data.img_prise||null,
+      img_prise_install: data.img_prise_install||null,
     };
     const {error} = await sb.from('prix_materiaux').upsert(payload, {onConflict:'id'});
     setSaving(false);
@@ -7977,42 +8023,23 @@ function AdminPrixMateriauxScreen({ onBack }) {
         <ImageImportBtn imgKey="img_bat" data={data} setData={setData} label="Batterie"/>
       </div>
 
-      {/* ── Box ── */}
+      {/* ── Box Comwatt ── */}
       <div className="card" style={{padding:'16px',marginBottom:12}}>
-        <div style={{fontWeight:700,fontSize:14,color:'#7dd940',marginBottom:12}}>📦 Box Comwatt — fourniture et pose séparées</div>
-        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'10px 14px'}}>
+        <div style={{fontWeight:700,fontSize:14,color:'#7dd940',marginBottom:14}}>📦 Box Comwatt — fourniture et pose</div>
+        <div style={{display:'flex',flexDirection:'column',gap:10}}>
           {[
-            ['box_prix','Box Comwatt (fourniture)','€'],
-            ['box_installation','Pose / installation','€'],
-            ['box_satellite','Box satellite','€'],
-            ['box_module_deporte','Module déporté','€'],
-            ['box_pinces','Pinces forte puissance','€'],
-          ].map(([key,label])=>(
-            <div key={key}>
-              <div style={{fontSize:11,color:'rgba(255,255,255,.45)',marginBottom:4}}>{label}</div>
-              <input type="number" style={INP} step="10" min="0" value={data[key]??''} onChange={e=>setData(p=>({...p,[key]:e.target.value}))}/>
-            </div>
+            ['box_prix',      'img_box_prix',        'Box Comwatt (fourniture)', 10],
+            ['box_installation','img_box_installation','Pose / installation',     10],
+            ['box_satellite', 'img_box_satellite',   'Box satellite',            10],
+            ['box_module_deporte','img_box_module',  'Module déporté',           10],
+            ['box_pinces',    'img_box_pinces',      'Pinces forte puissance',   10],
+            ['prise_prix',    'img_prise',           'Prise connectée',           5],
+            ['prise_installation','img_prise_install','Pose prise connectée',     5],
+          ].map(([priceKey, imgKey, label, step])=>(
+            <BoxItemRow key={priceKey} priceKey={priceKey} imgKey={imgKey} label={label} step={step} data={data} setData={setData} INP={INP}/>
           ))}
         </div>
-        <div style={{marginTop:10,fontSize:11,color:'rgba(255,255,255,.35)'}}>Pour le ROI : investissement box = fourniture + pose</div>
-        <ImageImportBtn imgKey="img_box" data={data} setData={setData} label="Box Comwatt"/>
-      </div>
-
-      {/* ── Prise connectée ── */}
-      <div className="card" style={{padding:'16px',marginBottom:12}}>
-        <div style={{fontWeight:700,fontSize:14,color:'#c084fc',marginBottom:12}}>🔌 Prise connectée — fourniture et pose</div>
-        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'10px 14px'}}>
-          {[
-            ['prise_prix','Prise connectée (fourniture)','€'],
-            ['prise_installation','Pose / installation','€'],
-          ].map(([key,label])=>(
-            <div key={key}>
-              <div style={{fontSize:11,color:'rgba(255,255,255,.45)',marginBottom:4}}>{label}</div>
-              <input type="number" style={INP} step="5" min="0" value={data[key]??''} onChange={e=>setData(p=>({...p,[key]:e.target.value}))}/>
-            </div>
-          ))}
-        </div>
-        <ImageImportBtn imgKey="img_prise" data={data} setData={setData} label="Prise connectée"/>
+        <div style={{marginTop:12,fontSize:11,color:'rgba(255,255,255,.35)'}}>Pour le ROI : investissement box = fourniture + pose</div>
       </div>
 
       {msg && <div style={{padding:'10px 14px',borderRadius:8,marginBottom:10,background:msg.ok?'rgba(125,217,64,.15)':'rgba(255,80,80,.15)',color:msg.ok?'#7dd940':'#ff6b6b',fontSize:13,fontWeight:600}}>{msg.text}</div>}
