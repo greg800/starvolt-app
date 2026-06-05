@@ -4166,7 +4166,7 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, cartVersion=0
 
             {/* ── Tuile Ma production, mon stockage et ma box ── */}
             {/* Masquée tant que le panier est vide */}
-            {(!!localStorage.getItem('starvolt_box_chosen')||!!localStorage.getItem('starvolt_solar_chosen')||!!localStorage.getItem('starvolt_optimisation_chosen')||localStorage.getItem('starvolt_acc_chosen')==='true')&&<div className="card" style={{padding:0,marginBottom:8,overflow:'hidden'}}>
+            {(!!localStorage.getItem('starvolt_box_chosen')||!!localStorage.getItem('starvolt_solar_chosen')||!!localStorage.getItem('starvolt_optimisation_chosen')||localStorage.getItem('starvolt_acc_chosen')==='true'||!!localStorage.getItem('starvolt_diy_box_chosen'))&&<div className="card" style={{padding:0,marginBottom:8,overflow:'hidden'}}>
               <div
                 style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'10px 14px 8px',borderBottom: prodOpen ? '1px solid rgba(255,255,255,.07)' : 'none',cursor:'pointer',userSelect:'none'}}
                 onClick={()=>setProdOpen(v=>!v)}
@@ -6917,46 +6917,35 @@ function BoxSimScreen({ user, userProfile, onBack, onPanier, onMonSite, onCartUp
 
 // ─── InstallSoiMemeScreen ──────────────────────
 function InstallSoiMemeScreen({ user, userProfile, onBack, onPanier, onMonSite, onCartUpdate }) {
-  const [loading,      setLoading]   = useState(true);
-  const [prixMat,      setPrixMat]   = useState(null);
-  const [qty,          setQty]       = useState({ box:0, module:0, prise:0 });
-  const [theorKw,      setTheorKw]   = useState(0);
-  const [showWarn,     setShowWarn]  = useState(false);
-  const [confirmed,    setConfirmed] = useState(false);
-  const [currentBill,  setCurrentBill] = useState(null);
+  const [loading,     setLoading]   = useState(true);
+  const [prixMat,     setPrixMat]   = useState(null);
+  const [siteId,      setSiteId]    = useState(null);
+  const [siteFlex,    setSiteFlex]  = useState(null); // flex déjà rempli
+  const [step,        setStep]      = useState('therm'); // 'therm' | 'catalog' | 'confirmed'
+  const [theorKw,     setTheorKw]   = useState(0);
+  const [qty,         setQty]       = useState({ box:0, module:0, prise:0 });
+  const [showWarn,    setShowWarn]  = useState(false);
 
   useEffect(() => {
-    const siteId = localStorage.getItem('starvolt_active_site_id');
+    const sid = localStorage.getItem('starvolt_active_site_id');
+    setSiteId(sid);
     Promise.all([
       sb.from('prix_materiaux').select('*').eq('id',1).maybeSingle(),
-      siteId
-        ? sb.from('sites').select('id,conso_profil,tarif_id,flex_chauffage,flex_ecs,flex_surface,heure_debut_hc1,heure_fin_hc1,heure_debut_hc2,heure_fin_hc2').eq('id',siteId).maybeSingle()
-        : Promise.resolve({data:null}),
-      sb.from('tarifs_electricite').select('*'),
-    ]).then(([{data:pm},{data:site},{data:tariffs}]) => {
+      sid ? sb.from('sites').select('id,flex_chauffage,flex_ecs,flex_surface,flex_type_logement,flex_statut').eq('id',sid).maybeSingle() : Promise.resolve({data:null}),
+    ]).then(([{data:pm},{data:site}]) => {
       setPrixMat(pm);
-      // Capacité théorique de stockage thermique depuis le formulaire équipements
-      const solDef = (()=>{try{return JSON.parse(localStorage.getItem('starvolt_solar_defaults'))||{};}catch{return{};}})();
-      const lsFlex = siteId ? (()=>{try{const v=localStorage.getItem('starvolt_flex_'+siteId);const p=v?JSON.parse(v):null;return(p?.chauffage&&p?.ecs&&p?.surface)?p:null;}catch{return null;}})() : null;
-      const flex = lsFlex || (site?.flex_chauffage&&site?.flex_ecs&&site?.flex_surface ? {chauffage:site.flex_chauffage,ecs:site.flex_ecs,surface:site.flex_surface} : null);
-      let kw = parseFloat(solDef.thermKwh) || 0;
-      if (!kw && flex) {
+      // Vérifier si le formulaire équipements est déjà rempli
+      const lsFlex = sid ? (()=>{try{const v=localStorage.getItem('starvolt_flex_'+sid);const p=v?JSON.parse(v):null;return(p?.chauffage&&p?.ecs&&p?.surface)?p:null;}catch{return null;}})() : null;
+      const flex = lsFlex || (site?.flex_chauffage&&site?.flex_ecs&&site?.flex_surface ? {chauffage:site.flex_chauffage,ecs:site.flex_ecs,surface:site.flex_surface,type_logement:site.flex_type_logement,statut:site.flex_statut} : null);
+      if (flex) {
+        setSiteFlex(flex);
+        // Calculer la capacité théorique depuis les données existantes
         const idx = flex.surface==='small'?0:flex.surface==='medium'?1:2;
+        let kw = 0;
         if(flex.chauffage==='elec'||flex.chauffage==='pac') kw += [3,7,12][idx];
         if(flex.ecs==='elec') kw += [2,3,4][idx];
-      }
-      setTheorKw(kw);
-      // Facture actuelle
-      if (site?.conso_profil && tariffs) {
-        const curT = tariffs.find(t => t.id === site.tarif_id);
-        if (curT && !curT.tarif_dynamique) {
-          const {kwh_hc,kwh_hp} = calcHcHp(site.conso_profil, site);
-          const r = calcTariffCost(curT, kwh_hc, kwh_hp);
-          if (r?.total) setCurrentBill(Math.round(r.total));
-        } else if (site.conso_profil) {
-          const {kwh_hc,kwh_hp} = calcHcHp(site.conso_profil, site);
-          setCurrentBill(Math.round((kwh_hc+kwh_hp)*0.18));
-        }
+        setTheorKw(kw);
+        setStep('catalog'); // formulaire déjà rempli → aller directement au catalogue
       }
       setLoading(false);
     });
@@ -6965,12 +6954,11 @@ function InstallSoiMemeScreen({ user, userProfile, onBack, onPanier, onMonSite, 
   // Capacité des équipements sélectionnés (kW)
   const equipKw = qty.box * 6 + qty.module * 3 + qty.prise * 2;
 
-  // Prix total
   const totalPrice = (pm) => {
     if (!pm) return 0;
-    return qty.box   * ((Number(pm.box_prix)||0) + (Number(pm.box_installation)||0))
-         + qty.module* ((Number(pm.box_module_deporte)||0))
-         + qty.prise * ((Number(pm.prise_prix)||0) + (Number(pm.prise_installation)||0));
+    return qty.box    * ((Number(pm.box_prix)||0) + (Number(pm.box_installation)||0))
+         + qty.module * (Number(pm.box_module_deporte)||0)
+         + qty.prise  * ((Number(pm.prise_prix)||0) + (Number(pm.prise_installation)||0));
   };
 
   const handleValider = () => {
@@ -6979,34 +6967,46 @@ function InstallSoiMemeScreen({ user, userProfile, onBack, onPanier, onMonSite, 
   };
 
   const doConfirm = () => {
-    // Stocker le choix et ajuster thermKwh effectif = min(theorKw, equipKw)
     const effectiveKw = theorKw > 0 ? Math.min(theorKw, equipKw) : equipKw;
+    // Mettre à jour thermKwh effectif dans solar_defaults
     try {
       const d = JSON.parse(localStorage.getItem('starvolt_solar_defaults')||'{}');
       d.thermKwh = String(effectiveKw);
       localStorage.setItem('starvolt_solar_defaults', JSON.stringify(d));
     } catch {}
+    // Activer la tuile prod/stockage dans Mon site
     localStorage.setItem('starvolt_diy_box_chosen', JSON.stringify({qty, equipKw, effectiveKw, total: totalPrice(prixMat)}));
     setShowWarn(false);
-    setConfirmed(true);
+    setStep('confirmed');
     if (onCartUpdate) onCartUpdate();
   };
 
   const chg = (k, delta) => setQty(q => ({...q, [k]: Math.max(0, q[k] + delta)}));
-
   const CHKBG = 'repeating-conic-gradient(rgba(255,255,255,.06) 0% 25%,transparent 0% 50%) 0 0/8px 8px';
 
-  // ── Produits du catalogue ──
   const products = prixMat ? [
-    { key:'box',    label:'Box Comwatt',    img: prixMat.img_box_prix,   prix: (Number(prixMat.box_prix)||0)+(Number(prixMat.box_installation)||0), kw:6,  emoji:'📦' },
-    { key:'module', label:'Module déporté', img: prixMat.img_box_module, prix: Number(prixMat.box_module_deporte)||0,                                kw:3,  emoji:'🔌' },
+    { key:'box',    label:'Box Comwatt',    img: prixMat.img_box_prix,   prix: (Number(prixMat.box_prix)||0)+(Number(prixMat.box_installation)||0), kw:6, emoji:'📦' },
+    { key:'module', label:'Module déporté', img: prixMat.img_box_module, prix: Number(prixMat.box_module_deporte)||0,                               kw:3, emoji:'🔌' },
     { key:'prise',  label:'Prise connectée',img: prixMat.img_prise,      prix: (Number(prixMat.prise_prix)||0)+(Number(prixMat.prise_installation)||0), kw:2, emoji:'🔋' },
   ] : [];
 
   if (loading) return <div className="screen fade-in"><div style={{textAlign:'center',padding:40}}><div className="spinner" style={{margin:'0 auto'}}/></div></div>;
 
-  // ── Écran confirmation ──
-  if (confirmed) {
+  // ── Étape 1 : formulaire équipements ──
+  if (step === 'therm') {
+    return <ThermaleForm
+      siteId={siteId}
+      initial={siteFlex}
+      onBack={onBack}
+      onDone={(kw) => {
+        setTheorKw(kw);
+        setStep('catalog');
+      }}
+    />;
+  }
+
+  // ── Étape 3 : confirmation ──
+  if (step === 'confirmed') {
     const tot = totalPrice(prixMat);
     const effectiveKw = theorKw > 0 ? Math.min(theorKw, equipKw) : equipKw;
     const flexGain = Math.round(effectiveKw * 14);
@@ -7033,11 +7033,20 @@ function InstallSoiMemeScreen({ user, userProfile, onBack, onPanier, onMonSite, 
         </div>
         {effectiveKw > 0 && (
           <div className="card" style={{padding:'16px',marginBottom:10,textAlign:'center'}}>
-            <div style={{fontSize:11,color:'rgba(255,255,255,.4)',marginBottom:6,textTransform:'uppercase',letterSpacing:'.5px'}}>Capacité de pilotage thermique</div>
+            <div style={{fontSize:11,color:'rgba(255,255,255,.4)',marginBottom:6,textTransform:'uppercase',letterSpacing:'.5px'}}>Capacité de pilotage thermique activée</div>
             <div style={{fontSize:32,fontWeight:900,color:'#7dd940'}}>{effectiveKw} kW</div>
             <div style={{fontSize:12,color:'rgba(255,255,255,.45)',marginTop:4}}>Cagnotte flexibilité estimée : ~{flexGain.toLocaleString('fr-FR')} €/an</div>
+            {theorKw > effectiveKw && (
+              <div style={{marginTop:8,fontSize:11,color:'rgba(251,146,60,.7)'}}>
+                ⚠️ Potentiel logement : {theorKw} kW — vous pouvez compléter vos équipements plus tard
+              </div>
+            )}
           </div>
         )}
+        <div className="card" style={{padding:'14px',marginBottom:10,background:'rgba(125,217,64,.07)',border:'1px solid rgba(125,217,64,.2)'}}>
+          <div style={{fontSize:12,color:'#7dd940',fontWeight:700,marginBottom:4}}>✅ Tuile stockage activée dans Mon site</div>
+          <div style={{fontSize:12,color:'rgba(255,255,255,.5)'}}>Rendez-vous dans Mon site pour visualiser votre simulation de production et stockage.</div>
+        </div>
       </div>
       <StickyFooter row onBack={onBack}>
         <button className="btn btn-yes" style={{flex:1}} onClick={onMonSite||onPanier}>Mon site →</button>
@@ -7046,18 +7055,18 @@ function InstallSoiMemeScreen({ user, userProfile, onBack, onPanier, onMonSite, 
     );
   }
 
-  // ── Popup avertissement ──
+  // ── Étape 2 : catalogue produits ──
   const WarnPopup = () => (
     <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.7)',zIndex:1000,display:'flex',alignItems:'center',justifyContent:'center',padding:20}}>
       <div style={{background:'#1a2332',border:'1px solid rgba(255,160,50,.4)',borderRadius:16,padding:'24px 20px',maxWidth:360,width:'100%'}}>
         <div style={{fontSize:28,textAlign:'center',marginBottom:10}}>⚠️</div>
         <div style={{fontWeight:900,fontSize:16,color:'white',marginBottom:10,textAlign:'center'}}>Capacité sous-dimensionnée</div>
         <div style={{fontSize:13,color:'rgba(255,255,255,.7)',lineHeight:1.6,marginBottom:14}}>
-          Votre logement a une capacité de stockage thermique théorique de <strong style={{color:'#fbbf24'}}>{theorKw} kW</strong>,
-          mais les équipements sélectionnés ne couvrent que <strong style={{color:'#fb923c'}}>{equipKw} kW</strong>.
+          Votre logement a un potentiel de <strong style={{color:'#fbbf24'}}>{theorKw} kW</strong>,
+          mais vos équipements ne couvrent que <strong style={{color:'#fb923c'}}>{equipKw} kW</strong>.
         </div>
         <div style={{background:'rgba(255,255,255,.06)',borderRadius:10,padding:'10px 14px',marginBottom:16,fontSize:12,color:'rgba(255,255,255,.55)'}}>
-          Vous ne pourrez piloter thermiquement que <strong style={{color:'white'}}>{equipKw} kW sur {theorKw} kW</strong> — soit {Math.round(equipKw/theorKw*100)}% du potentiel. Vous pouvez compléter plus tard.
+          Vous piloterez <strong style={{color:'white'}}>{equipKw} kW sur {theorKw} kW</strong> — soit {Math.round(equipKw/theorKw*100)}% du potentiel. Vous pourrez compléter plus tard.
         </div>
         <div style={{display:'flex',gap:10}}>
           <button onClick={()=>setShowWarn(false)} style={{flex:1,background:'rgba(255,255,255,.08)',border:'1px solid rgba(255,255,255,.2)',borderRadius:10,color:'white',padding:'11px',cursor:'pointer',fontFamily:'inherit',fontSize:13,fontWeight:700}}>← Modifier</button>
@@ -7076,27 +7085,29 @@ function InstallSoiMemeScreen({ user, userProfile, onBack, onPanier, onMonSite, 
       <div style={{marginBottom:16,marginTop:4}}>
         <div style={{fontSize:9,letterSpacing:'.6px',color:'rgba(125,217,64,.8)',fontWeight:700,textTransform:'uppercase'}}>Installation</div>
         <div style={{fontSize:20,fontWeight:900,color:'white',lineHeight:1.1}}>Installer soi-même <span className="accent">Comwatt</span></div>
-        <div style={{fontSize:13,color:'rgba(255,255,255,.45)',marginTop:4}}>Choisissez vos équipements et installez-les vous-même.</div>
+        <div style={{fontSize:13,color:'rgba(255,255,255,.45)',marginTop:4}}>
+          Choisissez vos équipements.
+          {theorKw > 0 && <span style={{color:'rgba(125,217,64,.7)'}}> Potentiel logement : {theorKw} kW.</span>}
+        </div>
       </div>
+
+      {/* Bouton modifier équipements */}
+      <button onClick={()=>setStep('therm')} style={{background:'rgba(255,255,255,.05)',border:'1px solid rgba(255,255,255,.12)',borderRadius:8,color:'rgba(255,255,255,.5)',fontSize:11,padding:'5px 12px',cursor:'pointer',fontFamily:'inherit',marginBottom:12}}>
+        ✏️ Modifier mes équipements
+      </button>
 
       {/* Catalogue produits */}
       <div style={{display:'flex',flexDirection:'column',gap:10,marginBottom:16}}>
         {products.map(p => (
           <div key={p.key} className="card" style={{padding:'12px 14px',display:'flex',alignItems:'center',gap:12}}>
-            {/* Image */}
             <div style={{width:64,height:52,flexShrink:0,background:CHKBG,borderRadius:8,overflow:'hidden',display:'flex',alignItems:'center',justifyContent:'center'}}>
-              {p.img
-                ? <img src={p.img} alt={p.label} style={{width:'100%',height:'100%',objectFit:'contain'}}/>
-                : <span style={{fontSize:26}}>{p.emoji}</span>
-              }
+              {p.img ? <img src={p.img} alt={p.label} style={{width:'100%',height:'100%',objectFit:'contain'}}/> : <span style={{fontSize:26}}>{p.emoji}</span>}
             </div>
-            {/* Infos */}
             <div style={{flex:1,minWidth:0}}>
               <div style={{fontWeight:800,fontSize:14,color:'white'}}>{p.label}</div>
               <div style={{fontSize:11,color:'rgba(255,255,255,.4)',marginTop:1}}>{p.kw} kW · {p.prix > 0 ? p.prix.toLocaleString('fr-FR')+' €/unité' : 'Prix non défini'}</div>
             </div>
-            {/* Sélecteur quantité */}
-            <div style={{display:'flex',alignItems:'center',gap:0,flexShrink:0,background:'rgba(255,255,255,.07)',border:'1px solid rgba(255,255,255,.15)',borderRadius:10,overflow:'hidden'}}>
+            <div style={{display:'flex',alignItems:'center',flexShrink:0,background:'rgba(255,255,255,.07)',border:'1px solid rgba(255,255,255,.15)',borderRadius:10,overflow:'hidden'}}>
               <button onClick={()=>chg(p.key,-1)} style={{background:'none',border:'none',color:'rgba(255,255,255,.6)',fontSize:18,width:34,height:36,cursor:'pointer',fontFamily:'inherit',lineHeight:1}}>−</button>
               <span style={{fontSize:16,fontWeight:800,color:'white',minWidth:24,textAlign:'center'}}>{qty[p.key]}</span>
               <button onClick={()=>chg(p.key,+1)} style={{background:'none',border:'none',color:'#7dd940',fontSize:18,width:34,height:36,cursor:'pointer',fontFamily:'inherit',lineHeight:1}}>+</button>
@@ -7120,11 +7131,9 @@ function InstallSoiMemeScreen({ user, userProfile, onBack, onPanier, onMonSite, 
           )}
         </div>
       )}
-
       <div style={{height:90}}/>
     </div>
 
-    {/* Footer sticky : total + bouton */}
     <div style={{position:'fixed',bottom:0,left:0,right:0,background:'rgba(6,18,30,.97)',borderTop:'1px solid rgba(255,255,255,.1)',padding:'12px 20px 20px',zIndex:100}}>
       <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:10}}>
         <div style={{fontSize:13,color:'rgba(255,255,255,.5)',fontWeight:600}}>Total panier</div>
@@ -7132,12 +7141,7 @@ function InstallSoiMemeScreen({ user, userProfile, onBack, onPanier, onMonSite, 
       </div>
       <div style={{display:'flex',gap:10}}>
         <button className="btn btn-sec" onClick={onBack} style={{width:56,flexShrink:0,fontSize:18}}>←</button>
-        <button
-          className="btn btn-yes"
-          style={{flex:1,fontSize:15,opacity:tot===0?0.4:1}}
-          disabled={tot===0}
-          onClick={handleValider}
-        >
+        <button className="btn btn-yes" style={{flex:1,fontSize:15,opacity:tot===0?0.4:1}} disabled={tot===0} onClick={handleValider}>
           {tot === 0 ? 'Sélectionnez des équipements' : 'Valider ma commande →'}
         </button>
       </div>
