@@ -961,6 +961,20 @@
     .offer-chip:hover { background: rgba(255,255,255,.14); }
     .offer-chip.chip-green:hover { background: rgba(125,217,64,.22); }
     /* Tooltip natif via title — fonctionne au survol desktop */
+    /* Animation réveil "Gratuit" */
+    @keyframes ringBell {
+      0%,100% { transform: rotate(0deg); }
+      10%      { transform: rotate(-18deg); }
+      20%      { transform: rotate(18deg); }
+      30%      { transform: rotate(-14deg); }
+      40%      { transform: rotate(14deg); }
+      50%      { transform: rotate(-8deg); }
+      60%      { transform: rotate(8deg); }
+      70%      { transform: rotate(-4deg); }
+      80%      { transform: rotate(4deg); }
+      90%      { transform: rotate(0deg); }
+    }
+    .chip-ring { animation: ringBell 1.6s ease-in-out infinite; display: inline-block; transform-origin: 50% 20%; }
     /* Sticky sliders footer */
     .sticky-footer-sliders { padding: 10px 16px 18px; }
     /* Mobile : titre réduit + sans tag */
@@ -4964,18 +4978,18 @@ function SimulationsScreen({ onACC, onBox, onSolar, onOptimisation, onBack, onMo
                     {/* Économies calculées */}
                     {saving != null && (
                       <span className="offer-chip chip-green" title="Économie estimée sur votre facture annuelle">
-                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                          <line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>
-                        </svg>
                         -{saving.toLocaleString('fr-FR')} €/an
                       </span>
                     )}
                     {/* Investissement */}
                     {isFree ? (
                       <span className="offer-chip chip-free" title="Aucun investissement requis">
-                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                          <circle cx="12" cy="12" r="10"/><polyline points="16 12 12 8 8 12"/><line x1="12" y1="16" x2="12" y2="8"/>
-                        </svg>
+                        <span className="chip-ring">
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+                            <line x1="12" y1="2" x2="12" y2="4"/>
+                          </svg>
+                        </span>
                         Gratuit
                       </span>
                     ) : o.investissement_min != null && (
@@ -8183,6 +8197,20 @@ function AdminFiltresScreen({ onBack }) {
 // ─── AdminOffreEditScreen ─────────────────────────────────────────────────────
 function AdminOffreEditScreen({ offre, onSave, onDelete, onBack }) {
   const isNew = !offre?.id;
+  const ENGAGEMENT_OPTIONS = [
+    { value: 0,  label: 'Sans engagement' },
+    { value: 1,  label: '1 an' },
+    { value: 2,  label: '2 ans' },
+    { value: 3,  label: '3 ans' },
+    { value: 5,  label: '5 ans' },
+    { value: 10, label: '10 ans' },
+  ];
+  const REVERSIBILITE_OPTIONS = [
+    { value: 'totalement_reversible',    label: 'Totalement réversible sans frais' },
+    { value: 'reversible_frais_minimes', label: 'Réversible avec des frais minimes' },
+    { value: 'reversible_frais_signi',   label: 'Réversible avec des frais significatifs' },
+  ];
+
   const [form, setForm] = useState({
     titre:               offre?.titre              || '',
     sous_titre:          offre?.sous_titre          || '',
@@ -8191,6 +8219,8 @@ function AdminOffreEditScreen({ offre, onSave, onDelete, onBack }) {
     reduction_pct:       offre?.reduction_pct       ?? '',
     types_offre:         offre?.types_offre         || [],
     picto_url:           offre?.picto_url           || '',
+    duree_engagement:    offre?.duree_engagement    ?? 0,
+    reversibilite:       offre?.reversibilite       || 'totalement_reversible',
   });
 
   const PICTOS_PRESET = [
@@ -8225,6 +8255,8 @@ function AdminOffreEditScreen({ offre, onSave, onDelete, onBack }) {
       reduction_pct:      form.reduction_pct !== '' ? Number(form.reduction_pct) : null,
       types_offre:        form.types_offre,
       picto_url:          form.picto_url.trim() || null,
+      duree_engagement:   Number(form.duree_engagement),
+      reversibilite:      form.reversibilite,
       updated_at:         new Date().toISOString(),
     };
     let error;
@@ -8284,6 +8316,20 @@ function AdminOffreEditScreen({ offre, onSave, onDelete, onBack }) {
           <label className="inp-label">Réduction de facture (%)</label>
           <input className="inp" type="number" min="0" max="100" step="0.1" value={form.reduction_pct} placeholder="Ex : 30"
             onChange={e => set('reduction_pct', e.target.value)}/>
+        </div>
+
+        <div className="inp-group">
+          <label className="inp-label">Durée d'engagement</label>
+          <select className="inp inp-sel" value={form.duree_engagement} onChange={e => set('duree_engagement', e.target.value)}>
+            {ENGAGEMENT_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </select>
+        </div>
+
+        <div className="inp-group">
+          <label className="inp-label">Réversibilité</label>
+          <select className="inp inp-sel" value={form.reversibilite} onChange={e => set('reversibilite', e.target.value)}>
+            {REVERSIBILITE_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </select>
         </div>
 
         <div className="inp-group">
