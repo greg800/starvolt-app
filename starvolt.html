@@ -6814,7 +6814,7 @@ function BoxSimScreen({ user, userProfile, onBack, onPanier, onMonSite, onCartUp
     ]).then(([{ data: site }, { data: tariffs }, { data: spotRows }, { data: nat }]) => {
       if (!site?.conso_profil) { setLoading(false); return; }
       setActiveSiteId(siteId);
-      const _lsFlex=(()=>{try{const v=localStorage.getItem('starvolt_flex_'+siteId);return v?JSON.parse(v):null;}catch{return null;}})();
+      const _lsFlex=(()=>{try{const v=localStorage.getItem('starvolt_flex_'+siteId);const p=v?JSON.parse(v):null;return(p?.chauffage&&p?.ecs&&p?.surface)?p:null;}catch{return null;}})();
       const _flex=_lsFlex||(site.flex_chauffage&&site.flex_ecs&&site.flex_surface?{chauffage:site.flex_chauffage,ecs:site.flex_ecs,surface:site.flex_surface}:null);
       if(_flex) setSiteFlex(_flex);
       const curTariff = site.tarif_id ? (tariffs || []).find(t => t.id === site.tarif_id) : null;
@@ -7065,7 +7065,7 @@ function SolarSimScreen({ user, userProfile, onBack, onPanier, onMonSite, onCart
       sb.rpc('get_spot_json'),
       sb.from('parametres_nationaux').select('*').eq('id', 1).maybeSingle(),
     ]).then(async ([{ data: site }, { data: tariffs }, { data: spotRows }, { data: nat }]) => {
-      const _lsFlexS=(()=>{try{const v=localStorage.getItem('starvolt_flex_'+siteId);return v?JSON.parse(v):null;}catch{return null;}})();
+      const _lsFlexS=(()=>{try{const v=localStorage.getItem('starvolt_flex_'+siteId);const p=v?JSON.parse(v):null;return(p?.chauffage&&p?.ecs&&p?.surface)?p:null;}catch{return null;}})();
       const _flexS=_lsFlexS||(site?.flex_chauffage&&site.flex_ecs&&site.flex_surface?{chauffage:site.flex_chauffage,ecs:site.flex_ecs,surface:site.flex_surface}:null);
       if(_flexS) setSiteFlex(_flexS);
       if (!site?.conso_profil) { setLoading(false); return; }
