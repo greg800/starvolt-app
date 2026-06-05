@@ -3931,7 +3931,7 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, cartVersion=0
   if(showFlexForm&&site){
     return <ThermaleForm
       siteId={activeId}
-      initial={site.flex_chauffage?{chauffage:site.flex_chauffage,ecs:site.flex_ecs,surface:site.flex_surface}:null}
+      initial={(site.flex_chauffage||site.flex_type_logement)?{chauffage:site.flex_chauffage,ecs:site.flex_ecs,surface:site.flex_surface,type_logement:site.flex_type_logement,statut:site.flex_statut}:null}
       onBack={()=>setShowFlexForm(false)}
       onDone={(kw)=>{setThermKwh(String(kw));setShowFlexForm(false);load();}}
     />;
@@ -4203,9 +4203,17 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, cartVersion=0
                     {importing?'⏳ Traitement…':'📂 Importer'}
                   </button>
                   <input ref={fileRef} type="file" accept=".xlsx,.xls" style={{display:'none'}} onChange={handleImport}/>
-                  <button style={{fontSize:11,padding:'5px 10px',borderRadius:8,flexShrink:0,cursor:'pointer',background:site.flex_chauffage?'rgba(125,217,64,.12)':'rgba(255,255,255,.06)',border:site.flex_chauffage?'1px solid rgba(125,217,64,.3)':'1px solid rgba(255,255,255,.15)',color:site.flex_chauffage?'#7dd940':'rgba(255,255,255,.5)',fontWeight:700}} onClick={()=>setShowFlexForm(true)}>
-                    🏠 {site.flex_chauffage?'Mon logement':'Configurer'}
-                  </button>
+                  {(()=>{
+                    const total=5;
+                    const filled=[site.flex_chauffage,site.flex_ecs,site.flex_surface,site.flex_type_logement,site.flex_statut].filter(Boolean).length;
+                    const pct=Math.round(filled/total*100);
+                    const done=pct===100;
+                    return (
+                      <button style={{fontSize:11,padding:'5px 10px',borderRadius:8,flexShrink:0,cursor:'pointer',background:filled>0?'rgba(125,217,64,.12)':'rgba(255,255,255,.06)',border:filled>0?'1px solid rgba(125,217,64,.3)':'1px solid rgba(255,255,255,.15)',color:filled>0?'#7dd940':'rgba(255,255,255,.5)',fontWeight:700}} onClick={()=>setShowFlexForm(true)}>
+                        🏠 Mon logement <span style={{fontWeight:600,opacity:.75}}>({pct}%)</span>
+                      </button>
+                    );
+                  })()}
                   <span style={{color:'rgba(255,255,255,.4)',fontSize:16,lineHeight:1,transition:'transform .2s',transform:consoOpen?'rotate(0deg)':'rotate(-90deg)',display:'inline-block'}}>▾</span>
                 </div>
               </div>
@@ -5089,7 +5097,7 @@ function SimulationsScreen({ onACC, onBox, onSolar, onOptimisation, onBack, onMo
       <div className="sticky-footer sticky-footer-sliders">
         <div style={{maxWidth:520,margin:'0 auto'}}>
           <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:6}}>
-            <span style={{fontSize:10,fontWeight:700,color:'rgba(255,255,255,.35)',textTransform:'uppercase',letterSpacing:'.5px'}}>Filtres</span>
+            <button onClick={onMonSite} className="btn btn-cta" style={{fontSize:12,padding:'6px 14px',borderRadius:10,fontWeight:700,letterSpacing:.2}}>Mon site →</button>
             <button onClick={onBack} style={{background:'none',border:'none',color:'rgba(255,255,255,.35)',fontSize:11,cursor:'pointer',fontFamily:'inherit',padding:'2px 6px'}}>← Retour</button>
           </div>
           <div className="sliders-panel" style={{margin:0}}>
@@ -6612,9 +6620,12 @@ function AccResultScreen({ state, onBack, onPanier, onMonSite }) {
 
 // ─── ThermaleForm ─────────────────────────────
 function ThermaleForm({ onDone, onBack, siteId=null, initial=null }) {
-  const [chauffage, setChauffage] = useState(initial?.chauffage||null);
-  const [ecs,       setEcs]       = useState(initial?.ecs||null);
-  const [surface,   setSurface]   = useState(initial?.surface||null);
+  const [tab,          setTab]          = useState('appareils');
+  const [chauffage,    setChauffage]    = useState(initial?.chauffage||null);
+  const [ecs,          setEcs]          = useState(initial?.ecs||null);
+  const [surface,      setSurface]      = useState(initial?.surface||null);
+  const [typeLogement, setTypeLogement] = useState(initial?.type_logement||null);
+  const [statut,       setStatut]       = useState(initial?.statut||null);
 
   async function handleDone() {
     const idx = surface === 'small' ? 0 : surface === 'medium' ? 1 : 2;
@@ -6628,8 +6639,8 @@ function ThermaleForm({ onDone, onBack, siteId=null, initial=null }) {
     } catch {}
     // Persiste en base ET en localStorage si on connaît le siteId — await pour que load() voie les nouvelles valeurs
     if (siteId) {
-      await sb.from('sites').update({flex_chauffage:chauffage,flex_ecs:ecs,flex_surface:surface}).eq('id',siteId);
-      try { localStorage.setItem('starvolt_flex_'+siteId, JSON.stringify({chauffage,ecs,surface})); } catch {}
+      await sb.from('sites').update({flex_chauffage:chauffage,flex_ecs:ecs,flex_surface:surface,flex_type_logement:typeLogement||null,flex_statut:statut||null}).eq('id',siteId);
+      try { localStorage.setItem('starvolt_flex_'+siteId, JSON.stringify({chauffage,ecs,surface,type_logement:typeLogement,statut})); } catch {}
     }
     onDone(kw);
   }
@@ -6652,77 +6663,127 @@ function ThermaleForm({ onDone, onBack, siteId=null, initial=null }) {
   const lS = (active) => ({ fontSize: 12, fontWeight: active ? 800 : 600, color: active ? '#7dd940' : 'rgba(255,255,255,.75)' });
   const sec = { fontSize: 11, fontWeight: 700, color: 'rgba(255,255,255,.4)', textTransform: 'uppercase', letterSpacing: '.6px', marginBottom: 10 };
 
+  const tabS = (active) => ({
+    flex: 1, padding: '9px 6px', borderRadius: 10, cursor: 'pointer', fontFamily: 'inherit',
+    border: `1.5px solid ${active ? '#7dd940' : 'rgba(255,255,255,.13)'}`,
+    background: active ? 'rgba(125,217,64,.12)' : 'rgba(255,255,255,.04)',
+    color: active ? '#7dd940' : 'rgba(255,255,255,.55)',
+    fontWeight: active ? 800 : 600, fontSize: 12, textAlign: 'center',
+  });
+
   return (
     <>
       <div className="screen fade-in">
-        <div style={{ marginBottom: 22, marginTop: 4 }}>
+        <div style={{ marginBottom: 16, marginTop: 4 }}>
           <div style={{ fontSize: 9, letterSpacing: '.8px', color: 'rgba(125,217,64,.85)', fontWeight: 700, textTransform: 'uppercase', marginBottom: 6 }}>Votre logement</div>
           <div style={{ fontSize: 19, fontWeight: 900, color: 'white', lineHeight: 1.25 }}>Quelques infos pour<br/>affiner votre simulation</div>
         </div>
 
-        <div className="card" style={{ padding: '16px', marginBottom: 10 }}>
-          <div style={sec}>Type de chauffage</div>
-          <div style={{ display: 'flex', gap: 8 }}>
-            <button onClick={() => setChauffage('elec')} style={bS(chauffage==='elec')}>
-              <div style={{ fontSize: 22, marginBottom: 5 }}>⚡</div>
-              <div style={lS(chauffage==='elec')}>Électrique</div>
-            </button>
-            <button onClick={() => setChauffage('pac')} style={bS(chauffage==='pac')}>
-              <div style={{ fontSize: 22, marginBottom: 5 }}>♨️</div>
-              <div style={lS(chauffage==='pac')}>PAC</div>
-            </button>
-            <button onClick={() => setChauffage('autre')} style={bS(chauffage==='autre')}>
-              <div style={{ fontSize: 22, marginBottom: 5 }}>🔥</div>
-              <div style={lS(chauffage==='autre')}>Autre</div>
-            </button>
-          </div>
+        {/* ── Onglets ── */}
+        <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
+          <button style={tabS(tab==='logement')} onClick={() => setTab('logement')}>🏠 Votre logement</button>
+          <button style={tabS(tab==='appareils')} onClick={() => setTab('appareils')}>⚡ Vos appareils</button>
         </div>
 
-        <div className="card" style={{ padding: '16px', marginBottom: 10 }}>
-          <div style={sec}>Eau chaude sanitaire</div>
-          <div style={{ display: 'flex', gap: 10 }}>
-            <button onClick={() => setEcs('elec')} style={bS(ecs==='elec')}>
-              <div style={{ fontSize: 22, marginBottom: 5 }}>⚡</div>
-              <div style={lS(ecs==='elec')}>Électrique</div>
-            </button>
-            <button onClick={() => setEcs('autre')} style={bS(ecs==='autre')}>
-              <div style={{ fontSize: 22, marginBottom: 5 }}>🔥</div>
-              <div style={lS(ecs==='autre')}>Autre</div>
-            </button>
-          </div>
-        </div>
+        {tab === 'logement' && (
+          <>
+            <div className="card" style={{ padding: '16px', marginBottom: 10 }}>
+              <div style={sec}>Type de logement</div>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button onClick={() => setTypeLogement('maison')} style={bS(typeLogement==='maison')}>
+                  <div style={{ fontSize: 26, marginBottom: 5 }}>🏠</div>
+                  <div style={lS(typeLogement==='maison')}>Maison<br/>individuelle</div>
+                </button>
+                <button onClick={() => setTypeLogement('collectif')} style={bS(typeLogement==='collectif')}>
+                  <div style={{ fontSize: 26, marginBottom: 5 }}>🏢</div>
+                  <div style={lS(typeLogement==='collectif')}>En collectif<br/>(appartement)</div>
+                </button>
+              </div>
+            </div>
 
-        <div className="card" style={{ padding: '16px', marginBottom: 10 }}>
-          <div style={sec}>Surface du logement</div>
-          <div style={{ display: 'flex', gap: 8 }}>
-            <button onClick={() => setSurface('small')} style={bS(surface==='small')}>
-              <div style={lS(surface==='small')}>{'< 70 m²'}</div>
-            </button>
-            <button onClick={() => setSurface('medium')} style={bS(surface==='medium')}>
-              <div style={lS(surface==='medium')}>{'70–150 m²'}</div>
-            </button>
-            <button onClick={() => setSurface('large')} style={bS(surface==='large')}>
-              <div style={lS(surface==='large')}>{' > 150 m²'}</div>
-            </button>
-          </div>
-        </div>
+            <div className="card" style={{ padding: '16px', marginBottom: 10 }}>
+              <div style={sec}>Situation</div>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button onClick={() => setStatut('locataire')} style={bS(statut==='locataire')}>
+                  <div style={{ fontSize: 26, marginBottom: 5 }}>🔑</div>
+                  <div style={lS(statut==='locataire')}>Locataire</div>
+                </button>
+                <button onClick={() => setStatut('proprietaire')} style={bS(statut==='proprietaire')}>
+                  <div style={{ fontSize: 26, marginBottom: 5 }}>📜</div>
+                  <div style={lS(statut==='proprietaire')}>Propriétaire</div>
+                </button>
+              </div>
+            </div>
+          </>
+        )}
 
-        {previewKw !== null && (
-          <div style={{ textAlign: 'center', padding: '14px 0 4px' }}>
-            <div style={{ fontSize: 11, color: 'rgba(255,255,255,.4)', marginBottom: 4 }}>Stockage thermique estimé</div>
-            {previewKw > 0
-              ? <div style={{ fontSize: 34, fontWeight: 900, color: '#7dd940', lineHeight: 1 }}>
-                  {previewKw} <span style={{ fontSize: 18, fontWeight: 600, color: 'rgba(125,217,64,.7)' }}>kWh</span>
-                </div>
-              : <div style={{ fontSize: 15, fontWeight: 700, color: 'rgba(255,255,255,.35)' }}>Stockage thermique non applicable</div>
-            }
-          </div>
+        {tab === 'appareils' && (
+          <>
+            <div className="card" style={{ padding: '16px', marginBottom: 10 }}>
+              <div style={sec}>Type de chauffage</div>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button onClick={() => setChauffage('elec')} style={bS(chauffage==='elec')}>
+                  <div style={{ fontSize: 22, marginBottom: 5 }}>⚡</div>
+                  <div style={lS(chauffage==='elec')}>Électrique</div>
+                </button>
+                <button onClick={() => setChauffage('pac')} style={bS(chauffage==='pac')}>
+                  <div style={{ fontSize: 22, marginBottom: 5 }}>♨️</div>
+                  <div style={lS(chauffage==='pac')}>PAC</div>
+                </button>
+                <button onClick={() => setChauffage('autre')} style={bS(chauffage==='autre')}>
+                  <div style={{ fontSize: 22, marginBottom: 5 }}>🔥</div>
+                  <div style={lS(chauffage==='autre')}>Autre</div>
+                </button>
+              </div>
+            </div>
+
+            <div className="card" style={{ padding: '16px', marginBottom: 10 }}>
+              <div style={sec}>Eau chaude sanitaire</div>
+              <div style={{ display: 'flex', gap: 10 }}>
+                <button onClick={() => setEcs('elec')} style={bS(ecs==='elec')}>
+                  <div style={{ fontSize: 22, marginBottom: 5 }}>⚡</div>
+                  <div style={lS(ecs==='elec')}>Électrique</div>
+                </button>
+                <button onClick={() => setEcs('autre')} style={bS(ecs==='autre')}>
+                  <div style={{ fontSize: 22, marginBottom: 5 }}>🔥</div>
+                  <div style={lS(ecs==='autre')}>Autre</div>
+                </button>
+              </div>
+            </div>
+
+            <div className="card" style={{ padding: '16px', marginBottom: 10 }}>
+              <div style={sec}>Surface du logement</div>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button onClick={() => setSurface('small')} style={bS(surface==='small')}>
+                  <div style={lS(surface==='small')}>{'< 70 m²'}</div>
+                </button>
+                <button onClick={() => setSurface('medium')} style={bS(surface==='medium')}>
+                  <div style={lS(surface==='medium')}>{'70–150 m²'}</div>
+                </button>
+                <button onClick={() => setSurface('large')} style={bS(surface==='large')}>
+                  <div style={lS(surface==='large')}>{' > 150 m²'}</div>
+                </button>
+              </div>
+            </div>
+
+            {previewKw !== null && (
+              <div style={{ textAlign: 'center', padding: '14px 0 4px' }}>
+                <div style={{ fontSize: 11, color: 'rgba(255,255,255,.4)', marginBottom: 4 }}>Stockage thermique estimé</div>
+                {previewKw > 0
+                  ? <div style={{ fontSize: 34, fontWeight: 900, color: '#7dd940', lineHeight: 1 }}>
+                      {previewKw} <span style={{ fontSize: 18, fontWeight: 600, color: 'rgba(125,217,64,.7)' }}>kWh</span>
+                    </div>
+                  : <div style={{ fontSize: 15, fontWeight: 700, color: 'rgba(255,255,255,.35)' }}>Stockage thermique non applicable</div>
+                }
+              </div>
+            )}
+          </>
         )}
       </div>
       <StickyFooter row onBack={onBack}>
         <button className="btn btn-yes" onClick={handleDone} disabled={!ready}
           style={{ opacity: ready ? 1 : 0.35, flex: 1 }}>
-          Continuer →
+          Enregistrer →
         </button>
       </StickyFooter>
     </>
