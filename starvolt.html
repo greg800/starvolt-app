@@ -4761,8 +4761,11 @@ function SimulationsScreen({ onACC, onBox, onSolar, onOptimisation, onBack, onMo
       setFiltresActifs(map);
     });
     if (user?.id) {
-      sb.from('sites').select('flex_type_logement,flex_statut').eq('user_id', user.id).order('created_at').limit(1).maybeSingle()
-        .then(({ data }) => { if (data) setSiteProfile({ type_logement: data.flex_type_logement, statut: data.flex_statut }); });
+      const activeId = localStorage.getItem('starvolt_active_site_id');
+      const q = activeId
+        ? sb.from('sites').select('flex_type_logement,flex_statut').eq('id', activeId).maybeSingle()
+        : sb.from('sites').select('flex_type_logement,flex_statut').eq('user_id', user.id).order('created_at').limit(1).maybeSingle();
+      q.then(({ data }) => { if (data) setSiteProfile({ type_logement: data.flex_type_logement, statut: data.flex_statut }); });
     }
   }, []);
 
@@ -6666,7 +6669,7 @@ function ThermaleForm({ onDone, onBack, siteId=null, initial=null }) {
     onDone(kw);
   }
 
-  const ready = chauffage && ecs && surface;
+  const ready = true; // toujours autorisé, même si des champs sont null
   let previewKw = null;
   if (ready) {
     const idx = surface === 'small' ? 0 : surface === 'medium' ? 1 : 2;
