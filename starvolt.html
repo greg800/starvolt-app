@@ -6692,11 +6692,11 @@ function ThermaleForm({ onDone, onBack, siteId=null, initial=null }) {
             <div className="card" style={{ padding: '16px', marginBottom: 10 }}>
               <div style={sec}>Type de logement</div>
               <div style={{ display: 'flex', gap: 8 }}>
-                <button onClick={() => setTypeLogement('maison')} style={bS(typeLogement==='maison')}>
+                <button onClick={() => setTypeLogement(v => v==='maison'?null:'maison')} style={bS(typeLogement==='maison')}>
                   <div style={{ fontSize: 26, marginBottom: 5 }}>🏠</div>
                   <div style={lS(typeLogement==='maison')}>Maison<br/>individuelle</div>
                 </button>
-                <button onClick={() => setTypeLogement('collectif')} style={bS(typeLogement==='collectif')}>
+                <button onClick={() => setTypeLogement(v => v==='collectif'?null:'collectif')} style={bS(typeLogement==='collectif')}>
                   <div style={{ fontSize: 26, marginBottom: 5 }}>🏢</div>
                   <div style={lS(typeLogement==='collectif')}>En collectif<br/>(appartement)</div>
                 </button>
@@ -6706,11 +6706,11 @@ function ThermaleForm({ onDone, onBack, siteId=null, initial=null }) {
             <div className="card" style={{ padding: '16px', marginBottom: 10 }}>
               <div style={sec}>Situation</div>
               <div style={{ display: 'flex', gap: 8 }}>
-                <button onClick={() => setStatut('locataire')} style={bS(statut==='locataire')}>
+                <button onClick={() => setStatut(v => v==='locataire'?null:'locataire')} style={bS(statut==='locataire')}>
                   <div style={{ fontSize: 26, marginBottom: 5 }}>🔑</div>
                   <div style={lS(statut==='locataire')}>Locataire</div>
                 </button>
-                <button onClick={() => setStatut('proprietaire')} style={bS(statut==='proprietaire')}>
+                <button onClick={() => setStatut(v => v==='proprietaire'?null:'proprietaire')} style={bS(statut==='proprietaire')}>
                   <div style={{ fontSize: 26, marginBottom: 5 }}>📜</div>
                   <div style={lS(statut==='proprietaire')}>Propriétaire</div>
                 </button>
@@ -6724,15 +6724,15 @@ function ThermaleForm({ onDone, onBack, siteId=null, initial=null }) {
             <div className="card" style={{ padding: '16px', marginBottom: 10 }}>
               <div style={sec}>Type de chauffage</div>
               <div style={{ display: 'flex', gap: 8 }}>
-                <button onClick={() => setChauffage('elec')} style={bS(chauffage==='elec')}>
+                <button onClick={() => setChauffage(v => v==='elec'?null:'elec')} style={bS(chauffage==='elec')}>
                   <div style={{ fontSize: 22, marginBottom: 5 }}>⚡</div>
                   <div style={lS(chauffage==='elec')}>Électrique</div>
                 </button>
-                <button onClick={() => setChauffage('pac')} style={bS(chauffage==='pac')}>
+                <button onClick={() => setChauffage(v => v==='pac'?null:'pac')} style={bS(chauffage==='pac')}>
                   <div style={{ fontSize: 22, marginBottom: 5 }}>♨️</div>
                   <div style={lS(chauffage==='pac')}>PAC</div>
                 </button>
-                <button onClick={() => setChauffage('autre')} style={bS(chauffage==='autre')}>
+                <button onClick={() => setChauffage(v => v==='autre'?null:'autre')} style={bS(chauffage==='autre')}>
                   <div style={{ fontSize: 22, marginBottom: 5 }}>🔥</div>
                   <div style={lS(chauffage==='autre')}>Autre</div>
                 </button>
@@ -6742,11 +6742,11 @@ function ThermaleForm({ onDone, onBack, siteId=null, initial=null }) {
             <div className="card" style={{ padding: '16px', marginBottom: 10 }}>
               <div style={sec}>Eau chaude sanitaire</div>
               <div style={{ display: 'flex', gap: 10 }}>
-                <button onClick={() => setEcs('elec')} style={bS(ecs==='elec')}>
+                <button onClick={() => setEcs(v => v==='elec'?null:'elec')} style={bS(ecs==='elec')}>
                   <div style={{ fontSize: 22, marginBottom: 5 }}>⚡</div>
                   <div style={lS(ecs==='elec')}>Électrique</div>
                 </button>
-                <button onClick={() => setEcs('autre')} style={bS(ecs==='autre')}>
+                <button onClick={() => setEcs(v => v==='autre'?null:'autre')} style={bS(ecs==='autre')}>
                   <div style={{ fontSize: 22, marginBottom: 5 }}>🔥</div>
                   <div style={lS(ecs==='autre')}>Autre</div>
                 </button>
@@ -6756,13 +6756,13 @@ function ThermaleForm({ onDone, onBack, siteId=null, initial=null }) {
             <div className="card" style={{ padding: '16px', marginBottom: 10 }}>
               <div style={sec}>Surface du logement</div>
               <div style={{ display: 'flex', gap: 8 }}>
-                <button onClick={() => setSurface('small')} style={bS(surface==='small')}>
+                <button onClick={() => setSurface(v => v==='small'?null:'small')} style={bS(surface==='small')}>
                   <div style={lS(surface==='small')}>{'< 70 m²'}</div>
                 </button>
-                <button onClick={() => setSurface('medium')} style={bS(surface==='medium')}>
+                <button onClick={() => setSurface(v => v==='medium'?null:'medium')} style={bS(surface==='medium')}>
                   <div style={lS(surface==='medium')}>{'70–150 m²'}</div>
                 </button>
-                <button onClick={() => setSurface('large')} style={bS(surface==='large')}>
+                <button onClick={() => setSurface(v => v==='large'?null:'large')} style={bS(surface==='large')}>
                   <div style={lS(surface==='large')}>{' > 150 m²'}</div>
                 </button>
               </div>
@@ -7011,12 +7011,12 @@ function BoxSimScreen({ user, userProfile, onBack, onPanier, onMonSite, onCartUp
         <div className="sticky-footer">
           <div className="sticky-footer-inner row">
             <button onClick={onBack} style={{ flexGrow:0, flexShrink:0, background:'rgba(255,255,255,.06)', border:'1px solid rgba(255,255,255,.12)', borderRadius:10, color:'rgba(255,255,255,.5)', fontSize:11, fontWeight:600, fontFamily:'inherit', padding:'10px 12px', cursor:'pointer', whiteSpace:'nowrap' }}>← Retour</button>
-            <button onClick={() => { localStorage.setItem('starvolt_box_chosen','free'); localStorage.removeItem('starvolt_box_saving'); setPanierServicesChecked({opti_tarif:true,opti_flex:true}); setChosen('free'); if(siteFlex){applyExistingFlex(siteFlex);setJustConfirmed(true);if(onCartUpdate)onCartUpdate();}else{setShowThermForm(true);} }}
+            <button onClick={() => { localStorage.setItem('starvolt_box_chosen','free'); localStorage.removeItem('starvolt_box_saving'); setPanierServicesChecked({opti_tarif:true,opti_flex:true}); setChosen('free'); setShowThermForm(true); }}
               style={{ flex:1, background:'rgba(255,255,255,.07)', border:'2px solid rgba(125,217,64,.55)', borderRadius:14, color:'white', padding:'13px 8px', cursor:'pointer', fontFamily:'inherit', textAlign:'center', lineHeight:1.3 }}>
               <div style={{ fontSize:17, fontWeight:900, color:'#7dd940', marginBottom:3 }}>🎁 Box gratuite</div>
               <div style={{ fontSize:12, color:'rgba(255,255,255,.75)' }}>Cagnotte reversée 3 ans</div>
             </button>
-            <button onClick={() => { localStorage.setItem('starvolt_box_chosen','buy'); localStorage.removeItem('starvolt_box_saving'); setPanierServicesChecked({opti_tarif:true,opti_flex:true}); setChosen('buy'); if(siteFlex){applyExistingFlex(siteFlex);setJustConfirmed(true);if(onCartUpdate)onCartUpdate();}else{setShowThermForm(true);} }}
+            <button onClick={() => { localStorage.setItem('starvolt_box_chosen','buy'); localStorage.removeItem('starvolt_box_saving'); setPanierServicesChecked({opti_tarif:true,opti_flex:true}); setChosen('buy'); setShowThermForm(true); }}
               style={{ flex:1, background:'rgba(255,255,255,.07)', border:'2px solid rgba(255,215,0,.4)', borderRadius:14, color:'white', padding:'13px 8px', cursor:'pointer', fontFamily:'inherit', textAlign:'center', lineHeight:1.3 }}>
               <div style={{ fontSize:17, fontWeight:900, color:'#fbbf24', marginBottom:2 }}>📦 Acheter</div>
               <div style={{ fontSize:18, fontWeight:900, color:'white', marginBottom:2 }}>600 €</div>
