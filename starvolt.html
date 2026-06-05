@@ -7778,6 +7778,86 @@ function AdminProductionScreen({ onBack }) {
   );
 }
 
+// ─── processImageTransparent : resize 250×200 + suppression fond ──────
+async function processImageTransparent(file) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      const W = 250, H = 200;
+      const canvas = document.createElement('canvas');
+      canvas.width = W; canvas.height = H;
+      const ctx = canvas.getContext('2d');
+      // Fond transparent + dessin avec letterbox
+      ctx.clearRect(0, 0, W, H);
+      const scale = Math.min(W / img.width, H / img.height);
+      const dw = img.width * scale, dh = img.height * scale;
+      const dx = (W - dw) / 2, dy = (H - dh) / 2;
+      ctx.drawImage(img, dx, dy, dw, dh);
+      // Suppression fond : sample couleur des 4 coins, rendre transparents les pixels proches
+      const idata = ctx.getImageData(0, 0, W, H);
+      const d = idata.data;
+      // Récupérer couleur de fond depuis les coins (moyenne)
+      const samplePx = (x, y) => { const i=(y*W+x)*4; return [d[i],d[i+1],d[i+2]]; };
+      const corners = [samplePx(0,0), samplePx(W-1,0), samplePx(0,H-1), samplePx(W-1,H-1)];
+      const bgR = Math.round(corners.reduce((s,c)=>s+c[0],0)/4);
+      const bgG = Math.round(corners.reduce((s,c)=>s+c[1],0)/4);
+      const bgB = Math.round(corners.reduce((s,c)=>s+c[2],0)/4);
+      // Flood-fill BFS depuis les 4 coins pour supprimer le fond
+      const threshold = 40;
+      const visited = new Uint8Array(W * H);
+      const queue = [];
+      const push = (x, y) => { if(x<0||y<0||x>=W||y>=H)return; const idx=y*W+x; if(visited[idx])return; const pi=idx*4; const dr=d[pi]-bgR,dg=d[pi+1]-bgG,db=d[pi+2]-bgB; if(Math.sqrt(dr*dr+dg*dg+db*db)>threshold)return; visited[idx]=1; queue.push(idx); };
+      [[0,0],[W-1,0],[0,H-1],[W-1,H-1]].forEach(([x,y])=>push(x,y));
+      let qi=0;
+      while(qi<queue.length){
+        const idx=queue[qi++];
+        d[idx*4+3]=0; // transparent
+        const x=idx%W, y=Math.floor(idx/W);
+        push(x-1,y);push(x+1,y);push(x,y-1);push(x,y+1);
+      }
+      // Adoucir les bords (anti-aliasing léger sur pixels semi-transparents de bord)
+      ctx.putImageData(idata, 0, 0);
+      resolve(canvas.toDataURL('image/png'));
+    };
+    img.onerror = reject;
+    img.src = url;
+  });
+}
+
+// ─── ImageImportBtn : bouton import image avec traitement transparent ──
+function ImageImportBtn({ imgKey, data, setData, label }) {
+  const fileRef = useRef(null);
+  const [processing, setProcessing] = useState(false);
+  const current = data?.[imgKey];
+  return (
+    <div style={{display:'flex',alignItems:'center',gap:8,marginTop:8}}>
+      {current && (
+        <div style={{position:'relative',width:50,height:40,background:'repeating-conic-gradient(rgba(255,255,255,.07) 0% 25%,transparent 0% 50%) 0 0/8px 8px',borderRadius:6,overflow:'hidden',flexShrink:0}}>
+          <img src={current} alt={label} style={{width:'100%',height:'100%',objectFit:'contain'}}/>
+          <button onClick={()=>setData(p=>({...p,[imgKey]:null}))} style={{position:'absolute',top:1,right:1,background:'rgba(0,0,0,.7)',border:'none',borderRadius:3,color:'white',fontSize:9,cursor:'pointer',lineHeight:1,padding:'1px 3px'}}>✕</button>
+        </div>
+      )}
+      <button
+        onClick={()=>fileRef.current?.click()}
+        disabled={processing}
+        style={{background:'rgba(255,255,255,.07)',border:'1px solid rgba(255,255,255,.18)',borderRadius:7,color:'rgba(255,255,255,.65)',fontSize:11,padding:'5px 10px',cursor:'pointer',fontFamily:'inherit',flexShrink:0}}
+      >
+        {processing ? '⏳ Traitement…' : current ? '🖼 Changer l\'image' : '🖼 Ajouter une image'}
+      </button>
+      <input ref={fileRef} type="file" accept="image/*" style={{display:'none'}} onChange={async e=>{
+        const f=e.target.files?.[0]; if(!f)return;
+        setProcessing(true);
+        try{ const b64=await processImageTransparent(f); setData(p=>({...p,[imgKey]:b64})); }
+        catch(err){ alert('Erreur traitement image : '+err.message); }
+        finally{ setProcessing(false); if(fileRef.current)fileRef.current.value=''; }
+      }}/>
+      <span style={{fontSize:10,color:'rgba(255,255,255,.3)'}}>250×200 · fond transparent</span>
+    </div>
+  );
+}
+
 // ─── AdminPrixMateriauxScreen ─────────────────
 function AdminPrixMateriauxScreen({ onBack }) {
   const [data, setData] = useState(null);
@@ -7788,7 +7868,7 @@ function AdminPrixMateriauxScreen({ onBack }) {
     sb.from('prix_materiaux').select('*').eq('id',1).maybeSingle()
       .then(({data:d}) => {
         if (d) setData(d);
-        else setData({pv_prices:[],bat_prices:[],box_prix:500,box_installation:100,box_satellite:200,box_module_deporte:50,box_pinces:100});
+        else setData({pv_prices:[],bat_prices:[],box_prix:500,box_installation:100,box_satellite:200,box_module_deporte:50,box_pinces:100,prise_prix:50,prise_installation:20});
       });
   }, []);
 
@@ -7803,6 +7883,12 @@ function AdminPrixMateriauxScreen({ onBack }) {
       box_satellite: Number(data.box_satellite)||0,
       box_module_deporte: Number(data.box_module_deporte)||0,
       box_pinces: Number(data.box_pinces)||0,
+      prise_prix: Number(data.prise_prix)||0,
+      prise_installation: Number(data.prise_installation)||0,
+      img_pv: data.img_pv||null,
+      img_bat: data.img_bat||null,
+      img_box: data.img_box||null,
+      img_prise: data.img_prise||null,
     };
     const {error} = await sb.from('prix_materiaux').upsert(payload, {onConflict:'id'});
     setSaving(false);
@@ -7863,6 +7949,7 @@ function AdminPrixMateriauxScreen({ onBack }) {
           </table>
         </div>
         <button onClick={addPvRow} style={{marginTop:8,background:'rgba(255,255,255,.07)',border:'1px solid rgba(255,255,255,.2)',borderRadius:7,color:'rgba(255,255,255,.7)',fontSize:12,padding:'5px 12px',cursor:'pointer',fontFamily:'inherit'}}>+ Ajouter une ligne</button>
+        <ImageImportBtn imgKey="img_pv" data={data} setData={setData} label="PV"/>
       </div>
 
       {/* ── Batterie ── */}
@@ -7887,6 +7974,7 @@ function AdminPrixMateriauxScreen({ onBack }) {
           </table>
         </div>
         <button onClick={addBatRow} style={{marginTop:8,background:'rgba(255,255,255,.07)',border:'1px solid rgba(255,255,255,.2)',borderRadius:7,color:'rgba(255,255,255,.7)',fontSize:12,padding:'5px 12px',cursor:'pointer',fontFamily:'inherit'}}>+ Ajouter une ligne</button>
+        <ImageImportBtn imgKey="img_bat" data={data} setData={setData} label="Batterie"/>
       </div>
 
       {/* ── Box ── */}
@@ -7907,6 +7995,24 @@ function AdminPrixMateriauxScreen({ onBack }) {
           ))}
         </div>
         <div style={{marginTop:10,fontSize:11,color:'rgba(255,255,255,.35)'}}>Pour le ROI : investissement box = fourniture + pose</div>
+        <ImageImportBtn imgKey="img_box" data={data} setData={setData} label="Box Comwatt"/>
+      </div>
+
+      {/* ── Prise connectée ── */}
+      <div className="card" style={{padding:'16px',marginBottom:12}}>
+        <div style={{fontWeight:700,fontSize:14,color:'#c084fc',marginBottom:12}}>🔌 Prise connectée — fourniture et pose</div>
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'10px 14px'}}>
+          {[
+            ['prise_prix','Prise connectée (fourniture)','€'],
+            ['prise_installation','Pose / installation','€'],
+          ].map(([key,label])=>(
+            <div key={key}>
+              <div style={{fontSize:11,color:'rgba(255,255,255,.45)',marginBottom:4}}>{label}</div>
+              <input type="number" style={INP} step="5" min="0" value={data[key]??''} onChange={e=>setData(p=>({...p,[key]:e.target.value}))}/>
+            </div>
+          ))}
+        </div>
+        <ImageImportBtn imgKey="img_prise" data={data} setData={setData} label="Prise connectée"/>
       </div>
 
       {msg && <div style={{padding:'10px 14px',borderRadius:8,marginBottom:10,background:msg.ok?'rgba(125,217,64,.15)':'rgba(255,80,80,.15)',color:msg.ok?'#7dd940':'#ff6b6b',fontSize:13,fontWeight:600}}>{msg.text}</div>}
