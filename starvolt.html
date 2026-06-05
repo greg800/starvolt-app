@@ -5100,7 +5100,7 @@ function SimulationsScreen({ onACC, onBox, onSolar, onOptimisation, onBack, onMo
             <button onClick={onBack} style={{background:'none',border:'none',color:'rgba(255,255,255,.35)',fontSize:11,cursor:'pointer',fontFamily:'inherit',padding:'2px 6px'}}>← Retour</button>
           </div>
           <div style={{display:'flex',alignItems:'stretch',gap:8}}>
-            <button onClick={onMonSite} className="btn btn-cta" style={{fontSize:11,padding:'0 12px',borderRadius:10,fontWeight:700,whiteSpace:'nowrap',flexShrink:0}}>Mon<br/>site →</button>
+            <button onClick={onMonSite} className="btn btn-cta" style={{fontSize:11,padding:'8px 12px',borderRadius:10,fontWeight:700,whiteSpace:'nowrap',flexShrink:0,width:'auto',alignSelf:'stretch',lineHeight:1.3,textAlign:'center'}}>Mon<br/>site →</button>
           <div className="sliders-panel" style={{margin:0,flex:1}}>
             {filtresActifs.vitesse && <GameSlider icon="⚡" label="Vitesse de déploiement"
               snapValues={delaiVals} value={delaiFilter}
