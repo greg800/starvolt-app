@@ -1123,6 +1123,31 @@ const sb = supabase.createClient(
   'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhreGtod2VncWthcGRic2lzeHd2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc0MjY4NjksImV4cCI6MjA5MzAwMjg2OX0.9-_oHRJfwXZkl3bRYDMb5K56UzB8O1NOfa5QfrXFfkQ'
 );
 
+// ─── Tracking événements utilisateur ──────────────
+// trackEvent(type, label, screen) — insère dans user_events si connecté
+function trackEvent(type, label, screen) {
+  sb.auth.getUser().then(({ data }) => {
+    const uid = data?.user?.id;
+    if (!uid) return;
+    sb.from('user_events').insert({ user_id: uid, event_type: type, label: label || null, screen: screen || null });
+  });
+}
+
+// Tracker global de clics sur les boutons de l'app
+(function installClickTracker() {
+  let _currentScreen = '';
+  // Exposition d'un setter que l'app appellera à chaque changement d'écran
+  window.__setTrackScreen = (s) => { _currentScreen = s; };
+  document.addEventListener('click', (e) => {
+    const btn = e.target.closest('button, [data-track]');
+    if (!btn) return;
+    // Ignorer les boutons sans texte visible ou purement icône (<3 chars)
+    const txt = (btn.textContent || '').trim().replace(/\s+/g,' ').slice(0, 80);
+    if (!txt || txt.length < 2) return;
+    trackEvent('click', txt, _currentScreen);
+  }, true);
+})();
+
 // Capturer le hash AVANT que Supabase le nettoie (pour détecter type=recovery)
 const initialHash = window.location.hash;
 
@@ -9227,8 +9252,97 @@ function AdminAccEditScreen({ site, onSave, onDelete, onBack }) {
   );
 }
 
+// ─── AdminUserLogsScreen ──────────────────────
+function AdminUserLogsScreen({ userId, userName, onBack }) {
+  const [logs,    setLogs]    = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [filter,  setFilter]  = useState('all'); // 'all' | 'login' | 'click'
+
+  useEffect(() => {
+    sb.from('user_events')
+      .select('*')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false })
+      .limit(500)
+      .then(({ data }) => { setLogs(data || []); setLoading(false); });
+  }, [userId]);
+
+  const fmtDt = (d) => {
+    if (!d) return '—';
+    const dt = new Date(d);
+    return dt.toLocaleDateString('fr-FR') + ' ' + dt.toLocaleTimeString('fr-FR', { hour:'2-digit', minute:'2-digit', second:'2-digit' });
+  };
+
+  const filtered = filter === 'all' ? logs : logs.filter(l => l.event_type === filter);
+  const loginCount = logs.filter(l => l.event_type === 'login').length;
+  const clickCount = logs.filter(l => l.event_type === 'click').length;
+
+  return (
+    <div className="screen fade-in" style={{padding:'0 0 80px'}}>
+      <div style={{display:'flex',alignItems:'center',gap:12,marginBottom:4,marginTop:4}}>
+        <button onClick={onBack} style={{background:'none',border:'none',color:'rgba(255,255,255,.6)',fontSize:22,cursor:'pointer',padding:'4px 8px',lineHeight:1}}>←</button>
+        <div>
+          <div style={{fontSize:9,color:'rgba(125,217,64,.8)',fontWeight:700,textTransform:'uppercase',letterSpacing:'.5px'}}>Activité</div>
+          <div style={{fontSize:18,fontWeight:900,color:'white',lineHeight:1.2}}>{userName || 'Utilisateur'}</div>
+        </div>
+      </div>
+
+      {/* Compteurs */}
+      <div style={{display:'flex',gap:8,margin:'12px 0 16px'}}>
+        {[
+          { key:'all',   label:'Tout',        count: logs.length,  color:'rgba(255,255,255,.7)' },
+          { key:'login', label:'Connexions',  count: loginCount,   color:'#7dd940' },
+          { key:'click', label:'Clics',       count: clickCount,   color:'#60a5fa' },
+        ].map(f => (
+          <button key={f.key} onClick={() => setFilter(f.key)} style={{
+            flex:1, background: filter===f.key ? 'rgba(255,255,255,.1)' : 'rgba(255,255,255,.04)',
+            border: `1px solid ${filter===f.key ? 'rgba(255,255,255,.3)' : 'rgba(255,255,255,.1)'}`,
+            borderRadius:10, padding:'10px 8px', cursor:'pointer', fontFamily:'inherit',
+            textAlign:'center'
+          }}>
+            <div style={{fontSize:20,fontWeight:900,color:f.color}}>{f.count}</div>
+            <div style={{fontSize:10,color:'rgba(255,255,255,.45)',marginTop:2}}>{f.label}</div>
+          </button>
+        ))}
+      </div>
+
+      {loading ? (
+        <div style={{textAlign:'center',padding:40}}><div className="spinner" style={{margin:'0 auto'}}/></div>
+      ) : filtered.length === 0 ? (
+        <div className="card" style={{textAlign:'center',padding:'28px 20px',color:'rgba(255,255,255,.4)',fontSize:14}}>
+          Aucun événement enregistré
+        </div>
+      ) : (
+        <div style={{display:'flex',flexDirection:'column',gap:4}}>
+          {filtered.map(ev => (
+            <div key={ev.id} style={{
+              background:'rgba(255,255,255,.04)', borderRadius:9,
+              padding:'9px 14px', display:'flex', alignItems:'center', gap:12
+            }}>
+              <div style={{
+                width:28, height:28, borderRadius:7, flexShrink:0,
+                background: ev.event_type==='login' ? 'rgba(125,217,64,.15)' : 'rgba(96,165,250,.12)',
+                display:'flex', alignItems:'center', justifyContent:'center', fontSize:14
+              }}>
+                {ev.event_type === 'login' ? '🔑' : '👆'}
+              </div>
+              <div style={{flex:1, minWidth:0}}>
+                <div style={{fontSize:13,color:'rgba(255,255,255,.85)',fontWeight:600,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
+                  {ev.label || ev.event_type}
+                </div>
+                {ev.screen && <div style={{fontSize:10,color:'rgba(255,255,255,.35)',marginTop:1}}>{ev.screen}</div>}
+              </div>
+              <div style={{fontSize:11,color:'rgba(255,255,255,.35)',whiteSpace:'nowrap',flexShrink:0}}>{fmtDt(ev.created_at)}</div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── AdminUsersScreen ─────────────────────────
-function AdminUsersScreen({ onBack }) {
+function AdminUsersScreen({ onBack, onViewLogs }) {
   const [users,           setUsers]           = useState([]);
   const [loading,         setLoading]         = useState(true);
   const [confirmDel,      setConfirmDel]      = useState(null);
@@ -9289,7 +9403,7 @@ function AdminUsersScreen({ onBack }) {
 
   const fmtDate = (d) => d ? new Date(d).toLocaleDateString('fr-FR') : '—';
 
-  const cols = ['', 'Prénom Nom', 'Email', 'Inscription', 'Dernière co.', 'Connexions', 'Rôle', 'Site'];
+  const cols = ['', 'Prénom Nom', 'Email', 'Inscription', 'Dernière co.', 'Connexions', 'Activité', 'Rôle', 'Site'];
 
   // Users sorted alphabetically for target dropdown
   const sortedUsers = [...users].sort((a,b) => {
@@ -9353,6 +9467,15 @@ function AdminUsersScreen({ onBack }) {
                   <td style={{padding:'10px 10px', whiteSpace:'nowrap', color:'rgba(255,255,255,.5)'}}>{fmtDate(u.created_at)}</td>
                   <td style={{padding:'10px 10px', whiteSpace:'nowrap', color:'rgba(255,255,255,.5)'}}>{fmtDate(u.last_sign_in_at)}</td>
                   <td style={{padding:'10px 10px', textAlign:'center', color:'rgba(255,255,255,.7)'}}>{u.login_count ?? '—'}</td>
+                  <td style={{padding:'10px 8px', textAlign:'center'}}>
+                    <button onClick={() => onViewLogs && onViewLogs(u)} style={{
+                      background:'rgba(96,165,250,.12)', border:'1px solid rgba(96,165,250,.3)',
+                      borderRadius:7, color:'#93c5fd', fontSize:11, padding:'4px 10px',
+                      cursor:'pointer', fontFamily:'inherit', whiteSpace:'nowrap', fontWeight:600
+                    }}>
+                      {(u.click_count ?? 0) > 0 ? `${u.click_count} clics` : '0 clic'} · voir log
+                    </button>
+                  </td>
                   <td style={{padding:'10px 10px'}}>
                     <select
                       value={u.role || 'user'}
@@ -9617,6 +9740,8 @@ function App() {
       }
       if (event === 'SIGNED_IN' && session?.user) {
         setUser(session.user);
+        // Logger la connexion dans user_events
+        sb.from('user_events').insert({ user_id: session.user.id, event_type: 'login', label: 'Connexion', screen: 'AUTH_LOGIN' });
         if (pendingProfileRef.current) {
           setProfile(pendingProfileRef.current);
           pendingProfileRef.current = null;
@@ -9642,6 +9767,7 @@ function App() {
   const goTo = useCallback((screen, updates = {}) => {
     setHistory(h => [...h, state]);
     setState(s => ({ ...s, screen, ...updates }));
+    window.__setTrackScreen && window.__setTrackScreen(screen);
     window.scrollTo({ top:0, behavior:'smooth' });
   }, [state]);
 
@@ -9736,7 +9862,9 @@ function App() {
           onBack={goBack}/>;
 
       case 'ADMIN_USERS':
-        return <AdminUsersScreen onBack={goBack}/>;
+        return <AdminUsersScreen onBack={goBack} onViewLogs={(u) => goTo('ADMIN_USER_LOGS', { logUser: u })}/>;
+      case 'ADMIN_USER_LOGS':
+        return <AdminUserLogsScreen userId={state.logUser?.id} userName={`${state.logUser?.prenom||''} ${state.logUser?.nom||''}`.trim() || state.logUser?.email} onBack={goBack}/>;
 
       case 'ADMIN_ACC':
         return <AdminAccScreen
