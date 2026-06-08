@@ -2273,7 +2273,8 @@ function clearPanierLS(){
   ['starvolt_solar_chosen','starvolt_solar_saving','starvolt_box_chosen','starvolt_box_saving',
    'starvolt_optimisation_chosen','starvolt_optimisation_tariff_id','starvolt_optimisation_saving',
    'starvolt_optimisation_tariff_nom','starvolt_acc_chosen','starvolt_acc_saving',
-   'starvolt_baisse_facture','starvolt_acc_price_ht','starvolt_solar_defaults','starvolt_diy_box_chosen'].forEach(k=>localStorage.removeItem(k));
+   'starvolt_baisse_facture','starvolt_acc_price_ht','starvolt_solar_defaults','starvolt_diy_box_chosen',
+   'starvolt_investissement_total'].forEach(k=>localStorage.removeItem(k));
   // Réinitialise les flags services à leurs valeurs par défaut (pas de suppression du cache)
   try{
     const cache=(()=>{try{return JSON.parse(localStorage.getItem('starvolt_global_vars_cache'));}catch{return {};}})();
@@ -7668,9 +7669,9 @@ function PanierScreen({ user, onBack, onGoTo, onMonSite }) {
     const removes = {
       optimisation: ['starvolt_optimisation_chosen','starvolt_optimisation_saving','starvolt_optimisation_tariff_id'],
       acc:          ['starvolt_acc_chosen'],
-      box:          ['starvolt_box_chosen','starvolt_box_saving'],
-      diy:          ['starvolt_diy_box_chosen','starvolt_box_chosen'],
-      solar:        ['starvolt_solar_chosen','starvolt_solar_saving'],
+      box:          ['starvolt_box_chosen','starvolt_box_saving','starvolt_investissement_total'],
+      diy:          ['starvolt_diy_box_chosen','starvolt_box_chosen','starvolt_investissement_total'],
+      solar:        ['starvolt_solar_chosen','starvolt_solar_saving','starvolt_investissement_total'],
     };
     removes[key].forEach(k => localStorage.removeItem(k));
     setItems(s => ({...s, [key]: false}));
