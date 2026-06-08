@@ -6951,44 +6951,19 @@ function InstallSoiMemeScreen({ user, userProfile, onBack, onPanier, onMonSite, 
     });
   }, []);
 
-  // Capacité des équipements sélectionnés (kW) — calculée depuis les produits actifs
-  const equipKw = products.reduce((sum, p) => sum + (qty[p.key] || 0) * p.kw, 0);
-
-  const totalPrice = () => products.reduce((sum, p) => sum + (qty[p.key] || 0) * p.prix, 0);
-
-  const handleValider = () => {
-    if (theorKw > 0 && equipKw < theorKw) { setShowWarn(true); return; }
-    doConfirm();
-  };
-
-  const doConfirm = () => {
-    const effectiveKw = theorKw > 0 ? Math.min(theorKw, equipKw) : equipKw;
-    // Mettre à jour thermKwh effectif dans solar_defaults
-    try {
-      const d = JSON.parse(localStorage.getItem('starvolt_solar_defaults')||'{}');
-      d.thermKwh = String(effectiveKw);
-      localStorage.setItem('starvolt_solar_defaults', JSON.stringify(d));
-    } catch {}
-    // Activer la tuile prod/stockage dans Mon site
-    localStorage.setItem('starvolt_diy_box_chosen', JSON.stringify({qty, equipKw, effectiveKw, total: totalPrice()}));
-    setShowWarn(false);
-    setStep('confirmed');
-    if (onCartUpdate) onCartUpdate();
-  };
-
-  const chg = (k, delta) => setQty(q => ({...q, [k]: Math.max(0, q[k] + delta)}));
+  const chg = (k, delta) => setQty(q => ({...q, [k]: Math.max(0, (q[k]||0) + delta)}));
   const CHKBG = 'repeating-conic-gradient(rgba(255,255,255,.06) 0% 25%,transparent 0% 50%) 0 0/8px 8px';
 
   // Catalogue dynamique basé sur les flags diy_* définis dans l'admin
   // kW de pilotage thermique : box=6, module=3, prise=2, accessoires=0
   const DIY_CATALOG = [
-    { diyFlag:'diy_box_prix',          priceKey:'box_prix',          imgKey:'img_box_prix',        label:'Box Comwatt',          kw:6, emoji:'📦' },
-    { diyFlag:'diy_box_installation',  priceKey:'box_installation',  imgKey:'img_box_installation', label:'Pose / installation',  kw:0, emoji:'🔧' },
-    { diyFlag:'diy_box_satellite',     priceKey:'box_satellite',     imgKey:'img_box_satellite',   label:'Box satellite',        kw:0, emoji:'📡' },
-    { diyFlag:'diy_box_module_deporte',priceKey:'box_module_deporte',imgKey:'img_box_module',       label:'Module déporté',       kw:3, emoji:'🔌' },
-    { diyFlag:'diy_box_pinces',        priceKey:'box_pinces',        imgKey:'img_box_pinces',       label:'Pinces forte puissance',kw:0, emoji:'🔗' },
-    { diyFlag:'diy_prise_prix',        priceKey:'prise_prix',        imgKey:'img_prise',            label:'Prise connectée',      kw:2, emoji:'🔋' },
-    { diyFlag:'diy_prise_installation',priceKey:'prise_installation',imgKey:'img_prise_install',   label:'Pose prise connectée', kw:0, emoji:'🔧' },
+    { diyFlag:'diy_box_prix',          priceKey:'box_prix',          imgKey:'img_box_prix',         label:'Box Comwatt',           kw:6, emoji:'📦' },
+    { diyFlag:'diy_box_installation',  priceKey:'box_installation',  imgKey:'img_box_installation',  label:'Pose / installation',   kw:0, emoji:'🔧' },
+    { diyFlag:'diy_box_satellite',     priceKey:'box_satellite',     imgKey:'img_box_satellite',    label:'Box satellite',         kw:0, emoji:'📡' },
+    { diyFlag:'diy_box_module_deporte',priceKey:'box_module_deporte',imgKey:'img_box_module',        label:'Module déporté',        kw:3, emoji:'🔌' },
+    { diyFlag:'diy_box_pinces',        priceKey:'box_pinces',        imgKey:'img_box_pinces',        label:'Pinces forte puissance', kw:0, emoji:'🔗' },
+    { diyFlag:'diy_prise_prix',        priceKey:'prise_prix',        imgKey:'img_prise',             label:'Prise connectée',       kw:2, emoji:'🔋' },
+    { diyFlag:'diy_prise_installation',priceKey:'prise_installation',imgKey:'img_prise_install',    label:'Pose prise connectée',  kw:0, emoji:'🔧' },
   ];
   const products = prixMat
     ? DIY_CATALOG.filter(p => !!prixMat[p.diyFlag]).map(p => ({
@@ -7000,6 +6975,28 @@ function InstallSoiMemeScreen({ user, userProfile, onBack, onPanier, onMonSite, 
         emoji: p.emoji,
       }))
     : [];
+
+  // Capacité et total — définis APRÈS products
+  const equipKw    = products.reduce((sum, p) => sum + (qty[p.key] || 0) * p.kw,   0);
+  const totalPrice = ()  => products.reduce((sum, p) => sum + (qty[p.key] || 0) * p.prix, 0);
+
+  const handleValider = () => {
+    if (theorKw > 0 && equipKw < theorKw) { setShowWarn(true); return; }
+    doConfirm();
+  };
+
+  const doConfirm = () => {
+    const effectiveKw = theorKw > 0 ? Math.min(theorKw, equipKw) : equipKw;
+    try {
+      const d = JSON.parse(localStorage.getItem('starvolt_solar_defaults')||'{}');
+      d.thermKwh = String(effectiveKw);
+      localStorage.setItem('starvolt_solar_defaults', JSON.stringify(d));
+    } catch {}
+    localStorage.setItem('starvolt_diy_box_chosen', JSON.stringify({qty, equipKw, effectiveKw, total: totalPrice()}));
+    setShowWarn(false);
+    setStep('confirmed');
+    if (onCartUpdate) onCartUpdate();
+  };
 
   if (loading) return <div className="screen fade-in"><div style={{textAlign:'center',padding:40}}><div className="spinner" style={{margin:'0 auto'}}/></div></div>;
 
