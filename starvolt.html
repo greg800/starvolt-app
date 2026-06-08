@@ -10209,16 +10209,17 @@ function AdminLearnSubjectEditScreen({ subjectId, groupId, onSave, onBack }) {
   const save = async () => {
     if (!title.trim()) { setMsg('Titre obligatoire.'); return; }
     setSaving(true);
-    if (isNew || !currentSubjectId) {
+    if (!currentSubjectId) {
       const { data, error } = await sb.from('learn_subjects').insert({ group_id:groupId, title:title.trim(), content:content.trim()||null, image_url:imageUrl||null, video_url:videoUrl.trim()||null, ordre:parseInt(ordre)||0 }).select('id').single();
       if (error) { setMsg(error.message); setSaving(false); return; }
       setCurrentSubjectId(data.id);
+      setSaving(false); setMsg('✓ Enregistré');
+      loadData(data.id);
     } else {
       const { error } = await sb.from('learn_subjects').update({ title:title.trim(), content:content.trim()||null, image_url:imageUrl||null, video_url:videoUrl.trim()||null, ordre:parseInt(ordre)||0 }).eq('id',currentSubjectId);
       if (error) { setMsg(error.message); setSaving(false); return; }
+      setSaving(false); setMsg('✓ Enregistré');
     }
-    setSaving(false); setMsg('✓ Enregistré');
-    if (isNew && currentSubjectId) loadData(currentSubjectId);
   };
 
   const del = async () => {
