@@ -9946,7 +9946,7 @@ function ComprendreQuizScreen({ user, questions, subject, isRevision, onDone, on
       setSelected(null);
       setAnswered(false);
     } else {
-      const correct = results.filter(r => r.correct).length + (selected ? (questions[idx].choices.find(c=>c.id===selected)?.is_correct ? 1 : 0) : 0);
+      const correct = results.filter(r => r.correct).length + (selected ? (questions[idx].learn_choices?.find(c=>c.id===selected)?.is_correct ? 1 : 0) : 0);
       const allResults = [...results];
       onDone({ correct: allResults.filter(r=>r.correct).length, total: questions.length, results: allResults });
     }
@@ -9971,7 +9971,7 @@ function ComprendreQuizScreen({ user, questions, subject, isRevision, onDone, on
         <div style={{fontSize:16,fontWeight:700,color:'white',lineHeight:1.5}}>{q.question}</div>
       </div>
       <div style={{display:'flex',flexDirection:'column',gap:8,marginBottom:16}}>
-        {(q.choices||[]).map(c => {
+        {(q.learn_choices||[]).map(c => {
           let bg = 'rgba(255,255,255,.07)';
           let border = '1px solid rgba(255,255,255,.12)';
           let color = 'white';
@@ -9988,8 +9988,8 @@ function ComprendreQuizScreen({ user, questions, subject, isRevision, onDone, on
         })}
       </div>
       {answered && (
-        <div style={{textAlign:'center',padding:'10px 0',color:(questions[idx].choices||[]).find(c=>c.id===selected)?.is_correct ? '#7dd940':'#ff9060',fontWeight:700,fontSize:15,marginBottom:8}}>
-          {(questions[idx].choices||[]).find(c=>c.id===selected)?.is_correct ? '✓ Bonne réponse !' : '✗ Mauvaise réponse'}
+        <div style={{textAlign:'center',padding:'10px 0',color:(questions[idx].learn_choices||[]).find(c=>c.id===selected)?.is_correct ? '#7dd940':'#ff9060',fontWeight:700,fontSize:15,marginBottom:8}}>
+          {(questions[idx].learn_choices||[]).find(c=>c.id===selected)?.is_correct ? '✓ Bonne réponse !' : '✗ Mauvaise réponse'}
         </div>
       )}
     </div>
