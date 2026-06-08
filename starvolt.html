@@ -1124,24 +1124,25 @@ const sb = supabase.createClient(
 );
 
 // ─── Tracking événements utilisateur ──────────────
-// trackEvent(type, label, screen) — insère dans user_events si connecté
+// UID courant stocké en global pour éviter un appel réseau à chaque clic
+window.__trackUserId = null;
+
 function trackEvent(type, label, screen) {
-  sb.auth.getUser().then(({ data }) => {
-    const uid = data?.user?.id;
-    if (!uid) return;
-    sb.from('user_events').insert({ user_id: uid, event_type: type, label: label || null, screen: screen || null });
-  });
+  const uid = window.__trackUserId;
+  if (!uid) return;
+  sb.from('user_events')
+    .insert({ user_id: uid, event_type: type, label: label || null, screen: screen || null })
+    .then(({ error }) => { if (error) console.warn('[trackEvent]', error.message); });
 }
 
 // Tracker global de clics sur les boutons de l'app
 (function installClickTracker() {
   let _currentScreen = '';
-  // Exposition d'un setter que l'app appellera à chaque changement d'écran
   window.__setTrackScreen = (s) => { _currentScreen = s; };
   document.addEventListener('click', (e) => {
+    if (!window.__trackUserId) return; // pas connecté, on ne track pas
     const btn = e.target.closest('button, [data-track]');
     if (!btn) return;
-    // Ignorer les boutons sans texte visible ou purement icône (<3 chars)
     const txt = (btn.textContent || '').trim().replace(/\s+/g,' ').slice(0, 80);
     if (!txt || txt.length < 2) return;
     trackEvent('click', txt, _currentScreen);
@@ -9720,6 +9721,7 @@ function App() {
     sb.auth.getSession().then(({ data: { session } }) => {
       if (initialHash.includes('type=recovery')) return;
       if (session?.user) {
+        window.__trackUserId = session.user.id; // init tracker pour sessions persistées
         setUser(session.user);
         fetchProfile(session.user.id).then(screen => {
           setState(s => ({ ...s, screen }));
@@ -9740,8 +9742,11 @@ function App() {
       }
       if (event === 'SIGNED_IN' && session?.user) {
         setUser(session.user);
+        // Stocker l'uid pour le tracking (évite un appel réseau à chaque clic)
+        window.__trackUserId = session.user.id;
         // Logger la connexion dans user_events
-        sb.from('user_events').insert({ user_id: session.user.id, event_type: 'login', label: 'Connexion', screen: 'AUTH_LOGIN' });
+        sb.from('user_events').insert({ user_id: session.user.id, event_type: 'login', label: 'Connexion', screen: 'AUTH_LOGIN' })
+          .then(({ error }) => { if (error) console.warn('[login track]', error.message); });
         if (pendingProfileRef.current) {
           setProfile(pendingProfileRef.current);
           pendingProfileRef.current = null;
@@ -9755,6 +9760,7 @@ function App() {
         });
       }
       if (event === 'SIGNED_OUT') {
+        window.__trackUserId = null;
         setUser(null); setProfile(null);
         setHistory([]); setState(INIT);
         localStorage.removeItem('starvolt_active_site_id');
