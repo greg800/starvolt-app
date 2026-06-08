@@ -2247,7 +2247,7 @@ function clearPanierLS(){
   ['starvolt_solar_chosen','starvolt_solar_saving','starvolt_box_chosen','starvolt_box_saving',
    'starvolt_optimisation_chosen','starvolt_optimisation_tariff_id','starvolt_optimisation_saving',
    'starvolt_optimisation_tariff_nom','starvolt_acc_chosen','starvolt_acc_saving',
-   'starvolt_baisse_facture','starvolt_acc_price_ht','starvolt_solar_defaults'].forEach(k=>localStorage.removeItem(k));
+   'starvolt_baisse_facture','starvolt_acc_price_ht','starvolt_solar_defaults','starvolt_diy_box_chosen'].forEach(k=>localStorage.removeItem(k));
   // Réinitialise les flags services à leurs valeurs par défaut (pas de suppression du cache)
   try{
     const cache=(()=>{try{return JSON.parse(localStorage.getItem('starvolt_global_vars_cache'));}catch{return {};}})();
@@ -6992,6 +6992,9 @@ function InstallSoiMemeScreen({ user, userProfile, onBack, onPanier, onMonSite, 
       d.thermKwh = String(effectiveKw);
       localStorage.setItem('starvolt_solar_defaults', JSON.stringify(d));
     } catch {}
+    // Activer le pilotage thermique dans Mon site (même logique que BoxSimScreen)
+    localStorage.setItem('starvolt_box_chosen', 'diy');
+    setPanierServicesChecked({opti_flex: true});
     localStorage.setItem('starvolt_diy_box_chosen', JSON.stringify({qty, equipKw, effectiveKw, total: totalPrice()}));
     setShowWarn(false);
     setStep('confirmed');
@@ -7113,7 +7116,8 @@ function InstallSoiMemeScreen({ user, userProfile, onBack, onPanier, onMonSite, 
             </div>
             <div style={{flex:1,minWidth:0}}>
               <div style={{fontWeight:800,fontSize:14,color:'white'}}>{p.label}</div>
-              <div style={{fontSize:11,color:'rgba(255,255,255,.4)',marginTop:1}}>{p.kw} kW · {p.prix > 0 ? p.prix.toLocaleString('fr-FR')+' €/unité' : 'Prix non défini'}</div>
+              <div style={{fontSize:11,color:'rgba(255,255,255,.4)',marginTop:1}}>{p.kw} kW</div>
+              <div style={{fontSize:17,fontWeight:900,color:'#7dd940',marginTop:3}}>{p.prix > 0 ? p.prix.toLocaleString('fr-FR')+' €' : <span style={{fontSize:12,color:'rgba(255,255,255,.3)'}}>Prix non défini</span>}<span style={{fontSize:10,fontWeight:500,color:'rgba(255,255,255,.4)'}}> /unité</span></div>
             </div>
             <div style={{display:'flex',alignItems:'center',flexShrink:0,background:'rgba(255,255,255,.07)',border:'1px solid rgba(255,255,255,.15)',borderRadius:10,overflow:'hidden'}}>
               <button onClick={()=>chg(p.key,-1)} style={{background:'none',border:'none',color:'rgba(255,255,255,.6)',fontSize:18,width:34,height:36,cursor:'pointer',fontFamily:'inherit',lineHeight:1}}>−</button>
@@ -7494,7 +7498,7 @@ function PanierScreen({ user, onBack, onGoTo, onMonSite }) {
   const [isDynamic,   setIsDynamic]   = useState(false);
   const [taux,        setTaux]        = useState(4);
   const [taux2,       setTaux2]       = useState(0);
-  const [savings,     setSavings]     = useState({ optimisation:0, acc:0, box:0, solar:0 });
+  const [savings,     setSavings]     = useState({ optimisation:0, acc:0, box:0, diy:0, solar:0 });
   const [validated,   setValidated]   = useState(false);
   const [solGridKwh,    setSolGridKwh]    = useState(null);
   const [solInjKwh,     setSolInjKwh]     = useState(null);
@@ -7503,13 +7507,15 @@ function PanierScreen({ user, onBack, onGoTo, onMonSite }) {
   const [items,       setItems]       = useState(() => ({
     optimisation: !!localStorage.getItem('starvolt_optimisation_chosen'),
     acc:          localStorage.getItem('starvolt_acc_chosen') === 'true',
-    box:          !!localStorage.getItem('starvolt_box_chosen'),
+    box:          !!localStorage.getItem('starvolt_box_chosen') && localStorage.getItem('starvolt_box_chosen') !== 'diy',
+    diy:          !!localStorage.getItem('starvolt_diy_box_chosen'),
     solar:        !!localStorage.getItem('starvolt_solar_chosen'),
   }));
 
   const boxChoice   = localStorage.getItem('starvolt_box_chosen');
   const solarChoice = localStorage.getItem('starvolt_solar_chosen');
-  const investments = { optimisation:0, acc:0, box: boxChoice==='buy' ? 600 : 0, solar:13000 };
+  const diyTotal    = (() => { try { return JSON.parse(localStorage.getItem('starvolt_diy_box_chosen')||'{}').total || 0; } catch { return 0; } })();
+  const investments = { optimisation:0, acc:0, box: boxChoice==='buy' ? 600 : 0, diy: diyTotal, solar:13000 };
   const investLS = parseInt(localStorage.getItem('starvolt_investissement_total')||'0') || 0;
 
   useEffect(() => {
@@ -7586,7 +7592,11 @@ function PanierScreen({ user, onBack, onGoTo, onMonSite }) {
         let solSav = baisseFact0 > 0 ? baisseFact0 : (solarChoice === 'solar_box' ? Math.round(adjBillSolar * 0.70) : Math.round(adjBillSolar * 0.50));
         // Si solar_box choisi, la Box est comprise dans le 70% — ne pas compter ses économies en double
         const effectiveBoxSav = (solarChoice === 'solar_box') ? 0 : boxSav;
-        setSavings({ optimisation: optSav, acc: accSav, box: effectiveBoxSav, solar: solSav });
+        // DIY savings : même estimation flex que Box (basée sur capacité thermique)
+        const diyData = (()=>{ try{return JSON.parse(localStorage.getItem('starvolt_diy_box_chosen')||'{}');}catch{return{};} })();
+        const diyKw = parseFloat(diyData.effectiveKw)||0;
+        const diyFlexGain = Math.round(diyKw * 14 + shiftSavP);
+        setSavings({ optimisation: optSav, acc: accSav, box: effectiveBoxSav, diy: diyFlexGain, solar: solSav });
         // Projection solaire précise : calculer achat réseau et injection heure par heure
         if (solarChoice && site.profil_production_id && site.conso_profil) {
           const siteKwh = site.conso_annuelle_kwh || kwh_total;
@@ -7631,6 +7641,7 @@ function PanierScreen({ user, onBack, onGoTo, onMonSite }) {
       optimisation: ['starvolt_optimisation_chosen','starvolt_optimisation_saving','starvolt_optimisation_tariff_id'],
       acc:          ['starvolt_acc_chosen'],
       box:          ['starvolt_box_chosen','starvolt_box_saving'],
+      diy:          ['starvolt_diy_box_chosen','starvolt_box_chosen'],
       solar:        ['starvolt_solar_chosen','starvolt_solar_saving'],
     };
     removes[key].forEach(k => localStorage.removeItem(k));
@@ -7639,7 +7650,7 @@ function PanierScreen({ user, onBack, onGoTo, onMonSite }) {
 
   const clearPanier = () => {
     clearPanierLS(); // vide LS + solar_defaults + dispatch starvolt_panier_cleared
-    setItems({ optimisation:false, acc:false, box:false, solar:false });
+    setItems({ optimisation:false, acc:false, box:false, diy:false, solar:false });
     // Réinitialise les services cochés quand on vide le panier
     sb.from('parametres_nationaux').upsert({id:1,opti_solaire:true,opti_tarif:true,opti_flex:false,opti_acc:false},{onConflict:'id'});
   };
@@ -7837,6 +7848,13 @@ function PanierScreen({ user, onBack, onGoTo, onMonSite }) {
           investment={investments.box}
           color="#7dd940" onRemove={()=>removeItem('box')}
           onClick={()=>onGoTo&&onGoTo('BOX_SIM')}/>
+      )}
+      {items.diy && (
+        <CartItemCard imgSrc="/comwatt-box.png" title="Installer soi-même Comwatt"
+          subtitle={(() => { try { const d=JSON.parse(localStorage.getItem('starvolt_diy_box_chosen')||'{}'); return `Matériel DIY — ${d.total ? d.total.toLocaleString('fr-FR')+' €' : 'commande confirmée'}`; } catch { return 'Commande DIY confirmée'; } })()}
+          investment={(() => { try { return JSON.parse(localStorage.getItem('starvolt_diy_box_chosen')||'{}').total || 0; } catch { return 0; } })()}
+          color="#c084fc" onRemove={()=>removeItem('diy')}
+          onClick={()=>onGoTo&&onGoTo('DIY_BOX_SIM')}/>
       )}
       {items.solar && (
         <CartItemCard imgSrc="/maison.png" title="Installation solaire"
