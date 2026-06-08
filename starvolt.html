@@ -3389,7 +3389,7 @@ function EnergyBalanceChart({ balance, level, selMonth, selDay, setLevel, setSel
 }
 
 // ─── MonSiteScreen ────────────────────────────
-function MonSiteScreen({ user, userProfile, onBack, onSimulations, cartVersion=0 }) {
+function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre, cartVersion=0 }) {
   const[sites,setSites]=useState(null);
   const[activeId,setActiveId]=useState(null);
   const[tariffs,setTariffs]=useState([]);
@@ -4521,6 +4521,7 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, cartVersion=0
 
       <StickyFooter row onBack={onBack}>
         {onSimulations&&<button className="btn btn-primary" style={{fontSize:13}} onClick={onSimulations}>Simulations d'économies →</button>}
+        {onComprendre&&<button className="btn" style={{fontSize:13}} onClick={onComprendre}>💡 Comprendre</button>}
       </StickyFooter>
     </>
   );
@@ -4625,7 +4626,7 @@ const PICTOS_DEFAUT = {
   solaire:                  '/maison.png',
 };
 
-function SimulationsScreen({ onACC, onBox, onSolar, onOptimisation, onDiyBox, onBack, onMonSite, user, userProfile }) {
+function SimulationsScreen({ onACC, onBox, onSolar, onOptimisation, onDiyBox, onBack, onMonSite, onComprendre, user, userProfile }) {
   const [hasConso,  setHasConso]  = useState(false);
   const [maxSaving, setMaxSaving] = useState(null);
   const [accSaving, setAccSaving] = useState(null);
@@ -5031,7 +5032,9 @@ function SimulationsScreen({ onACC, onBox, onSolar, onOptimisation, onDiyBox, on
         </div>
       </div>
     ) : (
-      <StickyFooter onBack={onBack}/>
+      <StickyFooter row onBack={onBack}>
+        {onComprendre&&<button className="btn" style={{fontSize:13}} onClick={onComprendre}>💡 Comprendre</button>}
+      </StickyFooter>
     )}
     </>
   );
@@ -8372,7 +8375,7 @@ function AdminPrixMateriauxScreen({ onBack }) {
 }
 
 // ─── AdminScreen ──────────────────────────────
-function AdminScreen({ onTariffs, onUsers, onSpot, onAcc, onProduction, onGlobalVars, onPrix, onOffres, onBack }) {
+function AdminScreen({ onTariffs, onUsers, onSpot, onAcc, onProduction, onGlobalVars, onPrix, onOffres, onLearn, onBack }) {
   return (
     <>
     <div className="screen fade-in">
@@ -8442,6 +8445,14 @@ function AdminScreen({ onTariffs, onUsers, onSpot, onAcc, onProduction, onGlobal
           <div className="sim-text">
             <div className="sim-title">Gestion des utilisateurs</div>
             <div className="sim-sub">Voir et gérer les membres Starvolt</div>
+          </div>
+          <span className="sim-arrow">→</span>
+        </button>
+        <button className="sim-btn" onClick={onLearn}>
+          <span className="sim-icon">💡</span>
+          <div className="sim-text">
+            <div className="sim-title">Paramétrer le module Comprendre</div>
+            <div className="sim-sub">Groupes, sujets, quiz et questions</div>
           </div>
           <span className="sim-arrow">→</span>
         </button>
@@ -9676,6 +9687,687 @@ const INIT = {
   investment:  0,
 };
 
+// ─── Utilitaires Learn ────────────────────────────────────────────────────────
+async function uploadLearnImage(file) {
+  const ext = file.name.split('.').pop().toLowerCase();
+  const filename = `${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`;
+  const { error } = await sb.storage.from('learn-images').upload(filename, file, { contentType: file.type, upsert: true });
+  if (error) throw error;
+  const { data: { publicUrl } } = sb.storage.from('learn-images').getPublicUrl(filename);
+  return publicUrl;
+}
+function getVideoEmbed(url) {
+  if (!url) return null;
+  const yt = url.match(/(?:youtube\.com\/(?:watch\?v=|embed\/)|youtu\.be\/)([^&?/]+)/);
+  if (yt) return `https://www.youtube.com/embed/${yt[1]}`;
+  return url;
+}
+
+// ─── HomeChoiceScreen ─────────────────────────────────────────────────────────
+function HomeChoiceScreen({ profile, onComprendre, onAction }) {
+  const prenom = profile?.prenom ? `, ${profile.prenom}` : '';
+  return (
+    <div style={{minHeight:'calc(100vh - 56px)',display:'flex',flexDirection:'column'}}>
+      <button onClick={onComprendre} style={{flex:1,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',background:'rgba(0,0,0,.22)',border:'none',borderBottom:'1px solid rgba(255,255,255,.1)',cursor:'pointer',padding:'40px 28px',gap:14,textAlign:'center',width:'100%'}}>
+        <div style={{fontSize:40}}>💡</div>
+        <div style={{fontSize:26,fontWeight:900,color:'white',lineHeight:1.2}}>L'énergie,<br/>enfin expliquée</div>
+        <div style={{fontSize:14,color:'rgba(255,255,255,.65)',maxWidth:280,lineHeight:1.6}}>Comprendre comment la transition énergétique va t'impacter concrètement</div>
+        <div style={{marginTop:6,padding:'11px 26px',background:'rgba(255,255,255,.14)',borderRadius:12,fontSize:14,fontWeight:700,color:'white',border:'1.5px solid rgba(255,255,255,.22)'}}>Comprendre →</div>
+      </button>
+      <button onClick={onAction} style={{flex:1,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',background:'rgba(125,217,64,.10)',border:'none',cursor:'pointer',padding:'40px 28px',gap:14,textAlign:'center',width:'100%'}}>
+        <div style={{fontSize:40}}>⚡</div>
+        <div style={{fontSize:26,fontWeight:900,color:'#7dd940',lineHeight:1.2}}>Passer à l'action<br/>dès maintenant</div>
+        <div style={{fontSize:14,color:'rgba(255,255,255,.65)',maxWidth:280,lineHeight:1.6}}>Simule tes économies et choisis les meilleures solutions pour ton logement</div>
+        <div style={{marginTop:6,padding:'11px 26px',background:'#7dd940',borderRadius:12,fontSize:14,fontWeight:700,color:'#1a4500'}}>Mon site →</div>
+      </button>
+    </div>
+  );
+}
+
+// ─── ComprendreHomeScreen ─────────────────────────────────────────────────────
+function ComprendreHomeScreen({ user, onGroup, onAction, onBack }) {
+  const [groups, setGroups] = useState([]);
+  const [progress, setProgress] = useState({});
+  const [revisions, setRevisions] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    async function load() {
+      const { data: grps } = await sb.from('learn_groups').select('id,title,description,ordre').order('ordre');
+      const { data: subs } = await sb.from('learn_subjects').select('id,group_id').order('ordre');
+      let prog = {};
+      let revs = [];
+      if (user) {
+        const { data: p } = await sb.from('user_learn_progress').select('subject_id,completed_at,score,failed_question_ids').eq('user_id', user.id);
+        if (p) p.forEach(r => {
+          prog[r.subject_id] = r;
+          if (r.failed_question_ids?.length) revs.push(r.subject_id);
+        });
+      }
+      const gWithStats = (grps||[]).map(g => {
+        const gSubs = (subs||[]).filter(s => s.group_id === g.id);
+        const total = gSubs.length;
+        const done = gSubs.filter(s => prog[s.id]?.completed_at).length;
+        const hasRev = gSubs.some(s => revs.includes(s.id));
+        return { ...g, total, done, hasRev };
+      });
+      setGroups(gWithStats);
+      setProgress(prog);
+      setRevisions(revs);
+      setLoading(false);
+    }
+    load();
+  }, [user]);
+
+  const totalRevisions = revisions.length;
+
+  return (
+    <>
+    <div className="screen fade-in">
+      <div className="auth-header">
+        <div className="welcome-tag" style={{color:'#7dd940'}}>Module</div>
+        <h1 className="welcome-title">L'énergie,<br/><span className="accent">enfin expliquée</span></h1>
+      </div>
+      {loading ? <div style={{textAlign:'center',padding:40}}><div className="spinner" style={{margin:'0 auto'}}/></div> : (
+        <>
+        {totalRevisions > 0 && (
+          <div className="card" style={{marginBottom:12,border:'1.5px solid rgba(255,180,60,.4)',background:'rgba(255,180,60,.08)',cursor:'pointer',padding:'14px 16px',display:'flex',alignItems:'center',gap:12}} onClick={() => onGroup({ id:'__revision__', title:'Révision', isRevision:true, revisionSubjectIds: revisions })}>
+            <span style={{fontSize:26}}>🔁</span>
+            <div style={{flex:1}}>
+              <div style={{fontWeight:700,color:'#ffb340',fontSize:15}}>Révision disponible</div>
+              <div style={{fontSize:12,color:'rgba(255,255,255,.6)',marginTop:2}}>{totalRevisions} sujet{totalRevisions>1?'s':''} avec des questions à revoir</div>
+            </div>
+            <span style={{color:'rgba(255,255,255,.4)',fontSize:18}}>→</span>
+          </div>
+        )}
+        <div style={{display:'flex',flexDirection:'column',gap:10}}>
+          {groups.map(g => (
+            <button key={g.id} onClick={() => onGroup(g)} style={{background:'rgba(255,255,255,.07)',border:'1px solid rgba(255,255,255,.12)',borderRadius:14,padding:'16px 18px',textAlign:'left',cursor:'pointer',display:'flex',alignItems:'center',gap:14,width:'100%'}}>
+              <div style={{flex:1}}>
+                <div style={{fontWeight:700,color:'white',fontSize:16,marginBottom:4}}>{g.title}</div>
+                {g.description && <div style={{fontSize:12,color:'rgba(255,255,255,.55)',lineHeight:1.4}}>{g.description}</div>}
+                <div style={{marginTop:8,display:'flex',alignItems:'center',gap:8}}>
+                  <div style={{flex:1,height:4,background:'rgba(255,255,255,.12)',borderRadius:4,overflow:'hidden'}}>
+                    <div style={{width:`${g.total>0?Math.round(g.done/g.total*100):0}%`,height:'100%',background:'#7dd940',borderRadius:4,transition:'width .3s'}}/>
+                  </div>
+                  <span style={{fontSize:11,color:'rgba(255,255,255,.5)',whiteSpace:'nowrap'}}>{g.done}/{g.total}</span>
+                  {g.hasRev && <span style={{fontSize:10,color:'#ffb340',fontWeight:700}}>🔁 révision</span>}
+                </div>
+              </div>
+              <span style={{color:'rgba(255,255,255,.35)',fontSize:20}}>→</span>
+            </button>
+          ))}
+          {groups.length === 0 && <div style={{textAlign:'center',color:'rgba(255,255,255,.35)',padding:40,fontSize:14}}>Aucun contenu disponible pour le moment.</div>}
+        </div>
+        </>
+      )}
+    </div>
+    <StickyFooter row onBack={onBack}>
+      <button className="btn btn-primary" style={{fontSize:13}} onClick={onAction}>Passer à l'action →</button>
+    </StickyFooter>
+    </>
+  );
+}
+
+// ─── ComprendreGroupScreen ────────────────────────────────────────────────────
+function ComprendreGroupScreen({ user, group, onSubject, onRevision, onAction, onBack }) {
+  const [subjects, setSubjects] = useState([]);
+  const [progress, setProgress] = useState({});
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    async function load() {
+      if (group.isRevision) { setLoading(false); return; }
+      const { data: subs } = await sb.from('learn_subjects').select('id,title,content,image_url,video_url,ordre').eq('group_id', group.id).order('ordre');
+      let prog = {};
+      if (user) {
+        const ids = (subs||[]).map(s=>s.id);
+        if (ids.length) {
+          const { data: p } = await sb.from('user_learn_progress').select('subject_id,completed_at,score,failed_question_ids').eq('user_id',user.id).in('subject_id',ids);
+          if (p) p.forEach(r => prog[r.subject_id] = r);
+        }
+      }
+      setSubjects(subs||[]);
+      setProgress(prog);
+      setLoading(false);
+    }
+    load();
+  }, [group, user]);
+
+  if (group.isRevision) {
+    return (
+      <>
+      <div className="screen fade-in">
+        <div className="auth-header">
+          <div className="welcome-tag" style={{color:'#ffb340'}}>🔁 Révision</div>
+          <h1 className="welcome-title">Revoir les<br/><span className="accent">erreurs passées</span></h1>
+        </div>
+        <div style={{fontSize:14,color:'rgba(255,255,255,.65)',lineHeight:1.6,marginBottom:20}}>
+          Nous allons revoir les questions que tu n'as pas réussies lors de tes précédentes sessions.
+        </div>
+        <button className="btn btn-yes" style={{width:'100%'}} onClick={() => onRevision(group.revisionSubjectIds)}>Démarrer la révision →</button>
+      </div>
+      <StickyFooter row onBack={onBack}>
+        <button className="btn btn-primary" style={{fontSize:13}} onClick={onAction}>Passer à l'action →</button>
+      </StickyFooter>
+      </>
+    );
+  }
+
+  return (
+    <>
+    <div className="screen fade-in">
+      <div className="auth-header">
+        <div className="welcome-tag" style={{color:'#7dd940'}}>Groupe</div>
+        <h1 className="welcome-title">{group.title}</h1>
+      </div>
+      {loading ? <div style={{textAlign:'center',padding:40}}><div className="spinner" style={{margin:'0 auto'}}/></div> : (
+        <div style={{display:'flex',flexDirection:'column',gap:10}}>
+          {subjects.map((s,i) => {
+            const p = progress[s.id];
+            const mastered = !!p?.completed_at;
+            const hasRev = p?.failed_question_ids?.length > 0;
+            return (
+              <button key={s.id} onClick={() => onSubject(s, group)} style={{background: mastered?'rgba(125,217,64,.10)':'rgba(255,255,255,.07)',border:`1px solid ${mastered?'rgba(125,217,64,.3)':'rgba(255,255,255,.12)'}`,borderRadius:14,padding:'14px 16px',textAlign:'left',cursor:'pointer',display:'flex',alignItems:'center',gap:12,width:'100%'}}>
+                <div style={{width:32,height:32,borderRadius:'50%',background:mastered?'rgba(125,217,64,.25)':'rgba(255,255,255,.1)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:14,fontWeight:700,color:mastered?'#7dd940':'rgba(255,255,255,.5)',flexShrink:0}}>
+                  {mastered ? '✓' : i+1}
+                </div>
+                <div style={{flex:1}}>
+                  <div style={{fontWeight:700,color:'white',fontSize:14}}>{s.title}</div>
+                  {mastered && <div style={{fontSize:11,color:'#7dd940',marginTop:2}}>Maîtrisé · {p.score}%{hasRev?' · 🔁 révision':''}</div>}
+                  {!mastered && p && <div style={{fontSize:11,color:'rgba(255,180,60,.8)',marginTop:2}}>En cours · {p.score}%{hasRev?' · 🔁 révision':''}</div>}
+                </div>
+                <span style={{color:'rgba(255,255,255,.35)',fontSize:18}}>→</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+    <StickyFooter row onBack={onBack}>
+      <button className="btn btn-primary" style={{fontSize:13}} onClick={onAction}>Passer à l'action →</button>
+    </StickyFooter>
+    </>
+  );
+}
+
+// ─── ComprendreSubjectScreen ──────────────────────────────────────────────────
+function ComprendreSubjectScreen({ subject, onQuiz, onBack }) {
+  const embed = getVideoEmbed(subject.video_url);
+  return (
+    <>
+    <div className="screen fade-in">
+      <div className="auth-header">
+        <div className="welcome-tag" style={{color:'#7dd940'}}>Contenu</div>
+        <h1 className="welcome-title">{subject.title}</h1>
+      </div>
+      {subject.image_url && (
+        <div style={{marginBottom:18,borderRadius:14,overflow:'hidden',maxHeight:220}}>
+          <img src={subject.image_url} alt="" style={{width:'100%',height:'100%',objectFit:'cover',display:'block'}}/>
+        </div>
+      )}
+      {subject.content && (
+        <div className="card" style={{marginBottom:16,padding:'18px 18px'}}>
+          <div style={{fontSize:14,color:'rgba(255,255,255,.85)',lineHeight:1.7,whiteSpace:'pre-wrap'}}>{subject.content}</div>
+        </div>
+      )}
+      {embed && (
+        <div style={{marginBottom:16,borderRadius:14,overflow:'hidden',aspectRatio:'16/9'}}>
+          <iframe src={embed} style={{width:'100%',height:'100%',border:'none'}} allowFullScreen title="vidéo"/>
+        </div>
+      )}
+    </div>
+    <StickyFooter row onBack={onBack}>
+      <button className="btn btn-yes" style={{fontSize:13}} onClick={onQuiz}>Démarrer le quiz →</button>
+    </StickyFooter>
+    </>
+  );
+}
+
+// ─── ComprendreQuizScreen ─────────────────────────────────────────────────────
+function ComprendreQuizScreen({ user, questions, subject, isRevision, onDone, onBack }) {
+  const [idx, setIdx] = useState(0);
+  const [selected, setSelected] = useState(null);
+  const [answered, setAnswered] = useState(false);
+  const [results, setResults] = useState([]);
+
+  const q = questions[idx];
+  if (!q) return null;
+
+  const handleSelect = (choice) => {
+    if (answered) return;
+    setSelected(choice.id);
+    setAnswered(true);
+    setResults(r => [...r, { questionId: q.id, correct: choice.is_correct }]);
+  };
+
+  const handleNext = () => {
+    if (idx < questions.length - 1) {
+      setIdx(i => i+1);
+      setSelected(null);
+      setAnswered(false);
+    } else {
+      const correct = results.filter(r => r.correct).length + (selected ? (questions[idx].choices.find(c=>c.id===selected)?.is_correct ? 1 : 0) : 0);
+      const allResults = [...results];
+      onDone({ correct: allResults.filter(r=>r.correct).length, total: questions.length, results: allResults });
+    }
+  };
+
+  const pct = Math.round((idx / questions.length) * 100);
+
+  return (
+    <>
+    <div className="screen fade-in">
+      <div style={{marginBottom:16}}>
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:6}}>
+          <span style={{fontSize:12,color:'rgba(255,255,255,.5)'}}>Question {idx+1} / {questions.length}</span>
+          {isRevision && <span style={{fontSize:11,color:'#ffb340',fontWeight:700}}>🔁 Révision</span>}
+        </div>
+        <div style={{height:4,background:'rgba(255,255,255,.12)',borderRadius:4,overflow:'hidden'}}>
+          <div style={{width:`${pct}%`,height:'100%',background:'#7dd940',borderRadius:4,transition:'width .3s'}}/>
+        </div>
+      </div>
+      {q.image_url && <div style={{marginBottom:14,borderRadius:12,overflow:'hidden',maxHeight:180}}><img src={q.image_url} alt="" style={{width:'100%',objectFit:'cover',display:'block'}}/></div>}
+      <div className="card" style={{marginBottom:16,padding:'18px 18px'}}>
+        <div style={{fontSize:16,fontWeight:700,color:'white',lineHeight:1.5}}>{q.question}</div>
+      </div>
+      <div style={{display:'flex',flexDirection:'column',gap:8,marginBottom:16}}>
+        {(q.choices||[]).map(c => {
+          let bg = 'rgba(255,255,255,.07)';
+          let border = '1px solid rgba(255,255,255,.12)';
+          let color = 'white';
+          if (answered) {
+            if (c.is_correct) { bg='rgba(125,217,64,.18)'; border='1.5px solid rgba(125,217,64,.5)'; color='#7dd940'; }
+            else if (c.id === selected) { bg='rgba(255,80,80,.15)'; border='1.5px solid rgba(255,80,80,.4)'; color='#ff6060'; }
+          } else if (c.id === selected) { bg='rgba(255,255,255,.14)'; border='1.5px solid rgba(255,255,255,.3)'; }
+          return (
+            <button key={c.id} onClick={() => handleSelect(c)}
+              style={{background:bg,border,borderRadius:12,padding:'14px 16px',textAlign:'left',cursor:answered?'default':'pointer',color,fontSize:14,fontWeight:500,transition:'all .2s',width:'100%'}}>
+              {c.text}
+            </button>
+          );
+        })}
+      </div>
+      {answered && (
+        <div style={{textAlign:'center',padding:'10px 0',color:(questions[idx].choices||[]).find(c=>c.id===selected)?.is_correct ? '#7dd940':'#ff9060',fontWeight:700,fontSize:15,marginBottom:8}}>
+          {(questions[idx].choices||[]).find(c=>c.id===selected)?.is_correct ? '✓ Bonne réponse !' : '✗ Mauvaise réponse'}
+        </div>
+      )}
+    </div>
+    {answered && (
+      <StickyFooter>
+        <button className="btn btn-yes" style={{width:'100%'}} onClick={handleNext}>
+          {idx < questions.length-1 ? 'Question suivante →' : 'Voir mon score →'}
+        </button>
+      </StickyFooter>
+    )}
+    {!answered && <StickyFooter onBack={onBack}/>}
+    </>
+  );
+}
+
+// ─── ComprendreScoreScreen ────────────────────────────────────────────────────
+function ComprendreScoreScreen({ user, subject, score, total, results, isRevision, allSubjects, onNext, onHome, onRetry }) {
+  const correct = results.filter(r=>r.correct).length;
+  const pct = total > 0 ? Math.round(correct/total*100) : 0;
+  const mastered = pct >= 70;
+  const failedIds = results.filter(r=>!r.correct).map(r=>r.questionId);
+
+  useEffect(() => {
+    if (mastered) {
+      confetti({ particleCount: 120, spread: 70, origin: { y: .6 } });
+      if (user && subject) {
+        sb.from('user_learn_progress').upsert({
+          user_id: user.id, subject_id: subject.id,
+          completed_at: mastered ? new Date().toISOString() : null,
+          score: pct,
+          failed_question_ids: failedIds,
+        }, { onConflict: 'user_id,subject_id' });
+      }
+    } else {
+      if (user && subject) {
+        sb.from('user_learn_progress').upsert({
+          user_id: user.id, subject_id: subject.id,
+          completed_at: null, score: pct,
+          failed_question_ids: failedIds,
+        }, { onConflict: 'user_id,subject_id' });
+      }
+    }
+  }, []);
+
+  return (
+    <>
+    <div className="screen fade-in">
+      <div style={{textAlign:'center',padding:'30px 0 20px'}}>
+        <div style={{fontSize:56,marginBottom:12}}>{mastered ? '🎉' : '💪'}</div>
+        <div style={{fontSize:22,fontWeight:900,color:'white',marginBottom:6}}>{isRevision ? 'Révision terminée !' : 'Quiz terminé !'}</div>
+        <div style={{fontSize:60,fontWeight:900,color:mastered?'#7dd940':'#ffb340',lineHeight:1}}>{pct}%</div>
+        <div style={{fontSize:14,color:'rgba(255,255,255,.55)',marginTop:6}}>{correct} bonne{correct>1?'s':''} réponse{correct>1?'s':''} sur {total}</div>
+      </div>
+      {mastered ? (
+        <div className="card" style={{textAlign:'center',padding:'14px 18px',border:'1.5px solid rgba(125,217,64,.3)',marginBottom:12}}>
+          <div style={{color:'#7dd940',fontWeight:700,fontSize:15}}>✓ Sujet maîtrisé !</div>
+          {failedIds.length > 0 && <div style={{fontSize:12,color:'rgba(255,255,255,.5)',marginTop:4}}>Les {failedIds.length} question{failedIds.length>1?'s':''} ratée{failedIds.length>1?'s':''} seront proposées en révision lors de ta prochaine session.</div>}
+        </div>
+      ) : (
+        <div className="card" style={{textAlign:'center',padding:'14px 18px',border:'1.5px solid rgba(255,180,60,.25)',marginBottom:12}}>
+          <div style={{color:'#ffb340',fontWeight:700,fontSize:15}}>Il faut 70% pour maîtriser ce sujet</div>
+          <div style={{fontSize:12,color:'rgba(255,255,255,.5)',marginTop:4}}>Réessaie pour débloquer le sujet suivant.</div>
+        </div>
+      )}
+    </div>
+    <StickyFooter row>
+      {!mastered && <button className="btn" style={{flex:1,fontSize:13}} onClick={onRetry}>Réessayer</button>}
+      {mastered && onNext && <button className="btn btn-yes" style={{flex:1,fontSize:13}} onClick={onNext}>Sujet suivant →</button>}
+      <button className="btn btn-primary" style={{flex:1,fontSize:13}} onClick={onHome}>Retour aux groupes</button>
+    </StickyFooter>
+    </>
+  );
+}
+
+// ─── Admin : Module Comprendre ────────────────────────────────────────────────
+function AdminLearnScreen({ onGroup, onNew, onBack }) {
+  const [groups, setGroups] = useState(null);
+  const load = async () => { const { data } = await sb.from('learn_groups').select('id,title,description,ordre').order('ordre'); setGroups(data||[]); };
+  useEffect(() => { load(); }, []);
+  return (
+    <>
+    <div className="screen fade-in">
+      <div className="auth-header">
+        <div className="welcome-tag" style={{color:'#7dd940'}}>Admin · Comprendre</div>
+        <h1 className="welcome-title">Groupes<br/><span className="accent">de sujets</span></h1>
+      </div>
+      <button className="btn btn-yes" style={{width:'100%',marginBottom:16}} onClick={onNew}>+ Nouveau groupe</button>
+      {groups === null ? <div style={{textAlign:'center',padding:40}}><div className="spinner" style={{margin:'0 auto'}}/></div> : (
+        <div style={{display:'flex',flexDirection:'column',gap:8}}>
+          {groups.map(g => (
+            <button key={g.id} onClick={()=>onGroup(g)} style={{background:'rgba(255,255,255,.07)',border:'1px solid rgba(255,255,255,.12)',borderRadius:12,padding:'14px 16px',textAlign:'left',cursor:'pointer',display:'flex',alignItems:'center',gap:12,width:'100%'}}>
+              <div style={{flex:1}}>
+                <div style={{fontWeight:700,color:'white',fontSize:14}}>{g.title}</div>
+                {g.description && <div style={{fontSize:11,color:'rgba(255,255,255,.45)',marginTop:2}}>{g.description}</div>}
+              </div>
+              <span style={{color:'rgba(255,255,255,.35)',fontSize:16}}>→</span>
+            </button>
+          ))}
+          {groups.length===0 && <div style={{textAlign:'center',color:'rgba(255,255,255,.35)',padding:30,fontSize:13}}>Aucun groupe. Créez-en un.</div>}
+        </div>
+      )}
+    </div>
+    <StickyFooter onBack={onBack}/>
+    </>
+  );
+}
+
+function AdminLearnGroupEditScreen({ group, onSubject, onSave, onBack }) {
+  const isNew = !group?.id;
+  const [title, setTitle] = useState(group?.title||'');
+  const [desc, setDesc] = useState(group?.description||'');
+  const [ordre, setOrdre] = useState(group?.ordre??0);
+  const [subjects, setSubjects] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [msg, setMsg] = useState('');
+
+  const loadSubs = async () => {
+    if (!group?.id) return;
+    const { data } = await sb.from('learn_subjects').select('id,title,ordre').eq('group_id',group.id).order('ordre');
+    setSubjects(data||[]);
+  };
+  useEffect(() => { loadSubs(); }, [group]);
+
+  const save = async () => {
+    if (!title.trim()) { setMsg('Le titre est obligatoire.'); return; }
+    setSaving(true);
+    if (isNew) {
+      const { error } = await sb.from('learn_groups').insert({ title:title.trim(), description:desc.trim()||null, ordre:parseInt(ordre)||0 });
+      if (error) { setMsg(error.message); setSaving(false); return; }
+    } else {
+      const { error } = await sb.from('learn_groups').update({ title:title.trim(), description:desc.trim()||null, ordre:parseInt(ordre)||0 }).eq('id',group.id);
+      if (error) { setMsg(error.message); setSaving(false); return; }
+    }
+    setSaving(false);
+    onSave();
+  };
+
+  const del = async () => {
+    if (!window.confirm('Supprimer ce groupe et tous ses sujets ?')) return;
+    setDeleting(true);
+    await sb.from('learn_groups').delete().eq('id',group.id);
+    onSave();
+  };
+
+  return (
+    <>
+    <div className="screen fade-in">
+      <div className="auth-header">
+        <div className="welcome-tag" style={{color:'#7dd940'}}>Admin</div>
+        <h1 className="welcome-title">{isNew?'Nouveau':'Modifier'}<br/><span className="accent">groupe</span></h1>
+      </div>
+      <div className="form-card">
+        <div className="inp-group"><label className="inp-label">Titre *</label><input className="inp" value={title} onChange={e=>setTitle(e.target.value)} placeholder="ex. Les bases de l'électricité"/></div>
+        <div className="inp-group"><label className="inp-label">Description</label><textarea className="inp" rows={2} value={desc} onChange={e=>setDesc(e.target.value)} placeholder="Courte description du groupe" style={{resize:'vertical'}}/></div>
+        <div className="inp-group"><label className="inp-label">Ordre d'affichage</label><input className="inp" type="number" value={ordre} onChange={e=>setOrdre(e.target.value)}/></div>
+        {msg && <div style={{color:'#ff6060',fontSize:12,marginTop:4}}>{msg}</div>}
+        <button className="btn btn-yes" style={{width:'100%',marginTop:12}} onClick={save} disabled={saving}>{saving?'Enregistrement…':'Enregistrer'}</button>
+        {!isNew && <button className="btn" style={{width:'100%',marginTop:8,color:'#ff6060',border:'1px solid rgba(255,96,96,.3)'}} onClick={del} disabled={deleting}>Supprimer le groupe</button>}
+      </div>
+
+      {!isNew && (
+        <>
+        <div style={{fontWeight:700,color:'rgba(255,255,255,.7)',fontSize:13,marginTop:20,marginBottom:8,textTransform:'uppercase',letterSpacing:.5}}>Sujets</div>
+        <button className="btn btn-yes" style={{width:'100%',marginBottom:10,fontSize:13}} onClick={()=>onSubject(null,group.id)}>+ Nouveau sujet</button>
+        {subjects===null ? <div style={{textAlign:'center',padding:20}}><div className="spinner" style={{margin:'0 auto'}}/></div> : (
+          <div style={{display:'flex',flexDirection:'column',gap:6}}>
+            {subjects.map(s => (
+              <button key={s.id} onClick={()=>onSubject(s,group.id)} style={{background:'rgba(255,255,255,.06)',border:'1px solid rgba(255,255,255,.1)',borderRadius:10,padding:'11px 14px',textAlign:'left',cursor:'pointer',display:'flex',alignItems:'center',gap:10,width:'100%'}}>
+                <span style={{fontSize:12,color:'rgba(255,255,255,.35)',minWidth:20}}>#{s.ordre}</span>
+                <span style={{flex:1,fontSize:13,color:'white',fontWeight:600}}>{s.title}</span>
+                <span style={{color:'rgba(255,255,255,.3)',fontSize:14}}>→</span>
+              </button>
+            ))}
+            {subjects.length===0 && <div style={{textAlign:'center',color:'rgba(255,255,255,.3)',padding:20,fontSize:12}}>Aucun sujet. Créez-en un.</div>}
+          </div>
+        )}
+        </>
+      )}
+    </div>
+    <StickyFooter onBack={onBack}/>
+    </>
+  );
+}
+
+function AdminLearnSubjectEditScreen({ subjectId, groupId, onSave, onBack }) {
+  const isNew = !subjectId;
+  const [title, setTitle] = useState('');
+  const [content, setContent] = useState('');
+  const [imageUrl, setImageUrl] = useState('');
+  const [videoUrl, setVideoUrl] = useState('');
+  const [ordre, setOrdre] = useState(0);
+  const [questions, setQuestions] = useState([]);
+  const [loading, setLoading] = useState(!isNew);
+  const [saving, setSaving] = useState(false);
+  const [uploadingImg, setUploadingImg] = useState(false);
+  const [msg, setMsg] = useState('');
+  const [editingQ, setEditingQ] = useState(null); // null | 'new' | question object
+  const [currentSubjectId, setCurrentSubjectId] = useState(subjectId);
+
+  const loadData = async (sid) => {
+    const { data: s } = await sb.from('learn_subjects').select('*').eq('id',sid).single();
+    if (s) { setTitle(s.title||''); setContent(s.content||''); setImageUrl(s.image_url||''); setVideoUrl(s.video_url||''); setOrdre(s.ordre??0); }
+    const { data: qs } = await sb.from('learn_questions').select('id,question,image_url,ordre, learn_choices(id,text,is_correct,ordre)').eq('subject_id',sid).order('ordre');
+    setQuestions(qs||[]);
+    setLoading(false);
+  };
+  useEffect(() => { if (!isNew) loadData(subjectId); }, [subjectId]);
+
+  const uploadImage = async (e) => {
+    const file = e.target.files[0]; if (!file) return;
+    setUploadingImg(true);
+    try { const url = await uploadLearnImage(file); setImageUrl(url); } catch(err) { setMsg('Erreur upload: '+err.message); }
+    setUploadingImg(false);
+  };
+
+  const save = async () => {
+    if (!title.trim()) { setMsg('Titre obligatoire.'); return; }
+    setSaving(true);
+    if (isNew || !currentSubjectId) {
+      const { data, error } = await sb.from('learn_subjects').insert({ group_id:groupId, title:title.trim(), content:content.trim()||null, image_url:imageUrl||null, video_url:videoUrl.trim()||null, ordre:parseInt(ordre)||0 }).select('id').single();
+      if (error) { setMsg(error.message); setSaving(false); return; }
+      setCurrentSubjectId(data.id);
+    } else {
+      const { error } = await sb.from('learn_subjects').update({ title:title.trim(), content:content.trim()||null, image_url:imageUrl||null, video_url:videoUrl.trim()||null, ordre:parseInt(ordre)||0 }).eq('id',currentSubjectId);
+      if (error) { setMsg(error.message); setSaving(false); return; }
+    }
+    setSaving(false); setMsg('✓ Enregistré');
+    if (isNew && currentSubjectId) loadData(currentSubjectId);
+  };
+
+  const del = async () => {
+    if (!window.confirm('Supprimer ce sujet et toutes ses questions ?')) return;
+    await sb.from('learn_subjects').delete().eq('id',currentSubjectId);
+    onSave();
+  };
+
+  return (
+    <>
+    <div className="screen fade-in">
+      <div className="auth-header">
+        <div className="welcome-tag" style={{color:'#7dd940'}}>Admin</div>
+        <h1 className="welcome-title">{isNew?'Nouveau':'Modifier'}<br/><span className="accent">sujet</span></h1>
+      </div>
+      {loading ? <div style={{textAlign:'center',padding:40}}><div className="spinner" style={{margin:'0 auto'}}/></div> : (
+        <>
+        <div className="form-card">
+          <div className="inp-group"><label className="inp-label">Titre *</label><input className="inp" value={title} onChange={e=>setTitle(e.target.value)} placeholder="ex. Comprendre le kWh"/></div>
+          <div className="inp-group"><label className="inp-label">Contenu (texte)</label><textarea className="inp" rows={6} value={content} onChange={e=>setContent(e.target.value)} placeholder="Texte d'introduction du sujet…" style={{resize:'vertical'}}/></div>
+          <div className="inp-group">
+            <label className="inp-label">Image</label>
+            {imageUrl && <img src={imageUrl} alt="" style={{width:'100%',maxHeight:140,objectFit:'cover',borderRadius:8,marginBottom:6}}/>}
+            <input type="file" accept="image/*" onChange={uploadImage} style={{fontSize:12,color:'rgba(255,255,255,.6)'}}/>
+            {uploadingImg && <div style={{fontSize:11,color:'rgba(255,255,255,.5)',marginTop:4}}>Upload en cours…</div>}
+          </div>
+          <div className="inp-group"><label className="inp-label">URL vidéo (YouTube ou embed)</label><input className="inp" value={videoUrl} onChange={e=>setVideoUrl(e.target.value)} placeholder="https://youtube.com/watch?v=…"/></div>
+          <div className="inp-group"><label className="inp-label">Ordre</label><input className="inp" type="number" value={ordre} onChange={e=>setOrdre(e.target.value)}/></div>
+          {msg && <div style={{color: msg.startsWith('✓')?'#7dd940':'#ff6060',fontSize:12,marginTop:4}}>{msg}</div>}
+          <button className="btn btn-yes" style={{width:'100%',marginTop:12}} onClick={save} disabled={saving}>{saving?'Enregistrement…':'Enregistrer le sujet'}</button>
+          {!isNew && <button className="btn" style={{width:'100%',marginTop:8,color:'#ff6060',border:'1px solid rgba(255,96,96,.3)'}} onClick={del}>Supprimer le sujet</button>}
+        </div>
+
+        {currentSubjectId && (
+          <>
+          <div style={{fontWeight:700,color:'rgba(255,255,255,.7)',fontSize:13,marginTop:20,marginBottom:8,textTransform:'uppercase',letterSpacing:.5}}>Questions du quiz</div>
+          <button className="btn btn-yes" style={{width:'100%',marginBottom:10,fontSize:13}} onClick={()=>setEditingQ('new')}>+ Nouvelle question</button>
+          <div style={{display:'flex',flexDirection:'column',gap:6}}>
+            {questions.map((q,i) => (
+              <button key={q.id} onClick={()=>setEditingQ(q)} style={{background:'rgba(255,255,255,.06)',border:'1px solid rgba(255,255,255,.1)',borderRadius:10,padding:'11px 14px',textAlign:'left',cursor:'pointer',display:'flex',alignItems:'center',gap:10,width:'100%'}}>
+                <span style={{fontSize:12,color:'rgba(255,255,255,.35)',minWidth:20}}>Q{i+1}</span>
+                <span style={{flex:1,fontSize:13,color:'white',lineHeight:1.3}}>{q.question}</span>
+                <span style={{fontSize:11,color: q.learn_choices?.some(c=>c.is_correct)?'#7dd940':'#ff6060'}}>{q.learn_choices?.some(c=>c.is_correct)?'✓':'⚠'}</span>
+                <span style={{color:'rgba(255,255,255,.3)',fontSize:14}}>→</span>
+              </button>
+            ))}
+            {questions.length===0 && <div style={{textAlign:'center',color:'rgba(255,255,255,.3)',padding:20,fontSize:12}}>Aucune question. Créez-en une.</div>}
+          </div>
+          </>
+        )}
+
+        {editingQ !== null && (
+          <AdminLearnQuestionEdit
+            question={editingQ==='new'?null:editingQ}
+            subjectId={currentSubjectId}
+            onSave={()=>{ setEditingQ(null); loadData(currentSubjectId); }}
+            onClose={()=>setEditingQ(null)}/>
+        )}
+        </>
+      )}
+    </div>
+    <StickyFooter onBack={onBack}/>
+    </>
+  );
+}
+
+function AdminLearnQuestionEdit({ question, subjectId, onSave, onClose }) {
+  const isNew = !question?.id;
+  const [qText, setQText] = useState(question?.question||'');
+  const [qImg, setQImg] = useState(question?.image_url||'');
+  const [ordre, setOrdre] = useState(question?.ordre??0);
+  const [choices, setChoices] = useState(question?.learn_choices?.slice().sort((a,b)=>a.ordre-b.ordre).map(c=>({...c}))||[{id:'tmp1',text:'',is_correct:false,ordre:0},{id:'tmp2',text:'',is_correct:false,ordre:1}]);
+  const [saving, setSaving] = useState(false);
+  const [msg, setMsg] = useState('');
+  const [uploadingImg, setUploadingImg] = useState(false);
+
+  const uploadQImg = async (e) => {
+    const file = e.target.files[0]; if (!file) return;
+    setUploadingImg(true);
+    try { setQImg(await uploadLearnImage(file)); } catch(err) { setMsg('Erreur: '+err.message); }
+    setUploadingImg(false);
+  };
+
+  const setChoice = (i, field, val) => setChoices(cs => cs.map((c,j) => j===i ? {...c,[field]:val} : c));
+  const toggleCorrect = (i) => setChoices(cs => cs.map((c,j) => ({...c, is_correct: j===i})));
+  const addChoice = () => setChoices(cs => [...cs, {id:'tmp'+Date.now(),text:'',is_correct:false,ordre:cs.length}]);
+  const removeChoice = (i) => setChoices(cs => cs.filter((_,j)=>j!==i));
+
+  const validate = () => {
+    if (!qText.trim()) return 'La question est obligatoire.';
+    if (choices.filter(c=>c.text.trim()).length < 2) return 'Au moins 2 choix de réponse.';
+    if (!choices.some(c=>c.is_correct)) return 'Cochez la bonne réponse.';
+    return null;
+  };
+
+  const save = async () => {
+    const err = validate(); if (err) { setMsg(err); return; }
+    setSaving(true);
+    let qId = question?.id;
+    if (isNew) {
+      const { data, error } = await sb.from('learn_questions').insert({ subject_id:subjectId, question:qText.trim(), image_url:qImg||null, ordre:parseInt(ordre)||0 }).select('id').single();
+      if (error) { setMsg(error.message); setSaving(false); return; }
+      qId = data.id;
+    } else {
+      await sb.from('learn_questions').update({ question:qText.trim(), image_url:qImg||null, ordre:parseInt(ordre)||0 }).eq('id',qId);
+      await sb.from('learn_choices').delete().eq('question_id',qId);
+    }
+    const validChoices = choices.filter(c=>c.text.trim()).map((c,i)=>({ question_id:qId, text:c.text.trim(), is_correct:c.is_correct, ordre:i }));
+    await sb.from('learn_choices').insert(validChoices);
+    setSaving(false); onSave();
+  };
+
+  const del = async () => {
+    if (!window.confirm('Supprimer cette question ?')) return;
+    await sb.from('learn_questions').delete().eq('id',question.id);
+    onSave();
+  };
+
+  return (
+    <div style={{marginTop:16,background:'rgba(0,0,0,.3)',borderRadius:14,padding:'18px 16px',border:'1px solid rgba(255,255,255,.12)'}}>
+      <div style={{fontWeight:700,color:'white',fontSize:14,marginBottom:12}}>{isNew?'Nouvelle question':'Modifier la question'}</div>
+      <div className="inp-group"><label className="inp-label">Question *</label><textarea className="inp" rows={2} value={qText} onChange={e=>setQText(e.target.value)} style={{resize:'vertical'}}/></div>
+      <div className="inp-group">
+        <label className="inp-label">Image (optionnel)</label>
+        {qImg && <img src={qImg} alt="" style={{width:'100%',maxHeight:100,objectFit:'cover',borderRadius:8,marginBottom:4}}/>}
+        <input type="file" accept="image/*" onChange={uploadQImg} style={{fontSize:11,color:'rgba(255,255,255,.5)'}}/>
+        {uploadingImg && <span style={{fontSize:11,color:'rgba(255,255,255,.4)'}}>Upload…</span>}
+      </div>
+      <div className="inp-group"><label className="inp-label">Ordre</label><input className="inp" type="number" value={ordre} onChange={e=>setOrdre(e.target.value)}/></div>
+      <div style={{marginBottom:8,fontWeight:600,color:'rgba(255,255,255,.6)',fontSize:12,textTransform:'uppercase',letterSpacing:.5}}>Choix de réponses <span style={{color:'rgba(255,255,255,.3)',fontWeight:400}}>(cochez la bonne)</span></div>
+      {choices.map((c,i) => (
+        <div key={c.id||i} style={{display:'flex',alignItems:'center',gap:8,marginBottom:6}}>
+          <input type="radio" name="correct" checked={c.is_correct} onChange={()=>toggleCorrect(i)} style={{accentColor:'#7dd940',flexShrink:0,width:16,height:16,cursor:'pointer'}}/>
+          <input className="inp" value={c.text} onChange={e=>setChoice(i,'text',e.target.value)} placeholder={`Choix ${i+1}`} style={{flex:1,padding:'8px 12px',fontSize:13}}/>
+          {choices.length > 2 && <button onClick={()=>removeChoice(i)} style={{background:'none',border:'none',color:'rgba(255,80,80,.6)',cursor:'pointer',fontSize:16,padding:'0 4px'}}>×</button>}
+        </div>
+      ))}
+      {choices.length < 5 && <button onClick={addChoice} style={{background:'none',border:'1px dashed rgba(255,255,255,.2)',borderRadius:8,color:'rgba(255,255,255,.4)',fontSize:12,padding:'6px 12px',cursor:'pointer',width:'100%',marginBottom:8}}>+ Ajouter un choix</button>}
+      {msg && <div style={{color: msg.startsWith('✓')?'#7dd940':'#ff6060',fontSize:12,marginBottom:8}}>{msg}</div>}
+      <div style={{display:'flex',gap:8}}>
+        <button className="btn btn-yes" style={{flex:1,fontSize:13}} onClick={save} disabled={saving}>{saving?'…':'Enregistrer'}</button>
+        {!isNew && <button className="btn" style={{fontSize:13,color:'#ff6060',border:'1px solid rgba(255,96,96,.3)'}} onClick={del}>Supprimer</button>}
+        <button className="btn" style={{fontSize:13}} onClick={onClose}>Annuler</button>
+      </div>
+    </div>
+  );
+}
+
 function App() {
   const [state,       setState]      = useState(INIT);
   const [history,     setHistory]    = useState([]);
@@ -9706,8 +10398,7 @@ function App() {
         }
       }
     }
-    // Atterrir directement sur Mon site
-    return 'MA_CONSO';
+    return 'HOME_CHOICE';
   }, []);
 
   // Vide le panier une seule fois par session navigateur (rechargement de page)
@@ -9802,6 +10493,68 @@ function App() {
 
     switch (state.screen) {
 
+      case 'HOME_CHOICE':
+        return <HomeChoiceScreen profile={profile} onComprendre={()=>goTo('COMPRENDRE_HOME')} onAction={()=>goTo('MA_CONSO')}/>;
+
+      case 'COMPRENDRE_HOME':
+        return <ComprendreHomeScreen user={user} onGroup={(g)=>goTo('COMPRENDRE_GROUP',{learnGroup:g})} onAction={()=>goTo('MA_CONSO')} onBack={()=>goTo('HOME_CHOICE')}/>;
+
+      case 'COMPRENDRE_GROUP': {
+        const g = state.learnGroup;
+        if (g?.isRevision) {
+          return <ComprendreGroupScreen user={user} group={g}
+            onSubject={(s,grp)=>goTo('COMPRENDRE_SUBJECT',{learnSubject:s,learnGroup:grp})}
+            onRevision={async (subjectIds)=>{
+              const qAll = [];
+              for (const sid of subjectIds) {
+                const { data: prog } = await sb.from('user_learn_progress').select('failed_question_ids').eq('user_id',user.id).eq('subject_id',sid).single();
+                const failedIds = prog?.failed_question_ids||[];
+                if (failedIds.length) {
+                  const { data: qs } = await sb.from('learn_questions').select('id,question,image_url,ordre,learn_choices(id,text,is_correct,ordre)').in('id',failedIds);
+                  if (qs) qAll.push(...qs.map(q=>({...q,_subjectId:sid})));
+                }
+              }
+              if (qAll.length) goTo('COMPRENDRE_QUIZ',{learnQuestions:qAll,learnSubject:null,isRevision:true});
+            }}
+            onAction={()=>goTo('MA_CONSO')} onBack={()=>goTo('COMPRENDRE_HOME')}/>;
+        }
+        return <ComprendreGroupScreen user={user} group={g}
+          onSubject={(s)=>goTo('COMPRENDRE_SUBJECT',{learnSubject:s,learnGroup:g})}
+          onRevision={()=>{}}
+          onAction={()=>goTo('MA_CONSO')} onBack={()=>goTo('COMPRENDRE_HOME')}/>;
+      }
+
+      case 'COMPRENDRE_SUBJECT':
+        return <ComprendreSubjectScreen subject={state.learnSubject}
+          onQuiz={async ()=>{
+            const { data: qs } = await sb.from('learn_questions').select('id,question,image_url,ordre,learn_choices(id,text,is_correct,ordre)').eq('subject_id',state.learnSubject.id).order('ordre');
+            goTo('COMPRENDRE_QUIZ',{learnQuestions:qs||[],learnSubject:state.learnSubject,learnGroup:state.learnGroup,isRevision:false});
+          }}
+          onBack={goBack}/>;
+
+      case 'COMPRENDRE_QUIZ':
+        return <ComprendreQuizScreen user={user} questions={state.learnQuestions||[]} subject={state.learnSubject} isRevision={!!state.isRevision}
+          onDone={(res)=>goTo('COMPRENDRE_SCORE',{learnSubject:state.learnSubject,learnGroup:state.learnGroup,quizResults:res,isRevision:!!state.isRevision})}
+          onBack={goBack}/>;
+
+      case 'COMPRENDRE_SCORE': {
+        const { learnSubject, learnGroup, quizResults, isRevision } = state;
+        return <ComprendreScoreScreen user={user} subject={learnSubject} results={quizResults?.results||[]} total={quizResults?.total||0} isRevision={!!isRevision}
+          onRetry={async ()=>{
+            const { data: qs } = await sb.from('learn_questions').select('id,question,image_url,ordre,learn_choices(id,text,is_correct,ordre)').eq('subject_id',learnSubject.id).order('ordre');
+            goTo('COMPRENDRE_QUIZ',{learnQuestions:qs||[],learnSubject,learnGroup,isRevision:false});
+          }}
+          onNext={async ()=>{
+            if (!learnGroup?.id) { goTo('COMPRENDRE_HOME'); return; }
+            const { data: subs } = await sb.from('learn_subjects').select('id,title,content,image_url,video_url,ordre').eq('group_id',learnGroup.id).order('ordre');
+            const idx = (subs||[]).findIndex(s=>s.id===learnSubject?.id);
+            const next = subs?.[idx+1];
+            if (next) goTo('COMPRENDRE_SUBJECT',{learnSubject:next,learnGroup});
+            else goTo('COMPRENDRE_GROUP',{learnGroup});
+          }}
+          onHome={()=>goTo('COMPRENDRE_HOME')}/>;
+      }
+
       case 'HOME_LOGGED_IN':
         return <HomeLoggedInScreen profile={profile}/>;
 
@@ -9824,6 +10577,27 @@ function App() {
           onGlobalVars={()=>goTo('ADMIN_GLOBAL_VARS')}
           onPrix={()=>goTo('ADMIN_PRIX_MATERIAUX')}
           onOffres={()=>goTo('ADMIN_OFFRES')}
+          onLearn={()=>goTo('ADMIN_LEARN')}
+          onBack={goBack}/>;
+
+      case 'ADMIN_LEARN':
+        return <AdminLearnScreen
+          onGroup={(g)=>goTo('ADMIN_LEARN_GROUP',{editLearnGroup:g})}
+          onNew={()=>goTo('ADMIN_LEARN_GROUP',{editLearnGroup:null})}
+          onBack={goBack}/>;
+
+      case 'ADMIN_LEARN_GROUP':
+        return <AdminLearnGroupEditScreen
+          group={state.editLearnGroup}
+          onSubject={(s,gid)=>goTo('ADMIN_LEARN_SUBJECT',{editLearnSubject:s,learnGroupId:gid})}
+          onSave={()=>goTo('ADMIN_LEARN')}
+          onBack={goBack}/>;
+
+      case 'ADMIN_LEARN_SUBJECT':
+        return <AdminLearnSubjectEditScreen
+          subjectId={state.editLearnSubject?.id||null}
+          groupId={state.learnGroupId}
+          onSave={()=>goBack()}
           onBack={goBack}/>;
 
       case 'ADMIN_OFFRES':
@@ -9887,7 +10661,7 @@ function App() {
           onBack={goBack}/>;
 
       case 'MA_CONSO':
-        return <MonSiteScreen user={user} userProfile={profile} onBack={goBack} onSimulations={()=>goTo('SIMULATIONS')} cartVersion={cartVersion}/>;
+        return <MonSiteScreen user={user} userProfile={profile} onBack={goBack} onSimulations={()=>goTo('SIMULATIONS')} onComprendre={()=>goTo('COMPRENDRE_HOME')} cartVersion={cartVersion}/>;
 
       case 'SIMULATIONS': {
         const base = { name: profile?.prenom||'', address:'Zone ACC', initialBill:2000, bill:2000, bravoItems:[], investment:0, eligible:true };
@@ -9900,7 +10674,8 @@ function App() {
           onOptimisation={()=>goTo('OPTIMISATION')}
           onDiyBox={()=>goTo('DIY_BOX_SIM')}
           onBack={goBack}
-          onMonSite={()=>goTo('MA_CONSO')}/>;
+          onMonSite={()=>goTo('MA_CONSO')}
+          onComprendre={()=>goTo('COMPRENDRE_HOME')}/>;
       }
 
       case 'PANIER':
