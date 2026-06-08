@@ -6923,7 +6923,7 @@ function InstallSoiMemeScreen({ user, userProfile, onBack, onPanier, onMonSite, 
   const [siteFlex,    setSiteFlex]  = useState(null); // flex déjà rempli
   const [step,        setStep]      = useState('therm'); // 'therm' | 'catalog' | 'confirmed'
   const [theorKw,     setTheorKw]   = useState(0);
-  const [qty,         setQty]       = useState({ box:0, module:0, prise:0 });
+  const [qty,         setQty]       = useState({});
   const [showWarn,    setShowWarn]  = useState(false);
 
   useEffect(() => {
@@ -6951,15 +6951,10 @@ function InstallSoiMemeScreen({ user, userProfile, onBack, onPanier, onMonSite, 
     });
   }, []);
 
-  // Capacité des équipements sélectionnés (kW)
-  const equipKw = qty.box * 6 + qty.module * 3 + qty.prise * 2;
+  // Capacité des équipements sélectionnés (kW) — calculée depuis les produits actifs
+  const equipKw = products.reduce((sum, p) => sum + (qty[p.key] || 0) * p.kw, 0);
 
-  const totalPrice = (pm) => {
-    if (!pm) return 0;
-    return qty.box    * ((Number(pm.box_prix)||0) + (Number(pm.box_installation)||0))
-         + qty.module * (Number(pm.box_module_deporte)||0)
-         + qty.prise  * ((Number(pm.prise_prix)||0) + (Number(pm.prise_installation)||0));
-  };
+  const totalPrice = () => products.reduce((sum, p) => sum + (qty[p.key] || 0) * p.prix, 0);
 
   const handleValider = () => {
     if (theorKw > 0 && equipKw < theorKw) { setShowWarn(true); return; }
@@ -6975,7 +6970,7 @@ function InstallSoiMemeScreen({ user, userProfile, onBack, onPanier, onMonSite, 
       localStorage.setItem('starvolt_solar_defaults', JSON.stringify(d));
     } catch {}
     // Activer la tuile prod/stockage dans Mon site
-    localStorage.setItem('starvolt_diy_box_chosen', JSON.stringify({qty, equipKw, effectiveKw, total: totalPrice(prixMat)}));
+    localStorage.setItem('starvolt_diy_box_chosen', JSON.stringify({qty, equipKw, effectiveKw, total: totalPrice()}));
     setShowWarn(false);
     setStep('confirmed');
     if (onCartUpdate) onCartUpdate();
@@ -6984,11 +6979,27 @@ function InstallSoiMemeScreen({ user, userProfile, onBack, onPanier, onMonSite, 
   const chg = (k, delta) => setQty(q => ({...q, [k]: Math.max(0, q[k] + delta)}));
   const CHKBG = 'repeating-conic-gradient(rgba(255,255,255,.06) 0% 25%,transparent 0% 50%) 0 0/8px 8px';
 
-  const products = prixMat ? [
-    { key:'box',    label:'Box Comwatt',    img: prixMat.img_box_prix,   prix: (Number(prixMat.box_prix)||0)+(Number(prixMat.box_installation)||0), kw:6, emoji:'📦' },
-    { key:'module', label:'Module déporté', img: prixMat.img_box_module, prix: Number(prixMat.box_module_deporte)||0,                               kw:3, emoji:'🔌' },
-    { key:'prise',  label:'Prise connectée',img: prixMat.img_prise,      prix: (Number(prixMat.prise_prix)||0)+(Number(prixMat.prise_installation)||0), kw:2, emoji:'🔋' },
-  ] : [];
+  // Catalogue dynamique basé sur les flags diy_* définis dans l'admin
+  // kW de pilotage thermique : box=6, module=3, prise=2, accessoires=0
+  const DIY_CATALOG = [
+    { diyFlag:'diy_box_prix',          priceKey:'box_prix',          imgKey:'img_box_prix',        label:'Box Comwatt',          kw:6, emoji:'📦' },
+    { diyFlag:'diy_box_installation',  priceKey:'box_installation',  imgKey:'img_box_installation', label:'Pose / installation',  kw:0, emoji:'🔧' },
+    { diyFlag:'diy_box_satellite',     priceKey:'box_satellite',     imgKey:'img_box_satellite',   label:'Box satellite',        kw:0, emoji:'📡' },
+    { diyFlag:'diy_box_module_deporte',priceKey:'box_module_deporte',imgKey:'img_box_module',       label:'Module déporté',       kw:3, emoji:'🔌' },
+    { diyFlag:'diy_box_pinces',        priceKey:'box_pinces',        imgKey:'img_box_pinces',       label:'Pinces forte puissance',kw:0, emoji:'🔗' },
+    { diyFlag:'diy_prise_prix',        priceKey:'prise_prix',        imgKey:'img_prise',            label:'Prise connectée',      kw:2, emoji:'🔋' },
+    { diyFlag:'diy_prise_installation',priceKey:'prise_installation',imgKey:'img_prise_install',   label:'Pose prise connectée', kw:0, emoji:'🔧' },
+  ];
+  const products = prixMat
+    ? DIY_CATALOG.filter(p => !!prixMat[p.diyFlag]).map(p => ({
+        key:   p.diyFlag,
+        label: p.label,
+        img:   prixMat[p.imgKey] || null,
+        prix:  Number(prixMat[p.priceKey]) || 0,
+        kw:    p.kw,
+        emoji: p.emoji,
+      }))
+    : [];
 
   if (loading) return <div className="screen fade-in"><div style={{textAlign:'center',padding:40}}><div className="spinner" style={{margin:'0 auto'}}/></div></div>;
 
@@ -7007,7 +7018,7 @@ function InstallSoiMemeScreen({ user, userProfile, onBack, onPanier, onMonSite, 
 
   // ── Étape 3 : confirmation ──
   if (step === 'confirmed') {
-    const tot = totalPrice(prixMat);
+    const tot = totalPrice();
     const effectiveKw = theorKw > 0 ? Math.min(theorKw, equipKw) : equipKw;
     const flexGain = Math.round(effectiveKw * 14);
     return (
@@ -7076,7 +7087,7 @@ function InstallSoiMemeScreen({ user, userProfile, onBack, onPanier, onMonSite, 
     </div>
   );
 
-  const tot = totalPrice(prixMat);
+  const tot = totalPrice();
 
   return (
     <>
@@ -8101,11 +8112,12 @@ function ImageImportBtn({ imgKey, data, setData, label }) {
   );
 }
 
-// ─── BoxItemRow : ligne catalogue Box avec image inline ───────────────
-function BoxItemRow({ priceKey, imgKey, label, step, data, setData, INP }) {
+// ─── BoxItemRow : ligne catalogue Box avec image inline + checkbox DIY ─
+function BoxItemRow({ priceKey, imgKey, diyKey, label, step, data, setData, INP }) {
   const fileRef = useRef(null);
   const [processing, setProcessing] = useState(false);
   const img = data?.[imgKey];
+  const isDiy = !!data?.[diyKey];
   const THUMB = {width:48,height:38,objectFit:'contain',borderRadius:5,background:'repeating-conic-gradient(rgba(255,255,255,.06) 0% 25%,transparent 0% 50%) 0 0/8px 8px'};
   return (
     <div style={{display:'flex',alignItems:'center',gap:8,padding:'6px 0',borderBottom:'1px solid rgba(255,255,255,.06)'}}>
@@ -8130,6 +8142,14 @@ function BoxItemRow({ priceKey, imgKey, label, step, data, setData, INP }) {
       {img && (
         <button onClick={()=>setData(p=>({...p,[imgKey]:null}))} title="Supprimer l'image"
           style={{flexShrink:0,background:'rgba(255,80,80,.12)',border:'1px solid rgba(255,80,80,.25)',borderRadius:6,color:'#ff6b6b',fontSize:11,padding:'4px 6px',cursor:'pointer'}}>✕</button>
+      )}
+      {/* Checkbox DIY */}
+      {diyKey && (
+        <label title="Proposer dans l'offre «Installer soi-même»" style={{flexShrink:0,display:'flex',alignItems:'center',gap:4,cursor:'pointer',userSelect:'none',padding:'2px 6px',borderRadius:6,background:isDiy?'rgba(192,132,252,.12)':'rgba(255,255,255,.04)',border:`1px solid ${isDiy?'rgba(192,132,252,.4)':'rgba(255,255,255,.12)'}`,whiteSpace:'nowrap'}}>
+          <input type="checkbox" checked={isDiy} onChange={e=>setData(p=>({...p,[diyKey]:e.target.checked}))}
+            style={{accentColor:'#c084fc',width:13,height:13,cursor:'pointer'}}/>
+          <span style={{fontSize:10,color:isDiy?'#c084fc':'rgba(255,255,255,.35)',fontWeight:700}}>DIY</span>
+        </label>
       )}
       <input ref={fileRef} type="file" accept="image/*" style={{display:'none'}} onChange={async e=>{
         const f=e.target.files?.[0]; if(!f)return;
@@ -8169,6 +8189,13 @@ function AdminPrixMateriauxScreen({ onBack }) {
       box_pinces: Number(data.box_pinces)||0,
       prise_prix: Number(data.prise_prix)||0,
       prise_installation: Number(data.prise_installation)||0,
+      diy_box_prix:           !!data.diy_box_prix,
+      diy_box_installation:   !!data.diy_box_installation,
+      diy_box_satellite:      !!data.diy_box_satellite,
+      diy_box_module_deporte: !!data.diy_box_module_deporte,
+      diy_box_pinces:         !!data.diy_box_pinces,
+      diy_prise_prix:         !!data.diy_prise_prix,
+      diy_prise_installation: !!data.diy_prise_installation,
       img_pv: data.img_pv||null,
       img_bat: data.img_bat||null,
       img_box_prix: data.img_box_prix||null,
@@ -8271,15 +8298,15 @@ function AdminPrixMateriauxScreen({ onBack }) {
         <div style={{fontWeight:700,fontSize:14,color:'#7dd940',marginBottom:14}}>📦 Box Comwatt — fourniture et pose</div>
         <div style={{display:'flex',flexDirection:'column',gap:10}}>
           {[
-            ['box_prix',      'img_box_prix',        'Box Comwatt (fourniture)', 10],
-            ['box_installation','img_box_installation','Pose / installation',     10],
-            ['box_satellite', 'img_box_satellite',   'Box satellite',            10],
-            ['box_module_deporte','img_box_module',  'Module déporté',           10],
-            ['box_pinces',    'img_box_pinces',      'Pinces forte puissance',   10],
-            ['prise_prix',    'img_prise',           'Prise connectée',           5],
-            ['prise_installation','img_prise_install','Pose prise connectée',     5],
-          ].map(([priceKey, imgKey, label, step])=>(
-            <BoxItemRow key={priceKey} priceKey={priceKey} imgKey={imgKey} label={label} step={step} data={data} setData={setData} INP={INP}/>
+            ['box_prix',          'img_box_prix',        'diy_box_prix',              'Box Comwatt (fourniture)', 10],
+            ['box_installation',  'img_box_installation','diy_box_installation',       'Pose / installation',     10],
+            ['box_satellite',     'img_box_satellite',   'diy_box_satellite',          'Box satellite',           10],
+            ['box_module_deporte','img_box_module',      'diy_box_module_deporte',     'Module déporté',          10],
+            ['box_pinces',        'img_box_pinces',      'diy_box_pinces',             'Pinces forte puissance',  10],
+            ['prise_prix',        'img_prise',           'diy_prise_prix',             'Prise connectée',          5],
+            ['prise_installation','img_prise_install',   'diy_prise_installation',     'Pose prise connectée',     5],
+          ].map(([priceKey, imgKey, diyKey, label, step])=>(
+            <BoxItemRow key={priceKey} priceKey={priceKey} imgKey={imgKey} diyKey={diyKey} label={label} step={step} data={data} setData={setData} INP={INP}/>
           ))}
         </div>
         <div style={{marginTop:12,fontSize:11,color:'rgba(255,255,255,.35)'}}>Pour le ROI : investissement box = fourniture + pose</div>
