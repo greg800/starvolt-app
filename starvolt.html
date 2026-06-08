@@ -9705,20 +9705,19 @@ function getVideoEmbed(url) {
 
 // ─── HomeChoiceScreen ─────────────────────────────────────────────────────────
 function HomeChoiceScreen({ profile, onComprendre, onAction }) {
-  const prenom = profile?.prenom ? `, ${profile.prenom}` : '';
   return (
-    <div style={{minHeight:'calc(100vh - 56px)',display:'flex',flexDirection:'column'}}>
+    <div style={{position:'fixed',top:56,left:0,right:0,bottom:0,display:'flex',flexDirection:'column'}}>
       <button onClick={onComprendre} style={{flex:1,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',background:'rgba(0,0,0,.22)',border:'none',borderBottom:'1px solid rgba(255,255,255,.1)',cursor:'pointer',padding:'40px 28px',gap:14,textAlign:'center',width:'100%'}}>
-        <div style={{fontSize:40}}>💡</div>
-        <div style={{fontSize:26,fontWeight:900,color:'white',lineHeight:1.2}}>L'énergie,<br/>enfin expliquée</div>
-        <div style={{fontSize:14,color:'rgba(255,255,255,.65)',maxWidth:280,lineHeight:1.6}}>Comprendre comment la transition énergétique va t'impacter concrètement</div>
-        <div style={{marginTop:6,padding:'11px 26px',background:'rgba(255,255,255,.14)',borderRadius:12,fontSize:14,fontWeight:700,color:'white',border:'1.5px solid rgba(255,255,255,.22)'}}>Comprendre →</div>
+        <div style={{fontSize:48}}>💡</div>
+        <div style={{fontSize:32,fontWeight:900,color:'white',lineHeight:1.2}}>L'énergie,<br/>enfin expliquée</div>
+        <div style={{fontSize:15,color:'rgba(255,255,255,.65)',maxWidth:420,lineHeight:1.6}}>Comprendre comment la transition énergétique va t'impacter concrètement</div>
+        <div style={{marginTop:8,padding:'13px 32px',background:'rgba(255,255,255,.14)',borderRadius:14,fontSize:15,fontWeight:700,color:'white',border:'1.5px solid rgba(255,255,255,.25)'}}>Comprendre →</div>
       </button>
       <button onClick={onAction} style={{flex:1,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',background:'rgba(125,217,64,.10)',border:'none',cursor:'pointer',padding:'40px 28px',gap:14,textAlign:'center',width:'100%'}}>
-        <div style={{fontSize:40}}>⚡</div>
-        <div style={{fontSize:26,fontWeight:900,color:'#7dd940',lineHeight:1.2}}>Passer à l'action<br/>dès maintenant</div>
-        <div style={{fontSize:14,color:'rgba(255,255,255,.65)',maxWidth:280,lineHeight:1.6}}>Simule tes économies et choisis les meilleures solutions pour ton logement</div>
-        <div style={{marginTop:6,padding:'11px 26px',background:'#7dd940',borderRadius:12,fontSize:14,fontWeight:700,color:'#1a4500'}}>Mon site →</div>
+        <div style={{fontSize:48}}>⚡</div>
+        <div style={{fontSize:32,fontWeight:900,color:'#7dd940',lineHeight:1.2}}>Passer à l'action<br/>dès maintenant</div>
+        <div style={{fontSize:15,color:'rgba(255,255,255,.65)',maxWidth:420,lineHeight:1.6}}>Simule tes économies et choisis les meilleures solutions pour ton logement</div>
+        <div style={{marginTop:8,padding:'13px 32px',background:'#7dd940',borderRadius:14,fontSize:15,fontWeight:700,color:'#1a4500'}}>Mon site →</div>
       </button>
     </div>
   );
@@ -10793,7 +10792,7 @@ function App() {
         avatarName={avatarName}
         showName={!isAuthScreen && showNameChip}
         logoOnly={isAuthScreen}
-        onLogoClick={() => user ? goTo('MA_CONSO') : goTo('WELCOME')}
+        onLogoClick={() => user ? goTo('HOME_CHOICE') : goTo('WELCOME')}
         onProfileClick={user ? () => goTo('PROFILE') : null}
         isAdmin={isAdmin}
         onAdmin={()=>goTo('ADMIN')}
