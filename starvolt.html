@@ -3902,7 +3902,8 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, cartVersion=0
                           :null);
                     const prixAvant=(billAvant&&consoTot)?billAvant/consoTot:null;
                     // Flex revenue — même formule que la tuile Ma prod
-                    const _hasBox2=!!localStorage.getItem('starvolt_box_chosen')||localStorage.getItem('starvolt_solar_chosen')==='solar_box';
+                    const _boxLS2=localStorage.getItem('starvolt_box_chosen');
+                    const _hasBox2=(_boxLS2&&_boxLS2!=='diy')||localStorage.getItem('starvolt_solar_chosen')==='solar_box';
                     const _optiFlex2=!!(globalVars?.opti_flex)&&_hasBox2;
                     const _ratio2=(globalVars?.ratio_puissance_stockage??50)/100;
                     const _batPow2=(parseFloat(batKwh)||0)*_ratio2;
@@ -4220,8 +4221,9 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, cartVersion=0
                     }
                   }
                   const hasSolar=!!localStorage.getItem('starvolt_solar_chosen');
-                  // hasBox : box choisie seule OU incluse dans solar_box
-                  const hasBox=!!localStorage.getItem('starvolt_box_chosen')||localStorage.getItem('starvolt_solar_chosen')==='solar_box';
+                  // hasBox : box choisie seule OU incluse dans solar_box (DIY exclu — son investissement est géré séparément)
+                  const _boxLS=localStorage.getItem('starvolt_box_chosen');
+                  const hasBox=(_boxLS&&_boxLS!=='diy')||localStorage.getItem('starvolt_solar_chosen')==='solar_box';
                   const hasAcc=localStorage.getItem('starvolt_acc_chosen')==='true';
                   const optiFlex=!!(globalVars?.opti_flex)&&hasBox;
                   const optiAcc=hasAcc; // cohérent avec hourlyPrices qui lit starvolt_acc_chosen directement
@@ -7695,7 +7697,9 @@ function PanierScreen({ user, onBack, onGoTo, onMonSite }) {
   // Source unique de la réduction : baisse facture calculée par Mon site (inclut énergie + flex + acc)
   const baisseLS           = parseInt(localStorage.getItem('starvolt_baisse_facture')||'0') || 0;
   const totalAnnualSaving  = baisseLS || activeItems.reduce((s,[k])=>s+(savings[k]||0),0);
-  const totalInvestment    = investLS || activeItems.reduce((s,[k])=>s+(investments[k]||0),0);
+  // investLS est calculé par Mon site (PV + bat + box fournis+posés) — on l'utilise seulement si solar ou box (non-DIY) au panier
+  const _hasSolarOrBox = items.solar || items.box;
+  const totalInvestment    = (_hasSolarOrBox && investLS) ? investLS : activeItems.reduce((s,[k])=>s+(investments[k]||0),0);
   const billedAfter        = currentBill ? Math.max(0, currentBill - totalAnnualSaving) : null;
   const roiGlobal          = totalInvestment > 0 && totalAnnualSaving > 0 ? Math.ceil(totalInvestment / totalAnnualSaving) : null;
   const gainNet25          = currentBill ? Math.max(0, projCum(currentBill) - projCumBilledAfter() - totalInvestment) : 0;
