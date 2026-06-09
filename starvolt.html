@@ -9801,7 +9801,7 @@ function ComprendreHomeScreen({ user, onGroup, onAction, onBack }) {
             <button key={g.id} onClick={() => onGroup(g)} style={{background:'rgba(255,255,255,.07)',border:'1px solid rgba(255,255,255,.12)',borderRadius:14,padding:'16px 18px',textAlign:'left',cursor:'pointer',display:'flex',alignItems:'center',gap:14,width:'100%'}}>
               <div style={{flex:1}}>
                 <div style={{fontWeight:700,color:'white',fontSize:16,marginBottom:4}}>{g.title}</div>
-                {g.description && <div style={{fontSize:12,color:'rgba(255,255,255,.55)',lineHeight:1.4}}>{g.description}</div>}
+                {g.description && <div style={{fontSize:15.5,color:'rgba(255,255,255,.55)',lineHeight:1.4}}>{g.description}</div>}
                 <div style={{marginTop:8,display:'flex',alignItems:'center',gap:8}}>
                   <div style={{flex:1,height:4,background:'rgba(255,255,255,.12)',borderRadius:4,overflow:'hidden'}}>
                     <div style={{width:`${g.total>0?Math.round(g.done/g.total*100):0}%`,height:'100%',background:'#7dd940',borderRadius:4,transition:'width .3s'}}/>
