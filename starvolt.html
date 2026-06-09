@@ -3050,6 +3050,134 @@ function computeCombinedOptimization(consoProfile, prodNorm, pvKwc, batKwh, ther
   return {monthly, hourly, billWithout, billWithStorage, saving, reductionPct, _combined: true};
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// SOURCE UNIQUE DE VÉRITÉ — impact du panier (Mon site ET Panier l'utilisent)
+// ═══════════════════════════════════════════════════════════════════════════
+// Trois fonctions pures, sans React, garantissant que les deux écrans affichent
+// EXACTEMENT le même chiffre : mêmes entrées + mêmes formules = même résultat.
+// Ne jamais recalculer les économies du panier ailleurs.
+
+// 1) Équipement PV / batterie / thermique retenu selon le contenu du panier.
+//    Lit starvolt_solar_defaults (édité dans Mon site) + fallback site + défauts.
+function resolveCartEquipment(site) {
+  const solarDef = (()=>{ try { return JSON.parse(localStorage.getItem('starvolt_solar_defaults'))||{}; } catch { return {}; } })();
+  const hasSolar   = !!localStorage.getItem('starvolt_solar_chosen');
+  const hasBoxOnly = !!localStorage.getItem('starvolt_box_chosen') && !hasSolar;
+  if (hasSolar) return {
+    pvKwc:    parseFloat(solarDef.pvKwc)  > 0 ? String(solarDef.pvKwc)  : (site?.puissance_pv_kwc      > 0 ? String(site.puissance_pv_kwc)      : '6'),
+    batKwh:   parseFloat(solarDef.batKwh) > 0 ? String(solarDef.batKwh) : (site?.batterie_capacite_kwh > 0 ? String(site.batterie_capacite_kwh) : '10'),
+    thermKwh: parseFloat(solarDef.thermKwh) > 0 ? String(solarDef.thermKwh) : '10',
+  };
+  if (hasBoxOnly) return { pvKwc: solarDef.pvKwc||'0', batKwh: solarDef.batKwh||'0', thermKwh: solarDef.thermKwh||'10' };
+  return { pvKwc: solarDef.pvKwc||'0', batKwh: solarDef.batKwh||'0', thermKwh: solarDef.thermKwh||'0' };
+}
+
+// 2) Bilan énergétique horaire selon le panier (sélection du moteur).
+//    Retourne l'objet balance ({billWithout, billWithStorage, saving, monthly, hourly...}) ou null.
+function buildSiteBalance({ site, prodProfil, tariffs, spotMap, globalVars, pvKwc, batKwh, thermKwh }) {
+  if (!site?.conso_profil) return null;
+  const kw = pvKwc === '' ? 6 : (parseFloat(pvKwc)||0);
+  const bk = parseFloat(batKwh)||0;
+  const tk = parseFloat(thermKwh)||0;
+  // Le stockage ne se pilote que si une box Starvolt est au panier.
+  const hasBoxLS = !!localStorage.getItem('starvolt_box_chosen')
+                || localStorage.getItem('starvolt_solar_chosen') === 'solar_box';
+  const eg = globalVars ? {
+    ...globalVars,
+    opti_tarif:   hasBoxLS ? (globalVars.opti_tarif   ?? true) : false,
+    opti_solaire: hasBoxLS ? (globalVars.opti_solaire ?? true) : false,
+  } : globalVars;
+  const optiChosen = !!localStorage.getItem('starvolt_optimisation_chosen');
+  const optiId = optiChosen ? localStorage.getItem('starvolt_optimisation_tariff_id') : null;
+  const effId = optiId || site.tarif_id;
+  const curT  = effId ? (tariffs||[]).find(t=>t.id===effId)||null : null;
+  const baseT = site.tarif_id ? (tariffs||[]).find(t=>t.id===site.tarif_id)||curT : curT;
+  if (kw > 0 && prodProfil) {
+    if (curT) {
+      if (curT.tarif_dynamique && !spotMap) return null;
+      return computeCombinedOptimization(site.conso_profil, prodProfil, kw, batKwh, thermKwh, eg, curT, baseT, site, spotMap);
+    }
+    const ratioBat=(globalVars?.ratio_puissance_stockage??50)/100;
+    const pBat=globalVars?.pertes_batterie??10;
+    const ratioTherm=(globalVars?.ratio_puissance_stockage_thermique??50)/100;
+    const pTherm=globalVars?.pertes_thermique??0;
+    return computeEnergyBalance(site.conso_profil, prodProfil, kw, bk*ratioBat*1000, bk, pBat, tk*ratioTherm, tk, pTherm);
+  }
+  if (curT) {
+    if (curT.tarif_dynamique && !spotMap) return null;
+    return computeStorageOptimization(site.conso_profil, curT, baseT, site, bk, tk, eg, spotMap);
+  }
+  return null;
+}
+
+// 3) Dérive les chiffres affichés (facture avant/après, économie totale) depuis le balance.
+//    totalSaving = saving énergie (tarif + stockage + PV) + flex (cagnotte) + ACC.
+function deriveSiteImpact({ balance, site, prodProfil, tariffs, spotMap, globalVars, batKwh, thermKwh }) {
+  const optiChosen = !!localStorage.getItem('starvolt_optimisation_chosen');
+  const optiId = optiChosen ? localStorage.getItem('starvolt_optimisation_tariff_id') : null;
+  const effId = optiId || site?.tarif_id;
+  const effectiveTariff = effId ? (tariffs||[]).find(t=>t.id===effId)||null : null;
+  const baseTariff = (tariffs||[]).find(t=>t.id===site?.tarif_id);
+  const consoTot = Math.round(site?.conso_annuelle_kwh||0);
+
+  let billAvant = balance?.billWithout != null
+    ? Math.round(balance.billWithout)
+    : (baseTariff && !baseTariff.tarif_dynamique
+        ? Math.round((baseTariff.abo_annuel||0) + (site?.conso_annuelle_kwh||0)*(baseTariff.prix_hp||0))
+        : null);
+
+  // Flex revenue (cagnotte flexibilité) — uniquement si box au panier + service activé
+  const _boxLS = localStorage.getItem('starvolt_box_chosen');
+  const _hasBox = (_boxLS && _boxLS!=='diy') || localStorage.getItem('starvolt_solar_chosen')==='solar_box';
+  const _optiFlex = !!(globalVars?.opti_flex) && _hasBox;
+  const _ratio = (globalVars?.ratio_puissance_stockage??50)/100;
+  const _batPow = (parseFloat(batKwh)||0)*_ratio;
+  const flexRev = _optiFlex ? Math.round((parseFloat(thermKwh)||0)*14 + _batPow*27) : 0;
+
+  // ACC savings — heures de prod solaire, accTTC < tarif normal TTC
+  const _hasAcc = localStorage.getItem('starvolt_acc_chosen')==='true';
+  let accRev = 0;
+  if (_hasAcc && effectiveTariff && site?.conso_profil) {
+    const _accPHT = parseFloat(localStorage.getItem('starvolt_acc_price_ht')||'0.09');
+    const _tva = (globalVars?.tva??20)/100;
+    const _hcw = [
+      {s:parseHcHour(site?.hc_debut1??site?.heure_debut_hc1??globalVars?.hc_debut1),e:parseHcHour(site?.hc_fin1??site?.heure_fin_hc1??globalVars?.hc_fin1)},
+      {s:parseHcHour(site?.hc_debut2??site?.heure_debut_hc2??globalVars?.hc_debut2),e:parseHcHour(site?.hc_fin2??site?.heure_fin_hc2??globalVars?.hc_fin2)},
+    ].filter(w=>w.s!==null&&w.e!==null);
+    const _ph = parseFloat(effectiveTariff.prix_hp)||0;
+    const _pc = effectiveTariff.prix_hc!=null ? parseFloat(effectiveTariff.prix_hc)||0 : _ph;
+    for (let _m=1;_m<=12;_m++) for (let _d=1;_d<=PROF_DAYS[_m-1];_d++) for (let _h=0;_h<24;_h++) {
+      const _idx = profIdx(_m,_d,_h);
+      const _isSolar = prodProfil ? prodProfil[_idx]>0 : (_h>=9&&_h<18);
+      if (!_isSolar) continue;
+      const _gkwh = balance?.hourly ? (balance.hourly[_idx]?.grid_buy||0) : ((site.conso_profil[_idx]||0)/1000);
+      if (_gkwh<=0) continue;
+      const _accTTC = (_accPHT+getTurpeRate(_m,_h,globalVars,_hcw))*(1+_tva);
+      let _nTTC;
+      if (effectiveTariff.tarif_dynamique && spotMap) {
+        const _spot = spotMap[`${_m}_${_d}_${_h}`]||0;
+        const _marge = (effectiveTariff.marge_fournisseur_ceur_kwh||0)/100;
+        _nTTC = (_spot+getTurpeRate(_m,_h,globalVars,_hcw)+(globalVars?.accise||0)/100+_marge)*(1+_tva);
+      } else {
+        _nTTC = _hcw.length>0&&isHcHour(_h,_hcw) ? _pc : _ph;
+      }
+      if (_nTTC>_accTTC) accRev += _gkwh*(_nTTC-_accTTC);
+    }
+    accRev = Math.round(accRev);
+  }
+
+  const hasBalance   = balance && typeof balance.billWithStorage === 'number';
+  const consoApres   = hasBalance ? Math.round(balance.monthly.reduce((s,m)=>s+m.grid_buy,0)) : null;
+  const injApres     = hasBalance ? Math.round(balance.monthly.reduce((s,m)=>s+m.injection,0)) : 0;
+  const billApresElec= hasBalance ? Math.round(balance.billWithStorage) : null;
+  const billApresNet = billApresElec!=null ? billApresElec-flexRev-accRev : null;
+  const energySaving = hasBalance ? balance.saving : 0;
+  const totalSaving  = hasBalance ? (balance.saving+flexRev+accRev) : accRev;
+  const reductionPct = billAvant>0 ? Math.min(100, Math.round(totalSaving/billAvant*100)) : 0;
+
+  return { billAvant, billApresNet, consoApres, injApres, consoTot, flexRev, accRev, energySaving, totalSaving, reductionPct, hasBalance, effectiveTariff };
+}
+
 // ─── EnergyBalanceChart ───────────────────────
 function EnergyBalanceChart({ balance, level, selMonth, selDay, setLevel, setSelMonth, setSelDay, hourlyPrices, isDynamic }) {
   const wrapperRef = useRef(null), canvasRef = useRef(null);
@@ -3567,26 +3695,9 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
   // Sync champs locaux quand on change de site
   // Règle : si solar au panier → valeurs de la page solaire (panier) ; sinon → valeurs DB ou défauts
   useEffect(()=>{
-    // Source unique : starvolt_solar_defaults (partagé avec la page solaire) > DB > défauts
-    // Si solar au panier → 6/10/10 ou valeurs configurées ; sinon → 0 (pas d'équipement)
-    const solarDef=(()=>{try{return JSON.parse(localStorage.getItem('starvolt_solar_defaults'))||{};}catch{return{};}})();
-    const hasSolarPanier=!!localStorage.getItem('starvolt_solar_chosen');
-    const hasBoxOnlyPanier=!!localStorage.getItem('starvolt_box_chosen')&&!hasSolarPanier;
-    if(hasSolarPanier){
-      setPvKwc(parseFloat(solarDef.pvKwc)>0?solarDef.pvKwc:(site?.puissance_pv_kwc>0?String(site.puissance_pv_kwc):'6'));
-      setBatKwh(parseFloat(solarDef.batKwh)>0?solarDef.batKwh:(site?.batterie_capacite_kwh>0?String(site.batterie_capacite_kwh):'10'));
-      setThermKwh(parseFloat(solarDef.thermKwh)>0?solarDef.thermKwh:'10');
-    } else if(hasBoxOnlyPanier){
-      // Box seule : conserver les valeurs déjà saisies, thermique à 10 par défaut
-      setPvKwc(solarDef.pvKwc||'0');
-      setBatKwh(solarDef.batKwh||'0');
-      setThermKwh(solarDef.thermKwh||'10');
-    } else {
-      // Aucun équipement au panier : conserver les valeurs saisies (ne pas remettre à 0)
-      setPvKwc(solarDef.pvKwc||'0');
-      setBatKwh(solarDef.batKwh||'0');
-      setThermKwh(solarDef.thermKwh||'0');
-    }
+    // Source unique partagée avec le Panier : resolveCartEquipment
+    const eq=resolveCartEquipment(site);
+    setPvKwc(eq.pvKwc); setBatKwh(eq.batKwh); setThermKwh(eq.thermKwh);
     setProdProfilId(site?.profil_production_id||'');
     setProdProfilData(null); setBalance(null);
   },[activeId,cartVersion]);
@@ -3632,69 +3743,9 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
     setChartLevel('month'); setChartMonth(null); setChartDay(null);
   },[site?.conso_profil,prodProfilData]);
 
-  // Calculer le bilan énergétique dès que les données sont prêtes
+  // Calculer le bilan énergétique dès que les données sont prêtes — moteur partagé buildSiteBalance
   useEffect(()=>{
-    if(!site?.conso_profil){setBalance(null);return;}
-    const kw=pvKwc===''?6:(parseFloat(pvKwc)||0);
-    const bk=parseFloat(batKwh)||0;
-    const tk=parseFloat(thermKwh)||0;
-
-    // ── Box souscrite ? ──────────────────────────────────────────────────────
-    // Le stockage ne se charge/décharge que si l'utilisateur a une box Starvolt.
-    // Sans box, les flags opti_tarif et opti_solaire sont forcés à false
-    // pour que le calcul reflète uniquement le changement de tarif, pas l'optimisation.
-    const hasBoxLS = !!localStorage.getItem('starvolt_box_chosen')
-                  || localStorage.getItem('starvolt_solar_chosen') === 'solar_box';
-    const effectiveGlobalVars = globalVars ? {
-      ...globalVars,
-      opti_tarif:   hasBoxLS ? (globalVars.opti_tarif   ?? true) : false,
-      opti_solaire: hasBoxLS ? (globalVars.opti_solaire ?? true) : false,
-    } : globalVars;
-
-    // ── Helpers tarif ─────────────────────────────────────────────────────────
-    const getEffectiveTariff = () => {
-      if(!tariffs.length) return null;
-      const optiChosen=!!localStorage.getItem('starvolt_optimisation_chosen');
-      const optiTariffId=optiChosen?localStorage.getItem('starvolt_optimisation_tariff_id'):null;
-      const id=optiTariffId||site.tarif_id;
-      return id?tariffs.find(t=>t.id===id)||null:null;
-    };
-    const getBaseTariff = curT => site.tarif_id?tariffs.find(t=>t.id===site.tarif_id)||curT:curT;
-
-    // ── Routage ────────────────────────────────────────────────────────────────
-    // Les flags ☀️/⚡ contrôlent la STRATÉGIE DE STOCKAGE, pas si le PV est compté.
-    // Le PV réduit toujours la facture finale via l'autoconsommation (kW instantanés).
-    //
-    // • kw>0 + profil prod présent → computeCombinedOptimization
-    //   PV toujours inclus dans billWithStorage ; flags contrôlent le dispatch du stockage.
-    // • kw=0 ou pas de profil prod → computeStorageOptimization (tarif pur, PV absent)
-    // • Pas de tarif connu → computeEnergyBalance (graphique PV sans €)
-
-    const curT = getEffectiveTariff();
-
-    if(kw>0 && prodProfilData){
-      // ── Chemin PV + stockage ──
-      if(curT){
-        if(curT.tarif_dynamique&&!spotMap){setBalance(null);return;}
-        setBalance(computeCombinedOptimization(site.conso_profil,prodProfilData,kw,batKwh,thermKwh,effectiveGlobalVars,curT,getBaseTariff(curT),site,spotMap));
-        return;
-      }
-      // Pas de tarif → graphique PV seul
-      const ratioBat=(globalVars?.ratio_puissance_stockage??50)/100;
-      const pBat=globalVars?.pertes_batterie??10;
-      const ratioTherm=(globalVars?.ratio_puissance_stockage_thermique??50)/100;
-      const pTherm=globalVars?.pertes_thermique??0;
-      setBalance(computeEnergyBalance(site.conso_profil,prodProfilData,kw,bk*ratioBat*1000,bk,pBat,tk*ratioTherm,tk,pTherm));
-      return;
-    }
-
-    // ── Chemin tarif pur (kw=0 ou profil prod absent) ──
-    if(curT){
-      if(curT.tarif_dynamique&&!spotMap){setBalance(null);return;}
-      setBalance(computeStorageOptimization(site.conso_profil,curT,getBaseTariff(curT),site,bk,tk,effectiveGlobalVars,spotMap));
-      return;
-    }
-    setBalance(null);
+    setBalance(buildSiteBalance({site,prodProfil:prodProfilData,tariffs,spotMap,globalVars,pvKwc,batKwh,thermKwh}));
   },[site?.conso_profil,prodProfilData,pvKwc,batKwh,thermKwh,globalVars,spotMap,tariffs,site?.tarif_id,site?.heure_debut_hc1,site?.heure_fin_hc1,site?.heure_debut_hc2,site?.heure_fin_hc2]);
 
   const updateSite=async(updates)=>{ await sb.from('sites').update(updates).eq('id',activeId); await load(); };
@@ -3921,59 +3972,17 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
                     const baseTariff=tariffs.find(t=>t.id===site.tarif_id);
                     const consoTot=Math.round(site.conso_annuelle_kwh);
                     const fmtE=v=>Math.round(v/1000)+' MWh/an';
-                    // AVANT
-                    let billAvant=balance?.billWithout!=null
-                      ?Math.round(balance.billWithout)
-                      :(baseTariff&&!baseTariff.tarif_dynamique
-                          ?Math.round((baseTariff.abo_annuel||0)+site.conso_annuelle_kwh*(baseTariff.prix_hp||0))
-                          :null);
+                    // Impact — moteur partagé (identique au Panier)
+                    const _imp=deriveSiteImpact({balance,site,prodProfil:prodProfilData,tariffs,spotMap,globalVars,batKwh,thermKwh});
+                    const billAvant=_imp.billAvant;
                     const prixAvant=(billAvant&&consoTot)?billAvant/consoTot:null;
-                    // Flex revenue — même formule que la tuile Ma prod
-                    const _boxLS2=localStorage.getItem('starvolt_box_chosen');
-                    const _hasBox2=(_boxLS2&&_boxLS2!=='diy')||localStorage.getItem('starvolt_solar_chosen')==='solar_box';
-                    const _optiFlex2=!!(globalVars?.opti_flex)&&_hasBox2;
-                    const _ratio2=(globalVars?.ratio_puissance_stockage??50)/100;
-                    const _batPow2=(parseFloat(batKwh)||0)*_ratio2;
-                    const flexRev=_optiFlex2?Math.round((parseFloat(thermKwh)||0)*14+_batPow2*27):0;
-                    // ACC savings — boucle m/d/h sur le profil de conso, même formule que la tuile Ma prod
-                    const _hasAcc2=localStorage.getItem('starvolt_acc_chosen')==='true';
-                    let accRev=0;
-                    if(_hasAcc2&&effectiveTariff&&site?.conso_profil){
-                      const _accPHT2=parseFloat(localStorage.getItem('starvolt_acc_price_ht')||'0.09');
-                      const _tva2=(globalVars?.tva??20)/100;
-                      const _hcw2=[
-                        {s:parseHcHour(site?.hc_debut1??site?.heure_debut_hc1??globalVars?.hc_debut1),e:parseHcHour(site?.hc_fin1??site?.heure_fin_hc1??globalVars?.hc_fin1)},
-                        {s:parseHcHour(site?.hc_debut2??site?.heure_debut_hc2??globalVars?.hc_debut2),e:parseHcHour(site?.hc_fin2??site?.heure_fin_hc2??globalVars?.hc_fin2)},
-                      ].filter(w=>w.s!==null&&w.e!==null);
-                      const _ph2=parseFloat(effectiveTariff.prix_hp)||0;
-                      const _pc2=effectiveTariff.prix_hc!=null?parseFloat(effectiveTariff.prix_hc)||0:_ph2;
-                      for(let _m=1;_m<=12;_m++) for(let _d=1;_d<=PROF_DAYS[_m-1];_d++) for(let _h=0;_h<24;_h++){
-                        const _idx=profIdx(_m,_d,_h);
-                        const _isSolar=prodProfilData?prodProfilData[_idx]>0:(_h>=9&&_h<18);
-                        if(!_isSolar) continue;
-                        const _gkwh=balance?.hourly?(balance.hourly[_idx]?.grid_buy||0):((site.conso_profil[_idx]||0)/1000);
-                        if(_gkwh<=0) continue;
-                        const _accTTC2=(_accPHT2+getTurpeRate(_m,_h,globalVars,_hcw2))*(1+_tva2);
-                        let _nTTC2;
-                        if(effectiveTariff.tarif_dynamique&&spotMap){
-                          const _spot=spotMap[`${_m}_${_d}_${_h}`]||0;
-                          const _marge=(effectiveTariff.marge_fournisseur_ceur_kwh||0)/100;
-                          _nTTC2=(_spot+getTurpeRate(_m,_h,globalVars,_hcw2)+(globalVars?.accise||0)/100+_marge)*(1+_tva2);
-                        } else {
-                          _nTTC2=_hcw2.length>0&&isHcHour(_h,_hcw2)?_pc2:_ph2;
-                        }
-                        if(_nTTC2>_accTTC2) accRev+=_gkwh*(_nTTC2-_accTTC2);
-                      }
-                      accRev=Math.round(accRev);
-                    }
-                    // APRÈS — coût net = facture électricité − revenus flex − économies ACC
-                    const hasBalance=balance&&typeof balance.billWithStorage==='number';
-                    const consoApres=hasBalance?Math.round(balance.monthly.reduce((s,m)=>s+m.grid_buy,0)):null;
-                    const billApresElec=hasBalance?Math.round(balance.billWithStorage):null;
-                    const billApresNet=billApresElec!=null?billApresElec-flexRev-accRev:null;
+                    const flexRev=_imp.flexRev, accRev=_imp.accRev;
+                    const hasBalance=_imp.hasBalance;
+                    const consoApres=_imp.consoApres;
+                    const billApresNet=_imp.billApresNet;
                     const prixApres=(billApresNet!=null&&consoApres>0)?billApresNet/consoApres:null;
-                    const totalSaving=hasBalance?(balance.saving+flexRev+accRev):accRev;
-                    const totalReductionPct=billAvant>0?Math.min(100,Math.round(totalSaving/billAvant*100)):0;
+                    const totalSaving=_imp.totalSaving;
+                    const totalReductionPct=_imp.reductionPct;
                     const hasSaving=totalSaving>0;
                     const hasModifs=hasBalance&&(
                       !!localStorage.getItem('starvolt_solar_chosen')||
@@ -4221,76 +4230,31 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
                     period=chartLevel==='hour'?`${chartDay}/${chartMonth}`:chartLevel==='day'?`Mois ${chartMonth}`:'Année';
                     fmt=v=>(v*scale).toFixed(unit==='MWh'?1:0)+' '+unit;
                   }
-                  // Baisse de facture annuelle (€TTC) et réduction (%)
-                  let reductionFacturePct=null, baisseFacture=null;
-                  if(balance){
-                    if(balance._storageOpti||balance._combined){
-                      // Résultat optimisation stockage (avec ou sans PV)
-                      baisseFacture=balance.saving;
-                      reductionFacturePct=balance.reductionPct;
-                      if(baisseFacture>0) localStorage.setItem('starvolt_baisse_facture',String(baisseFacture));
-                    } else if(site?.conso_profil&&site.conso_annuelle_kwh>0){
-                      // Bilan PV normal — même formule que SolarSim
-                      const annInj=balance.monthly.reduce((s,m)=>s+m.injection,0);
-                      const annGrid=balance.monthly.reduce((s,m)=>s+m.grid_buy,0);
-                      const curT=tariffs.find(t=>t.id===site.tarif_id);
-                      if(curT&&!curT.tarif_dynamique){
-                        const _bill=Math.round((curT.abo_annuel||0)+site.conso_annuelle_kwh*(curT.prix_hp||0));
-                        if(_bill>0){
-                          const _pm=_bill/site.conso_annuelle_kwh;
-                          const _pr=globalVars?.prix_rachat_injection??0.04;
-                          const nouvFact=Math.max(0,annGrid*_pm-annInj*_pr);
-                          reductionFacturePct=Math.min(100,Math.round((1-nouvFact/_bill)*100));
-                          baisseFacture=Math.max(0,Math.round(_bill-nouvFact));
-                          localStorage.setItem('starvolt_baisse_facture',String(baisseFacture));
-                        }
+                  // Impact — moteur partagé (identique à la table Avant/Après et au Panier)
+                  const _impT=deriveSiteImpact({balance,site,prodProfil:prodProfilData,tariffs,spotMap,globalVars,batKwh,thermKwh});
+                  const _boxLS=localStorage.getItem('starvolt_box_chosen');
+                  // hasBox : box choisie seule OU incluse dans solar_box (DIY exclu — son investissement est géré séparément)
+                  const hasBox=(_boxLS&&_boxLS!=='diy')||localStorage.getItem('starvolt_solar_chosen')==='solar_box';
+                  const hasAcc=localStorage.getItem('starvolt_acc_chosen')==='true';
+                  const flexRevenue=_impT.flexRev;
+                  const accSavings=_impT.accRev;
+                  // Économie énergie = bilan stockage/combiné ; fallback bilan PV pur (tarif non dynamique, pas de stockage)
+                  let baisseFacture=_impT.energySaving;
+                  if(!_impT.hasBalance&&balance&&site?.conso_profil&&site.conso_annuelle_kwh>0){
+                    const annInj=balance.monthly.reduce((s,m)=>s+m.injection,0);
+                    const annGrid=balance.monthly.reduce((s,m)=>s+m.grid_buy,0);
+                    const curT=tariffs.find(t=>t.id===site.tarif_id);
+                    if(curT&&!curT.tarif_dynamique){
+                      const _bill=Math.round((curT.abo_annuel||0)+site.conso_annuelle_kwh*(curT.prix_hp||0));
+                      if(_bill>0){
+                        const _pm=_bill/site.conso_annuelle_kwh;
+                        const _pr=globalVars?.prix_rachat_injection??0.04;
+                        const nouvFact=Math.max(0,annGrid*_pm-annInj*_pr);
+                        baisseFacture=Math.max(0,Math.round(_bill-nouvFact));
                       }
                     }
                   }
-                  const hasSolar=!!localStorage.getItem('starvolt_solar_chosen');
-                  // hasBox : box choisie seule OU incluse dans solar_box (DIY exclu — son investissement est géré séparément)
-                  const _boxLS=localStorage.getItem('starvolt_box_chosen');
-                  const hasBox=(_boxLS&&_boxLS!=='diy')||localStorage.getItem('starvolt_solar_chosen')==='solar_box';
-                  const hasAcc=localStorage.getItem('starvolt_acc_chosen')==='true';
-                  const optiFlex=!!(globalVars?.opti_flex)&&hasBox;
-                  const optiAcc=hasAcc; // cohérent avec hourlyPrices qui lit starvolt_acc_chosen directement
-                  // Flex revenue : thermique 14 €/kW/an + batterie 27 €/kW/an (puissance = capacité × ratio)
-                  const _ratio=(globalVars?.ratio_puissance_stockage??50)/100;
-                  const batPowKw=(parseFloat(batKwh)||0)*_ratio;
-                  const flexRevenue=optiFlex?Math.round((parseFloat(thermKwh)||0)*14+batPowKw*27):0;
-                  // ACC savings post-balance : heures 9–17, accTTC < normalTTC
-                  // Formule ACC TTC : (prix_vente_ACC + TURPE_4_taux(m,h)) × (1+TVA) — sans accise
-                  // TURPE variable selon saison et HC/HP ; normalTTC depuis tarif brut (pas hourlyPrices)
-                  let accSavings=0;
-                  if(optiAcc&&effectiveTariff&&site?.conso_profil){
-                    const _accPHT=parseFloat(localStorage.getItem('starvolt_acc_price_ht')||'0.09');
-                    const _tva=(globalVars?.tva??20)/100;
-                    const _hcw=[
-                      {s:parseHcHour(site?.hc_debut1??site?.heure_debut_hc1??globalVars?.hc_debut1),e:parseHcHour(site?.hc_fin1??site?.heure_fin_hc1??globalVars?.hc_fin1)},
-                      {s:parseHcHour(site?.hc_debut2??site?.heure_debut_hc2??globalVars?.hc_debut2),e:parseHcHour(site?.hc_fin2??site?.heure_fin_hc2??globalVars?.hc_fin2)},
-                    ].filter(w=>w.s!==null&&w.e!==null);
-                    const _ph=parseFloat(effectiveTariff.prix_hp)||0;
-                    const _pc=effectiveTariff.prix_hc!=null?parseFloat(effectiveTariff.prix_hc)||0:_ph;
-                    for(let _m=1;_m<=12;_m++) for(let _d=1;_d<=PROF_DAYS[_m-1];_d++) for(let _h=0;_h<24;_h++){
-                      const _idx=profIdx(_m,_d,_h);
-                      const _isSolar=prodProfilData?prodProfilData[_idx]>0:(_h>=9&&_h<18);
-                      if(!_isSolar) continue;
-                      const _gkwh=balance?.hourly?(balance.hourly[_idx]?.grid_buy||0):((site.conso_profil[_idx]||0)/1000);
-                      if(_gkwh<=0) continue;
-                      const accTTC=(_accPHT+getTurpeRate(_m,_h,globalVars,_hcw))*(1+_tva);
-                      const normalTTC=(()=>{
-                        if(effectiveTariff.tarif_dynamique&&spotMap){
-                          const spot=spotMap[`${_m}_${_d}_${_h}`]||0;
-                          const marge=(effectiveTariff.marge_fournisseur_ceur_kwh||0)/100;
-                          return(spot+getTurpeRate(_m,_h,globalVars,_hcw)+(globalVars?.accise||0)/100+marge)*(1+_tva);
-                        }
-                        return _hcw.length>0&&isHcHour(_h,_hcw)?_pc:_ph;
-                      })();
-                      if(normalTTC>accTTC) accSavings+=_gkwh*(normalTTC-accTTC);
-                    }
-                    accSavings=Math.round(accSavings);
-                  }
-                  // Baisse totale : bilan énergie + flex + acc
+                  // Baisse totale : énergie + flex + acc — cache pour SimulationsScreen / SolarSim
                   const baisseTotale=(baisseFacture||0)+flexRevenue+accSavings;
                   if(baisseTotale>0) localStorage.setItem('starvolt_baisse_facture',String(baisseTotale));
                   // Investissement global (PV + batterie + box) depuis les tarifs admin
@@ -7538,12 +7502,8 @@ function PanierScreen({ user, onBack, onGoTo, onMonSite }) {
   const [isDynamic,   setIsDynamic]   = useState(false);
   const [taux,        setTaux]        = useState(4);
   const [taux2,       setTaux2]       = useState(0);
-  const [savings,     setSavings]     = useState({ optimisation:0, acc:0, box:0, diy:0, solar:0 });
+  const [impact,      setImpact]      = useState(null);
   const [validated,   setValidated]   = useState(false);
-  const [solGridKwh,    setSolGridKwh]    = useState(null);
-  const [solInjKwh,     setSolInjKwh]     = useState(null);
-  const [solPrixBase,   setSolPrixBase]   = useState(null);
-  const [solPrixRachat, setSolPrixRachat] = useState(0.04);
   const [items,       setItems]       = useState(() => ({
     optimisation: !!localStorage.getItem('starvolt_optimisation_chosen'),
     acc:          localStorage.getItem('starvolt_acc_chosen') === 'true',
@@ -7593,94 +7553,13 @@ function PanierScreen({ user, onBack, onGoTo, onMonSite }) {
         const { data: pp } = await sb.from('profils_production').select('profil').eq('id', site.profil_production_id).single();
         _prodProfil = pp?.profil || null;
       }
-      setCurrentBill(bill);
-
-      if (bill) {
-        // Toujours recalculer le saving d'optimisation depuis les tarifs en live
-        // starvolt_optimisation_saving peut être périmé (ancienne session, ancienne conso)
-        const dynCtx = site.conso_profil && spotRows && nat
-          ? { consoProfile: site.conso_profil, spotMap: buildSpotMap(spotRows), natParams: nat, site }
-          : null;
-        let optSav = 0;
-        if (items.optimisation && tariffs?.length) {
-          const optiTariffId  = localStorage.getItem('starvolt_optimisation_tariff_id');
-          const curTariffRes  = curTariff  ? calcTariffCost(curTariff,  kwh_hc, kwh_hp, dynCtx) : null;
-          const optiTariffObj = optiTariffId ? (tariffs||[]).find(t=>t.id===optiTariffId) : null;
-          const optiTariffRes = optiTariffObj ? calcTariffCost(optiTariffObj, kwh_hc, kwh_hp, dynCtx) : null;
-          if (curTariffRes && optiTariffRes && optiTariffId !== site.tarif_id) {
-            optSav = Math.max(0, Math.round(curTariffRes.total - optiTariffRes.total));
-          } else {
-            // Fallback : diff avec le meilleur tarif dispo (en incluant les tarifs multi/dynamiques)
-            const ranked = (tariffs||[]).map(t=>({t,result:calcTariffCost(t,kwh_hc,kwh_hp,dynCtx)})).filter(({result})=>result!==null).sort((a,b)=>a.result.total-b.result.total);
-            const cur = site.tarif_id ? ranked.find(r=>r.t.id===site.tarif_id) : null;
-            optSav = cur ? Math.max(0, Math.round(cur.result.total - ranked[0].result.total)) : parseInt(localStorage.getItem('starvolt_optimisation_saving')||'0');
-          }
-        }
-        let accSav = parseInt(localStorage.getItem('starvolt_acc_saving')||'0');
-        if (!accSav && site.conso_profil) {
-          let kwh918 = 0;
-          for (let m=1;m<=12;m++) for (let d=1;d<=PROF_DAYS[m-1];d++) for (let h=0;h<24;h++) {
-            const idx=profIdx(m,d,h);
-            if (_prodProfil ? !(_prodProfil[idx]>0) : (h<9||h>=18)) continue;
-            kwh918 += (site.conso_profil[idx]||0)/1000;
-          }
-          accSav = Math.max(0, Math.round(kwh918 * ((curTariff?.prix_hp||0.24) - 0.11)));
-        }
-        const solDefP=(()=>{try{return JSON.parse(localStorage.getItem('starvolt_solar_defaults'))||{};}catch{return{};}})();
-        const bkvP=parseFloat(solDefP.batKwh)||0, tkvP=parseFloat(solDefP.thermKwh)||0;
-        const spP = spotRows ? buildSpotMap(spotRows) : null;
-        const storResP = curTariff ? computeStorageOptimization(site.conso_profil, curTariff, curTariff, site, bkvP, tkvP, {...nat, opti_tarif:true}, spP) : null;
-        const shiftSavP = storResP?.saving || 0;
-        let boxSav;
-        if (localStorage.getItem('starvolt_box_chosen') === 'free') {
-          boxSav = shiftSavP; // flex reversée à Starvolt, l'utilisateur garde le gain de déplacement
-        } else {
-          boxSav = parseInt(localStorage.getItem('starvolt_box_saving')||'0');
-          const _ratioP = (nat?.ratio_puissance_stockage ?? 50) / 100;
-          const flexGainP = Math.round((parseFloat(solDefP.thermKwh)||0)*14 + bkvP*_ratioP*27);
-          if (!boxSav) boxSav = Math.round(flexGainP + shiftSavP);
-        }
-        // Solar savings : utiliser baisse facture calculée (MaProd) si dispo, sinon estimation 70%
-        const adjBillSolar = Math.max(0, bill - optSav - accSav);
-        const baisseFact0 = parseInt(localStorage.getItem('starvolt_baisse_facture')||'0') || 0;
-        let solSav = baisseFact0 > 0 ? baisseFact0 : (solarChoice === 'solar_box' ? Math.round(adjBillSolar * 0.70) : Math.round(adjBillSolar * 0.50));
-        // Si solar_box choisi, la Box est comprise dans le 70% — ne pas compter ses économies en double
-        const effectiveBoxSav = (solarChoice === 'solar_box') ? 0 : boxSav;
-        // DIY savings : même estimation flex que Box (basée sur capacité thermique)
-        const diyData = (()=>{ try{return JSON.parse(localStorage.getItem('starvolt_diy_box_chosen')||'{}');}catch{return{};} })();
-        const diyKw = parseFloat(diyData.effectiveKw)||0;
-        const diyFlexGain = Math.round(diyKw * 14 + shiftSavP);
-        setSavings({ optimisation: optSav, acc: accSav, box: effectiveBoxSav, diy: diyFlexGain, solar: solSav });
-        // Projection solaire précise : calculer achat réseau et injection heure par heure
-        if (solarChoice && site.profil_production_id && site.conso_profil) {
-          const siteKwh = site.conso_annuelle_kwh || kwh_total;
-          const prixBase = curTariff && !curTariff.tarif_dynamique && siteKwh > 0
-            ? Math.round((curTariff.abo_annuel||0) + siteKwh * (curTariff.prix_hp||0)) / siteKwh
-            : (bill && kwh_total > 0 ? bill / kwh_total : 0.18);
-          const prixRachat = nat?.prix_rachat_injection ?? 0.04;
-          setSolPrixBase(prixBase);
-          setSolPrixRachat(prixRachat);
-          const solarDef = (()=>{ try{return JSON.parse(localStorage.getItem('starvolt_solar_defaults'))||{};}catch{return{};} })();
-          const kw = parseFloat(solarDef.pvKwc)||6;
-          const bk = parseFloat(solarDef.batKwh)||10;
-          const tk = parseFloat(solarDef.thermKwh)||5;
-          const ratioBat   = ((nat?.ratio_puissance_stockage              ??50)/100);
-          const ratioTherm = ((nat?.ratio_puissance_stockage_thermique    ??50)/100);
-          const pBat   = nat?.pertes_batterie  ?? 10;
-          const pTherm = nat?.pertes_thermique ?? 0;
-          if (_prodProfil) {
-            const bal = computeEnergyBalance(site.conso_profil, _prodProfil, kw,
-              bk*ratioBat*1000, bk, pBat, tk*ratioTherm, tk, pTherm);
-            const gridBuy = bal.monthly.reduce((s,m) => s+m.grid_buy, 0);
-            const injKwh  = bal.monthly.reduce((s,m) => s+m.injection, 0);
-            setSolGridKwh(gridBuy); setSolInjKwh(injKwh);
-            const curBillPan = Math.round(prixBase * siteKwh);
-            const nouvFactPan = Math.max(0, gridBuy * prixBase - injKwh * prixRachat);
-            const realSav = Math.max(0, Math.round(curBillPan - nouvFactPan));
-            if (realSav > 0) setSavings(prev => ({...prev, solar: realSav}));
-          }
-        }
-      }
+      // SOURCE UNIQUE : même moteur intégré que "Mon site" (buildSiteBalance + deriveSiteImpact)
+      const spotMap = spotRows ? buildSpotMap(spotRows) : null;
+      const eq = resolveCartEquipment(site);
+      const balance = buildSiteBalance({ site, prodProfil:_prodProfil, tariffs, spotMap, globalVars:nat, pvKwc:eq.pvKwc, batKwh:eq.batKwh, thermKwh:eq.thermKwh });
+      const imp = deriveSiteImpact({ balance, site, prodProfil:_prodProfil, tariffs, spotMap, globalVars:nat, batKwh:eq.batKwh, thermKwh:eq.thermKwh });
+      setCurrentBill(imp.billAvant != null ? Math.round(imp.billAvant) : bill);
+      setImpact(imp);
       setLoading(false);
     });
   }, []);
@@ -7716,24 +7595,8 @@ function PanierScreen({ user, onBack, onGoTo, onMonSite }) {
     for (let n = 1; n <= 25; n++) s += projYear(n, bill);
     return Math.round(s);
   };
-  // Projection "avec action" : seul le coût d'achat réseau est indexé sur l'inflation
-  // injection (revenus vente surplus) reste fixe, autoconsommation = gratuite
-  const projBilledAfter = (n) => {
-    if (solGridKwh !== null && solPrixBase !== null) {
-      let gridCost;
-      if (n <= 10) gridCost = solGridKwh * solPrixBase * Math.pow(1 + taux/100, n - 1);
-      else {
-        const gc10 = solGridKwh * solPrixBase * Math.pow(1 + taux/100, 9);
-        gridCost = gc10 * Math.pow(1 + taux2/100, n - 10);
-      }
-      return Math.max(0, Math.round(gridCost - solInjKwh * solPrixRachat));
-    }
-    // Fallback si pas de balance heure/heure disponible
-    if (!billedAfter) return 0;
-    if (n <= 10) return Math.round(billedAfter * Math.pow(1 + taux/100, n - 1));
-    const ba10 = billedAfter * Math.pow(1 + taux/100, 9);
-    return Math.round(ba10 * Math.pow(1 + taux2/100, n - 10));
-  };
+  // Projection "avec action" : la facture nette après action est indexée sur l'inflation
+  const projBilledAfter = (n) => projYear(n, billedAfter);
   const projCumBilledAfter = () => {
     let s = 0;
     for (let n = 1; n <= 25; n++) s += projBilledAfter(n);
@@ -7741,13 +7604,12 @@ function PanierScreen({ user, onBack, onGoTo, onMonSite }) {
   };
 
   const activeItems        = Object.entries(items).filter(([,v])=>v);
-  // Toujours recalculer depuis les savings individuels — ne pas utiliser le cache starvolt_baisse_facture
-  // (celui-ci peut être périmé si les items du panier ont changé depuis la dernière visite de Mon site)
-  const totalAnnualSaving  = activeItems.reduce((s,[k])=>s+(savings[k]||0),0);
+  // SOURCE UNIQUE : réduction issue du moteur intégré (identique à "Mon site")
+  const totalAnnualSaving  = Math.round(impact?.totalSaving || 0);
   // investLS est calculé par Mon site (PV + bat + box fournis+posés) — on l'utilise seulement si solar ou box (non-DIY) au panier
   const _hasSolarOrBox = items.solar || items.box;
   const totalInvestment    = (_hasSolarOrBox && investLS) ? investLS : activeItems.reduce((s,[k])=>s+(investments[k]||0),0);
-  const billedAfter        = currentBill ? Math.max(0, currentBill - totalAnnualSaving) : null;
+  const billedAfter        = impact?.billApresNet != null ? Math.max(0, Math.round(impact.billApresNet)) : (currentBill ? Math.max(0, currentBill - totalAnnualSaving) : null);
   const roiGlobal          = totalInvestment > 0 && totalAnnualSaving > 0 ? Math.ceil(totalInvestment / totalAnnualSaving) : null;
   const gainNet25          = currentBill ? Math.max(0, projCum(currentBill) - projCumBilledAfter() - totalInvestment) : 0;
   const itemsCount         = activeItems.length;
@@ -7896,7 +7758,7 @@ function PanierScreen({ user, onBack, onGoTo, onMonSite }) {
       {items.box && (
         <CartItemCard imgSrc="/comwatt-box.png" title="Box Comwatt"
           subtitle={boxChoice==='buy' ? 'Achat direct — 600 €' : 'Box gratuite — cagnotte reversée 3 ans'}
-          saving={savings.box} investment={investments.box}
+          investment={investments.box}
           color="#7dd940" onRemove={()=>removeItem('box')}
           onClick={()=>onGoTo&&onGoTo('BOX_SIM')}/>
       )}
