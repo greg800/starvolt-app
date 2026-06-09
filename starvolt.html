@@ -3057,6 +3057,21 @@ function computeCombinedOptimization(consoProfile, prodNorm, pvKwc, batKwh, ther
 // EXACTEMENT le même chiffre : mêmes entrées + mêmes formules = même résultat.
 // Ne jamais recalculer les économies du panier ailleurs.
 
+// 0) Variables globales : DB + override des flags opti_* depuis le cache localStorage.
+//    Le cache est la SEULE source de vérité pour opti_* (mis à jour en temps réel au
+//    clic) ; la DB peut être périmée. Tout écran qui calcule des économies DOIT passer
+//    par ici, sinon il diverge (bug panier -416 vs Mon site -676).
+function mergeGlobalVars(data) {
+  const cached = (()=>{ try { return JSON.parse(localStorage.getItem('starvolt_global_vars_cache')); } catch { return null; } })();
+  if (!data) return cached;
+  return { ...data,
+    opti_solaire: cached?.opti_solaire ?? data.opti_solaire ?? true,
+    opti_tarif:   cached?.opti_tarif   ?? data.opti_tarif   ?? true,
+    opti_flex:    cached?.opti_flex    ?? data.opti_flex    ?? false,
+    opti_acc:     cached?.opti_acc     ?? data.opti_acc     ?? false,
+  };
+}
+
 // 1) Équipement PV / batterie / thermique retenu selon le contenu du panier.
 //    Lit starvolt_solar_defaults (édité dans Mon site) + fallback site + défauts.
 function resolveCartEquipment(site) {
@@ -3765,15 +3780,8 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
     sb.from('parametres_nationaux').select('*').eq('id',1).maybeSingle()
       .then(({data})=>{
         if(!data) return;
-        // opti_* : le localStorage est la source de vérité (mis à jour en temps réel au clic)
-        // Supabase peut avoir une valeur stale si l'upsert n'avait pas eu le temps de se sauver
-        const cached=(()=>{try{return JSON.parse(localStorage.getItem('starvolt_global_vars_cache'));}catch{return null;}})();
-        const merged={...data,
-          opti_solaire: cached?.opti_solaire ?? data.opti_solaire ?? true,
-          opti_tarif:   cached?.opti_tarif   ?? data.opti_tarif   ?? true,
-          opti_flex:    cached?.opti_flex    ?? data.opti_flex    ?? false,
-          opti_acc:     cached?.opti_acc     ?? data.opti_acc     ?? false,
-        };
+        // opti_* : le cache localStorage est la source de vérité (cf. mergeGlobalVars)
+        const merged=mergeGlobalVars(data);
         setGlobalVars(merged);
         try{localStorage.setItem('starvolt_global_vars_cache',JSON.stringify(merged));}catch{}
       });
@@ -7522,7 +7530,7 @@ function PanierScreen({ user, onBack, onGoTo, onMonSite }) {
     const siteId = localStorage.getItem('starvolt_active_site_id');
     if (!siteId) { setLoading(false); return; }
     Promise.all([
-      sb.from('sites').select('id,conso_profil,conso_annuelle_kwh,tarif_id,profil_production_id,heure_debut_hc1,heure_fin_hc1,heure_debut_hc2,heure_fin_hc2').eq('id', siteId).maybeSingle(),
+      sb.from('sites').select('id,conso_profil,conso_annuelle_kwh,tarif_id,profil_production_id,heure_debut_hc1,heure_fin_hc1,heure_debut_hc2,heure_fin_hc2,hc_debut1,hc_fin1,hc_debut2,hc_fin2').eq('id', siteId).maybeSingle(),
       sb.from('tarifs_electricite').select('*'),
       sb.rpc('get_spot_json'),
       sb.from('parametres_nationaux').select('*').eq('id',1).maybeSingle(),
@@ -7554,10 +7562,12 @@ function PanierScreen({ user, onBack, onGoTo, onMonSite }) {
         _prodProfil = pp?.profil || null;
       }
       // SOURCE UNIQUE : même moteur intégré que "Mon site" (buildSiteBalance + deriveSiteImpact)
+      // gv = nat + override opti_* depuis le cache (sinon flags périmés → divergence)
+      const gv = mergeGlobalVars(nat);
       const spotMap = spotRows ? buildSpotMap(spotRows) : null;
       const eq = resolveCartEquipment(site);
-      const balance = buildSiteBalance({ site, prodProfil:_prodProfil, tariffs, spotMap, globalVars:nat, pvKwc:eq.pvKwc, batKwh:eq.batKwh, thermKwh:eq.thermKwh });
-      const imp = deriveSiteImpact({ balance, site, prodProfil:_prodProfil, tariffs, spotMap, globalVars:nat, batKwh:eq.batKwh, thermKwh:eq.thermKwh });
+      const balance = buildSiteBalance({ site, prodProfil:_prodProfil, tariffs, spotMap, globalVars:gv, pvKwc:eq.pvKwc, batKwh:eq.batKwh, thermKwh:eq.thermKwh });
+      const imp = deriveSiteImpact({ balance, site, prodProfil:_prodProfil, tariffs, spotMap, globalVars:gv, batKwh:eq.batKwh, thermKwh:eq.thermKwh });
       setCurrentBill(imp.billAvant != null ? Math.round(imp.billAvant) : bill);
       setImpact(imp);
       setLoading(false);
