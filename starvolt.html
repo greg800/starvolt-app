@@ -9625,6 +9625,29 @@ function HomeChoiceScreen({ profile, onComprendre, onAction }) {
   );
 }
 
+// ─── GroupDescription : sous-titre groupe replié à 4 lignes, déplié au clic sur "·······"
+function GroupDescription({ text }) {
+  const [expanded, setExpanded] = useState(false);
+  const [overflowing, setOverflowing] = useState(false);
+  const ref = useRef(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (el) setOverflowing(el.scrollHeight - el.clientHeight > 1);
+  }, [text]);
+  return (
+    <div>
+      <div ref={ref} style={{
+        fontSize:15.5, color:'white', lineHeight:1.4,
+        ...(expanded ? {} : { display:'-webkit-box', WebkitLineClamp:4, WebkitBoxOrient:'vertical', overflow:'hidden' })
+      }}>{text}</div>
+      {!expanded && overflowing && (
+        <span onClick={(e)=>{ e.stopPropagation(); setExpanded(true); }}
+          style={{ display:'block', cursor:'pointer', color:'rgba(255,255,255,.55)', fontWeight:900, letterSpacing:'3px', fontSize:16, lineHeight:1.2, marginTop:2, userSelect:'none' }}>·······</span>
+      )}
+    </div>
+  );
+}
+
 // ─── ComprendreHomeScreen ─────────────────────────────────────────────────────
 function ComprendreHomeScreen({ user, onGroup, onAction, onBack }) {
   const [groups, setGroups] = useState([]);
@@ -9690,7 +9713,7 @@ function ComprendreHomeScreen({ user, onGroup, onAction, onBack }) {
             <button key={g.id} onClick={() => onGroup(g)} style={{background:'rgba(255,255,255,.07)',border:'1px solid rgba(255,255,255,.12)',borderRadius:14,padding:'16px 18px',textAlign:'left',cursor:'pointer',display:'flex',alignItems:'center',gap:14,width:'100%'}}>
               <div style={{flex:1}}>
                 <div style={{fontWeight:700,color:'white',fontSize:16,marginBottom:4}}>{g.title}</div>
-                {g.description && <div style={{fontSize:15.5,color:'white',lineHeight:1.4}}>{g.description}</div>}
+                {g.description && <GroupDescription text={g.description} />}
                 <div style={{marginTop:8,display:'flex',alignItems:'center',gap:8}}>
                   <div style={{flex:1,height:4,background:'rgba(255,255,255,.12)',borderRadius:4,overflow:'hidden'}}>
                     <div style={{width:`${g.total>0?Math.round(g.done/g.total*100):0}%`,height:'100%',background:'#7dd940',borderRadius:4,transition:'width .3s'}}/>
