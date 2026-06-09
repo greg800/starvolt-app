@@ -9903,6 +9903,21 @@ function ComprendreGroupScreen({ user, group, onSubject, onRevision, onAction, o
   );
 }
 
+// ─── ImageWithLightbox ────────────────────────────────────────────────────────
+function ImageWithLightbox({ src, style }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <img src={src} alt="" style={{...style, cursor:'zoom-in'}} onClick={()=>setOpen(true)}/>
+      {open && (
+        <div className="lightbox-overlay" onClick={()=>setOpen(false)}>
+          <img src={src} alt="" onClick={e=>e.stopPropagation()}/>
+        </div>
+      )}
+    </>
+  );
+}
+
 // ─── ComprendreSubjectScreen ──────────────────────────────────────────────────
 function ComprendreSubjectScreen({ subject, onQuiz, onBack }) {
   const embed = getVideoEmbed(subject.video_url);
@@ -9914,8 +9929,8 @@ function ComprendreSubjectScreen({ subject, onQuiz, onBack }) {
         <h1 className="welcome-title">{subject.title}</h1>
       </div>
       {subject.image_url && (
-        <div style={{marginBottom:18,borderRadius:14,overflow:'hidden',maxHeight:220}}>
-          <img src={subject.image_url} alt="" style={{width:'100%',height:'100%',objectFit:'cover',display:'block'}}/>
+        <div style={{marginBottom:18,borderRadius:14,overflow:'hidden'}}>
+          <ImageWithLightbox src={subject.image_url} style={{width:'100%',display:'block',borderRadius:14}}/>
         </div>
       )}
       {subject.content && (
@@ -9979,7 +9994,7 @@ function ComprendreQuizScreen({ user, questions, subject, isRevision, onDone, on
           <div style={{width:`${pct}%`,height:'100%',background:'#7dd940',borderRadius:4,transition:'width .3s'}}/>
         </div>
       </div>
-      {q.image_url && <div style={{marginBottom:14,borderRadius:12,overflow:'hidden',maxHeight:180}}><img src={q.image_url} alt="" style={{width:'100%',objectFit:'cover',display:'block'}}/></div>}
+      {q.image_url && <div style={{marginBottom:14,borderRadius:12,overflow:'hidden'}}><ImageWithLightbox src={q.image_url} style={{width:'100%',display:'block',borderRadius:12}}/></div>}
       <div className="card" style={{marginBottom:16,padding:'18px 18px'}}>
         <div style={{fontSize:16,fontWeight:700,color:'white',lineHeight:1.5}}>{q.question}</div>
       </div>
