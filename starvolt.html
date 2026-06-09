@@ -7596,11 +7596,22 @@ function PanierScreen({ user, onBack, onGoTo, onMonSite }) {
       setCurrentBill(bill);
 
       if (bill) {
-        let optSav = parseInt(localStorage.getItem('starvolt_optimisation_saving')||'0');
-        if (!optSav && tariffs?.length) {
-          const ranked = tariffs.map(t=>({t,result:calcTariffCost(t,kwh_hc,kwh_hp)})).filter(({result})=>result!==null).sort((a,b)=>a.result.total-b.result.total);
-          const cur = site.tarif_id ? ranked.find(r=>r.t.id===site.tarif_id) : null;
-          optSav = cur ? Math.max(0, Math.round(cur.result.total - ranked[0].result.total)) : 0;
+        // Toujours recalculer le saving d'optimisation depuis les tarifs en live
+        // starvolt_optimisation_saving peut être périmé (ancienne session, ancienne conso)
+        let optSav = 0;
+        if (items.optimisation && tariffs?.length) {
+          const optiTariffId = localStorage.getItem('starvolt_optimisation_tariff_id');
+          const curTariffRes  = curTariff ? calcTariffCost(curTariff, kwh_hc, kwh_hp) : null;
+          const optiTariffObj = optiTariffId ? (tariffs||[]).find(t=>t.id===optiTariffId) : null;
+          const optiTariffRes = optiTariffObj ? calcTariffCost(optiTariffObj, kwh_hc, kwh_hp) : null;
+          if (curTariffRes && optiTariffRes && optiTariffId !== site.tarif_id) {
+            optSav = Math.max(0, Math.round(curTariffRes.total - optiTariffRes.total));
+          } else {
+            // Fallback : diff avec le meilleur tarif dispo
+            const ranked = (tariffs||[]).map(t=>({t,result:calcTariffCost(t,kwh_hc,kwh_hp)})).filter(({result})=>result!==null).sort((a,b)=>a.result.total-b.result.total);
+            const cur = site.tarif_id ? ranked.find(r=>r.t.id===site.tarif_id) : null;
+            optSav = cur ? Math.max(0, Math.round(cur.result.total - ranked[0].result.total)) : parseInt(localStorage.getItem('starvolt_optimisation_saving')||'0');
+          }
         }
         let accSav = parseInt(localStorage.getItem('starvolt_acc_saving')||'0');
         if (!accSav && site.conso_profil) {
