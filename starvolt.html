@@ -7660,15 +7660,10 @@ function PanierScreen({ user, onBack, onGoTo, onMonSite }) {
             const gridBuy = bal.monthly.reduce((s,m) => s+m.grid_buy, 0);
             const injKwh  = bal.monthly.reduce((s,m) => s+m.injection, 0);
             setSolGridKwh(gridBuy); setSolInjKwh(injKwh);
-            const baisseLSPan = parseInt(localStorage.getItem('starvolt_baisse_facture')||'0') || 0;
-            if (baisseLSPan > 0) {
-              setSavings(prev => ({...prev, solar: baisseLSPan}));
-            } else {
-              const curBillPan = Math.round(prixBase * siteKwh);
-              const nouvFactPan = Math.max(0, gridBuy * prixBase - injKwh * prixRachat);
-              const realSav = Math.max(0, Math.round(curBillPan - nouvFactPan));
-              if (realSav > 0) setSavings(prev => ({...prev, solar: realSav}));
-            }
+            const curBillPan = Math.round(prixBase * siteKwh);
+            const nouvFactPan = Math.max(0, gridBuy * prixBase - injKwh * prixRachat);
+            const realSav = Math.max(0, Math.round(curBillPan - nouvFactPan));
+            if (realSav > 0) setSavings(prev => ({...prev, solar: realSav}));
           }
         }
       }
@@ -7732,9 +7727,9 @@ function PanierScreen({ user, onBack, onGoTo, onMonSite }) {
   };
 
   const activeItems        = Object.entries(items).filter(([,v])=>v);
-  // Source unique de la réduction : baisse facture calculée par Mon site (inclut énergie + flex + acc)
-  const baisseLS           = parseInt(localStorage.getItem('starvolt_baisse_facture')||'0') || 0;
-  const totalAnnualSaving  = baisseLS || activeItems.reduce((s,[k])=>s+(savings[k]||0),0);
+  // Toujours recalculer depuis les savings individuels — ne pas utiliser le cache starvolt_baisse_facture
+  // (celui-ci peut être périmé si les items du panier ont changé depuis la dernière visite de Mon site)
+  const totalAnnualSaving  = activeItems.reduce((s,[k])=>s+(savings[k]||0),0);
   // investLS est calculé par Mon site (PV + bat + box fournis+posés) — on l'utilise seulement si solar ou box (non-DIY) au panier
   const _hasSolarOrBox = items.solar || items.box;
   const totalInvestment    = (_hasSolarOrBox && investLS) ? investLS : activeItems.reduce((s,[k])=>s+(investments[k]||0),0);
