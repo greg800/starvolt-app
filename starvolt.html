@@ -9780,6 +9780,10 @@ function ComprendreHomeScreen({ user, onGroup, onAction, onBack }) {
         <div className="welcome-tag" style={{color:'#7dd940'}}>Module</div>
         <h1 className="welcome-title">L'énergie,<br/><span className="accent">enfin expliquée</span></h1>
       </div>
+      <div style={{marginBottom:16,padding:'14px 16px',borderRadius:14,background:'rgba(255,180,0,.10)',border:'1.5px solid rgba(255,180,0,.3)',display:'flex',alignItems:'flex-start',gap:12}}>
+        <span style={{fontSize:28,flexShrink:0}}>🚧</span>
+        <div style={{fontSize:13,color:'rgba(255,255,255,.75)',lineHeight:1.6}}>Cette rubrique est en travaux, vous pouvez y circuler mais attention à la poussière, c'est loin d'être terminé, merci pour vos remarques.</div>
+      </div>
       {loading ? <div style={{textAlign:'center',padding:40}}><div className="spinner" style={{margin:'0 auto'}}/></div> : (
         <>
         {totalRevisions > 0 && (
