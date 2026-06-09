@@ -7598,17 +7598,20 @@ function PanierScreen({ user, onBack, onGoTo, onMonSite }) {
       if (bill) {
         // Toujours recalculer le saving d'optimisation depuis les tarifs en live
         // starvolt_optimisation_saving peut être périmé (ancienne session, ancienne conso)
+        const dynCtx = site.conso_profil && spotRows && nat
+          ? { consoProfile: site.conso_profil, spotMap: buildSpotMap(spotRows), natParams: nat, site }
+          : null;
         let optSav = 0;
         if (items.optimisation && tariffs?.length) {
-          const optiTariffId = localStorage.getItem('starvolt_optimisation_tariff_id');
-          const curTariffRes  = curTariff ? calcTariffCost(curTariff, kwh_hc, kwh_hp) : null;
+          const optiTariffId  = localStorage.getItem('starvolt_optimisation_tariff_id');
+          const curTariffRes  = curTariff  ? calcTariffCost(curTariff,  kwh_hc, kwh_hp, dynCtx) : null;
           const optiTariffObj = optiTariffId ? (tariffs||[]).find(t=>t.id===optiTariffId) : null;
-          const optiTariffRes = optiTariffObj ? calcTariffCost(optiTariffObj, kwh_hc, kwh_hp) : null;
+          const optiTariffRes = optiTariffObj ? calcTariffCost(optiTariffObj, kwh_hc, kwh_hp, dynCtx) : null;
           if (curTariffRes && optiTariffRes && optiTariffId !== site.tarif_id) {
             optSav = Math.max(0, Math.round(curTariffRes.total - optiTariffRes.total));
           } else {
-            // Fallback : diff avec le meilleur tarif dispo
-            const ranked = (tariffs||[]).map(t=>({t,result:calcTariffCost(t,kwh_hc,kwh_hp)})).filter(({result})=>result!==null).sort((a,b)=>a.result.total-b.result.total);
+            // Fallback : diff avec le meilleur tarif dispo (en incluant les tarifs multi/dynamiques)
+            const ranked = (tariffs||[]).map(t=>({t,result:calcTariffCost(t,kwh_hc,kwh_hp,dynCtx)})).filter(({result})=>result!==null).sort((a,b)=>a.result.total-b.result.total);
             const cur = site.tarif_id ? ranked.find(r=>r.t.id===site.tarif_id) : null;
             optSav = cur ? Math.max(0, Math.round(cur.result.total - ranked[0].result.total)) : parseInt(localStorage.getItem('starvolt_optimisation_saving')||'0');
           }
