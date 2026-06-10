@@ -3284,7 +3284,7 @@ function deriveSiteImpact({ balance, site, prodProfil, tariffs, spotMap, globalV
 
 // 4) Construit les CHIFFRES déjà calculés envoyés à l'IA pour "Ton bilan en clair".
 //    L'IA ne calcule RIEN : on lui livre des faits déterministes issus du moteur.
-//    leviers_eur = ordres de grandeur indicatifs (pas les chiffres précis du simulateur).
+//    leviers_classement = ordre qualitatif des leviers (sans euros, pour ne pas contredire le simulateur).
 function buildBilanFacts({ site, tariffs, globalVars, prodProfil }) {
   if (!site?.conso_profil || !(site.conso_annuelle_kwh > 0)) return null;
   const cp = site.conso_profil;
@@ -3350,6 +3350,20 @@ function buildBilanFacts({ site, tariffs, globalVars, prodProfil }) {
     leviers.panneaux_solaires = Math.round(factureActuelle*0.5);
   }
 
+  // ── Classement qualitatif des leviers (du plus au moins rentable) ──
+  //    On NE transmet PAS les euros à l'IA (ils sont indicatifs et risqueraient
+  //    de contredire le simulateur précis) : seul l'ordre est envoyé.
+  const LEVIER_LABEL = {
+    changer_de_tarif: 'changer de tarif',
+    rejoindre_acc: 'rejoindre une communauté solaire (autoconsommation collective)',
+    box_flexibilite: 'installer la box de flexibilité',
+    panneaux_solaires: 'installer des panneaux solaires',
+  };
+  const leviersClassement = Object.entries(leviers)
+    .filter(([, v]) => v > 0)
+    .sort((a, b) => b[1] - a[1])
+    .map(([k]) => LEVIER_LABEL[k] || k);
+
   return {
     conso_annuelle_kwh: consoAnnuelle,
     facture_actuelle_eur: factureActuelle,
@@ -3358,7 +3372,7 @@ function buildBilanFacts({ site, tariffs, globalVars, prodProfil }) {
     pct_heures_creuses: hasHC ? pctHC : null,
     repartition_horaire_pct: repartition,
     saisonnalite_pct: saisonnalite,
-    leviers_eur: leviers,
+    leviers_classement: leviersClassement,
   };
 }
 
