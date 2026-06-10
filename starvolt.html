@@ -9593,7 +9593,38 @@ function getVideoEmbed(url) {
 }
 
 // ─── HomeChoiceScreen ─────────────────────────────────────────────────────────
-function HomeChoiceScreen({ profile, onComprendre, onAction }) {
+function HomeChoiceScreen({ profile, user, onComprendre, onAction }) {
+  const [learnStats, setLearnStats] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      const { data: subs } = await sb.from('learn_subjects').select('id');
+      const totalSubjects = (subs || []).length;
+      let learned = 0, okQuiz = 0;
+      if (user) {
+        const { data: p } = await sb.from('user_learn_progress').select('subject_id,completed_at,failed_question_ids').eq('user_id', user.id);
+        if (p) p.forEach(r => {
+          if (r.completed_at) learned++;
+          if (r.completed_at && !(r.failed_question_ids && r.failed_question_ids.length)) okQuiz++;
+        });
+      }
+      const totalQuiz = totalSubjects;
+      const pct = totalQuiz > 0 ? (okQuiz / totalQuiz) * 100 : 0;
+      if (!cancelled) setLearnStats({ learned, totalSubjects, okQuiz, totalQuiz, pct });
+    }
+    load();
+    return () => { cancelled = true; };
+  }, [user]);
+
+  const medal = (() => {
+    const pct = learnStats?.pct ?? 0;
+    if (pct < 10)  return { emoji:'🐻', label:'Ourson' };
+    if (pct < 33)  return { emoji:'⭐', label:'1ʳᵉ étoile' };
+    if (pct < 66)  return { emoji:'⭐⭐', label:'2ᵉ étoile' };
+    return { emoji:'⭐⭐⭐', label:'3ᵉ étoile' };
+  })();
+
   return (
     <div style={{position:'fixed',top:56,left:0,right:0,bottom:0,display:'flex',flexDirection:'column'}}>
       <button onClick={onComprendre} style={{flex:1,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',background:'rgba(0,0,0,.22)',border:'none',borderBottom:'1px solid rgba(255,255,255,.1)',cursor:'pointer',padding:'40px 28px',gap:14,textAlign:'center',width:'100%'}}>
@@ -9607,6 +9638,26 @@ function HomeChoiceScreen({ profile, onComprendre, onAction }) {
         <div style={{fontSize:32,fontWeight:900,color:'white',lineHeight:1.2}}>L'énergie,<br/>enfin expliquée</div>
         <div style={{fontSize:19.5,color:'rgba(255,255,255,.65)',maxWidth:420,lineHeight:1.6}}>Comprendre comment la transition énergétique va vous impacter concrètement</div>
         <div style={{marginTop:8,padding:'13px 32px',background:'rgba(255,255,255,.14)',borderRadius:14,fontSize:15,fontWeight:700,color:'white',border:'1.5px solid rgba(255,255,255,.25)'}}>Comprendre →</div>
+        {learnStats && (
+          <div className="offer-meta" style={{justifyContent:'center',marginTop:10}}>
+            <span className="offer-chip" title="Sujets appris sur le total">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
+              </svg>
+              {learnStats.learned}/{learnStats.totalSubjects} sujets
+            </span>
+            <span className="offer-chip" title="Quiz réussis sur le total">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/>
+              </svg>
+              {learnStats.okQuiz}/{learnStats.totalQuiz} quiz
+            </span>
+            <span className="offer-chip chip-green" title={`Niveau ski : ${medal.label}`}>
+              <span style={{fontSize:13,letterSpacing:'-1px'}}>{medal.emoji}</span>
+              {medal.label}
+            </span>
+          </div>
+        )}
       </button>
       <button onClick={onAction} style={{flex:1,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',background:'rgba(125,217,64,.10)',border:'none',cursor:'pointer',padding:'40px 28px',gap:14,textAlign:'center',width:'100%'}}>
         <div style={{width:56,height:56}}>
@@ -10438,7 +10489,7 @@ function App() {
     switch (state.screen) {
 
       case 'HOME_CHOICE':
-        return <HomeChoiceScreen profile={profile} onComprendre={()=>goTo('COMPRENDRE_HOME')} onAction={()=>goTo('MA_CONSO')}/>;
+        return <HomeChoiceScreen profile={profile} user={user} onComprendre={()=>goTo('COMPRENDRE_HOME')} onAction={()=>goTo('MA_CONSO')}/>;
 
       case 'COMPRENDRE_HOME':
         return <ComprendreHomeScreen user={user} onGroup={(g)=>goTo('COMPRENDRE_GROUP',{learnGroup:g})} onAction={()=>goTo('MA_CONSO')} onBack={()=>goTo('HOME_CHOICE')}/>;
