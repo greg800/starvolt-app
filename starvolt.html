@@ -3443,6 +3443,7 @@ function EnergyBalanceChart({ balance, level, selMonth, selDay, setLevel, setSel
     const lblFont = isMobChart ? '13px sans-serif' : 'bold 18px sans-serif';
     ctx.font = lblFont;
     xLabels.forEach((lbl, i) => {
+      if (isMobChart && n === 12 && i % 3 !== 0) return;  // mobile mois : 1 sur 3
       if (n > 24 && i % 2 !== 0) return;           // jours : 1 sur 2
       if (isMobChart && n === 24 && i % 4 !== 0) return;  // mobile heures : 1 sur 4
       if (!isMobChart && n === 24 && i % 2 !== 0) return; // desktop heures : 1 sur 2
