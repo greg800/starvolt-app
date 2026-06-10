@@ -704,6 +704,7 @@
       .app { padding: 80px 24px 120px; }
       .screen { max-width: 560px; }
       .screen-wide { max-width: none; }
+      .screen-admin { max-width: 1040px; }
       .welcome-title { font-size: 42px; }
       .bill-num { font-size: 96px; }
       .card { padding: 30px 26px; }
@@ -869,18 +870,41 @@
     /* ══ SIMULATIONS SCREEN ════════════════════════════════════════ */
     .sim-header { text-align: center; margin-bottom: 18px; padding-top: 8px; }
     .sim-btns { display: flex; flex-direction: column; gap: 10px; }
+    .admin-grid { display: flex; flex-direction: column; }
+    .admin-group { display: flex; flex-direction: column; gap: 10px; }
+    .admin-group + .admin-group { margin-top: 18px; }
     .admin-group-label {
       display: flex; align-items: center; gap: 9px;
       font-size: 11px; font-weight: 700;
       letter-spacing: 1.8px; text-transform: uppercase;
       color: rgba(255,255,255,.5);
-      margin: 22px 2px 4px;
+      margin: 4px 2px 0;
     }
-    .admin-group-label:first-child { margin-top: 4px; }
     .admin-group-label .agl-ico { font-size: 15px; letter-spacing: 0; }
     .admin-group-label::after {
       content: ''; flex: 1; height: 1px;
       background: rgba(255,255,255,.12);
+    }
+    /* Desktop : groupes en cartes réparties sur plusieurs colonnes (masonry) */
+    @media (min-width: 768px) {
+      .admin-grid {
+        display: block;
+        column-count: 2;
+        column-gap: 16px;
+      }
+      .admin-group {
+        break-inside: avoid;
+        margin: 0 0 16px;
+        padding: 16px 16px 18px;
+        background: rgba(255,255,255,.05);
+        border: 1px solid rgba(255,255,255,.1);
+        border-radius: 18px;
+      }
+      .admin-group + .admin-group { margin-top: 0; }
+      .admin-group-label { margin: 0 2px 4px; }
+    }
+    @media (min-width: 1080px) {
+      .admin-grid { column-count: 3; }
     }
     .sim-btn {
       display: flex; align-items: center; gap: 14px;
@@ -8524,125 +8548,135 @@ function AdminPrixMateriauxScreen({ onBack }) {
 function AdminScreen({ onTariffs, onUsers, onSpot, onAcc, onProduction, onGlobalVars, onPrix, onOffres, onLearn, onFeedback, onProofread, onAICosts, onAIPrompts, onBack }) {
   return (
     <>
-    <div className="screen fade-in">
+    <div className="screen screen-admin fade-in">
       <div className="auth-header">
         <div className="welcome-tag" style={{color:'#ffb340'}}>Administration</div>
         <h1 className="welcome-title">Menu<br/><span className="accent">admin</span></h1>
       </div>
-      <div className="sim-btns">
-        <div className="admin-group-label"><span className="agl-ico">📥</span>Import de data</div>
-        <button className="sim-btn" onClick={onGlobalVars}>
-          <span className="sim-icon">⚙️</span>
-          <div className="sim-text">
-            <div className="sim-title">Variables globales</div>
-            <div className="sim-sub">Hypothèses stockage, TURPE, inflation, plages HC</div>
-          </div>
-          <span className="sim-arrow">→</span>
-        </button>
-        <button className="sim-btn" onClick={onTariffs}>
-          <span className="sim-icon">⚡</span>
-          <div className="sim-text">
-            <div className="sim-title">Gestion des tarifs d'électricité</div>
-            <div className="sim-sub">Créer et modifier les tarifs fournisseurs</div>
-          </div>
-          <span className="sim-arrow">→</span>
-        </button>
-        <button className="sim-btn" onClick={onSpot}>
-          <span className="sim-icon">📈</span>
-          <div className="sim-text">
-            <div className="sim-title">Prix spot</div>
-            <div className="sim-sub">Importer et visualiser les prix horaires</div>
-          </div>
-          <span className="sim-arrow">→</span>
-        </button>
-        <button className="sim-btn" onClick={onProduction}>
-          <span className="sim-icon">🌤️</span>
-          <div className="sim-text">
-            <div className="sim-title">Production solaire</div>
-            <div className="sim-sub">Importer et gérer les profils de production PV</div>
-          </div>
-          <span className="sim-arrow">→</span>
-        </button>
-        <button className="sim-btn" onClick={onAcc}>
-          <span className="sim-icon">☀️</span>
-          <div className="sim-text">
-            <div className="sim-title">Gestion des sites en ACC</div>
-            <div className="sim-sub">Sites photovoltaïques pour l'autoconsommation collective</div>
-          </div>
-          <span className="sim-arrow">→</span>
-        </button>
+      <div className="admin-grid">
+        <div className="admin-group">
+          <div className="admin-group-label"><span className="agl-ico">📥</span>Import de data</div>
+          <button className="sim-btn" onClick={onGlobalVars}>
+            <span className="sim-icon">⚙️</span>
+            <div className="sim-text">
+              <div className="sim-title">Variables globales</div>
+              <div className="sim-sub">Hypothèses stockage, TURPE, inflation, plages HC</div>
+            </div>
+            <span className="sim-arrow">→</span>
+          </button>
+          <button className="sim-btn" onClick={onTariffs}>
+            <span className="sim-icon">⚡</span>
+            <div className="sim-text">
+              <div className="sim-title">Gestion des tarifs d'électricité</div>
+              <div className="sim-sub">Créer et modifier les tarifs fournisseurs</div>
+            </div>
+            <span className="sim-arrow">→</span>
+          </button>
+          <button className="sim-btn" onClick={onSpot}>
+            <span className="sim-icon">📈</span>
+            <div className="sim-text">
+              <div className="sim-title">Prix spot</div>
+              <div className="sim-sub">Importer et visualiser les prix horaires</div>
+            </div>
+            <span className="sim-arrow">→</span>
+          </button>
+          <button className="sim-btn" onClick={onProduction}>
+            <span className="sim-icon">🌤️</span>
+            <div className="sim-text">
+              <div className="sim-title">Production solaire</div>
+              <div className="sim-sub">Importer et gérer les profils de production PV</div>
+            </div>
+            <span className="sim-arrow">→</span>
+          </button>
+          <button className="sim-btn" onClick={onAcc}>
+            <span className="sim-icon">☀️</span>
+            <div className="sim-text">
+              <div className="sim-title">Gestion des sites en ACC</div>
+              <div className="sim-sub">Sites photovoltaïques pour l'autoconsommation collective</div>
+            </div>
+            <span className="sim-arrow">→</span>
+          </button>
+        </div>
 
-        <div className="admin-group-label"><span className="agl-ico">🎯</span>Offres commerciales</div>
-        <button className="sim-btn" onClick={onOffres}>
-          <span className="sim-icon">🏷️</span>
-          <div className="sim-text">
-            <div className="sim-title">Gestion des offres</div>
-            <div className="sim-sub">Créer et modifier les offres proposées aux clients</div>
-          </div>
-          <span className="sim-arrow">→</span>
-        </button>
-        <button className="sim-btn" onClick={onPrix}>
-          <span className="sim-icon">💰</span>
-          <div className="sim-text">
-            <div className="sim-title">Prix matériel et pose</div>
-            <div className="sim-sub">Tarifs PV, batterie, box Comwatt</div>
-          </div>
-          <span className="sim-arrow">→</span>
-        </button>
+        <div className="admin-group">
+          <div className="admin-group-label"><span className="agl-ico">🎯</span>Offres commerciales</div>
+          <button className="sim-btn" onClick={onOffres}>
+            <span className="sim-icon">🏷️</span>
+            <div className="sim-text">
+              <div className="sim-title">Gestion des offres</div>
+              <div className="sim-sub">Créer et modifier les offres proposées aux clients</div>
+            </div>
+            <span className="sim-arrow">→</span>
+          </button>
+          <button className="sim-btn" onClick={onPrix}>
+            <span className="sim-icon">💰</span>
+            <div className="sim-text">
+              <div className="sim-title">Prix matériel et pose</div>
+              <div className="sim-sub">Tarifs PV, batterie, box Comwatt</div>
+            </div>
+            <span className="sim-arrow">→</span>
+          </button>
+        </div>
 
-        <div className="admin-group-label"><span className="agl-ico">👥</span>Utilisateurs</div>
-        <button className="sim-btn" onClick={onUsers}>
-          <span className="sim-icon">🧑‍🤝‍🧑</span>
-          <div className="sim-text">
-            <div className="sim-title">Gestion des utilisateurs</div>
-            <div className="sim-sub">Voir et gérer les membres Starvolt</div>
-          </div>
-          <span className="sim-arrow">→</span>
-        </button>
-        <button className="sim-btn" onClick={onFeedback}>
-          <span className="sim-icon">💬</span>
-          <div className="sim-text">
-            <div className="sim-title">Retours utilisateurs</div>
-            <div className="sim-sub">Commentaires positifs et négatifs par page</div>
-          </div>
-          <span className="sim-arrow">→</span>
-        </button>
+        <div className="admin-group">
+          <div className="admin-group-label"><span className="agl-ico">👥</span>Utilisateurs</div>
+          <button className="sim-btn" onClick={onUsers}>
+            <span className="sim-icon">🧑‍🤝‍🧑</span>
+            <div className="sim-text">
+              <div className="sim-title">Gestion des utilisateurs</div>
+              <div className="sim-sub">Voir et gérer les membres Starvolt</div>
+            </div>
+            <span className="sim-arrow">→</span>
+          </button>
+          <button className="sim-btn" onClick={onFeedback}>
+            <span className="sim-icon">💬</span>
+            <div className="sim-text">
+              <div className="sim-title">Retours utilisateurs</div>
+              <div className="sim-sub">Commentaires positifs et négatifs par page</div>
+            </div>
+            <span className="sim-arrow">→</span>
+          </button>
+        </div>
 
-        <div className="admin-group-label"><span className="agl-ico">📚</span>Comprendre</div>
-        <button className="sim-btn" onClick={onLearn}>
-          <span className="sim-icon">💡</span>
-          <div className="sim-text">
-            <div className="sim-title">Paramétrer le module Comprendre</div>
-            <div className="sim-sub">Groupes, sujets, quiz et questions</div>
-          </div>
-          <span className="sim-arrow">→</span>
-        </button>
+        <div className="admin-group">
+          <div className="admin-group-label"><span className="agl-ico">📚</span>Comprendre</div>
+          <button className="sim-btn" onClick={onLearn}>
+            <span className="sim-icon">💡</span>
+            <div className="sim-text">
+              <div className="sim-title">Paramétrer le module Comprendre</div>
+              <div className="sim-sub">Groupes, sujets, quiz et questions</div>
+            </div>
+            <span className="sim-arrow">→</span>
+          </button>
+        </div>
 
-        <div className="admin-group-label"><span className="agl-ico">🤖</span>Agents IA</div>
-        <button className="sim-btn" onClick={onProofread}>
-          <span className="sim-icon">🔍</span>
-          <div className="sim-text">
-            <div className="sim-title">Correction orthographique</div>
-            <div className="sim-sub">Relire et corriger les textes du module Comprendre</div>
-          </div>
-          <span className="sim-arrow">→</span>
-        </button>
-        <button className="sim-btn" onClick={onAICosts}>
-          <span className="sim-icon">📊</span>
-          <div className="sim-text">
-            <div className="sim-title">Coûts IA</div>
-            <div className="sim-sub">Suivi des montants engagés sur les appels à l'IA</div>
-          </div>
-          <span className="sim-arrow">→</span>
-        </button>
-        <button className="sim-btn" onClick={onAIPrompts}>
-          <span className="sim-icon">✏️</span>
-          <div className="sim-text">
-            <div className="sim-title">Prompts IA</div>
-            <div className="sim-sub">Cadrer chaque service IA (correction, bilan…)</div>
-          </div>
-          <span className="sim-arrow">→</span>
-        </button>
+        <div className="admin-group">
+          <div className="admin-group-label"><span className="agl-ico">🤖</span>Agents IA</div>
+          <button className="sim-btn" onClick={onProofread}>
+            <span className="sim-icon">🔍</span>
+            <div className="sim-text">
+              <div className="sim-title">Correction orthographique</div>
+              <div className="sim-sub">Relire et corriger les textes du module Comprendre</div>
+            </div>
+            <span className="sim-arrow">→</span>
+          </button>
+          <button className="sim-btn" onClick={onAICosts}>
+            <span className="sim-icon">📊</span>
+            <div className="sim-text">
+              <div className="sim-title">Coûts IA</div>
+              <div className="sim-sub">Suivi des montants engagés sur les appels à l'IA</div>
+            </div>
+            <span className="sim-arrow">→</span>
+          </button>
+          <button className="sim-btn" onClick={onAIPrompts}>
+            <span className="sim-icon">✏️</span>
+            <div className="sim-text">
+              <div className="sim-title">Prompts IA</div>
+              <div className="sim-sub">Cadrer chaque service IA (correction, bilan…)</div>
+            </div>
+            <span className="sim-arrow">→</span>
+          </button>
+        </div>
       </div>
     </div>
     <StickyFooter onBack={onBack}/>
