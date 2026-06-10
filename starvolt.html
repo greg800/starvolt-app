@@ -8298,7 +8298,7 @@ function AdminPrixMateriauxScreen({ onBack }) {
 }
 
 // ─── AdminScreen ──────────────────────────────
-function AdminScreen({ onTariffs, onUsers, onSpot, onAcc, onProduction, onGlobalVars, onPrix, onOffres, onLearn, onFeedback, onProofread, onBack }) {
+function AdminScreen({ onTariffs, onUsers, onSpot, onAcc, onProduction, onGlobalVars, onPrix, onOffres, onLearn, onFeedback, onProofread, onAICosts, onBack }) {
   return (
     <>
     <div className="screen fade-in">
@@ -8392,6 +8392,14 @@ function AdminScreen({ onTariffs, onUsers, onSpot, onAcc, onProduction, onGlobal
           <div className="sim-text">
             <div className="sim-title">Correction orthographique</div>
             <div className="sim-sub">Relire et corriger les textes du module Comprendre</div>
+          </div>
+          <span className="sim-arrow">→</span>
+        </button>
+        <button className="sim-btn" onClick={onAICosts}>
+          <span className="sim-icon">📊</span>
+          <div className="sim-text">
+            <div className="sim-title">Coûts IA</div>
+            <div className="sim-sub">Suivi des montants engagés sur les appels à l'IA</div>
           </div>
           <span className="sim-arrow">→</span>
         </button>
@@ -8541,6 +8549,7 @@ function AdminProofreadScreen({ onBack }) {
   const [sel, setSel] = useState({});        // index -> bool
   const [applying, setApplying] = useState(false);
   const [doneMsg, setDoneMsg] = useState(null);
+  const [lastRun, setLastRun] = useState(null); // { usage, cost }
 
   const TBL_LABEL = { learn_groups:'Groupe', learn_subjects:'Sujet', learn_questions:'Question', learn_choices:'Réponse' };
   const FLD_LABEL = { title:'titre', description:'description', content:'contenu', question:'question', text:'texte' };
@@ -8558,6 +8567,7 @@ function AdminProofreadScreen({ onBack }) {
       const cs = data?.corrections || [];
       setCorrections(cs);
       setScanned(data?.scanned || 0);
+      setLastRun(data?.cost ? { usage: data.usage, cost: data.cost } : null);
       const s = {}; cs.forEach((_, i) => { s[i] = true; }); // tout sélectionné par défaut
       setSel(s);
     } catch (e) {
@@ -8630,6 +8640,15 @@ function AdminProofreadScreen({ onBack }) {
 
         {loading && <div style={{textAlign:'center', color:'rgba(255,255,255,.45)', fontSize:12, marginTop:10}}>Cela peut prendre 20 à 60 secondes selon la quantité de texte.</div>}
 
+        {lastRun && !loading && (
+          <div style={{marginTop:12, display:'flex', alignItems:'center', justifyContent:'center', gap:6, flexWrap:'wrap', color:'rgba(255,255,255,.5)', fontSize:12}}>
+            <span>Coût de ce run :</span>
+            <span style={{color:'#ffb340', fontWeight:700}}>{lastRun.cost.eur.toFixed(4)} €</span>
+            <span>·</span>
+            <span>{(lastRun.usage.input_tokens + lastRun.usage.output_tokens).toLocaleString('fr-FR')} tokens ({lastRun.usage.input_tokens.toLocaleString('fr-FR')} entrée / {lastRun.usage.output_tokens.toLocaleString('fr-FR')} sortie)</span>
+          </div>
+        )}
+
         {error && (
           <div style={{marginTop:16, background:'rgba(255,138,106,.12)', border:'1px solid rgba(255,138,106,.4)', borderRadius:10, padding:'12px 14px', color:'#ff8a6a', fontSize:13, lineHeight:1.5}}>
             ⚠️ {error}
@@ -8701,6 +8720,90 @@ function AdminProofreadScreen({ onBack }) {
               </button>
             </>
           )
+        )}
+      </div>
+    </div>
+    <StickyFooter onBack={onBack}/>
+    </>
+  );
+}
+
+// ─── AdminAICostsScreen : suivi des coûts des appels IA ────────────────────────
+function AdminAICostsScreen({ onBack }) {
+  const [rows, setRows] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const USD_PER_EUR = 0.92; // même hypothèse que l'Edge Function
+
+  const FEAT_LABEL = { proofread: 'Correction orthographique' };
+
+  const load = () => {
+    setLoading(true);
+    sb.rpc('get_ai_usage_summary').then(({ data, error }) => {
+      if (error) console.error('get_ai_usage_summary', error);
+      setRows(data || []);
+      setLoading(false);
+    });
+  };
+  useEffect(load, []);
+
+  const fmtEur = (usd) => (Number(usd) / USD_PER_EUR);
+  const totUsd = rows.reduce((s, r) => s + Number(r.cost_usd || 0), 0);
+  const totCalls = rows.reduce((s, r) => s + Number(r.calls || 0), 0);
+  const totTok = rows.reduce((s, r) => s + Number(r.input_tokens || 0) + Number(r.output_tokens || 0), 0);
+  const fmtDate = (d) => d ? new Date(d).toLocaleString('fr-FR', { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit' }) : '—';
+
+  return (
+    <>
+    <div className="screen fade-in" style={{padding:'0 0 90px', maxWidth:'100%', width:'100%'}}>
+      <div className="auth-header">
+        <div className="welcome-tag" style={{color:'#ffb340'}}>Administration</div>
+        <h1 className="welcome-title">Coûts<br/><span className="accent">IA</span></h1>
+      </div>
+
+      <div style={{padding:'0 16px'}}>
+        <p style={{color:'rgba(255,255,255,.55)', fontSize:13, lineHeight:1.55, margin:'0 0 16px'}}>
+          Montants réellement engagés sur les appels à l'IA, par fonctionnalité. Conversion € approximative
+          (1 € ≈ {USD_PER_EUR.toFixed(2)} $).
+        </p>
+
+        {loading ? <div style={{textAlign:'center',padding:40}}><div className="spinner" style={{margin:'0 auto'}}/></div> : (
+          <>
+            {/* Carte total */}
+            <div style={{background:'linear-gradient(135deg,rgba(255,179,64,.15),rgba(255,179,64,.05))', border:'1px solid rgba(255,179,64,.35)', borderRadius:14, padding:'18px 18px', marginBottom:18}}>
+              <div style={{color:'rgba(255,255,255,.6)', fontSize:12, fontWeight:600, textTransform:'uppercase', letterSpacing:.5}}>Total engagé à ce jour</div>
+              <div style={{color:'#ffb340', fontSize:30, fontWeight:900, marginTop:4}}>{fmtEur(totUsd).toFixed(4)} €</div>
+              <div style={{color:'rgba(255,255,255,.45)', fontSize:12.5, marginTop:4}}>{totCalls.toLocaleString('fr-FR')} appel(s) · {totTok.toLocaleString('fr-FR')} tokens · {totUsd.toFixed(4)} $</div>
+            </div>
+
+            {rows.length === 0 ? (
+              <div style={{textAlign:'center', color:'rgba(255,255,255,.4)', fontSize:14, padding:'24px 0'}}>Aucun appel IA enregistré pour le moment.</div>
+            ) : (
+              <div style={{overflowX:'auto'}}>
+                <table style={{width:'100%', minWidth:560, borderCollapse:'collapse', fontSize:13}}>
+                  <thead>
+                    <tr>
+                      {['Fonctionnalité','Appels','Tokens','Coût €','Dernier appel'].map(c => (
+                        <th key={c} style={{textAlign:'left', padding:'8px 10px', color:'rgba(255,255,255,.4)', fontWeight:600, borderBottom:'1px solid rgba(255,255,255,.08)', whiteSpace:'nowrap'}}>{c}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rows.map(r => (
+                      <tr key={r.feature} style={{borderBottom:'1px solid rgba(255,255,255,.06)'}}>
+                        <td style={{padding:'12px 10px', color:'#fff', fontWeight:600}}>{FEAT_LABEL[r.feature] || r.feature}</td>
+                        <td style={{padding:'12px 10px', color:'rgba(255,255,255,.7)'}}>{Number(r.calls).toLocaleString('fr-FR')}</td>
+                        <td style={{padding:'12px 10px', color:'rgba(255,255,255,.7)', whiteSpace:'nowrap'}}>{(Number(r.input_tokens)+Number(r.output_tokens)).toLocaleString('fr-FR')}</td>
+                        <td style={{padding:'12px 10px', color:'#ffb340', fontWeight:700, whiteSpace:'nowrap'}}>{fmtEur(r.cost_usd).toFixed(4)} €</td>
+                        <td style={{padding:'12px 10px', color:'rgba(255,255,255,.55)', whiteSpace:'nowrap'}}>{fmtDate(r.last_call)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            <button onClick={load} style={{marginTop:16, background:'rgba(255,255,255,.06)', border:'1px solid rgba(255,255,255,.16)', borderRadius:9, color:'rgba(255,255,255,.7)', fontSize:12.5, fontWeight:700, padding:'8px 14px', cursor:'pointer', fontFamily:'inherit'}}>↻ Actualiser</button>
+          </>
         )}
       </div>
     </div>
@@ -11071,6 +11174,7 @@ function App() {
           onLearn={()=>goTo('ADMIN_LEARN')}
           onFeedback={()=>goTo('ADMIN_FEEDBACK')}
           onProofread={()=>goTo('ADMIN_PROOFREAD')}
+          onAICosts={()=>goTo('ADMIN_AI_COSTS')}
           onBack={goBack}/>;
 
       case 'ADMIN_FEEDBACK':
@@ -11078,6 +11182,9 @@ function App() {
 
       case 'ADMIN_PROOFREAD':
         return <AdminProofreadScreen onBack={goBack}/>;
+
+      case 'ADMIN_AI_COSTS':
+        return <AdminAICostsScreen onBack={goBack}/>;
 
       case 'ADMIN_LEARN':
         return <AdminLearnScreen
