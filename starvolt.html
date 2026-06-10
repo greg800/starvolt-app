@@ -414,6 +414,15 @@
     .inp[type=number]::-webkit-inner-spin-button,
     .inp[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; }
 
+    /* Inscription compacte : tout tient sans scroller sur un petit écran */
+    .signup-compact .auth-header { margin-bottom: 10px; padding-top: 2px; }
+    .signup-compact .welcome-tag { margin-bottom: 4px; }
+    .signup-compact .welcome-title { font-size: 25px; margin-bottom: 4px; }
+    .signup-compact .form-card { padding: 15px; gap: 9px; margin-bottom: 8px; }
+    .signup-compact .inp-group { gap: 3px; }
+    .signup-compact .inp { padding: 9px 13px; font-size: 14px; }
+    .signup-compact .inp-label { font-size: 10px; }
+
     .bill-wrap { position: relative; }
     .bill-sfx {
       position: absolute; right: 15px; top: 50%;
@@ -1958,24 +1967,55 @@ function SignupSuccessScreen({ email, firstName, consentUrl, onContinue }) {
 }
 
 // ─── AuthSignupScreen ─────────────────────────
+// Génère un mot de passe aléatoire lisible (sans caractères ambigus)
+function genPassword() {
+  const chars = 'abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  const arr = new Uint32Array(14);
+  (window.crypto || window.msCrypto).getRandomValues(arr);
+  let p = '';
+  for (let i = 0; i < 14; i++) p += chars[arr[i] % chars.length];
+  return p;
+}
+
 function AuthSignupScreen({ onGoToLogin, onSignedUp, onSuccessDone }) {
   const [prenom,        setPrenom]        = useState('');
   const [nom,           setNom]           = useState('');
   const [email,         setEmail]         = useState('');
-  const [pwd,           setPwd]           = useState('');
+  const [pwd,           setPwd]           = useState(() => genPassword()); // aléatoire par défaut
+  const [showPwd,       setShowPwd]       = useState(true);                // œil ouvert par défaut
   const [adresse,       setAdresse]       = useState('');
   const [codePostal,    setCodePostal]    = useState('');
   const [ville,         setVille]         = useState('');
   const [enedisConsent, setEnedisConsent] = useState(false);
   const [loading,       setLoading]       = useState(false);
   const [error,         setError]         = useState(null);
+  const [hint,          setHint]          = useState(null); // champ manquant signalé gentiment
   // Après inscription réussie
   const [successData,   setSuccessData]   = useState(null); // { email, firstName, consentUrl, userId }
 
-  // Le bouton n'apparaît que quand tout est rempli
+  // Le bouton est gris tant que tout n'est pas rempli
   const allFilled = prenom.trim() && nom.trim() && email.trim() &&
                     pwd.length >= 6 && adresse.trim() &&
                     codePostal.trim() && ville.trim() && enedisConsent;
+
+  // Premier champ manquant → message sympa
+  const firstMissingMessage = () => {
+    if (!prenom.trim())     return 'Il manque juste votre prénom 😊';
+    if (!nom.trim())        return 'Et votre nom de famille ?';
+    if (!email.trim())      return 'Votre email, pour qu\'on puisse vous écrire ✉️';
+    if (pwd.length < 6)     return 'Un mot de passe d\'au moins 6 caractères 🔒';
+    if (!adresse.trim())    return 'L\'adresse de votre compteur 🏠';
+    if (!codePostal.trim()) return 'Votre code postal 📮';
+    if (!ville.trim())      return 'Votre ville 🏙️';
+    if (!enedisConsent)     return 'Cochez la case pour autoriser la récupération de votre conso ⚡';
+    return null;
+  };
+
+  // Une fois un indice affiché, on le garde à jour au fil de la saisie ; on l'efface quand tout est bon
+  useEffect(() => {
+    if (allFilled) { setHint(null); return; }
+    setHint(h => h !== null ? firstMissingMessage() : h);
+  }, [prenom, nom, email, pwd, adresse, codePostal, ville, enedisConsent]);
 
   const ANON_KEY         = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhreGtod2VncWthcGRic2lzeHd2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc0MjY4NjksImV4cCI6MjA5MzAwMjg2OX0.9-_oHRJfwXZkl3bRYDMb5K56UzB8O1NOfa5QfrXFfkQ';
   const EDGE_URL         = 'https://hkxkhwegqkapdbsisxwv.supabase.co/functions/v1/switchgrid';
@@ -2090,7 +2130,7 @@ function AuthSignupScreen({ onGoToLogin, onSignedUp, onSuccessDone }) {
 
   return (
     <>
-      <div className="screen fade-in">
+      <div className="screen fade-in signup-compact">
         <div className="auth-header">
           <div className="welcome-tag">La constellation vous attend</div>
           <h1 className="welcome-title">Créez votre<br/><span className="accent">compte</span></h1>
@@ -2111,8 +2151,16 @@ function AuthSignupScreen({ onGoToLogin, onSignedUp, onSuccessDone }) {
             <input className="inp" type="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder="marie@exemple.fr"/>
           </div>
           <div className="inp-group">
-            <label className="inp-label">Mot de passe <span style={{fontWeight:400,color:'rgba(255,255,255,.4)',fontSize:11}}>(6 caractères min.)</span></label>
-            <input className="inp" type="password" value={pwd} onChange={e=>setPwd(e.target.value)} placeholder="••••••••"/>
+            <label className="inp-label">Mot de passe <span style={{fontWeight:400,color:'rgba(255,255,255,.4)',fontSize:11}}>(généré, modifiable)</span></label>
+            <div style={{position:'relative'}}>
+              <input className="inp" type={showPwd?'text':'password'} value={pwd} onChange={e=>setPwd(e.target.value)} placeholder="••••••••" autoComplete="new-password" style={{paddingRight:74}}/>
+              <div style={{position:'absolute',right:6,top:'50%',transform:'translateY(-50%)',display:'flex',gap:2}}>
+                <button type="button" onClick={()=>setPwd(genPassword())} title="Générer un nouveau mot de passe"
+                  style={{background:'none',border:'none',cursor:'pointer',fontSize:16,lineHeight:1,padding:'5px 6px'}}>🎲</button>
+                <button type="button" onClick={()=>setShowPwd(v=>!v)} title={showPwd?'Masquer le mot de passe':'Afficher le mot de passe'}
+                  style={{background:'none',border:'none',cursor:'pointer',fontSize:16,lineHeight:1,padding:'5px 6px'}}>{showPwd?'🙈':'👁️'}</button>
+              </div>
+            </div>
           </div>
           <div className="inp-group">
             <label className="inp-label">Adresse du compteur</label>
@@ -2154,11 +2202,20 @@ function AuthSignupScreen({ onGoToLogin, onSignedUp, onSuccessDone }) {
         <button className="btn-link" onClick={onGoToLogin}>Déjà membre ? Se connecter</button>
       </div>
       <StickyFooter>
-        {allFilled&&(
-          <button className="btn btn-yes" onClick={handleSignup} disabled={loading} style={{animation:'popIn .25s ease'}}>
+        <div style={{width:'100%'}}>
+          {hint&&(
+            <div style={{textAlign:'center',fontSize:13,fontWeight:600,color:'#f7c948',marginBottom:8,lineHeight:1.4,animation:'popIn .2s ease'}}>{hint}</div>
+          )}
+          <button
+            className={allFilled?'btn btn-yes':'btn'}
+            onClick={()=>{ if(allFilled){ handleSignup(); } else { setHint(firstMissingMessage()); } }}
+            disabled={loading}
+            style={allFilled
+              ? {animation:'popIn .25s ease'}
+              : {background:'rgba(255,255,255,.12)',color:'rgba(255,255,255,.5)',cursor:'pointer'}}>
             {loading?'Création en cours…':'Créer mon compte ✦'}
           </button>
-        )}
+        </div>
       </StickyFooter>
     </>
   );
@@ -11678,7 +11735,7 @@ function App() {
           </button>
         </StickyFooter>
       )}
-      <InstallBanner/>
+      {user && !isAuthScreen && state.screen!=='WELCOME' && state.screen!=='RESET_PASSWORD' && <InstallBanner/>}
     </div>
   );
 }
