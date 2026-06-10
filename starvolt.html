@@ -1139,6 +1139,9 @@ function trackEvent(type, label, screen) {
 (function installClickTracker() {
   let _currentScreen = '';
   window.__setTrackScreen = (s) => { _currentScreen = s; };
+  // Détail contextuel facultatif pour le feedback (ex : la question de quiz affichée)
+  window.__feedbackDetail = null;
+  window.__setFeedbackDetail = (d) => { window.__feedbackDetail = d || null; };
   document.addEventListener('click', (e) => {
     if (!window.__trackUserId) return; // pas connecté, on ne track pas
     const btn = e.target.closest('button, [data-track]');
@@ -8424,7 +8427,7 @@ function AdminFeedbackScreen({ onBack }) {
     }}>{label}</button>
   );
 
-  const cols = ['', 'Date & heure', 'Utilisateur', 'Page', 'Commentaire'];
+  const cols = ['', 'Date & heure', 'Utilisateur', 'Page', 'Commentaire', 'Pièce jointe'];
 
   return (
     <>
@@ -8445,7 +8448,7 @@ function AdminFeedbackScreen({ onBack }) {
           <div style={{textAlign:'center',color:'rgba(255,255,255,.4)',padding:40,fontSize:14}}>Aucun retour pour le moment.</div>
         ) : (
         <div style={{overflowX:'auto', padding:'0 16px'}}>
-          <table style={{width:'100%', minWidth:760, borderCollapse:'collapse', fontSize:13}}>
+          <table style={{width:'100%', minWidth:900, borderCollapse:'collapse', fontSize:13}}>
             <thead>
               <tr>
                 {cols.map(c => (
@@ -8466,8 +8469,20 @@ function AdminFeedbackScreen({ onBack }) {
                     <div style={{fontWeight:600, color:'#fff'}}>{userName(r)}</div>
                     {r.email && <div style={{color:'rgba(125,217,64,.7)', fontSize:11}}>{r.email}</div>}
                   </td>
-                  <td style={{padding:'12px 10px', whiteSpace:'nowrap', color:'rgba(255,255,255,.8)'}}>{r.page_label || r.screen || '—'}</td>
+                  <td style={{padding:'12px 10px', color:'rgba(255,255,255,.8)', minWidth:150, maxWidth:260}}>
+                    <div style={{whiteSpace:'nowrap'}}>{r.page_label || r.screen || '—'}</div>
+                    {r.context_detail && <div style={{marginTop:3,fontSize:11.5,color:'rgba(255,179,64,.85)',lineHeight:1.4}}>{r.context_detail}</div>}
+                  </td>
                   <td style={{padding:'12px 10px', color:'rgba(255,255,255,.85)', lineHeight:1.5, minWidth:240, maxWidth:420}}>{r.comment || <span style={{color:'rgba(255,255,255,.3)',fontStyle:'italic'}}>(sans commentaire)</span>}</td>
+                  <td style={{padding:'12px 10px', whiteSpace:'nowrap'}}>
+                    {r.attachment_url ? (
+                      (/\.pdf($|\?)/i.test(r.attachment_url)) ? (
+                        <a href={r.attachment_url} target="_blank" rel="noopener noreferrer" style={{display:'inline-flex',alignItems:'center',gap:5,color:'#7dd940',fontSize:12,fontWeight:600,textDecoration:'none'}}>📄 PDF</a>
+                      ) : (
+                        <a href={r.attachment_url} target="_blank" rel="noopener noreferrer"><img src={r.attachment_url} alt="pièce jointe" style={{width:46,height:46,objectFit:'cover',borderRadius:8,border:'1px solid rgba(255,255,255,.15)',display:'block'}}/></a>
+                      )
+                    ) : <span style={{color:'rgba(255,255,255,.25)'}}>—</span>}
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -9728,7 +9743,12 @@ function FeedbackModal({ sentiment, user, screen, onClose }) {
   const [text, setText] = useState('');
   const [saving, setSaving] = useState(false);
   const [done, setDone] = useState(false);
+  const [file, setFile] = useState(null);
   const taRef = useRef(null);
+  const fileRef = useRef(null);
+  // Capturé au montage : le détail contextuel (ex : la question de quiz affichée)
+  const detailRef = useRef(typeof window !== 'undefined' ? window.__feedbackDetail : null);
+  const detail = detailRef.current;
   const positif = sentiment === 'up';
   const accent = positif ? '#7dd940' : '#ff8a6a';
   const accentBg = positif ? 'rgba(125,217,64,.12)' : 'rgba(255,138,106,.12)';
@@ -9737,12 +9757,25 @@ function FeedbackModal({ sentiment, user, screen, onClose }) {
 
   useEffect(() => { const t = setTimeout(() => taRef.current?.focus(), 120); return () => clearTimeout(t); }, []);
 
+  const pickFile = (e) => {
+    const f = e.target.files && e.target.files[0];
+    if (!f) return;
+    if (f.size > 10 * 1024 * 1024) { alert('Fichier trop volumineux (max 10 Mo).'); return; }
+    setFile(f);
+  };
+
   const submit = async () => {
     if (saving || !user) return;
     setSaving(true);
+    let attachment_url = null;
+    if (file) {
+      try { attachment_url = await uploadFeedbackFile(file); }
+      catch (err) { setSaving(false); alert('Erreur lors de l’envoi de la pièce jointe : ' + err.message); return; }
+    }
     const { error } = await sb.from('app_feedback').insert({
       user_id: user.id, sentiment, comment: text.trim() || null,
       screen, page_label: pageNom,
+      context_detail: detail || null, attachment_url,
     });
     setSaving(false);
     if (error) { alert('Erreur lors de l’envoi : ' + error.message); return; }
@@ -9770,6 +9803,11 @@ function FeedbackModal({ sentiment, user, screen, onClose }) {
                 <div style={{fontSize:12,color:'rgba(255,255,255,.5)',marginTop:2}}>Page : <span style={{color:accent,fontWeight:700}}>{pageNom}</span></div>
               </div>
             </div>
+            {detail && (
+              <div style={{background:accentBg,border:`1px solid ${accentBd}`,borderRadius:10,padding:'8px 11px',marginBottom:12,fontSize:12,color:'rgba(255,255,255,.78)',lineHeight:1.45}}>
+                <span style={{color:accent,fontWeight:700}}>Contexte : </span>{detail}
+              </div>
+            )}
             <textarea
               ref={taRef}
               value={text}
@@ -9778,6 +9816,18 @@ function FeedbackModal({ sentiment, user, screen, onClose }) {
               rows={4}
               style={{width:'100%',boxSizing:'border-box',background:'rgba(255,255,255,.06)',border:'1px solid rgba(255,255,255,.15)',borderRadius:11,color:'white',fontSize:14,fontFamily:'inherit',padding:'11px 13px',lineHeight:1.5,resize:'vertical',outline:'none'}}
             />
+            <input ref={fileRef} type="file" accept="image/png,image/jpeg,image/gif,image/webp,application/pdf" onChange={pickFile} style={{display:'none'}}/>
+            {file ? (
+              <div style={{display:'flex',alignItems:'center',gap:9,marginTop:10,background:'rgba(255,255,255,.06)',border:'1px solid rgba(255,255,255,.14)',borderRadius:10,padding:'8px 11px'}}>
+                <span style={{fontSize:16,flexShrink:0}}>{file.type==='application/pdf'?'📄':'🖼️'}</span>
+                <span style={{flex:1,minWidth:0,fontSize:12.5,color:'rgba(255,255,255,.82)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{file.name}</span>
+                <button onClick={()=>{ setFile(null); if(fileRef.current) fileRef.current.value=''; }} style={{flexShrink:0,background:'none',border:'none',color:'rgba(255,255,255,.5)',cursor:'pointer',fontSize:16,fontFamily:'inherit',lineHeight:1,padding:2}}>✕</button>
+              </div>
+            ) : (
+              <button onClick={()=>fileRef.current?.click()} style={{display:'flex',alignItems:'center',gap:7,marginTop:10,background:'rgba(255,255,255,.05)',border:'1px dashed rgba(255,255,255,.22)',borderRadius:10,color:'rgba(255,255,255,.62)',padding:'9px 13px',cursor:'pointer',fontFamily:'inherit',fontSize:12.5,fontWeight:600,width:'100%'}}>
+                <span style={{fontSize:15}}>📎</span> Ajouter une pièce jointe (image ou PDF)
+              </button>
+            )}
             <div style={{display:'flex',gap:10,marginTop:14}}>
               <button onClick={onClose} style={{flex:'0 0 auto',background:'rgba(255,255,255,.07)',border:'1px solid rgba(255,255,255,.18)',borderRadius:11,color:'rgba(255,255,255,.7)',padding:'11px 16px',cursor:'pointer',fontFamily:'inherit',fontSize:13,fontWeight:700}}>Annuler</button>
               <button onClick={submit} disabled={saving} style={{flex:1,background:accentBg,border:`1px solid ${accentBd}`,borderRadius:11,color:accent,padding:'11px',cursor:saving?'default':'pointer',fontFamily:'inherit',fontSize:14,fontWeight:800,opacity:saving?.6:1}}>{saving?'Envoi…':'Envoyer'}</button>
@@ -9796,6 +9846,15 @@ async function uploadLearnImage(file) {
   const { error } = await sb.storage.from('learn-images').upload(filename, file, { contentType: file.type, upsert: true });
   if (error) throw error;
   const { data: { publicUrl } } = sb.storage.from('learn-images').getPublicUrl(filename);
+  return publicUrl;
+}
+// Upload d'une pièce jointe de feedback (png/jpg/pdf…) vers son bucket dédié
+async function uploadFeedbackFile(file) {
+  const ext = (file.name.split('.').pop() || 'bin').toLowerCase();
+  const filename = `${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`;
+  const { error } = await sb.storage.from('feedback-attachments').upload(filename, file, { contentType: file.type || 'application/octet-stream', upsert: true });
+  if (error) throw error;
+  const { data: { publicUrl } } = sb.storage.from('feedback-attachments').getPublicUrl(filename);
   return publicUrl;
 }
 function getVideoEmbed(url) {
@@ -10144,6 +10203,14 @@ function ComprendreQuizScreen({ user, questions, subject, isRevision, onDone, on
   const [results, setResults] = useState([]);
 
   const q = questions[idx];
+
+  // Renseigne le détail contextuel du feedback avec la question affichée
+  useEffect(() => {
+    if (!window.__setFeedbackDetail) return;
+    if (q) window.__setFeedbackDetail(`Question ${idx+1}/${questions.length} : ${q.question}`);
+    return () => window.__setFeedbackDetail(null);
+  }, [idx, q && q.id]);
+
   if (!q) return null;
 
   const handleSelect = (choice) => {
