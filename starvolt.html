@@ -10513,7 +10513,7 @@ function HomeChoiceScreen({ profile, user, onComprendre, onAction }) {
   );
 }
 
-// ─── GroupDescription : sous-titre groupe replié à 4 lignes, déplié au clic sur "·······"
+// ─── GroupDescription : sous-titre groupe — 4 lignes + "Lire la suite / Réduire" (ergonomie du bilan)
 function GroupDescription({ text }) {
   const [expanded, setExpanded] = useState(false);
   const [overflowing, setOverflowing] = useState(false);
@@ -10522,15 +10522,18 @@ function GroupDescription({ text }) {
     const el = ref.current;
     if (el) setOverflowing(el.scrollHeight - el.clientHeight > 1);
   }, [text]);
+  const toggle = (e) => { e.stopPropagation(); setExpanded(v => !v); };
   return (
     <div>
       <div ref={ref} style={{
         fontSize:15.5, color:'white', lineHeight:1.4,
         ...(expanded ? {} : { display:'-webkit-box', WebkitLineClamp:4, WebkitBoxOrient:'vertical', overflow:'hidden' })
       }}>{text}</div>
-      {!expanded && overflowing && (
-        <span onClick={(e)=>{ e.stopPropagation(); setExpanded(true); }}
-          style={{ display:'block', cursor:'pointer', color:'rgba(255,255,255,.55)', fontWeight:900, letterSpacing:'3px', fontSize:16, lineHeight:1.2, marginTop:2, userSelect:'none' }}>·······</span>
+      {(overflowing || expanded) && (
+        <span onClick={toggle}
+          style={{ display:'inline-block', cursor:'pointer', color:'#7dd940', fontWeight:700, fontSize:12.5, marginTop:6, userSelect:'none' }}>
+          {expanded ? 'Réduire ▲' : '… Lire la suite ▾'}
+        </span>
       )}
     </div>
   );
