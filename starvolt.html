@@ -3225,6 +3225,86 @@ function deriveSiteImpact({ balance, site, prodProfil, tariffs, spotMap, globalV
   return { billAvant, billApresNet, consoApres, injApres, consoTot, flexRev, accRev, energySaving, totalSaving, reductionPct, hasBalance, effectiveTariff };
 }
 
+// 4) Construit les CHIFFRES déjà calculés envoyés à l'IA pour "Ton bilan en clair".
+//    L'IA ne calcule RIEN : on lui livre des faits déterministes issus du moteur.
+//    leviers_eur = ordres de grandeur indicatifs (pas les chiffres précis du simulateur).
+function buildBilanFacts({ site, tariffs, globalVars, prodProfil }) {
+  if (!site?.conso_profil || !(site.conso_annuelle_kwh > 0)) return null;
+  const cp = site.conso_profil;
+  const consoAnnuelle = Math.round(site.conso_annuelle_kwh);
+
+  // ── Répartition horaire (% de la conso annuelle) + saisonnalité ──
+  const b = { nuit_0h_6h:0, matin_6h_9h:0, journee_9h_18h:0, pointe_18h_22h:0, soir_22h_24h:0 };
+  let ete=0, hiver=0, total=0;
+  for (let m=1;m<=12;m++) for(let d=1;d<=PROF_DAYS[m-1];d++) for(let h=0;h<24;h++){
+    const wh = cp[profIdx(m,d,h)]||0; if(wh<=0) continue;
+    total+=wh;
+    if(h<6) b.nuit_0h_6h+=wh;
+    else if(h<9) b.matin_6h_9h+=wh;
+    else if(h<18) b.journee_9h_18h+=wh;
+    else if(h<22) b.pointe_18h_22h+=wh;
+    else b.soir_22h_24h+=wh;
+    if(m>=4&&m<=10) ete+=wh; else hiver+=wh;
+  }
+  const pct = v => total>0 ? Math.round(v/total*100) : 0;
+  const repartition = {
+    nuit_0h_6h: pct(b.nuit_0h_6h), matin_6h_9h: pct(b.matin_6h_9h),
+    journee_9h_18h: pct(b.journee_9h_18h), pointe_18h_22h: pct(b.pointe_18h_22h),
+    soir_22h_24h: pct(b.soir_22h_24h),
+  };
+  const saisonnalite = { ete: pct(ete), hiver: pct(hiver) };
+
+  // ── Tarif courant + facture actuelle (déterministe) ──
+  const curT = (tariffs||[]).find(t=>t.id===site.tarif_id) || null;
+  const { kwh_hc, kwh_hp, hasHC } = calcHcHp(cp, site);
+  let factureActuelle = null, typeTarif = 'inconnu';
+  if (curT) {
+    typeTarif = (curT.tarif_dynamique||curT.type_tarif==='dynamique') ? 'dynamique'
+      : (hasHC ? 'heures_creuses' : 'base');
+    const c = calcTariffCost(curT, kwh_hc, kwh_hp); // null si dynamique sans contexte
+    if (c?.total!=null) factureActuelle = Math.round(c.total);
+  }
+  const pctHC = (kwh_hc+kwh_hp)>0 ? Math.round(kwh_hc/(kwh_hc+kwh_hp)*100) : 0;
+  const prixMoyen = (factureActuelle!=null && consoAnnuelle>0)
+    ? Math.round(factureActuelle/consoAnnuelle*100) : null; // c€/kWh
+
+  // ── Leviers (€/an, ordres de grandeur indicatifs) ──
+  const leviers = {};
+  if (factureActuelle!=null) {
+    // 1) Meilleur tarif statique vs actuel
+    let best=null;
+    (tariffs||[]).forEach(t=>{
+      if(t.tarif_dynamique||t.type_tarif==='dynamique'||t.type_tarif==='multi') return;
+      const c=calcTariffCost(t,kwh_hc,kwh_hp);
+      if(c?.total!=null && (best===null||c.total<best)) best=c.total;
+    });
+    if(best!=null) leviers.changer_de_tarif = Math.max(0, Math.round(factureActuelle-best));
+    // 2) ACC — kWh consommés en heures solaires × écart de prix
+    let kwhSolaire=0;
+    for (let m=1;m<=12;m++) for(let d=1;d<=PROF_DAYS[m-1];d++) for(let h=0;h<24;h++){
+      const isSolar = prodProfil ? prodProfil[profIdx(m,d,h)]>0 : (h>=9&&h<18);
+      if(isSolar) kwhSolaire += (cp[profIdx(m,d,h)]||0)/1000;
+    }
+    const prixHp = curT?.prix_hp || (prixMoyen?prixMoyen/100:0.20);
+    leviers.rejoindre_acc = Math.max(0, Math.round(kwhSolaire*Math.max(0, prixHp-0.09)));
+    // 3) Box flexibilité
+    leviers.box_flexibilite = Math.round(140 + factureActuelle*(typeTarif==='dynamique'?0.20:0.10));
+    // 4) Panneaux solaires
+    leviers.panneaux_solaires = Math.round(factureActuelle*0.5);
+  }
+
+  return {
+    conso_annuelle_kwh: consoAnnuelle,
+    facture_actuelle_eur: factureActuelle,
+    prix_moyen_ceur_kwh: prixMoyen,
+    type_tarif: typeTarif,
+    pct_heures_creuses: hasHC ? pctHC : null,
+    repartition_horaire_pct: repartition,
+    saisonnalite_pct: saisonnalite,
+    leviers_eur: leviers,
+  };
+}
+
 // ─── EnergyBalanceChart ───────────────────────
 function EnergyBalanceChart({ balance, level, selMonth, selDay, setLevel, setSelMonth, setSelDay, hourlyPrices, isDynamic }) {
   const wrapperRef = useRef(null), canvasRef = useRef(null);
@@ -3597,6 +3677,9 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
   const[linkyRequestId,setLinkyRequestId]=useState(null);
   const[linkyError,setLinkyError]=useState(null);
   const linkyPollRef=useRef(null);
+  const[bilanGenerating,setBilanGenerating]=useState(false);
+  const[bilanOpen,setBilanOpen]=useState(false);
+  const bilanGenRef=useRef({}); // {siteId:true} pour ne générer qu'une fois par session
   const ANON_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhreGtod2VncWthcGRic2lzeHd2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc0MjY4NjksImV4cCI6MjA5MzAwMjg2OX0.9-_oHRJfwXZkl3bRYDMb5K56UzB8O1NOfa5QfrXFfkQ';
   const EDGE_URL='https://hkxkhwegqkapdbsisxwv.supabase.co/functions/v1/switchgrid';
 
@@ -3796,6 +3879,29 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
   useEffect(()=>{
     setBalance(buildSiteBalance({site,prodProfil:prodProfilData,tariffs,spotMap,globalVars,pvKwc,batKwh,thermKwh}));
   },[site?.conso_profil,prodProfilData,pvKwc,batKwh,thermKwh,globalVars,spotMap,tariffs,site?.tarif_id,site?.heure_debut_hc1,site?.heure_fin_hc1,site?.heure_debut_hc2,site?.heure_fin_hc2]);
+
+  // ── "Ton bilan en clair" : un SEUL appel IA quand la conso existe et que le bilan n'est pas encore écrit en dur ──
+  useEffect(()=>{
+    if(!site||!site.id) return;
+    if(!(site.conso_annuelle_kwh>0)||!site.conso_profil) return;
+    if(site.bilan_ia) return;                     // déjà écrit en dur → jamais rappelé
+    if(!tariffs?.length) return;                  // besoin des tarifs pour les faits
+    if(bilanGenRef.current[site.id]) return;      // pas deux fois dans la même session
+    const facts=buildBilanFacts({site,tariffs,globalVars,prodProfil:prodProfilData});
+    if(!facts) return;
+    bilanGenRef.current[site.id]=true;
+    const sid=site.id;
+    setBilanGenerating(true);
+    (async()=>{
+      try{
+        const{data,error}=await sb.functions.invoke('bilan',{body:{facts}});
+        if(error||!data?.text){ console.warn('bilan error',error||data); return; }
+        await sb.from('sites').update({bilan_ia:data.text,bilan_ia_at:new Date().toISOString()}).eq('id',sid);
+        setSites(prev=>prev?prev.map(s=>s.id===sid?{...s,bilan_ia:data.text}:s):prev);
+      }catch(e){ console.warn('bilan exception',e); }
+      finally{ setBilanGenerating(false); }
+    })();
+  },[site?.id,site?.conso_annuelle_kwh,site?.bilan_ia,tariffs,globalVars,prodProfilData]);
 
   const updateSite=async(updates)=>{ await sb.from('sites').update(updates).eq('id',activeId); await load(); };
 
@@ -4127,6 +4233,39 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
                     <div style={{color:'rgba(255,255,255,.35)',fontSize:12,padding:'8px 0'}}>Sélectionnez un tarif dans « Ma conso » pour afficher le graphique.</div>
                   )}
                 </div>}
+              </div>
+            )}
+
+            {/* ── Tuile Ton bilan en clair (synthèse IA, écrite en dur) ── */}
+            {site.conso_annuelle_kwh>0&&(site.bilan_ia||bilanGenerating)&&(
+              <div className="card" style={{padding:'14px',marginBottom:8,position:'relative',overflow:'hidden'}}>
+                <div style={{fontWeight:800,fontSize:13,color:'white',display:'flex',alignItems:'center',gap:6,marginBottom:site.bilan_ia?10:0}}>
+                  ✨ Ton bilan en clair
+                </div>
+                {site.bilan_ia ? (
+                  <>
+                    <div style={{
+                      fontSize:13.5,lineHeight:1.55,color:'rgba(255,255,255,.85)',whiteSpace:'pre-wrap',
+                      ...(bilanOpen?{}:{display:'-webkit-box',WebkitLineClamp:4,WebkitBoxOrient:'vertical',overflow:'hidden'})
+                    }}>
+                      {site.bilan_ia}
+                    </div>
+                    <button
+                      onClick={()=>setBilanOpen(v=>!v)}
+                      style={{marginTop:8,background:'none',border:'none',color:'rgba(240,160,80,.9)',fontSize:12.5,fontWeight:700,cursor:'pointer',padding:0}}
+                    >
+                      {bilanOpen?'Réduire ▲':'… Lire la suite ▾'}
+                    </button>
+                  </>
+                ) : (
+                  <div style={{display:'flex',alignItems:'center',gap:9,color:'rgba(255,255,255,.55)',fontSize:13,paddingTop:4}}>
+                    <span style={{
+                      width:15,height:15,border:'2px solid rgba(240,160,80,.3)',borderTopColor:'rgba(240,160,80,.9)',
+                      borderRadius:'50%',display:'inline-block',animation:'spin 0.8s linear infinite'
+                    }}/>
+                    Analyse de ta consommation en cours…
+                  </div>
+                )}
               </div>
             )}
 
