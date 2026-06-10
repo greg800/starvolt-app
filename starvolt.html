@@ -9600,16 +9600,21 @@ function HomeChoiceScreen({ profile, user, onComprendre, onAction }) {
     let cancelled = false;
     async function load() {
       const { data: subs } = await sb.from('learn_subjects').select('id');
+      const { data: qs } = await sb.from('learn_questions').select('id,subject_id');
       const totalSubjects = (subs || []).length;
+      const totalQuiz = (qs || []).length;
+      const qCountBySubject = {};
+      (qs || []).forEach(q => { qCountBySubject[q.subject_id] = (qCountBySubject[q.subject_id] || 0) + 1; });
       let learned = 0, okQuiz = 0;
       if (user) {
         const { data: p } = await sb.from('user_learn_progress').select('subject_id,completed_at,failed_question_ids').eq('user_id', user.id);
         if (p) p.forEach(r => {
           if (r.completed_at) learned++;
-          if (r.completed_at && !(r.failed_question_ids && r.failed_question_ids.length)) okQuiz++;
+          const qc = qCountBySubject[r.subject_id] || 0;
+          const failed = (r.failed_question_ids && r.failed_question_ids.length) || 0;
+          okQuiz += Math.max(0, qc - failed);
         });
       }
-      const totalQuiz = totalSubjects;
       const pct = totalQuiz > 0 ? (okQuiz / totalQuiz) * 100 : 0;
       if (!cancelled) setLearnStats({ learned, totalSubjects, okQuiz, totalQuiz, pct });
     }
@@ -9654,7 +9659,7 @@ function HomeChoiceScreen({ profile, user, onComprendre, onAction }) {
             </span>
             <span className="offer-chip chip-green" title={`Niveau ski : ${medal.label}`}>
               <span style={{fontSize:13,letterSpacing:'-1px'}}>{medal.emoji}</span>
-              {medal.label}
+              Niveau actuel= {medal.label}
             </span>
           </div>
         )}
