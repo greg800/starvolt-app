@@ -8437,7 +8437,7 @@ function AdminPrixMateriauxScreen({ onBack }) {
 }
 
 // ─── AdminScreen ──────────────────────────────
-function AdminScreen({ onTariffs, onUsers, onSpot, onAcc, onProduction, onGlobalVars, onPrix, onOffres, onLearn, onFeedback, onProofread, onAICosts, onBack }) {
+function AdminScreen({ onTariffs, onUsers, onSpot, onAcc, onProduction, onGlobalVars, onPrix, onOffres, onLearn, onFeedback, onProofread, onAICosts, onAIPrompts, onBack }) {
   return (
     <>
     <div className="screen fade-in">
@@ -8539,6 +8539,14 @@ function AdminScreen({ onTariffs, onUsers, onSpot, onAcc, onProduction, onGlobal
           <div className="sim-text">
             <div className="sim-title">Coûts IA</div>
             <div className="sim-sub">Suivi des montants engagés sur les appels à l'IA</div>
+          </div>
+          <span className="sim-arrow">→</span>
+        </button>
+        <button className="sim-btn" onClick={onAIPrompts}>
+          <span className="sim-icon">✏️</span>
+          <div className="sim-text">
+            <div className="sim-title">Prompts IA</div>
+            <div className="sim-sub">Cadrer chaque service IA (correction, bilan…)</div>
           </div>
           <span className="sim-arrow">→</span>
         </button>
@@ -8873,7 +8881,7 @@ function AdminAICostsScreen({ onBack }) {
   const [loading, setLoading] = useState(true);
   const USD_PER_EUR = 0.92; // même hypothèse que l'Edge Function
 
-  const FEAT_LABEL = { proofread: 'Correction orthographique' };
+  const FEAT_LABEL = { proofread: 'Correction orthographique', bilan: 'Ton bilan en clair' };
 
   const load = () => {
     setLoading(true);
@@ -8944,6 +8952,103 @@ function AdminAICostsScreen({ onBack }) {
             <button onClick={load} style={{marginTop:16, background:'rgba(255,255,255,.06)', border:'1px solid rgba(255,255,255,.16)', borderRadius:9, color:'rgba(255,255,255,.7)', fontSize:12.5, fontWeight:700, padding:'8px 14px', cursor:'pointer', fontFamily:'inherit'}}>↻ Actualiser</button>
           </>
         )}
+      </div>
+    </div>
+    <StickyFooter onBack={onBack}/>
+    </>
+  );
+}
+
+// ─── AdminAIPromptsScreen : éditer les prompts qui cadrent chaque service IA ───
+function AdminAIPromptsScreen({ onBack }) {
+  const [rows, setRows] = useState(null);       // [{feature,label,system_prompt,updated_at,updated_by}]
+  const [drafts, setDrafts] = useState({});     // {feature: texte en cours d'édition}
+  const [savingFeat, setSavingFeat] = useState(null);
+  const [msg, setMsg] = useState(null);         // {feature, type:'ok'|'err', text}
+
+  const load = () => {
+    sb.rpc('get_ai_prompts').then(({ data, error }) => {
+      if (error) { console.error('get_ai_prompts', error); setRows([]); return; }
+      setRows(data || []);
+      const d = {}; (data || []).forEach(r => { d[r.feature] = r.system_prompt; });
+      setDrafts(d);
+    });
+  };
+  useEffect(load, []);
+
+  const save = async (feature) => {
+    setSavingFeat(feature); setMsg(null);
+    const { error } = await sb.rpc('set_ai_prompt', { p_feature: feature, p_prompt: drafts[feature] });
+    setSavingFeat(null);
+    if (error) { setMsg({ feature, type:'err', text: 'Échec : ' + (error.message || 'erreur') }); return; }
+    setMsg({ feature, type:'ok', text: 'Prompt enregistré. Il sera utilisé au prochain appel.' });
+    setRows(prev => prev.map(r => r.feature===feature ? { ...r, system_prompt: drafts[feature], updated_at: new Date().toISOString() } : r));
+  };
+
+  const fmtDate = (d) => d ? new Date(d).toLocaleString('fr-FR', { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit' }) : '—';
+
+  return (
+    <>
+    <div className="screen fade-in" style={{padding:'0 0 90px', maxWidth:'100%', width:'100%'}}>
+      <div className="auth-header">
+        <div className="welcome-tag" style={{color:'#ffb340'}}>Administration</div>
+        <h1 className="welcome-title">Prompts<br/><span className="accent">IA</span></h1>
+      </div>
+
+      <div style={{padding:'0 16px'}}>
+        <p style={{color:'rgba(255,255,255,.55)', fontSize:13, lineHeight:1.55, margin:'0 0 16px'}}>
+          Chaque service IA est cadré par un prompt système, lu en base juste avant l'appel.
+          Modifie-le ici : la prise en compte est immédiate, sans redéploiement.
+        </p>
+
+        {rows === null ? (
+          <div style={{textAlign:'center',padding:40}}><div className="spinner" style={{margin:'0 auto'}}/></div>
+        ) : rows.length === 0 ? (
+          <div style={{textAlign:'center', color:'rgba(255,255,255,.4)', fontSize:14, padding:'24px 0'}}>Aucun service IA configuré.</div>
+        ) : rows.map(r => {
+          const dirty = drafts[r.feature] !== r.system_prompt;
+          return (
+            <div key={r.feature} className="card" style={{padding:14, marginBottom:14}}>
+              <div style={{display:'flex', alignItems:'center', justifyContent:'space-between', gap:8, marginBottom:8}}>
+                <div style={{fontWeight:800, fontSize:14, color:'#fff'}}>{r.label}</div>
+                <code style={{fontSize:11, color:'rgba(255,255,255,.4)'}}>{r.feature}</code>
+              </div>
+              <textarea
+                value={drafts[r.feature] ?? ''}
+                onChange={e => setDrafts(d => ({ ...d, [r.feature]: e.target.value }))}
+                spellCheck={false}
+                style={{width:'100%', minHeight:170, resize:'vertical', boxSizing:'border-box',
+                  background:'rgba(0,0,0,.25)', border:'1px solid rgba(255,255,255,.14)', borderRadius:10,
+                  color:'rgba(255,255,255,.9)', fontSize:13, lineHeight:1.5, padding:'10px 12px',
+                  fontFamily:'inherit'}}
+              />
+              <div style={{display:'flex', alignItems:'center', justifyContent:'space-between', gap:10, marginTop:8, flexWrap:'wrap'}}>
+                <span style={{fontSize:11.5, color:'rgba(255,255,255,.4)'}}>
+                  Modifié le {fmtDate(r.updated_at)}{r.updated_by ? ' · '+r.updated_by : ''}
+                </span>
+                <div style={{display:'flex', gap:8}}>
+                  {dirty && (
+                    <button onClick={() => setDrafts(d => ({ ...d, [r.feature]: r.system_prompt }))}
+                      style={{background:'rgba(255,255,255,.06)', border:'1px solid rgba(255,255,255,.16)', borderRadius:9, color:'rgba(255,255,255,.65)', fontSize:12.5, fontWeight:700, padding:'8px 14px', cursor:'pointer', fontFamily:'inherit'}}>
+                      Annuler
+                    </button>
+                  )}
+                  <button onClick={() => save(r.feature)} disabled={!dirty || savingFeat===r.feature}
+                    style={{background: dirty ? '#ffb340' : 'rgba(255,255,255,.1)', border:'none', borderRadius:9,
+                      color: dirty ? '#1a1208' : 'rgba(255,255,255,.4)', fontSize:12.5, fontWeight:800,
+                      padding:'8px 16px', cursor: dirty ? 'pointer' : 'default', fontFamily:'inherit', opacity: savingFeat===r.feature?.6:1}}>
+                    {savingFeat===r.feature ? 'Enregistrement…' : 'Enregistrer'}
+                  </button>
+                </div>
+              </div>
+              {msg && msg.feature===r.feature && (
+                <div style={{marginTop:8, fontSize:12.5, fontWeight:600, color: msg.type==='ok' ? '#5fd38a' : '#ff8080'}}>
+                  {msg.text}
+                </div>
+              )}
+            </div>
+          );
+        })}
       </div>
     </div>
     <StickyFooter onBack={onBack}/>
@@ -11314,6 +11419,7 @@ function App() {
           onFeedback={()=>goTo('ADMIN_FEEDBACK')}
           onProofread={()=>goTo('ADMIN_PROOFREAD')}
           onAICosts={()=>goTo('ADMIN_AI_COSTS')}
+          onAIPrompts={()=>goTo('ADMIN_AI_PROMPTS')}
           onBack={goBack}/>;
 
       case 'ADMIN_FEEDBACK':
@@ -11324,6 +11430,9 @@ function App() {
 
       case 'ADMIN_AI_COSTS':
         return <AdminAICostsScreen onBack={goBack}/>;
+
+      case 'ADMIN_AI_PROMPTS':
+        return <AdminAIPromptsScreen onBack={goBack}/>;
 
       case 'ADMIN_LEARN':
         return <AdminLearnScreen
