@@ -10013,24 +10013,21 @@ function ComprendreScoreScreen({ user, subject, score, total, results, isRevisio
   const failedIds = results.filter(r=>!r.correct).map(r=>r.questionId);
 
   useEffect(() => {
-    if (mastered) {
-      confetti({ particleCount: 120, spread: 70, origin: { y: .6 } });
-      if (user && subject) {
-        sb.from('user_learn_progress').upsert({
+    // L'upsert supabase-js est paresseux : il faut l'attendre (await) pour que
+    // la requête parte réellement. Sans await, la progression n'est jamais enregistrée.
+    if (user && subject && !isRevision) {
+      (async () => {
+        const { error } = await sb.from('user_learn_progress').upsert({
           user_id: user.id, subject_id: subject.id,
           completed_at: mastered ? new Date().toISOString() : null,
           score: pct,
           failed_question_ids: failedIds,
         }, { onConflict: 'user_id,subject_id' });
-      }
-    } else {
-      if (user && subject) {
-        sb.from('user_learn_progress').upsert({
-          user_id: user.id, subject_id: subject.id,
-          completed_at: null, score: pct,
-          failed_question_ids: failedIds,
-        }, { onConflict: 'user_id,subject_id' });
-      }
+        if (error) console.error('Erreur enregistrement progression quiz', error);
+      })();
+    }
+    if (mastered) {
+      try { confetti({ particleCount: 120, spread: 70, origin: { y: .6 } }); } catch {}
     }
   }, []);
 
