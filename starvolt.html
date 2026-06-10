@@ -4021,7 +4021,7 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
                           </thead>
                           <tbody>
                             <tr style={sep}>
-                              <td style={{...td,textAlign:'left',color:'rgba(255,255,255,.5)',fontSize:11}}>Élec soutirée</td>
+                              <td style={{...td,textAlign:'left',color:'rgba(255,255,255,.5)',fontSize:11}}>Élec achetée</td>
                               <td style={{...td,color:'white',fontWeight:700}}>{Math.round(consoTot/1000)}<U c="MWh/an" em={0.4}/></td>
                               <td style={{...td,color:hasModifs?'white':'rgba(255,255,255,.18)',fontWeight:700}}>{hasModifs?<>{Math.round(consoApres/1000)}<U c="MWh/an" em={0.4}/></>:dash}</td>
                             </tr>
@@ -4053,7 +4053,7 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
                         <thead>
                           <tr style={{borderBottom:'1px solid rgba(255,255,255,.1)'}}>
                             <th style={{...thD,textAlign:'left',width:'10%'}}></th>
-                            <th style={{...thD,color:'rgba(255,255,255,.38)'}}>Élec soutirée</th>
+                            <th style={{...thD,color:'rgba(255,255,255,.38)'}}>Élec achetée</th>
                             <th style={{...thD,color:'rgba(255,255,255,.38)'}}>Facture TTC</th>
                             <th style={{...thD,color:'rgba(255,255,255,.38)'}}>Prix / kWh</th>
                           </tr>
