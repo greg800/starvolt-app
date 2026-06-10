@@ -869,6 +869,19 @@
     /* ══ SIMULATIONS SCREEN ════════════════════════════════════════ */
     .sim-header { text-align: center; margin-bottom: 18px; padding-top: 8px; }
     .sim-btns { display: flex; flex-direction: column; gap: 10px; }
+    .admin-group-label {
+      display: flex; align-items: center; gap: 9px;
+      font-size: 11px; font-weight: 700;
+      letter-spacing: 1.8px; text-transform: uppercase;
+      color: rgba(255,255,255,.5);
+      margin: 22px 2px 4px;
+    }
+    .admin-group-label:first-child { margin-top: 4px; }
+    .admin-group-label .agl-ico { font-size: 15px; letter-spacing: 0; }
+    .admin-group-label::after {
+      content: ''; flex: 1; height: 1px;
+      background: rgba(255,255,255,.12);
+    }
     .sim-btn {
       display: flex; align-items: center; gap: 14px;
       background: rgba(255,255,255,.10);
@@ -8517,19 +8530,12 @@ function AdminScreen({ onTariffs, onUsers, onSpot, onAcc, onProduction, onGlobal
         <h1 className="welcome-title">Menu<br/><span className="accent">admin</span></h1>
       </div>
       <div className="sim-btns">
+        <div className="admin-group-label"><span className="agl-ico">📥</span>Import de data</div>
         <button className="sim-btn" onClick={onGlobalVars}>
           <span className="sim-icon">⚙️</span>
           <div className="sim-text">
             <div className="sim-title">Variables globales</div>
             <div className="sim-sub">Hypothèses stockage, TURPE, inflation, plages HC</div>
-          </div>
-          <span className="sim-arrow">→</span>
-        </button>
-        <button className="sim-btn" onClick={onPrix}>
-          <span className="sim-icon">💰</span>
-          <div className="sim-text">
-            <div className="sim-title">Prix matériel et pose</div>
-            <div className="sim-sub">Tarifs PV, batterie, box Comwatt</div>
           </div>
           <span className="sim-arrow">→</span>
         </button>
@@ -8541,27 +8547,11 @@ function AdminScreen({ onTariffs, onUsers, onSpot, onAcc, onProduction, onGlobal
           </div>
           <span className="sim-arrow">→</span>
         </button>
-        <button className="sim-btn" onClick={onOffres}>
-          <span className="sim-icon">🎯</span>
-          <div className="sim-text">
-            <div className="sim-title">Gestion des offres</div>
-            <div className="sim-sub">Créer et modifier les offres proposées aux clients</div>
-          </div>
-          <span className="sim-arrow">→</span>
-        </button>
         <button className="sim-btn" onClick={onSpot}>
           <span className="sim-icon">📈</span>
           <div className="sim-text">
             <div className="sim-title">Prix spot</div>
             <div className="sim-sub">Importer et visualiser les prix horaires</div>
-          </div>
-          <span className="sim-arrow">→</span>
-        </button>
-        <button className="sim-btn" onClick={onAcc}>
-          <span className="sim-icon">☀️</span>
-          <div className="sim-text">
-            <div className="sim-title">Gestion des sites en ACC</div>
-            <div className="sim-sub">Sites photovoltaïques pour l'autoconsommation collective</div>
           </div>
           <span className="sim-arrow">→</span>
         </button>
@@ -8573,8 +8563,36 @@ function AdminScreen({ onTariffs, onUsers, onSpot, onAcc, onProduction, onGlobal
           </div>
           <span className="sim-arrow">→</span>
         </button>
+        <button className="sim-btn" onClick={onAcc}>
+          <span className="sim-icon">☀️</span>
+          <div className="sim-text">
+            <div className="sim-title">Gestion des sites en ACC</div>
+            <div className="sim-sub">Sites photovoltaïques pour l'autoconsommation collective</div>
+          </div>
+          <span className="sim-arrow">→</span>
+        </button>
+
+        <div className="admin-group-label"><span className="agl-ico">🎯</span>Offres commerciales</div>
+        <button className="sim-btn" onClick={onOffres}>
+          <span className="sim-icon">🏷️</span>
+          <div className="sim-text">
+            <div className="sim-title">Gestion des offres</div>
+            <div className="sim-sub">Créer et modifier les offres proposées aux clients</div>
+          </div>
+          <span className="sim-arrow">→</span>
+        </button>
+        <button className="sim-btn" onClick={onPrix}>
+          <span className="sim-icon">💰</span>
+          <div className="sim-text">
+            <div className="sim-title">Prix matériel et pose</div>
+            <div className="sim-sub">Tarifs PV, batterie, box Comwatt</div>
+          </div>
+          <span className="sim-arrow">→</span>
+        </button>
+
+        <div className="admin-group-label"><span className="agl-ico">👥</span>Utilisateurs</div>
         <button className="sim-btn" onClick={onUsers}>
-          <span className="sim-icon">👥</span>
+          <span className="sim-icon">🧑‍🤝‍🧑</span>
           <div className="sim-text">
             <div className="sim-title">Gestion des utilisateurs</div>
             <div className="sim-sub">Voir et gérer les membres Starvolt</div>
@@ -8589,6 +8607,8 @@ function AdminScreen({ onTariffs, onUsers, onSpot, onAcc, onProduction, onGlobal
           </div>
           <span className="sim-arrow">→</span>
         </button>
+
+        <div className="admin-group-label"><span className="agl-ico">📚</span>Comprendre</div>
         <button className="sim-btn" onClick={onLearn}>
           <span className="sim-icon">💡</span>
           <div className="sim-text">
@@ -8597,6 +8617,8 @@ function AdminScreen({ onTariffs, onUsers, onSpot, onAcc, onProduction, onGlobal
           </div>
           <span className="sim-arrow">→</span>
         </button>
+
+        <div className="admin-group-label"><span className="agl-ico">🤖</span>Agents IA</div>
         <button className="sim-btn" onClick={onProofread}>
           <span className="sim-icon">🔍</span>
           <div className="sim-text">
