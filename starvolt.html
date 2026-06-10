@@ -8399,12 +8399,27 @@ function AdminFeedbackScreen({ onBack }) {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('all'); // all | up | down
+  const [signed, setSigned] = useState({}); // attachment_url -> URL signée temporaire
+  const [pdfView, setPdfView] = useState(null); // { url, name } pour la modale PDF in-app
 
   useEffect(() => {
-    sb.rpc('get_all_feedback').then(({ data, error }) => {
+    sb.rpc('get_all_feedback').then(async ({ data, error }) => {
       if (error) console.error('get_all_feedback', error);
       setRows(data || []);
       setLoading(false);
+      // Bucket privé : on génère des URLs signées (expirent dans 1 h) pour chaque pièce jointe
+      const withAtt = (data || []).filter(r => r.attachment_url);
+      if (!withAtt.length) return;
+      const pathOf = (u) => { const p = u.split('/feedback-attachments/')[1]; return p ? p.split('?')[0] : null; };
+      const paths = withAtt.map(r => pathOf(r.attachment_url)).filter(Boolean);
+      const { data: sg, error: sgErr } = await sb.storage.from('feedback-attachments').createSignedUrls(paths, 3600);
+      if (sgErr) { console.error('signed urls', sgErr); return; }
+      const map = {};
+      (sg || []).forEach(s => { if (s.signedUrl && s.path) map[s.path] = s.signedUrl; });
+      // Reclé par attachment_url d'origine pour le rendu
+      const byUrl = {};
+      withAtt.forEach(r => { const p = pathOf(r.attachment_url); if (p && map[p]) byUrl[r.attachment_url] = map[p]; });
+      setSigned(byUrl);
     });
   }, []);
 
@@ -8475,13 +8490,16 @@ function AdminFeedbackScreen({ onBack }) {
                   </td>
                   <td style={{padding:'12px 10px', color:'rgba(255,255,255,.85)', lineHeight:1.5, minWidth:240, maxWidth:420}}>{r.comment || <span style={{color:'rgba(255,255,255,.3)',fontStyle:'italic'}}>(sans commentaire)</span>}</td>
                   <td style={{padding:'12px 10px', whiteSpace:'nowrap'}}>
-                    {r.attachment_url ? (
-                      (/\.pdf($|\?)/i.test(r.attachment_url)) ? (
-                        <a href={r.attachment_url} target="_blank" rel="noopener noreferrer" style={{display:'inline-flex',alignItems:'center',gap:5,color:'#7dd940',fontSize:12,fontWeight:600,textDecoration:'none'}}>📄 PDF</a>
+                    {r.attachment_url ? (() => {
+                      const su = signed[r.attachment_url];
+                      const isPdf = /\.pdf($|\?)/i.test(r.attachment_url);
+                      if (!su) return <span style={{color:'rgba(255,255,255,.3)',fontSize:11}}>chargement…</span>;
+                      return isPdf ? (
+                        <button onClick={()=>setPdfView({ url: su, name: 'Pièce jointe PDF' })} style={{display:'inline-flex',alignItems:'center',gap:5,background:'rgba(125,217,64,.12)',border:'1px solid rgba(125,217,64,.35)',borderRadius:8,color:'#7dd940',fontSize:12,fontWeight:700,padding:'7px 11px',cursor:'pointer',fontFamily:'inherit'}}>📄 Voir le PDF</button>
                       ) : (
-                        <a href={r.attachment_url} target="_blank" rel="noopener noreferrer"><img src={r.attachment_url} alt="pièce jointe" style={{width:46,height:46,objectFit:'cover',borderRadius:8,border:'1px solid rgba(255,255,255,.15)',display:'block'}}/></a>
-                      )
-                    ) : <span style={{color:'rgba(255,255,255,.25)'}}>—</span>}
+                        <ImageWithLightbox src={su} style={{width:46,height:46,objectFit:'cover',borderRadius:8,border:'1px solid rgba(255,255,255,.15)',display:'block'}}/>
+                      );
+                    })() : <span style={{color:'rgba(255,255,255,.25)'}}>—</span>}
                   </td>
                 </tr>
               ))}
@@ -8491,6 +8509,16 @@ function AdminFeedbackScreen({ onBack }) {
         )
       )}
     </div>
+    {pdfView && (
+      <div onClick={()=>setPdfView(null)} style={{position:'fixed',inset:0,background:'rgba(0,0,0,.82)',backdropFilter:'blur(3px)',WebkitBackdropFilter:'blur(3px)',zIndex:10000,display:'flex',flexDirection:'column',padding:'14px'}}>
+        <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:10,flexShrink:0}}>
+          <div style={{flex:1,minWidth:0,color:'#fff',fontWeight:700,fontSize:14,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>📄 {pdfView.name}</div>
+          <a href={pdfView.url} target="_blank" rel="noopener noreferrer" onClick={e=>e.stopPropagation()} style={{flexShrink:0,background:'rgba(125,217,64,.14)',border:'1px solid rgba(125,217,64,.4)',borderRadius:9,color:'#7dd940',fontSize:12,fontWeight:700,padding:'8px 13px',textDecoration:'none'}}>Ouvrir / Télécharger</a>
+          <button onClick={()=>setPdfView(null)} style={{flexShrink:0,background:'rgba(255,255,255,.1)',border:'1px solid rgba(255,255,255,.25)',borderRadius:9,color:'#fff',fontSize:16,fontWeight:700,width:38,height:38,cursor:'pointer',fontFamily:'inherit',lineHeight:1}}>✕</button>
+        </div>
+        <iframe title="pdf" src={pdfView.url} onClick={e=>e.stopPropagation()} style={{flex:1,width:'100%',border:'none',borderRadius:12,background:'#fff'}}/>
+      </div>
+    )}
     <StickyFooter onBack={onBack}/>
     </>
   );
