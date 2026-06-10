@@ -10787,10 +10787,11 @@ function ImageWithLightbox({ src, style }) {
   return (
     <>
       <img src={src} alt="" style={{...style, cursor:'zoom-in'}} onClick={()=>setOpen(true)}/>
-      {open && (
+      {open && ReactDOM.createPortal(
         <div className="lightbox-overlay" onClick={()=>setOpen(false)}>
           <img src={src} alt="" onClick={e=>e.stopPropagation()}/>
-        </div>
+        </div>,
+        document.body
       )}
     </>
   );
