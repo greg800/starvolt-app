@@ -106,6 +106,8 @@
     .approx-banner-ic { font-size: 18px; line-height: 1.25; flex-shrink: 0; }
     .approx-banner strong { color: #fff; font-weight: 800; }
 
+    @keyframes linkyPulse { 0%, 100% { opacity: 1; } 50% { opacity: .4; } }
+
     /* Blob decorations */
     .app::before {
       content: '';
@@ -1883,6 +1885,71 @@ function ApproxConsoBanner({ screen, userId }) {
       <div>
         <strong>Estimations approximatives.</strong> ENEDIS n'a pas fourni la courbe de charge détaillée de ce compteur (non enregistrée à ce jour). Les calculs reposent sur les <strong>consommations journalières</strong> réparties sur 24 h : les estimations heure par heure (heures pleines/creuses, tarifs dynamiques, box, solaire) <strong>ne sont pas précises</strong>. Relancez l'import dans quelques jours, une fois la courbe de charge activée par ENEDIS.
       </div>
+    </div>
+  );
+}
+
+// ─── LinkyProgress : suivi par étapes de la récupération ENEDIS ───────────────
+const LINKY_STEP_LABELS = [
+  'Recherche du compteur sur ENEDIS',
+  'Signature du consentement par le propriétaire',
+  'Récupération des données chez ENEDIS',
+  'Données de consommation heure par heure collectées',
+];
+
+// Calcule l'état de chaque étape (todo | active | done | error) selon le statut.
+function linkyStepStates(status, errorStep) {
+  let doneUpTo = -1, activeIdx = -1;
+  if (status === 'loading')        { activeIdx = 0; }
+  else if (status === 'pending')   { doneUpTo = 0; activeIdx = 1; }
+  else if (status === 'ordering')  { doneUpTo = 1; activeIdx = 2; }
+  else if (status === 'done')      { doneUpTo = 3; }
+  else if (status === 'error')     { doneUpTo = (errorStep != null ? errorStep - 1 : -1); }
+  return LINKY_STEP_LABELS.map((label, i) => {
+    if (status === 'error' && i === errorStep) return { label, state: 'error' };
+    if (i <= doneUpTo) return { label, state: 'done' };
+    if (i === activeIdx) return { label, state: 'active' };
+    return { label, state: 'todo' };
+  });
+}
+
+function LinkyProgress({ status, errorStep, consoSource }) {
+  if (!status) return null;
+  const steps = linkyStepStates(status, errorStep);
+  // Repli journalier : l'étape finale est atteinte mais sans détail heure par heure → état "warn".
+  if (status === 'done' && consoSource === 'daily' && steps[3]) {
+    steps[3] = { label: 'Consommations journalières collectées (courbe de charge indisponible)', state: 'warn' };
+  }
+  const ringColor = { done: '#7dd940', active: '#f7c948', todo: 'rgba(255,255,255,.25)', error: '#ff6b6b', warn: '#f59e0b' };
+  return (
+    <div style={{ marginTop: 10 }}>
+      {steps.map((s, i) => (
+        <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 10, position: 'relative', paddingBottom: i < steps.length - 1 ? 14 : 0 }}>
+          {i < steps.length - 1 && (
+            <div style={{ position: 'absolute', left: 9, top: 21, width: 2, height: 'calc(100% - 21px)', background: s.state === 'done' ? '#7dd940' : 'rgba(255,255,255,.12)' }} />
+          )}
+          <div style={{
+            flex: '0 0 20px', width: 20, height: 20, borderRadius: '50%',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            fontSize: 11, fontWeight: 800,
+            background: s.state === 'done' ? '#7dd940' : s.state === 'error' ? '#ff6b6b' : s.state === 'warn' ? '#f59e0b' : s.state === 'active' ? 'rgba(247,201,72,.18)' : 'rgba(255,255,255,.05)',
+            border: `2px solid ${ringColor[s.state]}`,
+            color: (s.state === 'done' || s.state === 'error' || s.state === 'warn') ? '#061e2a' : ringColor[s.state],
+            animation: s.state === 'active' ? 'linkyPulse 1.4s ease-in-out infinite' : 'none',
+          }}>
+            {s.state === 'done' ? '✓' : s.state === 'error' ? '✕' : s.state === 'warn' ? '!' : s.state === 'active' ? '●' : i + 1}
+          </div>
+          <div style={{ flex: 1, paddingTop: 1 }}>
+            <div style={{
+              fontSize: 12,
+              fontWeight: (s.state === 'active' || s.state === 'error' || s.state === 'warn') ? 700 : 600,
+              color: s.state === 'todo' ? 'rgba(255,255,255,.4)' : s.state === 'done' ? 'rgba(255,255,255,.85)' : ringColor[s.state],
+              lineHeight: 1.35,
+            }}>{s.label}</div>
+            {s.state === 'active' && <div style={{ fontSize: 10.5, color: 'rgba(255,255,255,.5)', marginTop: 2 }}>En cours…</div>}
+          </div>
+        </div>
+      ))}
     </div>
   );
 }
@@ -3836,6 +3903,7 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
   const[linkyUserUrl,setLinkyUserUrl]=useState(null);
   const[linkyRequestId,setLinkyRequestId]=useState(null);
   const[linkyError,setLinkyError]=useState(null);
+  const[linkyErrorStep,setLinkyErrorStep]=useState(null); // 0..3 : étape où l'erreur s'est produite
   const linkyPollRef=useRef(null);
   const[bilanGenerating,setBilanGenerating]=useState(false);
   const[bilanOpen,setBilanOpen]=useState(false);
@@ -3882,7 +3950,11 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
           clearInterval(linkyPollRef.current);
           if(siteId) localStorage.removeItem(`starvolt_linky_${siteId}`);
           if(ns==='done') setTimeout(()=>load(),800);
-          if(ns==='error') setLinkyError(d.error_message||'Erreur inconnue');
+          if(ns==='error'){
+            // Étape d'échec déduite du statut précédent : pending→consentement, ordering→données
+            setLinkyErrorStep(linkyStatus==='pending'?1:2);
+            setLinkyError(d.error_message||'Erreur inconnue');
+          }
         } else if(siteId){
           localStorage.setItem(`starvolt_linky_${siteId}`,JSON.stringify({requestId:linkyRequestId,status:ns,userUrl:nu||linkyUserUrl}));
         }
@@ -3905,18 +3977,18 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
 
     // ── Validation ──────────────────────────────────────────────────────────
     if(!firstName || !lastName){
-      setLinkyStatus('error');
+      setLinkyStatus('error'); setLinkyErrorStep(0);
       setLinkyError('Renseignez le prénom et le nom du titulaire du contrat ENEDIS.');
       return;
     }
     if(!hasPdl && !hasAddress){
-      setLinkyStatus('error');
+      setLinkyStatus('error'); setLinkyErrorStep(0);
       setLinkyError('Renseignez soit le PDL (14 chiffres), soit l\'adresse complète (rue, CP, ville).');
       return;
     }
 
     // ── Appel Switchgrid ─────────────────────────────────────────────────────
-    setLinkyStatus('loading'); setLinkyError(null); setLinkyUserUrl(null); setLinkyRequestId(null);
+    setLinkyStatus('loading'); setLinkyError(null); setLinkyErrorStep(null); setLinkyUserUrl(null); setLinkyRequestId(null);
     try{
       const { data:{session} } = await sb.auth.getSession();
       if(!session) throw new Error('Non connecté');
@@ -3936,7 +4008,7 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
 
       // Plusieurs compteurs trouvés → afficher la liste
       if(d.error==='MULTIPLE_CONTRACTS'){
-        setLinkyStatus('error');
+        setLinkyStatus('error'); setLinkyErrorStep(0);
         const list=d.results.map(r=>`• ${r.prm} — ${r.nom} (${r.adresse})`).join('\n');
         setLinkyError(`${d.message}\n${list}`);
         return;
@@ -3944,12 +4016,12 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
 
       // Quota ENEDIS atteint / tentative récente → message clair, pas de relance
       if(d.error==='COOLDOWN'){
-        setLinkyStatus('error');
+        setLinkyStatus('error'); setLinkyErrorStep(2);
         setLinkyError(d.message||'Trop de demandes pour ce compteur. Réessayez plus tard.');
         return;
       }
 
-      if(d.error) throw new Error(d.error);
+      if(d.error){ setLinkyErrorStep(0); throw new Error(d.error); }
 
       // PDL auto-découvert par adresse → mettre à jour le site
       if(d.pdl_found){
@@ -3965,6 +4037,7 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
       }));
     }catch(e){
       setLinkyStatus('error');
+      setLinkyErrorStep(prev=>prev==null?0:prev);
       setLinkyError(e.message);
       if(site?.id) localStorage.removeItem(`starvolt_linky_${site.id}`);
     }
@@ -4495,49 +4568,63 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
                         </div>
                       </div>
                     </div>
-                    <div style={{display:'flex',gap:8,alignItems:'center',flexWrap:'wrap',marginTop:8}}>
-                      <button
-                        onClick={()=>handleLinkyImport(site)}
-                        disabled={linkyStatus==='loading'||linkyStatus==='pending'||linkyStatus==='ordering'}
-                        style={{
-                          background: linkyStatus==='done'?'#7dd940':linkyStatus==='error'?'rgba(255,50,50,.25)':'rgba(247,201,72,.15)',
-                          border: `1px solid ${linkyStatus==='done'?'#7dd940':linkyStatus==='error'?'#ff6b6b':'rgba(247,201,72,.5)'}`,
-                          borderRadius:8, color: linkyStatus==='done'?'#061e2a':linkyStatus==='error'?'#ff9090':'#f7c948',
-                          fontSize:12, fontWeight:700, padding:'8px 12px', cursor:'pointer',
-                          opacity:(linkyStatus==='loading'||linkyStatus==='pending'||linkyStatus==='ordering')?0.6:1,
-                          whiteSpace:'nowrap',
-                        }}
-                      >
-                        {linkyStatus==='loading'?'⏳ Connexion…':linkyStatus==='pending'?'⏳ En attente…':linkyStatus==='ordering'?'⏳ Téléchargement…':linkyStatus==='done'?'✅ Importé !':linkyStatus==='error'?'⚠️ Réessayer':'⚡ Récupérer depuis Linky'}
-                      </button>
-                    </div>
-                    {/* Status messages */}
+                    {/* Bouton : visible seulement au départ et sur erreur (pour réessayer).
+                        Une fois le processus lancé / le consentement signé, on n'affiche que le suivi par étapes. */}
+                    {(!linkyStatus||linkyStatus==='error')&&(
+                      <div style={{display:'flex',gap:8,alignItems:'center',flexWrap:'wrap',marginTop:8}}>
+                        <button
+                          onClick={()=>handleLinkyImport(site)}
+                          style={{
+                            background: linkyStatus==='error'?'rgba(255,50,50,.25)':'rgba(247,201,72,.15)',
+                            border: `1px solid ${linkyStatus==='error'?'#ff6b6b':'rgba(247,201,72,.5)'}`,
+                            borderRadius:8, color: linkyStatus==='error'?'#ff9090':'#f7c948',
+                            fontSize:12, fontWeight:700, padding:'8px 12px', cursor:'pointer', whiteSpace:'nowrap',
+                          }}
+                        >
+                          {linkyStatus==='error'?'⚠️ Réessayer':'⚡ Récupérer depuis Linky'}
+                        </button>
+                      </div>
+                    )}
+
+                    {/* Suivi par étapes du processus ENEDIS */}
+                    <LinkyProgress status={linkyStatus} errorStep={linkyErrorStep} consoSource={site.conso_source}/>
+
+                    {/* Étape 2 en cours : lien de consentement (disparaît dès le consentement signé) */}
                     {linkyStatus==='pending'&&linkyUserUrl&&(
-                      <div style={{marginTop:8,background:'rgba(247,201,72,.1)',border:'1px solid rgba(247,201,72,.3)',borderRadius:8,padding:'10px 12px'}}>
-                        <div style={{color:'#f7c948',fontWeight:700,fontSize:12,marginBottom:6}}>⚡ Autorisation ENEDIS requise</div>
-                        <div style={{color:'rgba(255,255,255,.7)',fontSize:11,marginBottom:8,lineHeight:1.5}}>Cliquez sur le lien ci-dessous pour autoriser Starvolt à accéder à vos données ENEDIS. La page se mettra à jour automatiquement une fois validé.</div>
+                      <div style={{marginTop:10,background:'rgba(247,201,72,.1)',border:'1px solid rgba(247,201,72,.3)',borderRadius:8,padding:'10px 12px'}}>
+                        <div style={{color:'#f7c948',fontWeight:700,fontSize:12,marginBottom:6}}>⚡ Le propriétaire du compteur doit signer le consentement</div>
+                        <div style={{color:'rgba(255,255,255,.7)',fontSize:11,marginBottom:8,lineHeight:1.5}}>Ouvrez le lien ci-dessous (ou transmettez-le au titulaire du contrat) pour autoriser Starvolt à accéder aux données ENEDIS. Cette page se mettra à jour automatiquement une fois le consentement validé.</div>
                         <a href={linkyUserUrl} target="_blank" rel="noopener noreferrer"
                           style={{display:'inline-block',background:'#f7c948',color:'#061e2a',fontWeight:800,fontSize:12,borderRadius:7,padding:'8px 14px',textDecoration:'none'}}>
-                          Autoriser sur ENEDIS →
+                          Signer le consentement ENEDIS →
                         </a>
                       </div>
                     )}
                     {linkyStatus==='pending'&&!linkyUserUrl&&(
-                      <div style={{marginTop:6,color:'rgba(255,255,255,.5)',fontSize:11}}>En attente de la réponse Switchgrid…</div>
+                      <div style={{marginTop:8,color:'rgba(255,255,255,.5)',fontSize:11}}>Préparation du lien de consentement…</div>
                     )}
-                    {linkyStatus==='ordering'&&(
-                      <div style={{marginTop:6,color:'rgba(255,255,255,.5)',fontSize:11}}>⬇️ Téléchargement des données ENEDIS en cours…</div>
-                    )}
-                    {linkyStatus==='done'&&site.conso_source!=='daily'&&(
-                      <div style={{marginTop:6,color:'#7dd940',fontSize:11,fontWeight:700}}>✅ Données Linky importées avec succès !</div>
-                    )}
+
+                    {/* Étape 4 terminée : courbe de charge indisponible → repli journalier */}
                     {linkyStatus==='done'&&site.conso_source==='daily'&&(
-                      <div style={{marginTop:6,padding:'8px 10px',background:'rgba(220,38,38,.15)',border:'1px solid rgba(248,113,113,.5)',borderRadius:8,color:'#ffb4b4',fontSize:11,lineHeight:1.5}}>
+                      <div style={{marginTop:10,padding:'8px 10px',background:'rgba(220,38,38,.15)',border:'1px solid rgba(248,113,113,.5)',borderRadius:8,color:'#ffb4b4',fontSize:11,lineHeight:1.5}}>
                         ⚠️ <strong style={{color:'#fff'}}>Courbe de charge indisponible chez ENEDIS</strong> pour ce compteur. Seules les <strong>consommations journalières</strong> ont pu être récupérées : les calculs seront <strong>approximatifs</strong> (pas de détail heure par heure). Réessayez l'import dans quelques jours, une fois la courbe de charge activée par ENEDIS.
                       </div>
                     )}
-                    {linkyStatus==='error'&&linkyError&&(
-                      <div style={{marginTop:6,color:'#ff9090',fontSize:11}}>⚠️ {linkyError}</div>
+
+                    {/* Erreur : explication claire selon l'étape concernée */}
+                    {linkyStatus==='error'&&(
+                      <div style={{marginTop:10,padding:'10px 12px',background:'rgba(255,50,50,.12)',border:'1px solid rgba(255,107,107,.45)',borderRadius:8}}>
+                        <div style={{color:'#ff9090',fontWeight:700,fontSize:12,marginBottom:4}}>
+                          {linkyErrorStep===0?'⚠️ Compteur introuvable':linkyErrorStep===1?'⚠️ Consentement non validé':linkyErrorStep===2?'⚠️ Données indisponibles chez ENEDIS':'⚠️ Une erreur est survenue'}
+                        </div>
+                        <div style={{color:'rgba(255,255,255,.72)',fontSize:11,lineHeight:1.5}}>
+                          {linkyErrorStep===0?"Vérifiez le nom et prénom du titulaire ainsi que le PDL (14 chiffres) ou l'adresse exacte enregistrée chez ENEDIS, puis réessayez.":
+                           linkyErrorStep===1?"Le propriétaire du compteur n'a pas (encore) validé le consentement, ou le lien a expiré. Relancez l'import pour générer un nouveau lien de consentement.":
+                           linkyErrorStep===2?"ENEDIS n'a pas de courbe de charge enregistrée pour ce compteur, ou le quota de demandes du jour est atteint. Réessayez dans quelques jours, une fois la mesure activée par ENEDIS.":
+                           "Une erreur inattendue s'est produite. Réessayez dans quelques instants."}
+                        </div>
+                        {linkyError&&<div style={{color:'rgba(255,255,255,.45)',fontSize:10,marginTop:6,whiteSpace:'pre-wrap'}}>{linkyError}</div>}
+                      </div>
                     )}
                   </div>
                   {/* Heatmap */}
