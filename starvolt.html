@@ -2059,9 +2059,48 @@ function Confetti() {
 }
 
 // ─── SignupSuccessScreen ───────────────────────
-function SignupSuccessScreen({ email, firstName, consentUrl, onContinue }) {
+function SignupSuccessScreen({ email, firstName, consentUrl, requestId, siteId, onVisualiser }) {
   const [showConfetti, setShowConfetti] = React.useState(true);
+  const [status,       setStatus]       = React.useState(requestId ? 'pending' : null);
+  const [userUrl,      setUserUrl]      = React.useState(consentUrl || null);
+  const [errorStep,    setErrorStep]    = React.useState(null);
+  const [consoSource,  setConsoSource]  = React.useState(null);
+  const pollRef   = React.useRef(null);
+  const statusRef = React.useRef('pending');
+  const ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhreGtod2VncWthcGRic2lzeHd2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc0MjY4NjksImV4cCI6MjA5MzAwMjg2OX0.9-_oHRJfwXZkl3bRYDMb5K56UzB8O1NOfa5QfrXFfkQ';
+  const EDGE_URL = 'https://hkxkhwegqkapdbsisxwv.supabase.co/functions/v1/switchgrid';
+
   React.useEffect(()=>{ const t=setTimeout(()=>setShowConfetti(false),5500); return()=>clearTimeout(t); },[]);
+
+  // ── Suivi live de la récupération ENEDIS ──
+  React.useEffect(()=>{
+    if(!requestId || status==='done' || status==='error') return;
+    clearInterval(pollRef.current);
+    pollRef.current=setInterval(async()=>{
+      try{
+        const { data:{session} } = await sb.auth.getSession();
+        if(!session) return;
+        const res=await fetch(`${EDGE_URL}?request_id=${requestId}`,
+          {headers:{Authorization:`Bearer ${session.access_token}`,'apikey':ANON_KEY}});
+        const d=await res.json();
+        const ns=d.status||'pending';
+        const nu=d.userUrl||null;
+        if(nu) setUserUrl(nu);
+        if(d.conso_source) setConsoSource(d.conso_source);
+        if(ns==='done'||ns==='error'){
+          clearInterval(pollRef.current);
+          if(siteId) localStorage.removeItem(`starvolt_linky_${siteId}`);
+          if(ns==='error') setErrorStep(statusRef.current==='pending'?1:2);
+        } else if(siteId){
+          localStorage.setItem(`starvolt_linky_${siteId}`,JSON.stringify({requestId,status:ns,userUrl:nu||userUrl}));
+        }
+        statusRef.current=ns;
+        setStatus(ns);
+      }catch(e){/* silencieux */}
+    },8000);
+    return ()=>clearInterval(pollRef.current);
+  },[requestId,status]);
+
   return (
     <>
       {showConfetti && <Confetti/>}
@@ -2072,7 +2111,7 @@ function SignupSuccessScreen({ email, firstName, consentUrl, onContinue }) {
         </div>
         <div style={{padding:'0 16px',display:'flex',flexDirection:'column',gap:14}}>
 
-          {/* Box principale */}
+          {/* Tuile 1 — conservée : compte créé */}
           <div style={{
             background:'rgba(125,217,64,.08)',border:'1px solid rgba(125,217,64,.2)',
             borderRadius:16,padding:'20px 18px',
@@ -2083,45 +2122,90 @@ function SignupSuccessScreen({ email, firstName, consentUrl, onContinue }) {
             </p>
           </div>
 
-          {/* Box email + consentement */}
-          <div style={{
-            background:'rgba(247,201,72,.07)',border:'1px solid rgba(247,201,72,.2)',
-            borderRadius:16,padding:'20px 18px',
-          }}>
-            <p style={{color:'rgba(255,255,255,.85)',lineHeight:1.7,fontSize:14,margin:'0 0 14px'}}>
-              📧 Un email a été envoyé à <strong style={{color:'#f7c948'}}>{email}</strong>.<br/>
-              Cliquez sur le lien qu'il contient pour <strong>donner votre consentement à ENEDIS</strong>.
-            </p>
-
-            {consentUrl&&(
-              <a href={consentUrl} target="_blank" rel="noopener noreferrer" style={{
-                display:'block',width:'100%',padding:'13px 0',
-                background:'rgba(247,201,72,.85)',borderRadius:10,border:'none',
-                color:'#0a1a04',fontWeight:800,fontSize:14,textAlign:'center',
-                textDecoration:'none',cursor:'pointer',marginBottom:14,
-                boxShadow:'0 2px 12px rgba(247,201,72,.3)',
-              }}>✅ Donner mon consentement ENEDIS →</a>
-            )}
-
-            <p style={{color:'rgba(255,255,255,.55)',lineHeight:1.65,fontSize:13,margin:0}}>
-              Une fois le consentement donné, attendez quelques dizaines de secondes que la magie opère ✨ puis revenez dans l'app Starvolt pour découvrir votre profil de consommation et vos économies potentielles.
-            </p>
-          </div>
-
-          {!consentUrl&&(
+          {/* Les étapes de récupération */}
+          {status && (
             <div style={{
-              background:'rgba(255,255,255,.05)',border:'1px solid rgba(255,255,255,.1)',
-              borderRadius:12,padding:'14px 16px',
-              color:'rgba(255,255,255,.5)',fontSize:13,lineHeight:1.6,
+              background:'rgba(255,255,255,.04)',border:'1px solid rgba(255,255,255,.1)',
+              borderRadius:16,padding:'18px 18px',
             }}>
-              ℹ️ Confirmez votre email, puis revenez dans l'app et cliquez sur <strong style={{color:'rgba(255,255,255,.8)'}}>⚡ Récupérer depuis Linky</strong> sur votre page Mon site.
+              <div style={{fontSize:12,fontWeight:800,letterSpacing:'.04em',textTransform:'uppercase',color:'rgba(255,255,255,.5)',marginBottom:4}}>
+                Récupération de vos données
+              </div>
+              <LinkyProgress status={status} errorStep={errorStep} consoSource={consoSource}/>
             </div>
           )}
+
+          {/* Étape consentement — tant qu'ENEDIS attend la signature */}
+          {(status==='pending'||status==='loading') && (
+            <div style={{
+              background:'rgba(247,201,72,.07)',border:'1px solid rgba(247,201,72,.2)',
+              borderRadius:16,padding:'20px 18px',
+            }}>
+              <p style={{color:'rgba(255,255,255,.88)',lineHeight:1.7,fontSize:14,margin:'0 0 14px'}}>
+                ✍️ Dernière étape : <strong style={{color:'#f7c948'}}>signez votre consentement ENEDIS</strong>. C'est ce qui autorise la récupération de vos données de consommation.
+              </p>
+              {userUrl && (
+                <a href={userUrl} target="_blank" rel="noopener noreferrer" style={{
+                  display:'block',width:'100%',padding:'13px 0',
+                  background:'rgba(247,201,72,.9)',borderRadius:10,border:'none',
+                  color:'#0a1a04',fontWeight:800,fontSize:14,textAlign:'center',
+                  textDecoration:'none',cursor:'pointer',marginBottom:14,
+                  boxShadow:'0 2px 12px rgba(247,201,72,.3)',
+                }}>✅ Signer mon consentement ENEDIS →</a>
+              )}
+              <p style={{color:'rgba(255,255,255,.6)',lineHeight:1.6,fontSize:13,margin:0}}>
+                ⚠️ Pensez à <strong style={{color:'rgba(255,255,255,.85)'}}>vérifier que le consentement concerne bien votre compteur</strong> (votre adresse / numéro de PDL) avant de signer.
+              </p>
+            </div>
+          )}
+
+          {/* Consentement signé, ENEDIS traite la demande */}
+          {status==='ordering' && (
+            <div style={{
+              background:'rgba(125,217,64,.1)',border:'1px solid rgba(125,217,64,.28)',
+              borderRadius:16,padding:'20px 18px',
+            }}>
+              <div style={{fontSize:22,marginBottom:8}}>☕</div>
+              <p style={{color:'rgba(255,255,255,.9)',lineHeight:1.7,fontSize:14,margin:0}}>
+                <strong style={{color:'#7dd940'}}>Bonne nouvelle, tout semble en ordre&nbsp;!</strong> ENEDIS a retrouvé votre dossier et transfère actuellement les données. Cela peut prendre entre 1 et 10 minutes — vous pouvez aller prendre un café ou directement vous connecter à l'appli pour l'explorer.
+              </p>
+            </div>
+          )}
+
+          {/* Tout est récupéré */}
+          {status==='done' && (
+            <div style={{
+              background:'rgba(125,217,64,.12)',border:'1px solid rgba(125,217,64,.32)',
+              borderRadius:16,padding:'20px 18px',
+            }}>
+              <div style={{fontSize:22,marginBottom:8}}>🎉</div>
+              <p style={{color:'rgba(255,255,255,.92)',lineHeight:1.7,fontSize:14,margin:0}}>
+                <strong style={{color:'#7dd940'}}>Super, on a tout&nbsp;!</strong> À vous de jouer maintenant pour identifier ensemble comment réduire votre facture en quelques clics.
+              </p>
+            </div>
+          )}
+
+          {/* Erreur */}
+          {status==='error' && (
+            <div style={{
+              background:'rgba(255,107,107,.08)',border:'1px solid rgba(255,107,107,.28)',
+              borderRadius:16,padding:'20px 18px',
+            }}>
+              <div style={{fontSize:22,marginBottom:8}}>😕</div>
+              <p style={{color:'rgba(255,255,255,.9)',lineHeight:1.7,fontSize:14,margin:'0 0 10px'}}>
+                Cela arrive parfois&nbsp;: ENEDIS n'a pas pu finaliser la récupération du premier coup. Pas d'inquiétude !
+              </p>
+              <p style={{color:'rgba(255,255,255,.7)',lineHeight:1.65,fontSize:13,margin:0}}>
+                Réessayez dans quelques heures depuis la page <strong style={{color:'rgba(255,255,255,.9)'}}>« Mon site »</strong>. Si cela ne fonctionne toujours pas, contactez Starvolt via le <strong style={{color:'rgba(255,255,255,.9)'}}>pouce vers le bas 👎</strong> en haut de l'interface.
+              </p>
+            </div>
+          )}
+
         </div>
       </div>
       <StickyFooter>
-        <button className="btn btn-yes" onClick={onContinue}>
-          Continuer dans l'app →
+        <button className="btn btn-yes" onClick={onVisualiser}>
+          Visualiser mon site →
         </button>
       </StickyFooter>
     </>
@@ -2199,6 +2283,8 @@ function AuthSignupScreen({ onGoToLogin, onSignedUp, onSuccessDone }) {
     if (err) { setError(err.message); setLoading(false); return; }
 
     let consentUrl = null;
+    let requestId  = null;
+    let siteId     = null;
 
     if (data.user) {
       // Créer le profil
@@ -2255,6 +2341,8 @@ function AuthSignupScreen({ onGoToLogin, onSignedUp, onSuccessDone }) {
           const sgData = await sgRes.json();
           if (sgData.request_id) {
             consentUrl = sgData.userUrl || null;
+            requestId  = sgData.request_id;
+            siteId     = newSite.id;
             localStorage.setItem(`starvolt_linky_${newSite.id}`, JSON.stringify({
               requestId: sgData.request_id,
               status:    sgData.status || 'pending',
@@ -2275,7 +2363,7 @@ function AuthSignupScreen({ onGoToLogin, onSignedUp, onSuccessDone }) {
     }
 
     setLoading(false);
-    setSuccessData({ email: email.trim(), firstName: prenom.trim(), consentUrl, userId: data.user?.id });
+    setSuccessData({ email: email.trim(), firstName: prenom.trim(), consentUrl, requestId, siteId, userId: data.user?.id });
   };
 
   // Écran de succès après inscription
@@ -2285,7 +2373,9 @@ function AuthSignupScreen({ onGoToLogin, onSignedUp, onSuccessDone }) {
         email={successData.email}
         firstName={successData.firstName}
         consentUrl={successData.consentUrl}
-        onContinue={()=>{ onSuccessDone?.(successData.userId); }}
+        requestId={successData.requestId}
+        siteId={successData.siteId}
+        onVisualiser={()=>{ onSuccessDone?.(successData.userId, 'MA_CONSO'); }}
       />
     );
   }
@@ -12104,7 +12194,7 @@ function App() {
         return <AuthSignupScreen
           onGoToLogin={()=>goTo('AUTH_LOGIN')}
           onSignedUp={(p)=>{ justSignedUpRef.current = true; pendingProfileRef.current = {...p, pseudo:null, adresse_ligne1:null, code_postal:null, ville:null, telephone:null}; }}
-          onSuccessDone={(userId)=>{ justSignedUpRef.current = false; fetchProfile(userId).then(screen=>{ setState(s=>({...s,screen})); setHistory([]); }); }}/>;
+          onSuccessDone={(userId, forceScreen)=>{ justSignedUpRef.current = false; fetchProfile(userId).then(screen=>{ setState(s=>({...s,screen: forceScreen||screen})); setHistory([]); }); }}/>;
 
       case 'AUTH_LOGIN':
         return <AuthLoginScreen onGoToSignup={()=>goTo('AUTH_SIGNUP')}/>;
