@@ -4069,6 +4069,14 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
 
   const site=sites?.find(s=>s.id===activeId)||null;
 
+  // Site déjà importé avec la totalité des données heure par heure (courbe de
+  // charge complète : 8784 valeurs ET source non journalière). Dans ce cas, on
+  // masque le bouton de collecte et on affiche les 4 étapes au vert.
+  const siteHasFullHourly = !!site && site.conso_source!=='daily' && site.conso_profil?.length===8784;
+  // Statut effectif pour le suivi par étapes : si une session d'import est en
+  // cours on l'utilise ; sinon, un site déjà complet est affiché comme « done ».
+  const effectiveLinkyStatus = linkyStatus || (siteHasFullHourly ? 'done' : null);
+
   // Sync champs locaux quand on change de site
   // Règle : si solar au panier → valeurs de la page solaire (panier) ; sinon → valeurs DB ou défauts
   useEffect(()=>{
@@ -4574,8 +4582,9 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
                       </div>
                     </div>
                     {/* Bouton : visible seulement au départ et sur erreur (pour réessayer).
-                        Une fois le processus lancé / le consentement signé, on n'affiche que le suivi par étapes. */}
-                    {(!linkyStatus||linkyStatus==='error')&&(
+                        Masqué dès que le processus est lancé, le consentement signé,
+                        OU que le site dispose déjà de la totalité des données heure par heure. */}
+                    {((!linkyStatus&&!siteHasFullHourly)||linkyStatus==='error')&&(
                       <div style={{display:'flex',gap:8,alignItems:'center',flexWrap:'wrap',marginTop:8}}>
                         <button
                           onClick={()=>handleLinkyImport(site)}
@@ -4592,7 +4601,7 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
                     )}
 
                     {/* Suivi par étapes du processus ENEDIS */}
-                    <LinkyProgress status={linkyStatus} errorStep={linkyErrorStep} consoSource={site.conso_source}/>
+                    <LinkyProgress status={effectiveLinkyStatus} errorStep={linkyErrorStep} consoSource={site.conso_source}/>
 
                     {/* Étape 2 en cours : lien de consentement (disparaît dès le consentement signé) */}
                     {linkyStatus==='pending'&&linkyUserUrl&&(
