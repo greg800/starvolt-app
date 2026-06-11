@@ -8710,7 +8710,119 @@ function AdminPrixMateriauxScreen({ onBack }) {
 }
 
 // ─── AdminScreen ──────────────────────────────
-function AdminScreen({ onTariffs, onUsers, onSpot, onAcc, onProduction, onGlobalVars, onPrix, onOffres, onLearn, onFeedback, onProofread, onAICosts, onAIPrompts, onBack }) {
+// ─── AdminDashboard : tableau de bord d'activité (en tête du menu admin) ──────
+function AdminDashboard({ onViewLogs }) {
+  const [rows, setRows]         = useState([]);
+  const [loading, setLoading]   = useState(true);
+  const [showAll, setShowAll]   = useState(false);   // afficher toutes les lignes
+  const [collapsed, setCollapsed] = useState(false); // replier tout le bloc
+
+  useEffect(() => {
+    sb.rpc('get_admin_dashboard').then(({ data, error }) => {
+      if (error) console.error('get_admin_dashboard', error);
+      setRows(data || []);
+      setLoading(false);
+    });
+  }, []);
+
+  const fmtClick = (d) => {
+    if (!d) return '—';
+    const dt = new Date(d), now = new Date();
+    const sameDay = dt.toDateString() === now.toDateString();
+    const yest = new Date(now); yest.setDate(now.getDate() - 1);
+    const isYest = dt.toDateString() === yest.toDateString();
+    const hm = dt.toLocaleTimeString('fr-FR', { hour:'2-digit', minute:'2-digit' });
+    if (sameDay) return `Aujourd'hui ${hm}`;
+    if (isYest)  return `Hier ${hm}`;
+    return dt.toLocaleDateString('fr-FR', { day:'2-digit', month:'2-digit', year:'2-digit' }) + ' ' + hm;
+  };
+
+  const visible = showAll ? rows : rows.slice(0, 5);
+  const hidden  = Math.max(0, rows.length - 5);
+
+  const linkCell = { cursor:'pointer', color:'#7dd940', fontWeight:700 };
+
+  return (
+    <div style={{
+      background:'rgba(255,255,255,.04)', border:'1px solid rgba(255,255,255,.1)',
+      borderRadius:14, padding:'4px 6px 6px', marginBottom:22, overflow:'hidden'
+    }}>
+      {/* Titre cliquable → replie/déplie tout le tableau */}
+      <button onClick={() => setCollapsed(c => !c)} style={{
+        width:'100%', background:'none', border:'none', cursor:'pointer', fontFamily:'inherit',
+        display:'flex', alignItems:'center', justifyContent:'space-between',
+        padding:'12px 12px', color:'#fff'
+      }}>
+        <span style={{display:'flex', alignItems:'center', gap:9, fontWeight:800, fontSize:15}}>
+          <span style={{fontSize:17}}>📊</span> Tableau de bord — activité
+        </span>
+        <span style={{display:'flex', alignItems:'center', gap:10}}>
+          {!loading && <span style={{fontSize:11, color:'rgba(255,255,255,.4)', fontWeight:600}}>{rows.length} utilisateurs</span>}
+          <span style={{fontSize:13, color:'rgba(255,255,255,.5)', transition:'transform .2s', transform:collapsed?'rotate(-90deg)':'none'}}>▾</span>
+        </span>
+      </button>
+
+      {!collapsed && (loading ? (
+        <div style={{textAlign:'center', padding:30}}><div className="spinner" style={{margin:'0 auto'}}/></div>
+      ) : rows.length === 0 ? (
+        <div style={{textAlign:'center', padding:'22px', color:'rgba(255,255,255,.4)', fontSize:13}}>Aucune donnée</div>
+      ) : (
+        <div style={{padding:'0 4px 4px'}}>
+          <div style={{overflowX:'auto'}}>
+            <table style={{width:'100%', borderCollapse:'collapse', fontSize:13}}>
+              <thead>
+                <tr style={{textAlign:'left'}}>
+                  <th style={{padding:'8px 10px', fontSize:10, letterSpacing:'.5px', textTransform:'uppercase', color:'rgba(255,255,255,.4)', fontWeight:700}}>Utilisateur</th>
+                  <th style={{padding:'8px 10px', fontSize:10, letterSpacing:'.5px', textTransform:'uppercase', color:'rgba(255,255,255,.4)', fontWeight:700}}>Dernier clic</th>
+                  <th style={{padding:'8px 10px', fontSize:10, letterSpacing:'.5px', textTransform:'uppercase', color:'rgba(255,255,255,.4)', fontWeight:700, textAlign:'right'}}>Clics</th>
+                  <th style={{padding:'8px 10px', fontSize:10, letterSpacing:'.5px', textTransform:'uppercase', color:'rgba(255,255,255,.4)', fontWeight:700, textAlign:'right'}}>Tickets</th>
+                </tr>
+              </thead>
+              <tbody>
+                {visible.map((u, i) => (
+                  <tr key={u.id} style={{background: i%2 ? 'rgba(255,255,255,.02)' : 'transparent'}}>
+                    <td onClick={() => onViewLogs && onViewLogs(u)} style={{padding:'9px 10px', borderTop:'1px solid rgba(255,255,255,.06)', ...linkCell}}
+                        title="Voir les logs de cet utilisateur">
+                      {u.prenom || u.email || '—'}
+                    </td>
+                    <td style={{padding:'9px 10px', borderTop:'1px solid rgba(255,255,255,.06)', color:'rgba(255,255,255,.7)', whiteSpace:'nowrap'}}>
+                      {fmtClick(u.last_click_at)}
+                    </td>
+                    <td style={{padding:'9px 10px', borderTop:'1px solid rgba(255,255,255,.06)', color:'rgba(255,255,255,.85)', fontWeight:700, textAlign:'right', fontVariantNumeric:'tabular-nums'}}>
+                      {u.click_count}
+                    </td>
+                    <td onClick={() => onViewLogs && onViewLogs(u)} style={{padding:'9px 10px', borderTop:'1px solid rgba(255,255,255,.06)', textAlign:'right', cursor:'pointer'}}
+                        title="Voir les logs de cet utilisateur">
+                      {u.ticket_count > 0 ? (
+                        <span style={{display:'inline-block', minWidth:24, padding:'2px 8px', borderRadius:20, background:'rgba(247,201,72,.15)', color:'#f7c948', fontWeight:800, fontSize:12}}>{u.ticket_count}</span>
+                      ) : (
+                        <span style={{color:'rgba(255,255,255,.25)'}}>0</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {hidden > 0 && (
+            <button onClick={() => setShowAll(s => !s)} style={{
+              width:'100%', marginTop:8, background:'rgba(255,255,255,.04)', border:'1px solid rgba(255,255,255,.1)',
+              borderRadius:9, padding:'9px', cursor:'pointer', fontFamily:'inherit',
+              color:'rgba(255,255,255,.7)', fontWeight:700, fontSize:12, display:'flex', alignItems:'center', justifyContent:'center', gap:6
+            }}>
+              {showAll
+                ? <><span style={{fontSize:16, lineHeight:1}}>−</span> Réduire</>
+                : <><span style={{fontSize:16, lineHeight:1}}>+</span> Voir les {hidden} autres</>}
+            </button>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function AdminScreen({ onTariffs, onUsers, onSpot, onAcc, onProduction, onGlobalVars, onPrix, onOffres, onLearn, onFeedback, onProofread, onAICosts, onAIPrompts, onViewLogs, onBack }) {
   return (
     <>
     <div className="screen screen-admin fade-in">
@@ -8718,6 +8830,7 @@ function AdminScreen({ onTariffs, onUsers, onSpot, onAcc, onProduction, onGlobal
         <div className="welcome-tag" style={{color:'#ffb340'}}>Administration</div>
         <h1 className="welcome-title">Menu<br/><span className="accent">admin</span></h1>
       </div>
+      <AdminDashboard onViewLogs={onViewLogs}/>
       <div className="admin-grid">
         <div className="admin-group">
           <div className="admin-group-label"><span className="agl-ico">📥</span>Import de data</div>
@@ -11752,6 +11865,7 @@ function App() {
           onProofread={()=>goTo('ADMIN_PROOFREAD')}
           onAICosts={()=>goTo('ADMIN_AI_COSTS')}
           onAIPrompts={()=>goTo('ADMIN_AI_PROMPTS')}
+          onViewLogs={(u)=>goTo('ADMIN_USER_LOGS', { logUser: u })}
           onBack={goBack}/>;
 
       case 'ADMIN_FEEDBACK':
