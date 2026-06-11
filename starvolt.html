@@ -1866,7 +1866,7 @@ function ApproxConsoBanner({ screen, userId }) {
   useEffect(() => {
     let cancelled = false;
     if (!userId || !CALC_SCREENS_FOR_BANNER.includes(screen)) { setSource(null); return; }
-    (async () => {
+    const fetchSource = async () => {
       const activeId = localStorage.getItem('starvolt_active_site_id');
       let q = sb.from('sites').select('conso_source');
       q = activeId
@@ -1874,8 +1874,12 @@ function ApproxConsoBanner({ screen, userId }) {
         : q.eq('user_id', userId).not('conso_profil','is',null).order('created_at').limit(1);
       const { data } = await q.maybeSingle();
       if (!cancelled) setSource(data?.conso_source || null);
-    })();
-    return () => { cancelled = true; };
+    };
+    fetchSource();
+    // Re-lire quand l'utilisateur change de site (le banner lit le localStorage
+    // directement, sans ça il garderait l'état du site précédent).
+    window.addEventListener('starvolt:sitechange', fetchSource);
+    return () => { cancelled = true; window.removeEventListener('starvolt:sitechange', fetchSource); };
   }, [screen, userId]);
 
   if (source !== 'daily') return null;
@@ -4047,6 +4051,7 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
     setActiveId(id);
     if(id){ localStorage.setItem('starvolt_active_site_id',id); sb.from('profiles').update({active_site_id:id}).eq('id',user.id); }
     else{ localStorage.removeItem('starvolt_active_site_id'); sb.from('profiles').update({active_site_id:null}).eq('id',user.id); }
+    try{ window.dispatchEvent(new Event('starvolt:sitechange')); }catch(_){}
   };
 
   const load=async()=>{
