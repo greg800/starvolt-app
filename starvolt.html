@@ -10977,7 +10977,7 @@ function ComprendreQuizScreen({ user, questions, subject, isRevision, onDone, on
 }
 
 // ─── ComprendreScoreScreen ────────────────────────────────────────────────────
-function ComprendreScoreScreen({ user, subject, score, total, results, isRevision, allSubjects, onNext, onHome, onRetry }) {
+function ComprendreScoreScreen({ user, subject, score, total, results, isRevision, revisionQuestions, allSubjects, onNext, onHome, onRetry }) {
   const correct = results.filter(r=>r.correct).length;
   const pct = total > 0 ? Math.round(correct/total*100) : 0;
   const mastered = pct >= 70;
@@ -10995,6 +10995,28 @@ function ComprendreScoreScreen({ user, subject, score, total, results, isRevisio
           failed_question_ids: failedIds,
         }, { onConflict: 'user_id,subject_id' });
         if (error) console.error('Erreur enregistrement progression quiz', error);
+      })();
+    }
+    // Révision : on retire les questions désormais réussies de failed_question_ids,
+    // par sujet. Une question encore ratée reste en révision. Sans ça, le bouton
+    // « Révision disponible » resterait affiché à vie.
+    if (user && isRevision && revisionQuestions?.length) {
+      (async () => {
+        const subjOf = {};
+        const subjectsInRevision = new Set();
+        revisionQuestions.forEach(q => { subjOf[q.id] = q._subjectId; subjectsInRevision.add(q._subjectId); });
+        const stillFailed = {};
+        subjectsInRevision.forEach(sid => { stillFailed[sid] = []; });
+        results.forEach(r => {
+          const sid = subjOf[r.questionId];
+          if (sid != null && !r.correct) stillFailed[sid].push(r.questionId);
+        });
+        for (const sid of subjectsInRevision) {
+          const { error } = await sb.from('user_learn_progress')
+            .update({ failed_question_ids: stillFailed[sid] })
+            .eq('user_id', user.id).eq('subject_id', sid);
+          if (error) console.error('Erreur MAJ révision', error);
+        }
       })();
     }
     if (mastered) {
@@ -11508,7 +11530,7 @@ function App() {
 
       case 'COMPRENDRE_SCORE': {
         const { learnSubject, learnGroup, quizResults, isRevision } = state;
-        return <ComprendreScoreScreen user={user} subject={learnSubject} results={quizResults?.results||[]} total={quizResults?.total||0} isRevision={!!isRevision}
+        return <ComprendreScoreScreen user={user} subject={learnSubject} results={quizResults?.results||[]} total={quizResults?.total||0} isRevision={!!isRevision} revisionQuestions={state.learnQuestions}
           onRetry={async ()=>{
             const { data: qs } = await sb.from('learn_questions').select('id,question,image_url,ordre,learn_choices(id,text,is_correct,ordre)').eq('subject_id',learnSubject.id).order('ordre');
             goTo('COMPRENDRE_QUIZ',{learnQuestions:qs||[],learnSubject,learnGroup,isRevision:false});
