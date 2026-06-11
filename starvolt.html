@@ -10075,7 +10075,7 @@ function AdminUserLogsScreen({ userId, userName, onBack }) {
 }
 
 // ─── AdminUsersScreen ─────────────────────────
-function AdminUsersScreen({ onBack, onViewLogs }) {
+function AdminUsersScreen({ onBack, onViewLogs, isSuperadmin }) {
   const [users,           setUsers]           = useState([]);
   const [loading,         setLoading]         = useState(true);
   const [confirmDel,      setConfirmDel]      = useState(null);
@@ -10094,7 +10094,8 @@ function AdminUsersScreen({ onBack, onViewLogs }) {
   useEffect(() => { load(); }, []);
 
   const handleRoleChange = async (userId, newRole) => {
-    await sb.from('profiles').update({ role: newRole }).eq('id', userId);
+    const { error } = await sb.rpc('admin_set_role', { target_user_id: userId, new_role: newRole });
+    if (error) { alert('Modification du rôle refusée : ' + error.message); return; }
     setUsers(u => u.map(x => x.id === userId ? { ...x, role: newRole } : x));
   };
 
@@ -10172,7 +10173,9 @@ function AdminUsersScreen({ onBack, onViewLogs }) {
               {users.map((u) => (
                 <tr key={u.id} style={{borderBottom:'1px solid rgba(255,255,255,.06)'}}>
                   <td style={{padding:'10px 8px', width:40}}>
-                    {confirmDel === u.id ? (
+                    {u.role === 'superadmin' && !isSuperadmin ? (
+                      <span title="Compte super admin protégé" style={{fontSize:14, opacity:.5}}>🔒</span>
+                    ) : confirmDel === u.id ? (
                       <div style={{display:'flex',gap:5,alignItems:'center',whiteSpace:'nowrap'}}>
                         <span style={{fontSize:11,color:'#fff',fontWeight:600}}>Confirmer ?</span>
                         <button onClick={() => handleDelete(u.id)} style={{
@@ -10210,17 +10213,27 @@ function AdminUsersScreen({ onBack, onViewLogs }) {
                     </button>
                   </td>
                   <td style={{padding:'10px 10px'}}>
-                    <select
-                      value={u.role || 'user'}
-                      onChange={e => handleRoleChange(u.id, e.target.value)}
-                      style={{
-                        background:'rgba(255,255,255,.08)', border:'1px solid rgba(255,255,255,.15)',
-                        borderRadius:6, color:'#fff', padding:'4px 8px', fontSize:12,
-                        cursor:'pointer', fontFamily:'inherit'
-                      }}>
-                      <option value="user">Utilisateur</option>
-                      <option value="admin">Admin</option>
-                    </select>
+                    {(u.role === 'superadmin' || u.role === 'demo') && !isSuperadmin ? (
+                      <span style={{
+                        display:'inline-block', padding:'4px 10px', fontSize:12, fontWeight:600,
+                        borderRadius:6, color: u.role === 'superadmin' ? '#ffb340' : 'rgba(255,255,255,.7)',
+                        background:'rgba(255,255,255,.06)', border:'1px solid rgba(255,255,255,.12)'
+                      }}>{u.role === 'superadmin' ? 'Super admin 🔒' : 'Démo'}</span>
+                    ) : (
+                      <select
+                        value={u.role || 'user'}
+                        onChange={e => handleRoleChange(u.id, e.target.value)}
+                        style={{
+                          background:'rgba(255,255,255,.08)', border:'1px solid rgba(255,255,255,.15)',
+                          borderRadius:6, color:'#fff', padding:'4px 8px', fontSize:12,
+                          cursor:'pointer', fontFamily:'inherit'
+                        }}>
+                        <option value="user">Utilisateur</option>
+                        <option value="admin">Admin</option>
+                        {u.role === 'demo' && <option value="demo">Démo</option>}
+                        {isSuperadmin && <option value="superadmin">Super admin</option>}
+                      </select>
+                    )}
                   </td>
                   <td style={{padding:'10px 8px'}}>
                     <button onClick={() => openCopyDialog(u)} style={{
@@ -11374,7 +11387,7 @@ function App() {
   // Charge le profil, hydrate le site actif, et retourne l'écran cible
   const fetchProfile = useCallback(async (userId) => {
     const { data } = await sb.from('profiles')
-      .select('prenom, nom, pseudo, adresse_ligne1, code_postal, ville, telephone, pdl, active_site_id')
+      .select('prenom, nom, pseudo, adresse_ligne1, code_postal, ville, telephone, pdl, active_site_id, role')
       .eq('id', userId).single();
     if (data) {
       setProfile(data);
@@ -11473,7 +11486,8 @@ function App() {
 
   const handleLogout = async () => { await sb.auth.signOut(); };
 
-  const isAdmin = user?.email === 'greg@starvolt.fr';
+  const isAdmin = ['admin','superadmin'].includes(profile?.role);
+  const isSuperadmin = profile?.role === 'superadmin';
 
   const render = () => {
     if (authLoading) return (
@@ -11650,7 +11664,7 @@ function App() {
           onBack={goBack}/>;
 
       case 'ADMIN_USERS':
-        return <AdminUsersScreen onBack={goBack} onViewLogs={(u) => goTo('ADMIN_USER_LOGS', { logUser: u })}/>;
+        return <AdminUsersScreen onBack={goBack} isSuperadmin={isSuperadmin} onViewLogs={(u) => goTo('ADMIN_USER_LOGS', { logUser: u })}/>;
       case 'ADMIN_USER_LOGS':
         return <AdminUserLogsScreen userId={state.logUser?.id} userName={`${state.logUser?.prenom||''} ${state.logUser?.nom||''}`.trim() || state.logUser?.email} onBack={goBack}/>;
 
