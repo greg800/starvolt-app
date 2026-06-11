@@ -11193,7 +11193,7 @@ function ComprendreSubjectScreen({ subject, onQuiz, onBack }) {
 // ─── ComprendreQuizScreen ─────────────────────────────────────────────────────
 function ComprendreQuizScreen({ user, questions, subject, isRevision, onDone, onBack }) {
   const [idx, setIdx] = useState(0);
-  const [selected, setSelected] = useState(null);
+  const [selectedIds, setSelectedIds] = useState([]); // réponses sélectionnées pour la question courante
   const [answered, setAnswered] = useState(false);
   const [results, setResults] = useState([]);
 
@@ -11208,22 +11208,33 @@ function ComprendreQuizScreen({ user, questions, subject, isRevision, onDone, on
 
   if (!q) return null;
 
+  const choices      = q.learn_choices || [];
+  const correctIds   = choices.filter(c => c.is_correct).map(c => c.id);
+  const correctCount = Math.max(1, correctIds.length); // nb de réponses attendues
+  const multi        = correctCount > 1;
+  // Réponse correcte = exactement le bon ensemble sélectionné
+  const isCurrentCorrect = selectedIds.length === correctCount && selectedIds.every(id => correctIds.includes(id));
+
   const handleSelect = (choice) => {
     if (answered) return;
-    setSelected(choice.id);
-    setAnswered(true);
-    setResults(r => [...r, { questionId: q.id, correct: choice.is_correct }]);
+    const isSel = selectedIds.includes(choice.id);
+    const next  = isSel ? selectedIds.filter(id => id !== choice.id) : [...selectedIds, choice.id];
+    setSelectedIds(next);
+    // Dès que le nombre de réponses attendu est atteint → vérification
+    if (next.length === correctCount) {
+      const ok = next.every(id => correctIds.includes(id));
+      setAnswered(true);
+      setResults(r => [...r, { questionId: q.id, correct: ok }]);
+    }
   };
 
   const handleNext = () => {
     if (idx < questions.length - 1) {
       setIdx(i => i+1);
-      setSelected(null);
+      setSelectedIds([]);
       setAnswered(false);
     } else {
-      const correct = results.filter(r => r.correct).length + (selected ? (questions[idx].learn_choices?.find(c=>c.id===selected)?.is_correct ? 1 : 0) : 0);
-      const allResults = [...results];
-      onDone({ correct: allResults.filter(r=>r.correct).length, total: questions.length, results: allResults });
+      onDone({ correct: results.filter(r => r.correct).length, total: questions.length, results });
     }
   };
 
@@ -11242,29 +11253,39 @@ function ComprendreQuizScreen({ user, questions, subject, isRevision, onDone, on
         </div>
       </div>
       {q.image_url && <div style={{marginBottom:14,borderRadius:12,overflow:'hidden'}}><ImageWithLightbox src={q.image_url} style={{width:'100%',display:'block',borderRadius:12}}/></div>}
-      <div className="card" style={{marginBottom:16,padding:'18px 18px'}}>
+      <div className="card" style={{marginBottom:multi?8:16,padding:'18px 18px'}}>
         <div style={{fontSize:16,fontWeight:700,color:'white',lineHeight:1.5}}>{q.question}</div>
       </div>
+      {multi && (
+        <div style={{display:'flex',alignItems:'center',justifyContent:'center',gap:7,marginBottom:14,padding:'9px 12px',borderRadius:10,background:'rgba(255,179,64,.12)',border:'1px solid rgba(255,179,64,.3)',color:'#ffb340',fontSize:12.5,fontWeight:600,textAlign:'center'}}>
+          <span style={{fontSize:14}}>🔢</span> Plusieurs réponses attendues — sélectionnez les {correctCount} bonnes réponses
+        </div>
+      )}
       <div style={{display:'flex',flexDirection:'column',gap:8,marginBottom:16}}>
-        {(q.learn_choices||[]).map(c => {
+        {choices.map(c => {
+          const isSel = selectedIds.includes(c.id);
           let bg = 'rgba(255,255,255,.07)';
           let border = '1px solid rgba(255,255,255,.12)';
           let color = 'white';
           if (answered) {
             if (c.is_correct) { bg='rgba(125,217,64,.18)'; border='1.5px solid rgba(125,217,64,.5)'; color='#7dd940'; }
-            else if (c.id === selected) { bg='rgba(255,80,80,.15)'; border='1.5px solid rgba(255,80,80,.4)'; color='#ff6060'; }
-          } else if (c.id === selected) { bg='rgba(255,255,255,.14)'; border='1.5px solid rgba(255,255,255,.3)'; }
+            else if (isSel) { bg='rgba(255,80,80,.15)'; border='1.5px solid rgba(255,80,80,.4)'; color='#ff6060'; }
+          } else if (isSel) { bg='rgba(255,255,255,.14)'; border='1.5px solid rgba(255,255,255,.3)'; }
+          const showCheck = isSel || (answered && c.is_correct);
           return (
             <button key={c.id} onClick={() => handleSelect(c)}
-              style={{background:bg,border,borderRadius:12,padding:'14px 16px',textAlign:'left',cursor:answered?'default':'pointer',color,fontSize:14,fontWeight:500,transition:'all .2s',width:'100%'}}>
-              {c.text}
+              style={{background:bg,border,borderRadius:12,padding:'14px 16px',textAlign:'left',cursor:answered?'default':'pointer',color,fontSize:14,fontWeight:500,transition:'all .2s',width:'100%',display:'flex',alignItems:'center',gap:11}}>
+              <span style={{flexShrink:0,width:20,height:20,borderRadius:multi?6:'50%',border:`1.5px solid ${showCheck?'currentColor':'rgba(255,255,255,.28)'}`,display:'inline-flex',alignItems:'center',justifyContent:'center',fontSize:12,lineHeight:1,color:'currentColor'}}>
+                {showCheck ? '✓' : ''}
+              </span>
+              <span style={{flex:1}}>{c.text}</span>
             </button>
           );
         })}
       </div>
       {answered && (
-        <div style={{textAlign:'center',padding:'10px 0',color:(questions[idx].learn_choices||[]).find(c=>c.id===selected)?.is_correct ? '#7dd940':'#ff9060',fontWeight:700,fontSize:15,marginBottom:8}}>
-          {(questions[idx].learn_choices||[]).find(c=>c.id===selected)?.is_correct ? '✓ Bonne réponse !' : '✗ Mauvaise réponse'}
+        <div style={{textAlign:'center',padding:'10px 0',color:isCurrentCorrect ? '#7dd940':'#ff9060',fontWeight:700,fontSize:15,marginBottom:8}}>
+          {isCurrentCorrect ? (multi ? '✓ Bonnes réponses !' : '✓ Bonne réponse !') : '✗ Mauvaise réponse'}
         </div>
       )}
     </div>
@@ -11275,7 +11296,15 @@ function ComprendreQuizScreen({ user, questions, subject, isRevision, onDone, on
         </button>
       </StickyFooter>
     )}
-    {!answered && <StickyFooter onBack={onBack}/>}
+    {!answered && multi && (
+      <StickyFooter onBack={onBack}>
+        <div style={{flex:1,textAlign:'center',padding:'11px 12px',borderRadius:10,background:'rgba(255,255,255,.05)',border:'1px dashed rgba(255,255,255,.18)',color:'rgba(255,255,255,.5)',fontWeight:600,fontSize:13,cursor:'not-allowed',userSelect:'none'}}>
+          En attente d'un autre choix
+          <span style={{display:'block',fontSize:11,color:'rgba(255,255,255,.35)',marginTop:2}}>{selectedIds.length} / {correctCount} sélectionné{selectedIds.length>1?'s':''}</span>
+        </div>
+      </StickyFooter>
+    )}
+    {!answered && !multi && <StickyFooter onBack={onBack}/>}
     </>
   );
 }
@@ -11598,14 +11627,14 @@ function AdminLearnQuestionEdit({ question, subjectId, onSave, onClose }) {
   };
 
   const setChoice = (i, field, val) => setChoices(cs => cs.map((c,j) => j===i ? {...c,[field]:val} : c));
-  const toggleCorrect = (i) => setChoices(cs => cs.map((c,j) => ({...c, is_correct: j===i})));
+  const toggleCorrect = (i) => setChoices(cs => cs.map((c,j) => j===i ? {...c, is_correct: !c.is_correct} : c));
   const addChoice = () => setChoices(cs => [...cs, {id:'tmp'+Date.now(),text:'',is_correct:false,ordre:cs.length}]);
   const removeChoice = (i) => setChoices(cs => cs.filter((_,j)=>j!==i));
 
   const validate = () => {
     if (!qText.trim()) return 'La question est obligatoire.';
     if (choices.filter(c=>c.text.trim()).length < 2) return 'Au moins 2 choix de réponse.';
-    if (!choices.some(c=>c.is_correct)) return 'Cochez la bonne réponse.';
+    if (!choices.some(c=>c.is_correct)) return 'Cochez au moins une bonne réponse.';
     return null;
   };
 
@@ -11643,10 +11672,10 @@ function AdminLearnQuestionEdit({ question, subjectId, onSave, onClose }) {
         {uploadingImg && <span style={{fontSize:11,color:'rgba(255,255,255,.4)'}}>Upload…</span>}
       </div>
       <div className="inp-group"><label className="inp-label">Ordre</label><input className="inp" type="number" value={ordre} onChange={e=>setOrdre(e.target.value)}/></div>
-      <div style={{marginBottom:8,fontWeight:600,color:'rgba(255,255,255,.6)',fontSize:12,textTransform:'uppercase',letterSpacing:.5}}>Choix de réponses <span style={{color:'rgba(255,255,255,.3)',fontWeight:400}}>(cochez la bonne)</span></div>
+      <div style={{marginBottom:8,fontWeight:600,color:'rgba(255,255,255,.6)',fontSize:12,textTransform:'uppercase',letterSpacing:.5}}>Choix de réponses <span style={{color:'rgba(255,255,255,.3)',fontWeight:400}}>(cochez la ou les bonnes — plusieurs possibles)</span></div>
       {choices.map((c,i) => (
         <div key={c.id||i} style={{display:'flex',alignItems:'center',gap:8,marginBottom:6}}>
-          <input type="radio" name="correct" checked={c.is_correct} onChange={()=>toggleCorrect(i)} style={{accentColor:'#7dd940',flexShrink:0,width:16,height:16,cursor:'pointer'}}/>
+          <input type="checkbox" checked={c.is_correct} onChange={()=>toggleCorrect(i)} style={{accentColor:'#7dd940',flexShrink:0,width:16,height:16,cursor:'pointer'}}/>
           <input className="inp" value={c.text} onChange={e=>setChoice(i,'text',e.target.value)} placeholder={`Choix ${i+1}`} style={{flex:1,padding:'8px 12px',fontSize:13}}/>
           {choices.length > 2 && <button onClick={()=>removeChoice(i)} style={{background:'none',border:'none',color:'rgba(255,80,80,.6)',cursor:'pointer',fontSize:16,padding:'0 4px'}}>×</button>}
         </div>
