@@ -84,6 +84,28 @@
       overflow: hidden;
     }
 
+    .approx-banner {
+      align-self: center;
+      width: 100%;
+      max-width: 640px;
+      margin: 0 auto 14px;
+      display: flex;
+      gap: 10px;
+      align-items: flex-start;
+      padding: 12px 14px;
+      background: linear-gradient(90deg, rgba(220,38,38,.96), rgba(190,18,18,.96));
+      border: 1px solid rgba(255,160,160,.55);
+      border-radius: 14px;
+      color: #fff;
+      font-size: 12.5px;
+      line-height: 1.5;
+      box-shadow: 0 6px 20px rgba(220,38,38,.4);
+      position: relative;
+      z-index: 5;
+    }
+    .approx-banner-ic { font-size: 18px; line-height: 1.25; flex-shrink: 0; }
+    .approx-banner strong { color: #fff; font-weight: 800; }
+
     /* Blob decorations */
     .app::before {
       content: '';
@@ -1835,6 +1857,36 @@ function FinalScreen({ state, onRestart }) {
 }
 
 // ─── PWA Install Banner ───────────────────────
+// Bannière rouge globale : données de conso approximatives (courbe de charge ENEDIS absente)
+const CALC_SCREENS_FOR_BANNER = ['MA_CONSO','SIMULATIONS','BOX_SIM','DIY_BOX_SIM','SOLAR_SIM','OPTIMISATION','ACC_RESULT'];
+function ApproxConsoBanner({ screen, userId }) {
+  const [source, setSource] = useState(null);
+  useEffect(() => {
+    let cancelled = false;
+    if (!userId || !CALC_SCREENS_FOR_BANNER.includes(screen)) { setSource(null); return; }
+    (async () => {
+      const activeId = localStorage.getItem('starvolt_active_site_id');
+      let q = sb.from('sites').select('conso_source');
+      q = activeId
+        ? q.eq('id', activeId)
+        : q.eq('user_id', userId).not('conso_profil','is',null).order('created_at').limit(1);
+      const { data } = await q.maybeSingle();
+      if (!cancelled) setSource(data?.conso_source || null);
+    })();
+    return () => { cancelled = true; };
+  }, [screen, userId]);
+
+  if (source !== 'daily') return null;
+  return (
+    <div className="approx-banner" role="alert">
+      <span className="approx-banner-ic" aria-hidden="true">⚠️</span>
+      <div>
+        <strong>Estimations approximatives.</strong> ENEDIS n'a pas fourni la courbe de charge détaillée de ce compteur (non enregistrée à ce jour). Les calculs reposent sur les <strong>consommations journalières</strong> réparties sur 24 h : les estimations heure par heure (heures pleines/creuses, tarifs dynamiques, box, solaire) <strong>ne sont pas précises</strong>. Relancez l'import dans quelques jours, une fois la courbe de charge activée par ENEDIS.
+      </div>
+    </div>
+  );
+}
+
 function InstallBanner() {
   const [show,    setShow]    = useState(false);
   const [isIOS,   setIsIOS]   = useState(false);
@@ -3890,6 +3942,13 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
         return;
       }
 
+      // Quota ENEDIS atteint / tentative récente → message clair, pas de relance
+      if(d.error==='COOLDOWN'){
+        setLinkyStatus('error');
+        setLinkyError(d.message||'Trop de demandes pour ce compteur. Réessayez plus tard.');
+        return;
+      }
+
       if(d.error) throw new Error(d.error);
 
       // PDL auto-découvert par adresse → mettre à jour le site
@@ -4469,8 +4528,13 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
                     {linkyStatus==='ordering'&&(
                       <div style={{marginTop:6,color:'rgba(255,255,255,.5)',fontSize:11}}>⬇️ Téléchargement des données ENEDIS en cours…</div>
                     )}
-                    {linkyStatus==='done'&&(
+                    {linkyStatus==='done'&&site.conso_source!=='daily'&&(
                       <div style={{marginTop:6,color:'#7dd940',fontSize:11,fontWeight:700}}>✅ Données Linky importées avec succès !</div>
+                    )}
+                    {linkyStatus==='done'&&site.conso_source==='daily'&&(
+                      <div style={{marginTop:6,padding:'8px 10px',background:'rgba(220,38,38,.15)',border:'1px solid rgba(248,113,113,.5)',borderRadius:8,color:'#ffb4b4',fontSize:11,lineHeight:1.5}}>
+                        ⚠️ <strong style={{color:'#fff'}}>Courbe de charge indisponible chez ENEDIS</strong> pour ce compteur. Seules les <strong>consommations journalières</strong> ont pu être récupérées : les calculs seront <strong>approximatifs</strong> (pas de détail heure par heure). Réessayez l'import dans quelques jours, une fois la courbe de charge activée par ENEDIS.
+                      </div>
                     )}
                     {linkyStatus==='error'&&linkyError&&(
                       <div style={{marginTop:6,color:'#ff9090',fontSize:11}}>⚠️ {linkyError}</div>
@@ -11825,6 +11889,7 @@ function App() {
       {feedbackSentiment && (
         <FeedbackModal sentiment={feedbackSentiment} user={user} screen={state.screen} onClose={()=>setFeedbackSentiment(null)}/>
       )}
+      {user && !isAuthScreen && <ApproxConsoBanner screen={state.screen} userId={user.id}/>}
       <div className="chevrons-deco" aria-hidden="true">
         {['»','»','»','»'].map((c,i)=><span key={i}>{c}</span>)}
       </div>
