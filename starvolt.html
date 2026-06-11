@@ -1198,6 +1198,7 @@ const sb = supabase.createClient(
 window.__trackUserId = null;
 
 function trackEvent(type, label, screen) {
+  if (window.__impersonating) return; // mode debug admin : on ne compte pas les clics
   const uid = window.__trackUserId;
   if (!uid) return;
   sb.from('user_events')
@@ -1213,6 +1214,7 @@ function trackEvent(type, label, screen) {
   window.__feedbackDetail = null;
   window.__setFeedbackDetail = (d) => { window.__feedbackDetail = d || null; };
   document.addEventListener('click', (e) => {
+    if (window.__impersonating) return; // mode debug admin : pas de tracking
     if (!window.__trackUserId) return; // pas connecté, on ne track pas
     const btn = e.target.closest('button, [data-track]');
     if (!btn) return;
@@ -8711,7 +8713,7 @@ function AdminPrixMateriauxScreen({ onBack }) {
 
 // ─── AdminScreen ──────────────────────────────
 // ─── AdminDashboard : tableau de bord d'activité (en tête du menu admin) ──────
-function AdminDashboard({ onViewLogs }) {
+function AdminDashboard({ onViewLogs, onImpersonate }) {
   const [rows, setRows]         = useState([]);
   const [loading, setLoading]   = useState(true);
   const [showAll, setShowAll]   = useState(false);   // afficher toutes les lignes
@@ -8781,9 +8783,20 @@ function AdminDashboard({ onViewLogs }) {
               <tbody>
                 {visible.map((u, i) => (
                   <tr key={u.id} style={{background: i%2 ? 'rgba(255,255,255,.02)' : 'transparent'}}>
-                    <td onClick={() => onViewLogs && onViewLogs(u)} style={{padding:'9px 10px', borderTop:'1px solid rgba(255,255,255,.06)', ...linkCell}}
-                        title="Voir les logs de cet utilisateur">
-                      {u.prenom || u.email || '—'}
+                    <td style={{padding:'9px 10px', borderTop:'1px solid rgba(255,255,255,.06)'}}>
+                      <span style={{display:'flex', alignItems:'center', gap:8}}>
+                        <span onClick={() => onViewLogs && onViewLogs(u)} style={linkCell}
+                              title="Voir les logs de cet utilisateur">
+                          {u.prenom || u.email || '—'}
+                        </span>
+                        <button onClick={(e) => { e.stopPropagation(); onImpersonate && onImpersonate(u); }}
+                                title="Se connecter en tant que cet utilisateur (mode debug)"
+                                style={{background:'none', border:'none', cursor:'pointer', padding:'2px 4px', fontSize:14, lineHeight:1, opacity:.55, filter:'grayscale(1)'}}
+                                onMouseEnter={e=>{e.currentTarget.style.opacity='1';e.currentTarget.style.filter='none';}}
+                                onMouseLeave={e=>{e.currentTarget.style.opacity='.55';e.currentTarget.style.filter='grayscale(1)';}}>
+                          👁
+                        </button>
+                      </span>
                     </td>
                     <td style={{padding:'9px 10px', borderTop:'1px solid rgba(255,255,255,.06)', color:'rgba(255,255,255,.7)', whiteSpace:'nowrap'}}>
                       {fmtClick(u.last_click_at)}
@@ -8822,7 +8835,7 @@ function AdminDashboard({ onViewLogs }) {
   );
 }
 
-function AdminScreen({ onTariffs, onUsers, onSpot, onAcc, onProduction, onGlobalVars, onPrix, onOffres, onLearn, onFeedback, onProofread, onAICosts, onAIPrompts, onViewLogs, onBack }) {
+function AdminScreen({ onTariffs, onUsers, onSpot, onAcc, onProduction, onGlobalVars, onPrix, onOffres, onLearn, onFeedback, onProofread, onAICosts, onAIPrompts, onViewLogs, onImpersonate, onBack }) {
   return (
     <>
     <div className="screen screen-admin fade-in">
@@ -8830,7 +8843,7 @@ function AdminScreen({ onTariffs, onUsers, onSpot, onAcc, onProduction, onGlobal
         <div className="welcome-tag" style={{color:'#ffb340'}}>Administration</div>
         <h1 className="welcome-title">Menu<br/><span className="accent">admin</span></h1>
       </div>
-      <AdminDashboard onViewLogs={onViewLogs}/>
+      <AdminDashboard onViewLogs={onViewLogs} onImpersonate={onImpersonate}/>
       <div className="admin-grid">
         <div className="admin-group">
           <div className="admin-group-label"><span className="agl-ico">📥</span>Import de data</div>
@@ -11718,9 +11731,11 @@ function App() {
         setUser(session.user);
         // Stocker l'uid pour le tracking (évite un appel réseau à chaque clic)
         window.__trackUserId = session.user.id;
-        // Logger la connexion dans user_events
-        sb.from('user_events').insert({ user_id: session.user.id, event_type: 'login', label: 'Connexion', screen: 'AUTH_LOGIN' })
-          .then(({ error }) => { if (error) console.warn('[login track]', error.message); });
+        // Logger la connexion dans user_events (sauf en mode debug admin)
+        if (!window.__impersonating) {
+          sb.from('user_events').insert({ user_id: session.user.id, event_type: 'login', label: 'Connexion', screen: 'AUTH_LOGIN' })
+            .then(({ error }) => { if (error) console.warn('[login track]', error.message); });
+        }
         if (pendingProfileRef.current) {
           setProfile(pendingProfileRef.current);
           pendingProfileRef.current = null;
@@ -11763,6 +11778,59 @@ function App() {
   }, [history, user]);
 
   const handleLogout = async () => { await sb.auth.signOut(); };
+
+  // ─── Impersonation admin (mode debug) ───────────────
+  const [imperso, setImperso] = useState(() => {
+    try { const raw = localStorage.getItem('starvolt_imp'); if (raw) { window.__impersonating = true; return JSON.parse(raw); } } catch(_){}
+    return null;
+  });
+
+  const startImpersonation = async (u) => {
+    try {
+      // 1) Mémoriser la session admin courante pour pouvoir y revenir
+      const { data: { session } } = await sb.auth.getSession();
+      if (!session) { alert('Session admin introuvable.'); return; }
+      const adminInfo = { access: session.access_token, refresh: session.refresh_token };
+      // 2) Activer le flag AVANT le changement de session (coupe le tracking + le log de connexion)
+      window.__impersonating = true;
+      // 3) Demander une session pour l'utilisateur cible
+      const { data, error } = await sb.functions.invoke('admin-impersonate', { body: { target_user_id: u.id } });
+      if (error || !data?.access_token) {
+        window.__impersonating = false;
+        console.error('impersonate', error || data);
+        alert("Impossible de se connecter en tant que cet utilisateur.");
+        return;
+      }
+      const impInfo = { name: u.prenom || u.email, adminAccess: adminInfo.access, adminRefresh: adminInfo.refresh };
+      localStorage.setItem('starvolt_imp', JSON.stringify(impInfo));
+      setImperso(impInfo);
+      // 4) Basculer sur la session de l'utilisateur cible → déclenche SIGNED_IN → navigation
+      await sb.auth.setSession({ access_token: data.access_token, refresh_token: data.refresh_token });
+    } catch (e) {
+      window.__impersonating = false;
+      console.error(e);
+      alert("Erreur lors de l'impersonation.");
+    }
+  };
+
+  const stopImpersonation = async () => {
+    try {
+      const raw = localStorage.getItem('starvolt_imp');
+      const info = raw ? JSON.parse(raw) : imperso;
+      localStorage.removeItem('starvolt_imp');
+      setImperso(null);
+      if (info?.adminAccess && info?.adminRefresh) {
+        await sb.auth.setSession({ access_token: info.adminAccess, refresh_token: info.adminRefresh });
+      } else {
+        await sb.auth.signOut();
+      }
+    } catch (e) {
+      console.error(e);
+      await sb.auth.signOut();
+    } finally {
+      window.__impersonating = false;
+    }
+  };
 
   const isAdmin = ['admin','superadmin'].includes(profile?.role);
   const isSuperadmin = profile?.role === 'superadmin';
@@ -11866,6 +11934,7 @@ function App() {
           onAICosts={()=>goTo('ADMIN_AI_COSTS')}
           onAIPrompts={()=>goTo('ADMIN_AI_PROMPTS')}
           onViewLogs={(u)=>goTo('ADMIN_USER_LOGS', { logUser: u })}
+          onImpersonate={startImpersonation}
           onBack={goBack}/>;
 
       case 'ADMIN_FEEDBACK':
@@ -12088,6 +12157,27 @@ function App() {
 
   return (
     <div className="app">
+      {imperso && (
+        <div style={{
+          position:'sticky', top:0, zIndex:9999,
+          background:'linear-gradient(90deg,#b8412e,#d4632e)', color:'#fff',
+          display:'flex', alignItems:'center', justifyContent:'center', gap:12,
+          padding:'8px 14px', fontSize:13, fontWeight:700, flexWrap:'wrap',
+          boxShadow:'0 2px 8px rgba(0,0,0,.3)'
+        }}>
+          <span style={{display:'flex', alignItems:'center', gap:7}}>
+            <span style={{fontSize:15}}>👁</span>
+            Mode debug — connecté en tant que <strong>{imperso.name}</strong>
+          </span>
+          <button onClick={stopImpersonation} style={{
+            background:'rgba(255,255,255,.95)', color:'#b8412e', border:'none',
+            borderRadius:8, padding:'5px 12px', fontWeight:800, fontSize:12.5,
+            cursor:'pointer', fontFamily:'inherit'
+          }}>
+            ← Revenir à mon compte admin
+          </button>
+        </div>
+      )}
       <TopBar
         name={chipLabel}
         avatarName={avatarName}
