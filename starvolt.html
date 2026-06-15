@@ -2068,7 +2068,7 @@ function SignupSuccessScreen({ email, firstName, consentUrl, requestId, siteId, 
   const pollRef   = React.useRef(null);
   const statusRef = React.useRef('pending');
   const ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhreGtod2VncWthcGRic2lzeHd2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc0MjY4NjksImV4cCI6MjA5MzAwMjg2OX0.9-_oHRJfwXZkl3bRYDMb5K56UzB8O1NOfa5QfrXFfkQ';
-  const EDGE_URL = 'https://hkxkhwegqkapdbsisxwv.supabase.co/functions/v1/switchgrid';
+  const EDGE_URL = 'https://hkxkhwegqkapdbsisxwv.supabase.co/functions/v1/switchgrid-v0';
 
   React.useEffect(()=>{ const t=setTimeout(()=>setShowConfetti(false),5500); return()=>clearTimeout(t); },[]);
 
@@ -2224,14 +2224,19 @@ function genPassword() {
 }
 
 function AuthSignupScreen({ onGoToLogin, onSignedUp, onSuccessDone }) {
+  const [accountType,   setAccountType]   = useState('particulier'); // 'particulier' | 'entreprise'
   const [prenom,        setPrenom]        = useState('');
   const [nom,           setNom]           = useState('');
   const [email,         setEmail]         = useState('');
   const [pwd,           setPwd]           = useState(() => genPassword()); // aléatoire par défaut
   const [showPwd,       setShowPwd]       = useState(true);                // œil ouvert par défaut
+  const [raisonSociale, setRaisonSociale] = useState('');
   const [adresse,       setAdresse]       = useState('');
   const [codePostal,    setCodePostal]    = useState('');
   const [ville,         setVille]         = useState('');
+  const [signerPrenom,  setSignerPrenom]  = useState('');
+  const [signerNom,     setSignerNom]     = useState('');
+  const [signerEmail,   setSignerEmail]   = useState('');
   const [enedisConsent, setEnedisConsent] = useState(false);
   const [loading,       setLoading]       = useState(false);
   const [error,         setError]         = useState(null);
@@ -2239,10 +2244,14 @@ function AuthSignupScreen({ onGoToLogin, onSignedUp, onSuccessDone }) {
   // Après inscription réussie
   const [successData,   setSuccessData]   = useState(null); // { email, firstName, consentUrl, userId }
 
+  const isEntreprise = accountType === 'entreprise';
+
   // Le bouton est gris tant que tout n'est pas rempli
-  const allFilled = prenom.trim() && nom.trim() && email.trim() &&
-                    pwd.length >= 6 && adresse.trim() &&
-                    codePostal.trim() && ville.trim() && enedisConsent;
+  const baseFilled = prenom.trim() && nom.trim() && email.trim() &&
+                     pwd.length >= 6 && adresse.trim() &&
+                     codePostal.trim() && ville.trim() && enedisConsent;
+  const entFilled  = !isEntreprise || (raisonSociale.trim() && signerPrenom.trim() && signerNom.trim() && signerEmail.trim());
+  const allFilled  = baseFilled && entFilled;
 
   // Premier champ manquant → message sympa
   const firstMissingMessage = () => {
@@ -2250,10 +2259,14 @@ function AuthSignupScreen({ onGoToLogin, onSignedUp, onSuccessDone }) {
     if (!nom.trim())        return 'Et votre nom de famille ?';
     if (!email.trim())      return 'Votre email, pour qu\'on puisse vous écrire ✉️';
     if (pwd.length < 6)     return 'Un mot de passe d\'au moins 6 caractères 🔒';
-    if (!adresse.trim())    return 'L\'adresse de votre compteur 🏠';
-    if (!codePostal.trim()) return 'Votre code postal 📮';
-    if (!ville.trim())      return 'Votre ville 🏙️';
-    if (!enedisConsent)     return 'Cochez la case pour autoriser la récupération de votre conso ⚡';
+    if (isEntreprise && !raisonSociale.trim()) return 'Le nom de l\'entreprise 🏢';
+    if (!adresse.trim())    return 'L\'adresse du compteur 🏠';
+    if (!codePostal.trim()) return 'Le code postal 📮';
+    if (!ville.trim())      return 'La ville 🏙️';
+    if (isEntreprise && !signerPrenom.trim()) return 'Le prénom du gérant signataire ✍️';
+    if (isEntreprise && !signerNom.trim())    return 'Le nom du gérant signataire ✍️';
+    if (isEntreprise && !signerEmail.trim())  return 'L\'email du gérant pour la signature ✉️';
+    if (!enedisConsent)     return 'Cochez la case pour autoriser la récupération de la conso ⚡';
     return null;
   };
 
@@ -2261,10 +2274,10 @@ function AuthSignupScreen({ onGoToLogin, onSignedUp, onSuccessDone }) {
   useEffect(() => {
     if (allFilled) { setHint(null); return; }
     setHint(h => h !== null ? firstMissingMessage() : h);
-  }, [prenom, nom, email, pwd, adresse, codePostal, ville, enedisConsent]);
+  }, [accountType, prenom, nom, email, pwd, raisonSociale, adresse, codePostal, ville, signerPrenom, signerNom, signerEmail, enedisConsent]);
 
   const ANON_KEY         = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhreGtod2VncWthcGRic2lzeHd2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc0MjY4NjksImV4cCI6MjA5MzAwMjg2OX0.9-_oHRJfwXZkl3bRYDMb5K56UzB8O1NOfa5QfrXFfkQ';
-  const EDGE_URL         = 'https://hkxkhwegqkapdbsisxwv.supabase.co/functions/v1/switchgrid';
+  const EDGE_URL         = 'https://hkxkhwegqkapdbsisxwv.supabase.co/functions/v1/switchgrid-v0';
   const SEND_WELCOME_URL = 'https://hkxkhwegqkapdbsisxwv.supabase.co/functions/v1/send-welcome';
 
   const handleSignup = async () => {
@@ -2303,9 +2316,14 @@ function AuthSignupScreen({ onGoToLogin, onSignedUp, onSuccessDone }) {
       try {
         const { data: ns } = await sb.from('sites').insert({
           user_id:        data.user.id,
-          nom:            `Site de ${prenom.trim()}`,
+          nom:            isEntreprise ? raisonSociale.trim() : `Site de ${prenom.trim()}`,
+          account_type:   accountType,
+          raison_sociale: isEntreprise ? raisonSociale.trim() : null,
           titulaire_prenom: prenom.trim(),
           titulaire_nom:  nom.trim(),
+          signer_prenom:  isEntreprise ? signerPrenom.trim() : null,
+          signer_nom:     isEntreprise ? signerNom.trim()    : null,
+          signer_email:   isEntreprise ? signerEmail.trim()  : null,
           adresse_ligne1: adresse.trim(),
           code_postal:    codePostal.trim(),
           ville:          ville.trim(),
@@ -2329,13 +2347,18 @@ function AuthSignupScreen({ onGoToLogin, onSignedUp, onSuccessDone }) {
               apikey: ANON_KEY,
             },
             body: JSON.stringify({
-              site_id:    newSite.id,
-              pdl:        '',
-              firstName:  prenom.trim(),
-              lastName:   nom.trim(),
-              address:    adresse.trim(),
-              codePostal: codePostal.trim(),
-              commune:    ville.trim(),
+              site_id:        newSite.id,
+              pdl:            '',
+              account_type:   accountType,
+              raison_sociale: isEntreprise ? raisonSociale.trim() : null,
+              firstName:      prenom.trim(),
+              lastName:       nom.trim(),
+              signer_prenom:  isEntreprise ? signerPrenom.trim() : null,
+              signer_nom:     isEntreprise ? signerNom.trim()    : null,
+              signer_email:   isEntreprise ? signerEmail.trim()  : null,
+              address:        adresse.trim(),
+              codePostal:     codePostal.trim(),
+              commune:        ville.trim(),
             }),
           });
           const sgData = await sgRes.json();
@@ -2388,6 +2411,22 @@ function AuthSignupScreen({ onGoToLogin, onSignedUp, onSuccessDone }) {
           <h1 className="welcome-title">Créez votre<br/><span className="accent">compte</span></h1>
         </div>
         <div className="form-card">
+          {/* Type de compte — particulier (défaut) ou entreprise */}
+          <div style={{display:'flex',gap:8,marginBottom:16}}>
+            {[['particulier','👤 Particulier'],['entreprise','🏢 Entreprise']].map(([val,lbl])=>{
+              const active = accountType===val;
+              return (
+                <button key={val} type="button" onClick={()=>setAccountType(val)}
+                  style={{flex:1,padding:'11px 8px',borderRadius:10,fontSize:14,fontWeight:700,cursor:'pointer',transition:'all .15s',
+                    border:`2px solid ${active?'#f7c948':'rgba(255,255,255,.18)'}`,
+                    background:active?'rgba(247,201,72,.14)':'transparent',
+                    color:active?'#f7c948':'rgba(255,255,255,.6)'}}>{lbl}</button>
+              );
+            })}
+          </div>
+
+          {/* Section A — vos identifiants */}
+          <div style={{fontSize:12,fontWeight:800,letterSpacing:.5,textTransform:'uppercase',color:'rgba(255,255,255,.45)',margin:'4px 0 10px'}}>1 · Votre compte</div>
           <div className="inp-row">
             <div className="inp-group">
               <label className="inp-label">Prénom</label>
@@ -2414,6 +2453,17 @@ function AuthSignupScreen({ onGoToLogin, onSignedUp, onSuccessDone }) {
               </div>
             </div>
           </div>
+
+          {/* Section B — compteur (+ entreprise) */}
+          <div style={{fontSize:12,fontWeight:800,letterSpacing:.5,textTransform:'uppercase',color:'rgba(255,255,255,.45)',margin:'18px 0 10px'}}>
+            {isEntreprise ? '2 · Entreprise & compteur ENEDIS' : '2 · Adresse du compteur'}
+          </div>
+          {isEntreprise && (
+            <div className="inp-group">
+              <label className="inp-label">Raison sociale</label>
+              <input className="inp" value={raisonSociale} onChange={e=>setRaisonSociale(e.target.value)} placeholder="Boulangerie Dupont SARL"/>
+            </div>
+          )}
           <div className="inp-group">
             <label className="inp-label">Adresse du compteur</label>
             <input className="inp" value={adresse} onChange={e=>setAdresse(e.target.value)} placeholder="12 rue de la Paix"/>
@@ -2428,6 +2478,29 @@ function AuthSignupScreen({ onGoToLogin, onSignedUp, onSuccessDone }) {
               <input className="inp" value={ville} onChange={e=>setVille(e.target.value)} placeholder="Paris"/>
             </div>
           </div>
+
+          {/* Section C — signataire (entreprise uniquement) */}
+          {isEntreprise && (
+            <>
+              <div style={{fontSize:12,fontWeight:800,letterSpacing:.5,textTransform:'uppercase',color:'rgba(255,255,255,.45)',margin:'18px 0 4px'}}>3 · Signataire du consentement</div>
+              <div style={{fontSize:12,lineHeight:1.45,color:'rgba(255,255,255,.5)',marginBottom:10}}>Le représentant légal (gérant) habilité à autoriser l'accès aux données ENEDIS. Il recevra le lien de signature par email.</div>
+              <div className="inp-row">
+                <div className="inp-group">
+                  <label className="inp-label">Prénom du gérant</label>
+                  <input className="inp" value={signerPrenom} onChange={e=>setSignerPrenom(e.target.value)} placeholder="Jean"/>
+                </div>
+                <div className="inp-group">
+                  <label className="inp-label">Nom du gérant</label>
+                  <input className="inp" value={signerNom} onChange={e=>setSignerNom(e.target.value)} placeholder="Dupont"/>
+                </div>
+              </div>
+              <div className="inp-group">
+                <label className="inp-label">Email du gérant</label>
+                <input className="inp" type="email" value={signerEmail} onChange={e=>setSignerEmail(e.target.value)} placeholder="gerant@entreprise.fr"/>
+              </div>
+            </>
+          )}
+
           <label style={{display:'flex',alignItems:'flex-start',gap:12,marginTop:8,cursor:'pointer',padding:'12px 0 4px'}}>
             <span style={{position:'relative',flexShrink:0,marginTop:2}}>
               <input
@@ -2446,7 +2519,9 @@ function AuthSignupScreen({ onGoToLogin, onSignedUp, onSuccessDone }) {
               </span>
             </span>
             <span style={{fontSize:13,lineHeight:1.5,color:'rgba(255,255,255,0.75)',userSelect:'none'}}>
-              J'autorise Starvolt à contacter ENEDIS de ma part afin de récupérer mes données de consommation et de comptage, puissance souscrite, heures pleines / heures creuses.
+              {isEntreprise
+                ? "J'autorise Starvolt à contacter ENEDIS au nom de l'entreprise afin de récupérer les données de consommation, de comptage, la puissance souscrite et les heures pleines / heures creuses du compteur."
+                : "J'autorise Starvolt à contacter ENEDIS de ma part afin de récupérer mes données de consommation et de comptage, puissance souscrite, heures pleines / heures creuses."}
             </span>
           </label>
           {error&&<div className="auth-error">{error}</div>}
@@ -4005,7 +4080,7 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
   const[bilanOpen,setBilanOpen]=useState(false);
   const bilanGenRef=useRef({}); // {siteId:true} pour ne générer qu'une fois par session
   const ANON_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhreGtod2VncWthcGRic2lzeHd2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc0MjY4NjksImV4cCI6MjA5MzAwMjg2OX0.9-_oHRJfwXZkl3bRYDMb5K56UzB8O1NOfa5QfrXFfkQ';
-  const EDGE_URL='https://hkxkhwegqkapdbsisxwv.supabase.co/functions/v1/switchgrid';
+  const EDGE_URL='https://hkxkhwegqkapdbsisxwv.supabase.co/functions/v1/switchgrid-v0';
 
   // ── Restaurer l'état linky depuis localStorage quand le site actif change ──
   React.useEffect(()=>{
@@ -4098,6 +4173,11 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
           address:   rue,
           codePostal: cp,
           commune:   ville,
+          account_type:   site.account_type || 'particulier',
+          raison_sociale: site.raison_sociale || null,
+          signer_prenom:  site.signer_prenom || null,
+          signer_nom:     site.signer_nom || null,
+          signer_email:   site.signer_email || null,
         }),
       });
       const d=await res.json();
@@ -4689,6 +4769,29 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
                         >
                           {linkyStatus==='error'?'⚠️ Réessayer':'⚡ Récupérer depuis Linky'}
                         </button>
+                      </div>
+                    )}
+
+                    {/* Bouton de mise à jour : visible quand le site possède déjà des données ENEDIS
+                        et qu'aucune demande n'est en cours. Permet de relancer une collecte
+                        (nouvelle version d'API) ; les nouvelles données n'écrasent les anciennes
+                        que si elles sont de meilleure qualité (côté Edge Function). */}
+                    {(siteHasFullHourly||site.conso_source)&&(!linkyStatus||linkyStatus==='done')&&(
+                      <div style={{display:'flex',gap:8,alignItems:'center',flexWrap:'wrap',marginTop:8}}>
+                        <button
+                          onClick={()=>handleLinkyImport(site)}
+                          style={{
+                            background:'rgba(125,217,64,.12)',
+                            border:'1px solid rgba(125,217,64,.4)',
+                            borderRadius:8, color:'#7dd940',
+                            fontSize:12, fontWeight:700, padding:'8px 12px', cursor:'pointer', whiteSpace:'nowrap',
+                          }}
+                        >
+                          🔄 Mettre à jour les données ENEDIS
+                        </button>
+                        <span style={{fontSize:10,color:'rgba(255,255,255,.4)',lineHeight:1.4}}>
+                          Relance une collecte ENEDIS. Les nouvelles données ne remplacent les actuelles que si elles sont plus complètes.
+                        </span>
                       </div>
                     )}
 
