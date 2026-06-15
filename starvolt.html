@@ -4147,7 +4147,19 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
     const hasPdl      = pdl.length === 14 && /^\d{14}$/.test(pdl);
 
     // ── Validation ──────────────────────────────────────────────────────────
-    if(!firstName || !lastName){
+    const isEntreprise = (site.account_type||'particulier')==='entreprise';
+    if(isEntreprise){
+      if(!(site.raison_sociale||'').trim()){
+        setLinkyStatus('error'); setLinkyErrorStep(0);
+        setLinkyError('Renseignez la raison sociale de l\'entreprise (nom recherché chez ENEDIS).');
+        return;
+      }
+      if(!(site.signer_prenom||'').trim() || !(site.signer_nom||'').trim() || !(site.signer_email||'').trim()){
+        setLinkyStatus('error'); setLinkyErrorStep(0);
+        setLinkyError('Renseignez le signataire du consentement (prénom, nom et email du gérant).');
+        return;
+      }
+    } else if(!firstName || !lastName){
       setLinkyStatus('error'); setLinkyErrorStep(0);
       setLinkyError('Renseignez le prénom et le nom du titulaire du contrat ENEDIS.');
       return;
@@ -4736,8 +4748,36 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
                   <div>
                     <label style={{fontSize:10,color:'rgba(255,255,255,.45)',fontWeight:700,letterSpacing:'.5px',display:'block',marginBottom:4}}>PDL (numéro compteur Linky)</label>
                     <PDLInput value={site.pdl||''} onSave={v=>updateSite({pdl:v})}/>
-                    <div style={{marginTop:5}}>
-                      <label style={{fontSize:10,color:'rgba(255,255,255,.35)',fontWeight:700,letterSpacing:'.5px',display:'block',marginBottom:4}}>TITULAIRE DU CONTRAT ENEDIS</label>
+
+                    {/* Type de compte ENEDIS — particulier ou entreprise.
+                        Détermine le nom utilisé pour la recherche du compteur (titulaire vs raison sociale)
+                        et le signataire du consentement (titulaire vs gérant). */}
+                    <div style={{marginTop:8}}>
+                      <label style={{fontSize:10,color:'rgba(255,255,255,.35)',fontWeight:700,letterSpacing:'.5px',display:'block',marginBottom:4}}>TYPE DE CONTRAT ENEDIS</label>
+                      <div style={{display:'flex',gap:6}}>
+                        {[['particulier','👤 Particulier'],['entreprise','🏢 Entreprise']].map(([val,lbl])=>{
+                          const active=(site.account_type||'particulier')===val;
+                          return (
+                            <button key={val} type="button" onClick={()=>updateSite({account_type:val})}
+                              style={{flex:1,padding:'8px 6px',borderRadius:8,fontSize:12,fontWeight:700,cursor:'pointer',transition:'all .15s',
+                                border:`1.5px solid ${active?'#f7c948':'rgba(255,255,255,.18)'}`,
+                                background:active?'rgba(247,201,72,.14)':'transparent',
+                                color:active?'#f7c948':'rgba(255,255,255,.6)'}}>{lbl}</button>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {/* Raison sociale — entreprise uniquement. Sert de nom de recherche ENEDIS. */}
+                    {(site.account_type==='entreprise')&&(
+                      <div style={{marginTop:6}}>
+                        <label style={{fontSize:10,color:'rgba(255,255,255,.35)',fontWeight:700,letterSpacing:'.5px',display:'block',marginBottom:4}}>RAISON SOCIALE (nom recherché chez ENEDIS)</label>
+                        <TxtInput value={site.raison_sociale||''} placeholder="Boulangerie Dupont SARL" onSave={v=>updateSite({raison_sociale:v.trim()||null})}/>
+                      </div>
+                    )}
+
+                    <div style={{marginTop:6}}>
+                      <label style={{fontSize:10,color:'rgba(255,255,255,.35)',fontWeight:700,letterSpacing:'.5px',display:'block',marginBottom:4}}>{site.account_type==='entreprise'?'TITULAIRE DU CONTRAT (personne)':'TITULAIRE DU CONTRAT ENEDIS'}</label>
                       <div style={{display:'flex',gap:6}}>
                         <TxtInput value={site.titulaire_prenom||''} placeholder="Prénom" onSave={v=>updateSite({titulaire_prenom:v.trim()||null})} style={{flex:1}}/>
                         <TxtInput value={site.titulaire_nom||''} placeholder="Nom" onSave={v=>updateSite({titulaire_nom:v.trim()||null})} style={{flex:1}}/>
@@ -4753,6 +4793,18 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
                         </div>
                       </div>
                     </div>
+
+                    {/* Signataire du consentement — entreprise uniquement (gérant / représentant légal). */}
+                    {(site.account_type==='entreprise')&&(
+                      <div style={{marginTop:6}}>
+                        <label style={{fontSize:10,color:'rgba(255,255,255,.35)',fontWeight:700,letterSpacing:'.5px',display:'block',marginBottom:4}}>SIGNATAIRE DU CONSENTEMENT (gérant)</label>
+                        <div style={{display:'flex',gap:6,marginBottom:5}}>
+                          <TxtInput value={site.signer_prenom||''} placeholder="Prénom" onSave={v=>updateSite({signer_prenom:v.trim()||null})} style={{flex:1}}/>
+                          <TxtInput value={site.signer_nom||''} placeholder="Nom" onSave={v=>updateSite({signer_nom:v.trim()||null})} style={{flex:1}}/>
+                        </div>
+                        <TxtInput value={site.signer_email||''} placeholder="email@entreprise.fr" onSave={v=>updateSite({signer_email:v.trim()||null})}/>
+                      </div>
+                    )}
                     {/* Bouton : visible seulement au départ et sur erreur (pour réessayer).
                         Masqué dès que le processus est lancé, le consentement signé,
                         OU que le site dispose déjà de la totalité des données heure par heure. */}
