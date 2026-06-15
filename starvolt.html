@@ -2065,6 +2065,7 @@ function SignupSuccessScreen({ email, firstName, consentUrl, requestId, siteId, 
   const [userUrl,      setUserUrl]      = React.useState(consentUrl || null);
   const [errorStep,    setErrorStep]    = React.useState(null);
   const [consoSource,  setConsoSource]  = React.useState(null);
+  const [linkCopied,   setLinkCopied]   = React.useState(false);
   const pollRef   = React.useRef(null);
   const statusRef = React.useRef('pending');
   const ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhreGtod2VncWthcGRic2lzeHd2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc0MjY4NjksImV4cCI6MjA5MzAwMjg2OX0.9-_oHRJfwXZkl3bRYDMb5K56UzB8O1NOfa5QfrXFfkQ';
@@ -2149,12 +2150,21 @@ function SignupSuccessScreen({ email, firstName, consentUrl, requestId, siteId, 
                   display:'block',width:'100%',padding:'13px 0',
                   background:'rgba(247,201,72,.9)',borderRadius:10,border:'none',
                   color:'#0a1a04',fontWeight:800,fontSize:14,textAlign:'center',
-                  textDecoration:'none',cursor:'pointer',marginBottom:14,
+                  textDecoration:'none',cursor:'pointer',marginBottom:10,
                   boxShadow:'0 2px 12px rgba(247,201,72,.3)',
                 }}>✅ Signer mon consentement ENEDIS →</a>
               )}
+              {userUrl && (
+                <button type="button"
+                  onClick={()=>{ navigator.clipboard?.writeText(userUrl).then(()=>{setLinkCopied(true);setTimeout(()=>setLinkCopied(false),2000);}).catch(()=>{}); }}
+                  style={{display:'block',width:'100%',padding:'11px 0',background:'transparent',
+                    border:'1px solid rgba(247,201,72,.5)',borderRadius:10,color:'#f7c948',
+                    fontWeight:700,fontSize:13,textAlign:'center',cursor:'pointer',marginBottom:14}}>
+                  {linkCopied?'✓ Lien copié':'📋 Copier le lien (à transmettre au signataire)'}
+                </button>
+              )}
               <p style={{color:'rgba(255,255,255,.6)',lineHeight:1.6,fontSize:13,margin:0}}>
-                ⚠️ Pensez à <strong style={{color:'rgba(255,255,255,.85)'}}>vérifier que le consentement concerne bien votre compteur</strong> (votre adresse / numéro de PDL) avant de signer.
+                ⚠️ Pensez à <strong style={{color:'rgba(255,255,255,.85)'}}>vérifier que le consentement concerne bien le bon compteur</strong> (adresse / numéro de PDL) avant de signer. <strong style={{color:'rgba(255,255,255,.85)'}}>Si une autre personne doit signer</strong> (gérant de l'entreprise, titulaire du contrat), copiez le lien ci-dessus et transmettez-le-lui — aucun email ne lui est envoyé automatiquement.
               </p>
             </div>
           )}
@@ -4075,6 +4085,7 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
   const[linkyRequestId,setLinkyRequestId]=useState(null);
   const[linkyError,setLinkyError]=useState(null);
   const[linkyErrorStep,setLinkyErrorStep]=useState(null); // 0..3 : étape où l'erreur s'est produite
+  const[linkCopied,setLinkCopied]=useState(false); // feedback "lien copié" du bouton de partage consentement
   const linkyPollRef=useRef(null);
   const[bilanGenerating,setBilanGenerating]=useState(false);
   const[bilanOpen,setBilanOpen]=useState(false);
@@ -4851,16 +4862,35 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
                     <LinkyProgress status={effectiveLinkyStatus} errorStep={linkyErrorStep} consoSource={site.conso_source}/>
 
                     {/* Étape 2 en cours : lien de consentement (disparaît dès le consentement signé) */}
-                    {linkyStatus==='pending'&&linkyUserUrl&&(
+                    {linkyStatus==='pending'&&linkyUserUrl&&(()=>{
+                      const isEnt = site.account_type==='entreprise';
+                      const signerLbl = isEnt
+                        ? [site.signer_prenom,site.signer_nom].filter(Boolean).join(' ').trim()
+                        : [site.titulaire_prenom,site.titulaire_nom].filter(Boolean).join(' ').trim();
+                      return (
                       <div style={{marginTop:10,background:'rgba(247,201,72,.1)',border:'1px solid rgba(247,201,72,.3)',borderRadius:8,padding:'10px 12px'}}>
-                        <div style={{color:'#f7c948',fontWeight:700,fontSize:12,marginBottom:6}}>⚡ Le propriétaire du compteur doit signer le consentement</div>
-                        <div style={{color:'rgba(255,255,255,.7)',fontSize:11,marginBottom:8,lineHeight:1.5}}>Ouvrez le lien ci-dessous (ou transmettez-le au titulaire du contrat) pour autoriser Starvolt à accéder aux données ENEDIS. Cette page se mettra à jour automatiquement une fois le consentement validé.</div>
-                        <a href={linkyUserUrl} target="_blank" rel="noopener noreferrer"
-                          style={{display:'inline-block',background:'#f7c948',color:'#061e2a',fontWeight:800,fontSize:12,borderRadius:7,padding:'8px 14px',textDecoration:'none'}}>
-                          Signer le consentement ENEDIS →
-                        </a>
+                        <div style={{color:'#f7c948',fontWeight:700,fontSize:12,marginBottom:6}}>
+                          ⚡ {isEnt?'Le gérant signataire doit valider le consentement':'Le propriétaire du compteur doit signer le consentement'}
+                        </div>
+                        <div style={{color:'rgba(255,255,255,.7)',fontSize:11,marginBottom:8,lineHeight:1.5}}>
+                          {isEnt
+                            ? <>Aucun email n'est envoyé automatiquement. <strong style={{color:'#fff'}}>Transmettez le lien ci-dessous{signerLbl?<> à {signerLbl}</>:" au gérant"}{site.signer_email?<> ({site.signer_email})</>:null}</strong> : c'est lui qui doit l'ouvrir et signer pour autoriser l'accès aux données ENEDIS. Cette page se met à jour automatiquement une fois le consentement validé.</>
+                            : <>Ouvrez le lien ci-dessous (ou transmettez-le au titulaire du contrat) pour autoriser Starvolt à accéder aux données ENEDIS. Cette page se mettra à jour automatiquement une fois le consentement validé.</>}
+                        </div>
+                        <div style={{display:'flex',gap:8,flexWrap:'wrap',alignItems:'center'}}>
+                          <a href={linkyUserUrl} target="_blank" rel="noopener noreferrer"
+                            style={{display:'inline-block',background:'#f7c948',color:'#061e2a',fontWeight:800,fontSize:12,borderRadius:7,padding:'8px 14px',textDecoration:'none'}}>
+                            Signer le consentement ENEDIS →
+                          </a>
+                          <button type="button"
+                            onClick={()=>{ navigator.clipboard?.writeText(linkyUserUrl).then(()=>{setLinkCopied(true);setTimeout(()=>setLinkCopied(false),2000);}).catch(()=>{}); }}
+                            style={{background:'transparent',border:'1px solid rgba(247,201,72,.5)',borderRadius:7,color:'#f7c948',fontSize:12,fontWeight:700,padding:'8px 12px',cursor:'pointer',whiteSpace:'nowrap'}}>
+                            {linkCopied?'✓ Lien copié':'📋 Copier le lien'}
+                          </button>
+                        </div>
                       </div>
-                    )}
+                      );
+                    })()}
                     {linkyStatus==='pending'&&!linkyUserUrl&&(
                       <div style={{marginTop:8,color:'rgba(255,255,255,.5)',fontSize:11}}>Préparation du lien de consentement…</div>
                     )}
