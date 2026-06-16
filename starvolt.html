@@ -1512,7 +1512,6 @@ const BackBtn = ({ onBack }) =>
 const DEMO_VALUES = { name: 'Marie Dupont', bill: '2000', address: '14 Rue du Temple, 30250 Combas' };
 
 function WelcomeScreen({ onCreateAccount, onLogin }) {
-  const [showSignupAlert, setShowSignupAlert] = React.useState(false);
   return (
     <>
       <div className="screen fade-in">
@@ -1542,46 +1541,11 @@ function WelcomeScreen({ onCreateAccount, onLogin }) {
         </div>
       </div>
       <StickyFooter>
-        <button className="btn btn-cta" onClick={() => setShowSignupAlert(true)}>
+        <button className="btn btn-cta" onClick={onCreateAccount}>
           Créer votre compte en 5 secondes →
         </button>
         <button className="btn-link" onClick={onLogin}>Déjà membre ? Se connecter</button>
       </StickyFooter>
-
-      {showSignupAlert && (
-        <div style={{
-          position:'fixed',inset:0,zIndex:9999,
-          background:'rgba(0,0,0,.65)',backdropFilter:'blur(4px)',
-          display:'flex',alignItems:'center',justifyContent:'center',
-          padding:'24px',
-        }}>
-          <div style={{
-            background:'#1a1f2e',border:'1px solid rgba(255,255,255,.12)',
-            borderRadius:20,padding:'28px 24px',maxWidth:360,width:'100%',
-            boxShadow:'0 24px 60px rgba(0,0,0,.5)',
-          }}>
-            <div style={{
-              width:48,height:48,borderRadius:12,
-              background:'rgba(125,217,64,.15)',border:'1px solid rgba(125,217,64,.3)',
-              display:'flex',alignItems:'center',justifyContent:'center',
-              fontSize:24,marginBottom:18,
-            }}>💡</div>
-            <h3 style={{color:'white',fontWeight:700,fontSize:17,margin:'0 0 12px'}}>
-              Avant de créer votre compte
-            </h3>
-            <p style={{color:'rgba(255,255,255,.7)',fontSize:14,lineHeight:1.6,margin:'0 0 24px'}}>
-              Pour récupérer vos données de consommation sans soucis, attention de bien vous inscrire ici avec le <strong style={{color:'white'}}>nom, prénom et adresse</strong> que vous avez utilisé pour votre abonnement d'électricité.
-            </p>
-            <button
-              className="btn btn-cta"
-              style={{width:'100%'}}
-              onClick={() => { setShowSignupAlert(false); onCreateAccount(); }}
-            >
-              OK j'ai compris
-            </button>
-          </div>
-        </div>
-      )}
     </>
   );
 }
