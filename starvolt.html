@@ -3797,7 +3797,7 @@ function EnergyBalanceChart({ balance, level, selMonth, selDay, setLevel, setSel
       const v = maxPos * f, y = zeroY - v * scalePos;
       ctx.strokeStyle = 'rgba(255,255,255,.09)';
       ctx.beginPath(); ctx.moveTo(ML, y); ctx.lineTo(W - MR, y); ctx.stroke();
-      ctx.fillStyle = 'rgba(255,255,255,.75)'; ctx.font = '13px sans-serif'; ctx.textAlign = 'right';
+      ctx.fillStyle = 'rgba(255,255,255,.75)'; ctx.font = 'bold 13px sans-serif'; ctx.textAlign = 'right';
       ctx.fillText(v.toFixed(1), ML - 4, y + 4);
     });
     const vn = maxNeg * 0.65, yn = zeroY + vn * scaleNeg;
@@ -3810,9 +3810,9 @@ function EnergyBalanceChart({ balance, level, selMonth, selDay, setLevel, setSel
     ctx.strokeStyle = 'rgba(255,255,255,1)'; ctx.lineWidth = 3;
     ctx.beginPath(); ctx.moveTo(ML, zeroY); ctx.lineTo(W - MR, zeroY); ctx.stroke();
 
-    // Label axe Y
-    ctx.save(); ctx.fillStyle = 'rgba(255,255,255,.6)'; ctx.font = '13px sans-serif'; ctx.textAlign = 'center';
-    ctx.translate(14, MT + cH / 2); ctx.rotate(-Math.PI/2); ctx.fillText(unitLabel, 0, 0); ctx.restore();
+    // Label axe Y (horizontal, juste au-dessus du zéro, à gauche)
+    ctx.fillStyle = 'rgba(255,255,255,.7)'; ctx.font = 'bold 13px sans-serif'; ctx.textAlign = 'left';
+    ctx.fillText(unitLabel, 2, zeroY - 5);
 
     // Barres + positions pour le drill-down
     const bTW = cW / n, bPad = Math.max(2, bTW * 0.14), bW = bTW - bPad * 2;
@@ -3863,7 +3863,7 @@ function EnergyBalanceChart({ balance, level, selMonth, selDay, setLevel, setSel
       ctx.beginPath(); ctx.moveTo(axX, MT); ctx.lineTo(axX, axBottom); ctx.stroke();
 
       // Ticks + labels en c€/kWh (même taille que l'axe gauche)
-      ctx.font = '13px sans-serif';
+      ctx.font = 'bold 13px sans-serif';
       ctx.textAlign = 'left';
       const ticks = [0, maxP * 0.5, maxP];
       if (hasNegPrice) ticks.push(minP);
@@ -3878,15 +3878,11 @@ function EnergyBalanceChart({ balance, level, selMonth, selDay, setLevel, setSel
         ctx.fillText((p * 100).toFixed(p === 0 ? 0 : 1), axX + 6, ty + 3.5);
       });
 
-      // Label unité
-      ctx.save();
-      ctx.fillStyle = 'rgba(255,255,255,.5)';
-      ctx.font = '13px sans-serif';
-      ctx.textAlign = 'center';
-      ctx.translate(W - 6, MT + (zeroY - MT) / 2);
-      ctx.rotate(Math.PI / 2);
-      ctx.fillText('c€/kWh', 0, 0);
-      ctx.restore();
+      // Label unité (horizontal, juste au-dessus du zéro, aligné à droite)
+      ctx.fillStyle = 'rgba(255,255,255,.7)';
+      ctx.font = 'bold 13px sans-serif';
+      ctx.textAlign = 'right';
+      ctx.fillText('c€/kWh', W - 2, zeroY - 5);
 
       // Trait horizontal par barre = tarif de la période (rouge si négatif)
       newBars.forEach((bar, i) => {
@@ -3909,7 +3905,7 @@ function EnergyBalanceChart({ balance, level, selMonth, selDay, setLevel, setSel
         ctx.beginPath(); ctx.moveTo(ML, py); ctx.lineTo(W - MR, py); ctx.stroke();
         ctx.setLineDash([]);
         ctx.fillStyle = negAvg ? 'rgba(255,150,150,.75)' : 'rgba(255,255,255,.75)';
-        ctx.font = '10px sans-serif'; ctx.textAlign = 'right';
+        ctx.font = 'bold 10px sans-serif'; ctx.textAlign = 'right';
         ctx.fillText('moy', W - MR - 2, py - 3);
       }
       ctx.restore();
@@ -3919,7 +3915,7 @@ function EnergyBalanceChart({ balance, level, selMonth, selDay, setLevel, setSel
     ctx.fillStyle = 'rgba(255,255,255,.92)';
     ctx.textAlign = 'center';
     // Taille par niveau : heures = 20px, mois/jours = 26px (desktop)
-    const lblFont = isMobChart ? '13px sans-serif' : 'bold 18px sans-serif';
+    const lblFont = isMobChart ? 'bold 13px sans-serif' : 'bold 18px sans-serif';
     ctx.font = lblFont;
     xLabels.forEach((lbl, i) => {
       if (isMobChart && n === 12 && i % 3 !== 0) return;  // mobile mois : 1 sur 3
