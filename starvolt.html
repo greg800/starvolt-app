@@ -4702,7 +4702,7 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
             {site.conso_annuelle_kwh>0&&(site.bilan_ia||bilanGenerating)&&(
               <div className="card" style={{padding:'14px',marginBottom:8,position:'relative',overflow:'hidden'}}>
                 <div style={{fontWeight:800,fontSize:13,color:'white',display:'flex',alignItems:'center',gap:6,marginBottom:site.bilan_ia?10:0}}>
-                  ✨ Ton bilan en clair
+                  ✨ Votre bilan en clair
                 </div>
                 {site.bilan_ia ? (
                   <>
@@ -9750,7 +9750,7 @@ function AdminAICostsScreen({ onBack }) {
   const [loading, setLoading] = useState(true);
   const USD_PER_EUR = 0.92; // même hypothèse que l'Edge Function
 
-  const FEAT_LABEL = { proofread: 'Correction orthographique', bilan: 'Ton bilan en clair' };
+  const FEAT_LABEL = { proofread: 'Correction orthographique', bilan: 'Votre bilan en clair' };
 
   const load = () => {
     setLoading(true);
