@@ -3999,6 +3999,7 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
   const[linkCopied,setLinkCopied]=useState(false); // feedback "lien copié" du bouton de partage consentement
   const[consentModal,setConsentModal]=useState(null); // null | 'invite' | 'iframe' — fenêtre de consentement in-app
   const[autoLinkyArmed,setAutoLinkyArmed]=useState(false); // armé au retour de l'inscription pour lancer la collecte si besoin
+  const[linkyLive,setLinkyLive]=useState(false); // true seulement quand le statut vient d'une réponse live de l'edge (≠ restauré du localStorage)
   const consentShownRef=useRef(null); // requestId pour lequel l'invite a déjà été ouverte automatiquement
   const enedisRef=useRef(null); // zone ENEDIS — cible du scroll/centre auto au retour de l'inscription
   const linkyPollRef=useRef(null);
@@ -4011,6 +4012,7 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
   // ── Restaurer l'état linky depuis localStorage quand le site actif change ──
   React.useEffect(()=>{
     clearInterval(linkyPollRef.current);
+    setLinkyLive(false); // statut restauré = non confirmé ; un poll live tranchera (consentement peut-être déjà signé)
     if(!activeId){ setLinkyRequestId(null);setLinkyStatus(null);setLinkyUserUrl(null);setLinkyError(null); return; }
     try{
       const saved=localStorage.getItem(`starvolt_linky_${activeId}`);
@@ -4043,9 +4045,11 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
   },[activeId]);
 
   // ── Ouvre automatiquement la fenêtre de consentement dès que le lien est prêt,
-  //    et la ferme dès que le consentement est signé (statut ordering/done/error). ──
+  //    et la ferme dès que le consentement est signé (statut ordering/done/error).
+  //    On n'ouvre QUE si le statut 'pending' est confirmé par un poll live (linkyLive) :
+  //    si le consentement est déjà donné, le poll renvoie 'ordering' → pas de fenêtre. ──
   React.useEffect(()=>{
-    if(linkyStatus==='pending'&&linkyUserUrl){
+    if(linkyLive&&linkyStatus==='pending'&&linkyUserUrl){
       if(consentShownRef.current!==linkyRequestId){
         consentShownRef.current=linkyRequestId;
         setConsentModal('invite');
@@ -4053,14 +4057,14 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
     } else if(linkyStatus==='ordering'||linkyStatus==='done'||linkyStatus==='error'){
       setConsentModal(null);
     }
-  },[linkyStatus,linkyUserUrl,linkyRequestId]);
+  },[linkyLive,linkyStatus,linkyUserUrl,linkyRequestId]);
 
   // ── Poll Edge Function tant qu'une demande est en cours ──
   React.useEffect(()=>{
     if(!linkyRequestId||linkyStatus==='done'||linkyStatus==='error') return;
     const siteId=activeId; // capture dans la closure
     clearInterval(linkyPollRef.current);
-    linkyPollRef.current=setInterval(async()=>{
+    const tick=async()=>{
       try{
         const { data:{session} } = await sb.auth.getSession();
         if(!session) return;
@@ -4071,6 +4075,7 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
         const nu=d.userUrl||null;
         setLinkyStatus(ns);
         if(nu) setLinkyUserUrl(nu);
+        setLinkyLive(true); // réponse live de l'edge : le statut est désormais fiable (consentement déjà signé → 'ordering')
         if(ns==='done'||ns==='error'){
           clearInterval(linkyPollRef.current);
           if(siteId) localStorage.removeItem(`starvolt_linky_${siteId}`);
@@ -4084,7 +4089,9 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
           localStorage.setItem(`starvolt_linky_${siteId}`,JSON.stringify({requestId:linkyRequestId,status:ns,userUrl:nu||linkyUserUrl}));
         }
       }catch(e){console.warn('linky poll error',e);}
-    },8000);
+    };
+    tick(); // vérification immédiate (ne pas attendre 8 s) pour trancher tout de suite si le consentement est déjà donné
+    linkyPollRef.current=setInterval(tick,8000);
     return ()=>clearInterval(linkyPollRef.current);
   },[linkyRequestId,linkyStatus]);
 
@@ -4173,6 +4180,7 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
       setLinkyRequestId(d.request_id);
       setLinkyStatus(d.status||'pending');
       if(d.userUrl) setLinkyUserUrl(d.userUrl);
+      setLinkyLive(true); // réponse live du POST : statut fiable (consentement déjà donné → 'ordering', pas de fenêtre)
       // Persister pour survie au rechargement de page
       localStorage.setItem(`starvolt_linky_${site.id}`,JSON.stringify({
         requestId:d.request_id, status:d.status||'pending', userUrl:d.userUrl||null,
@@ -4816,8 +4824,10 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
                     {/* Suivi par étapes du processus ENEDIS */}
                     <LinkyProgress status={effectiveLinkyStatus} errorStep={linkyErrorStep} consoSource={site.conso_source}/>
 
-                    {/* Étape 2 en cours : lien de consentement (disparaît dès le consentement signé) */}
-                    {linkyStatus==='pending'&&linkyUserUrl&&(()=>{
+                    {/* Étape 2 en cours : lien de consentement (disparaît dès le consentement signé).
+                        Gardé par linkyLive : si le consentement est déjà donné, le poll renvoie
+                        'ordering' et ce bloc ne s'affiche jamais. */}
+                    {linkyLive&&linkyStatus==='pending'&&linkyUserUrl&&(()=>{
                       const isEnt = site.account_type==='entreprise';
                       const signerLbl = isEnt
                         ? [site.signer_prenom,site.signer_nom].filter(Boolean).join(' ').trim()
