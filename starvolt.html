@@ -241,6 +241,12 @@
     }
     .fade-in { animation: fadeUp .4s cubic-bezier(.22,1,.36,1) both; }
 
+    @keyframes slideInRight {
+      from { opacity:0; transform:translateX(34px); }
+      to   { opacity:1; transform:none; }
+    }
+    .slide-in-right { animation: slideInRight .32s cubic-bezier(.22,1,.36,1) both; }
+
     /* =============================================
        BILL METER
        ============================================= */
@@ -2281,7 +2287,7 @@ function AuthSignupScreen({ onGoToLogin, onSignedUp, onSuccessDone }) {
         consentUrl={successData.consentUrl}
         requestId={successData.requestId}
         siteId={successData.siteId}
-        onVisualiser={()=>{ try{localStorage.setItem('starvolt_focus_enedis','1');}catch{} onSuccessDone?.(successData.userId, 'MA_CONSO'); }}
+        onVisualiser={()=>{ try{localStorage.setItem('starvolt_focus_enedis','1');localStorage.setItem('starvolt_onboarding','1');}catch{} onSuccessDone?.(successData.userId, 'MA_CONSO'); }}
       />
     );
   }
@@ -3995,7 +4001,7 @@ function EnergyBalanceChart({ balance, level, selMonth, selDay, setLevel, setSel
 }
 
 // ─── MonSiteScreen ────────────────────────────
-function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre, cartVersion=0 }) {
+function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre, onOnboardingQuestions, cartVersion=0 }) {
   const[sites,setSites]=useState(null);
   const[activeId,setActiveId]=useState(null);
   const[tariffs,setTariffs]=useState([]);
@@ -4088,6 +4094,21 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
       setConsentModal(null);
     }
   },[linkyLive,linkyStatus,linkyUserUrl,linkyRequestId]);
+
+  // ── Onboarding : juste après la signature du consentement (statut ordering/done),
+  //    bascule vers le questionnaire typeform. Une seule fois (flag consommé). ──
+  const onbFiredRef=useRef(false);
+  React.useEffect(()=>{
+    if(!activeId||onbFiredRef.current||!onOnboardingQuestions) return;
+    let armed=false;
+    try{ armed=localStorage.getItem('starvolt_onboarding')==='1'; }catch{}
+    if(!armed) return;
+    if(linkyStatus==='ordering'||linkyStatus==='done'){
+      onbFiredRef.current=true;
+      try{ localStorage.removeItem('starvolt_onboarding'); }catch{}
+      onOnboardingQuestions(activeId);
+    }
+  },[linkyStatus,activeId]);
 
   // ── Poll Edge Function tant qu'une demande est en cours ──
   React.useEffect(()=>{
@@ -7436,6 +7457,120 @@ function ThermaleForm({ onDone, onBack, siteId=null, initial=null }) {
         </button>
       </StickyFooter>
     </>
+  );
+}
+
+// ─── OnboardingTypeform ───────────────────────
+// Questionnaire « une question par écran », auto-avance au clic (pas de bouton valider),
+// transition slide. Affiché juste après la signature du consentement, pendant la collecte
+// ENEDIS. Persiste les mêmes champs flex_* que ThermaleForm puis envoie vers « Comprendre ».
+const ONBOARDING_QUESTIONS = [
+  { key:'chauffage', title:'Comment chauffez-vous votre logement ?', cols:3, options:[
+    { value:'elec',  emoji:'⚡',  label:'Électrique' },
+    { value:'pac',   emoji:'♨️',  label:'Pompe à chaleur' },
+    { value:'autre', emoji:'🔥',  label:'Autre' },
+  ]},
+  { key:'ecs', title:'Et votre eau chaude sanitaire ?', cols:2, options:[
+    { value:'elec',  emoji:'⚡',  label:'Électrique' },
+    { value:'autre', emoji:'🔥',  label:'Autre' },
+  ]},
+  { key:'surface', title:'Quelle est la surface de votre logement ?', cols:3, options:[
+    { value:'small',  emoji:'🏠', label:'< 70 m²' },
+    { value:'medium', emoji:'🏡', label:'70–150 m²' },
+    { value:'large',  emoji:'🏰', label:'> 150 m²' },
+  ]},
+  { key:'type_logement', title:'Vous habitez…', cols:2, options:[
+    { value:'maison',    emoji:'🏠', label:'Une maison individuelle' },
+    { value:'collectif', emoji:'🏢', label:'En collectif (appartement)' },
+  ]},
+  { key:'statut', title:'Vous êtes…', cols:2, options:[
+    { value:'locataire',    emoji:'🔑', label:'Locataire' },
+    { value:'proprietaire', emoji:'📜', label:'Propriétaire' },
+  ]},
+];
+
+function OnboardingTypeform({ siteId, onDone }) {
+  const [step,    setStep]    = useState(0);
+  const [answers, setAnswers] = useState({});
+  const [busy,    setBusy]    = useState(false); // bloque les clics pendant l'auto-avance
+  const advanceRef = useRef(null);
+  useEffect(() => () => clearTimeout(advanceRef.current), []);
+
+  const q = ONBOARDING_QUESTIONS[step];
+  const total = ONBOARDING_QUESTIONS.length;
+
+  const finish = async (allAnswers) => {
+    const { chauffage=null, ecs=null, surface=null, type_logement=null, statut=null } = allAnswers;
+    const idx = surface === 'small' ? 0 : surface === 'medium' ? 1 : 2;
+    let kw = 0;
+    if (chauffage === 'elec' || chauffage === 'pac') kw += [3, 7, 12][idx];
+    if (ecs === 'elec') kw += [2, 3, 4][idx];
+    try {
+      const d = JSON.parse(localStorage.getItem('starvolt_solar_defaults') || '{}');
+      d.thermKwh = String(kw);
+      localStorage.setItem('starvolt_solar_defaults', JSON.stringify(d));
+    } catch {}
+    if (siteId) {
+      try {
+        await sb.from('sites').update({ flex_chauffage:chauffage, flex_ecs:ecs, flex_surface:surface, flex_type_logement:type_logement, flex_statut:statut }).eq('id', siteId);
+        localStorage.setItem('starvolt_flex_'+siteId, JSON.stringify({ chauffage, ecs, surface, type_logement, statut }));
+      } catch {}
+    }
+    onDone?.();
+  };
+
+  const pick = (value) => {
+    if (busy) return;
+    setBusy(true);
+    const next = { ...answers, [q.key]: value };
+    setAnswers(next);
+    advanceRef.current = setTimeout(() => {
+      if (step + 1 >= total) { finish(next); return; }
+      setStep(step + 1);
+      setBusy(false);
+    }, 320);
+  };
+
+  return (
+    <div className="screen" style={{ display:'flex', flexDirection:'column', minHeight:'100vh', padding:'0 0 40px' }}>
+      {/* progression */}
+      <div style={{ display:'flex', gap:6, padding:'22px 18px 0' }}>
+        {ONBOARDING_QUESTIONS.map((_, i) => (
+          <div key={i} style={{
+            flex:1, height:4, borderRadius:2,
+            background: i <= step ? '#7dd940' : 'rgba(255,255,255,.12)',
+            transition:'background .3s',
+          }}/>
+        ))}
+      </div>
+
+      <div style={{ flex:1, display:'flex', flexDirection:'column', justifyContent:'center', padding:'0 18px' }}>
+        <div key={step} className="slide-in-right">
+          <div style={{ fontSize:9, letterSpacing:'.8px', color:'rgba(125,217,64,.85)', fontWeight:700, textTransform:'uppercase', marginBottom:10 }}>
+            Question {step + 1} / {total}
+          </div>
+          <h1 style={{ fontSize:24, fontWeight:900, color:'white', lineHeight:1.25, margin:'0 0 26px' }}>{q.title}</h1>
+
+          <div style={{ display:'grid', gridTemplateColumns:`repeat(${q.cols}, 1fr)`, gap:10 }}>
+            {q.options.map(opt => {
+              const active = answers[q.key] === opt.value;
+              return (
+                <button key={opt.value} onClick={() => pick(opt.value)} style={{
+                  padding:'22px 8px', borderRadius:16,
+                  border:`2px solid ${active ? '#7dd940' : 'rgba(255,255,255,.13)'}`,
+                  background: active ? 'rgba(125,217,64,.13)' : 'rgba(255,255,255,.04)',
+                  color:'white', cursor:'pointer', fontFamily:'inherit', textAlign:'center',
+                  transition:'border-color .15s, background .15s, transform .1s',
+                }}>
+                  <div style={{ fontSize:34, marginBottom:10 }}>{opt.emoji}</div>
+                  <div style={{ fontSize:13, fontWeight: active ? 800 : 600, color: active ? '#7dd940' : 'rgba(255,255,255,.82)', lineHeight:1.3 }}>{opt.label}</div>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -12561,7 +12696,9 @@ function App() {
           onBack={goBack}/>;
 
       case 'MA_CONSO':
-        return <MonSiteScreen user={user} userProfile={profile} onBack={goBack} onSimulations={()=>goTo('SIMULATIONS')} onComprendre={()=>goTo('COMPRENDRE_HOME')} cartVersion={cartVersion}/>;
+        return <MonSiteScreen user={user} userProfile={profile} onBack={goBack} onSimulations={()=>goTo('SIMULATIONS')} onComprendre={()=>goTo('COMPRENDRE_HOME')} onOnboardingQuestions={(sid)=>goTo('ONBOARDING_QUESTIONS',{onbSiteId:sid})} cartVersion={cartVersion}/>;
+      case 'ONBOARDING_QUESTIONS':
+        return <OnboardingTypeform siteId={state.onbSiteId} onDone={()=>goTo('COMPRENDRE_HOME')}/>;
 
       case 'SIMULATIONS': {
         const base = { name: profile?.prenom||'', address:'Zone ACC', initialBill:2000, bill:2000, bravoItems:[], investment:0, eligible:true };
