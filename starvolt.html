@@ -3812,7 +3812,7 @@ function EnergyBalanceChart({ balance, level, selMonth, selDay, setLevel, setSel
 
     // Label axe Y (horizontal, juste au-dessus du zéro, à gauche)
     ctx.fillStyle = 'rgba(255,255,255,.7)'; ctx.font = 'bold 13px sans-serif'; ctx.textAlign = 'left';
-    ctx.fillText(unitLabel, 2, zeroY - 5);
+    ctx.fillText(unitLabel, 2, zeroY - 16);
 
     // Barres + positions pour le drill-down
     const bTW = cW / n, bPad = Math.max(2, bTW * 0.14), bW = bTW - bPad * 2;
@@ -3882,7 +3882,7 @@ function EnergyBalanceChart({ balance, level, selMonth, selDay, setLevel, setSel
       ctx.fillStyle = 'rgba(255,255,255,.7)';
       ctx.font = 'bold 13px sans-serif';
       ctx.textAlign = 'right';
-      ctx.fillText('c€/kWh', W - 2, zeroY - 5);
+      ctx.fillText('c€/kWh', W - 2, zeroY - 16);
 
       // Trait horizontal par barre = tarif de la période (rouge si négatif)
       newBars.forEach((bar, i) => {
