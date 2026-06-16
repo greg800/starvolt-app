@@ -4060,7 +4060,7 @@ function EnergyBalanceChart({ balance, level, selMonth, selDay, setLevel, setSel
       await blinkClick(); setSelDay(25); await sleep(2000);
       await blinkClick(); setSelDay(24); await sleep(2000);
       // 5) loupe dézoom : heure → jour → année
-      const zoomY = H_CHART - 28 - 16;
+      const zoomY = H_CHART - 28 - 16 + 26; // +1 diamètre de rond jaune : le bouton loupe est plus bas (ctxLabel)
       await moveTo(20, zoomY, 1500, 'La loupe dézoome.');
       await blinkClick(); setLevel('day'); await sleep(1500);
       await blinkClick(); setLevel('month'); setSelMonth(null); setSelDay(null); await sleep(900);
