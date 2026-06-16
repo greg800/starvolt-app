@@ -23,7 +23,15 @@
   <!-- React + ReactDOM + Babel (CDN) -->
   <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
-  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone@7.25.6/babel.min.js"></script>
+  <script>
+    // Force le runtime JSX CLASSIQUE : Babel émet React.createElement (pas d'import ESM
+    // "react/jsx-runtime", qui ne peut pas s'exécuter dans un script non-module et provoque
+    // un écran vert / app non montée). Robuste face aux dérives de version du CDN.
+    Babel.registerPreset('react-classic', {
+      presets: [[Babel.availablePresets['react'], { runtime: 'classic' }]]
+    });
+  </script>
 
   <!-- SheetJS (lecture Excel côté client) -->
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
@@ -1199,7 +1207,7 @@
 <body>
 <div id="root"></div>
 
-<script type="text/babel">
+<script type="text/babel" data-presets="react-classic">
 const { useState, useEffect, useRef, useCallback, useMemo } = React;
 
 // ─── Supabase client ──────────────────────────
