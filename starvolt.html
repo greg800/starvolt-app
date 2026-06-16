@@ -2059,48 +2059,9 @@ function Confetti() {
 }
 
 // ─── SignupSuccessScreen ───────────────────────
-function SignupSuccessScreen({ email, firstName, consentUrl, requestId, siteId, onVisualiser }) {
+function SignupSuccessScreen({ firstName, onVisualiser }) {
   const [showConfetti, setShowConfetti] = React.useState(true);
-  const [status,       setStatus]       = React.useState(requestId ? 'pending' : null);
-  const [userUrl,      setUserUrl]      = React.useState(consentUrl || null);
-  const [errorStep,    setErrorStep]    = React.useState(null);
-  const [consoSource,  setConsoSource]  = React.useState(null);
-  const [linkCopied,   setLinkCopied]   = React.useState(false);
-  const pollRef   = React.useRef(null);
-  const statusRef = React.useRef('pending');
-  const ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhreGtod2VncWthcGRic2lzeHd2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc0MjY4NjksImV4cCI6MjA5MzAwMjg2OX0.9-_oHRJfwXZkl3bRYDMb5K56UzB8O1NOfa5QfrXFfkQ';
-  const EDGE_URL = 'https://hkxkhwegqkapdbsisxwv.supabase.co/functions/v1/switchgrid-v0';
-
   React.useEffect(()=>{ const t=setTimeout(()=>setShowConfetti(false),5500); return()=>clearTimeout(t); },[]);
-
-  // ── Suivi live de la récupération ENEDIS ──
-  React.useEffect(()=>{
-    if(!requestId || status==='done' || status==='error') return;
-    clearInterval(pollRef.current);
-    pollRef.current=setInterval(async()=>{
-      try{
-        const { data:{session} } = await sb.auth.getSession();
-        if(!session) return;
-        const res=await fetch(`${EDGE_URL}?request_id=${requestId}`,
-          {headers:{Authorization:`Bearer ${session.access_token}`,'apikey':ANON_KEY}});
-        const d=await res.json();
-        const ns=d.status||'pending';
-        const nu=d.userUrl||null;
-        if(nu) setUserUrl(nu);
-        if(d.conso_source) setConsoSource(d.conso_source);
-        if(ns==='done'||ns==='error'){
-          clearInterval(pollRef.current);
-          if(siteId) localStorage.removeItem(`starvolt_linky_${siteId}`);
-          if(ns==='error') setErrorStep(statusRef.current==='pending'?1:2);
-        } else if(siteId){
-          localStorage.setItem(`starvolt_linky_${siteId}`,JSON.stringify({requestId,status:ns,userUrl:nu||userUrl}));
-        }
-        statusRef.current=ns;
-        setStatus(ns);
-      }catch(e){/* silencieux */}
-    },8000);
-    return ()=>clearInterval(pollRef.current);
-  },[requestId,status]);
 
   return (
     <>
@@ -2111,111 +2072,23 @@ function SignupSuccessScreen({ email, firstName, consentUrl, requestId, siteId, 
           <h1 className="welcome-title">Bravo<br/><span className="accent">{firstName} !</span></h1>
         </div>
         <div style={{padding:'0 16px',display:'flex',flexDirection:'column',gap:14}}>
-
-          {/* Tuile 1 — conservée : compte créé */}
           <div style={{
             background:'rgba(125,217,64,.08)',border:'1px solid rgba(125,217,64,.2)',
-            borderRadius:16,padding:'20px 18px',
+            borderRadius:16,padding:'24px 18px',
           }}>
-            <div style={{fontSize:22,marginBottom:10,textAlign:'center'}}>⚡</div>
-            <p style={{color:'rgba(255,255,255,.9)',lineHeight:1.75,fontSize:14,margin:0}}>
-              Votre compte est créé ! Nous venons de lancer une demande à ENEDIS pour collecter vos données de consommation et vous préparer une <strong style={{color:'#7dd940'}}>proposition d'économie sur mesure</strong>.
+            <div style={{fontSize:34,marginBottom:12,textAlign:'center'}}>⚡</div>
+            <p style={{color:'rgba(255,255,255,.92)',lineHeight:1.75,fontSize:15,margin:'0 0 12px',textAlign:'center'}}>
+              <strong style={{color:'#7dd940'}}>Votre compte est créé !</strong>
+            </p>
+            <p style={{color:'rgba(255,255,255,.82)',lineHeight:1.7,fontSize:14,margin:0,textAlign:'center'}}>
+              La <strong style={{color:'#fff'}}>demande de collecte de vos données ENEDIS est lancée</strong>. Elle prend en général <strong style={{color:'#fff'}}>entre 1 et 10 minutes</strong>. Vous allez pouvoir suivre son avancement en direct sur votre page « Mon site ».
             </p>
           </div>
-
-          {/* Les étapes de récupération */}
-          {status && (
-            <div style={{
-              background:'rgba(255,255,255,.04)',border:'1px solid rgba(255,255,255,.1)',
-              borderRadius:16,padding:'18px 18px',
-            }}>
-              <div style={{fontSize:12,fontWeight:800,letterSpacing:'.04em',textTransform:'uppercase',color:'rgba(255,255,255,.5)',marginBottom:4}}>
-                Récupération de vos données
-              </div>
-              <LinkyProgress status={status} errorStep={errorStep} consoSource={consoSource}/>
-            </div>
-          )}
-
-          {/* Étape consentement — tant qu'ENEDIS attend la signature */}
-          {(status==='pending'||status==='loading') && (
-            <div style={{
-              background:'rgba(247,201,72,.07)',border:'1px solid rgba(247,201,72,.2)',
-              borderRadius:16,padding:'20px 18px',
-            }}>
-              <p style={{color:'rgba(255,255,255,.88)',lineHeight:1.7,fontSize:14,margin:'0 0 14px'}}>
-                ✍️ Dernière étape : <strong style={{color:'#f7c948'}}>signez votre consentement ENEDIS</strong>. C'est ce qui autorise la récupération de vos données de consommation.
-              </p>
-              {userUrl && (
-                <a href={userUrl} target="_blank" rel="noopener noreferrer" style={{
-                  display:'block',width:'100%',padding:'13px 0',
-                  background:'rgba(247,201,72,.9)',borderRadius:10,border:'none',
-                  color:'#0a1a04',fontWeight:800,fontSize:14,textAlign:'center',
-                  textDecoration:'none',cursor:'pointer',marginBottom:10,
-                  boxShadow:'0 2px 12px rgba(247,201,72,.3)',
-                }}>✅ Signer mon consentement ENEDIS →</a>
-              )}
-              {userUrl && (
-                <button type="button"
-                  onClick={()=>{ navigator.clipboard?.writeText(userUrl).then(()=>{setLinkCopied(true);setTimeout(()=>setLinkCopied(false),2000);}).catch(()=>{}); }}
-                  style={{display:'block',width:'100%',padding:'11px 0',background:'transparent',
-                    border:'1px solid rgba(247,201,72,.5)',borderRadius:10,color:'#f7c948',
-                    fontWeight:700,fontSize:13,textAlign:'center',cursor:'pointer',marginBottom:14}}>
-                  {linkCopied?'✓ Lien copié':'📋 Copier le lien (à transmettre au signataire)'}
-                </button>
-              )}
-              <p style={{color:'rgba(255,255,255,.6)',lineHeight:1.6,fontSize:13,margin:0}}>
-                ⚠️ Pensez à <strong style={{color:'rgba(255,255,255,.85)'}}>vérifier que le consentement concerne bien le bon compteur</strong> (adresse / numéro de PDL) avant de signer. <strong style={{color:'rgba(255,255,255,.85)'}}>Si une autre personne doit signer</strong> (gérant de l'entreprise, titulaire du contrat), copiez le lien ci-dessus et transmettez-le-lui — aucun email ne lui est envoyé automatiquement.
-              </p>
-            </div>
-          )}
-
-          {/* Consentement signé, ENEDIS traite la demande */}
-          {status==='ordering' && (
-            <div style={{
-              background:'rgba(125,217,64,.1)',border:'1px solid rgba(125,217,64,.28)',
-              borderRadius:16,padding:'20px 18px',
-            }}>
-              <div style={{fontSize:22,marginBottom:8}}>☕</div>
-              <p style={{color:'rgba(255,255,255,.9)',lineHeight:1.7,fontSize:14,margin:0}}>
-                <strong style={{color:'#7dd940'}}>Bonne nouvelle, tout semble en ordre&nbsp;!</strong> ENEDIS a retrouvé votre dossier et transfère actuellement les données. Cela peut prendre entre 1 et 10 minutes — vous pouvez aller prendre un café ou directement vous connecter à l'appli pour l'explorer.
-              </p>
-            </div>
-          )}
-
-          {/* Tout est récupéré */}
-          {status==='done' && (
-            <div style={{
-              background:'rgba(125,217,64,.12)',border:'1px solid rgba(125,217,64,.32)',
-              borderRadius:16,padding:'20px 18px',
-            }}>
-              <div style={{fontSize:22,marginBottom:8}}>🎉</div>
-              <p style={{color:'rgba(255,255,255,.92)',lineHeight:1.7,fontSize:14,margin:0}}>
-                <strong style={{color:'#7dd940'}}>Super, on a tout&nbsp;!</strong> À vous de jouer maintenant pour identifier ensemble comment réduire votre facture en quelques clics.
-              </p>
-            </div>
-          )}
-
-          {/* Erreur */}
-          {status==='error' && (
-            <div style={{
-              background:'rgba(255,107,107,.08)',border:'1px solid rgba(255,107,107,.28)',
-              borderRadius:16,padding:'20px 18px',
-            }}>
-              <div style={{fontSize:22,marginBottom:8}}>😕</div>
-              <p style={{color:'rgba(255,255,255,.9)',lineHeight:1.7,fontSize:14,margin:'0 0 10px'}}>
-                Cela arrive parfois&nbsp;: ENEDIS n'a pas pu finaliser la récupération du premier coup. Pas d'inquiétude !
-              </p>
-              <p style={{color:'rgba(255,255,255,.7)',lineHeight:1.65,fontSize:13,margin:0}}>
-                Réessayez dans quelques heures depuis la page <strong style={{color:'rgba(255,255,255,.9)'}}>« Mon site »</strong>. Si cela ne fonctionne toujours pas, contactez Starvolt via le <strong style={{color:'rgba(255,255,255,.9)'}}>pouce vers le bas 👎</strong> en haut de l'interface.
-              </p>
-            </div>
-          )}
-
         </div>
       </div>
       <StickyFooter>
         <button className="btn btn-yes" onClick={onVisualiser}>
-          Visualiser mon site →
+          OK, j'ai compris →
         </button>
       </StickyFooter>
     </>
@@ -2234,7 +2107,10 @@ function genPassword() {
 }
 
 function AuthSignupScreen({ onGoToLogin, onSignedUp, onSuccessDone }) {
-  const [accountType,   setAccountType]   = useState('particulier'); // 'particulier' | 'entreprise'
+  const [step,          setStep]          = useState('choice'); // 'choice' (étape 0) | 'form'
+  const [accountType,   setAccountType]   = useState(null);     // null tant qu'aucun choix | 'particulier' | 'entreprise'
+  const [userIsGerant,  setUserIsGerant]  = useState(true);     // entreprise : l'utilisateur est le gérant signataire
+  const [pdl,           setPdl]           = useState('');       // numéro de compteur Linky (OPTIONNEL)
   const [prenom,        setPrenom]        = useState('');
   const [nom,           setNom]           = useState('');
   const [email,         setEmail]         = useState('');
@@ -2260,7 +2136,8 @@ function AuthSignupScreen({ onGoToLogin, onSignedUp, onSuccessDone }) {
   const baseFilled = prenom.trim() && nom.trim() && email.trim() &&
                      pwd.length >= 6 && adresse.trim() &&
                      codePostal.trim() && ville.trim() && enedisConsent;
-  const entFilled  = !isEntreprise || (raisonSociale.trim() && signerPrenom.trim() && signerNom.trim() && signerEmail.trim());
+  const gerantFilled = userIsGerant || (signerPrenom.trim() && signerNom.trim() && signerEmail.trim());
+  const entFilled  = !isEntreprise || (raisonSociale.trim() && gerantFilled);
   const allFilled  = baseFilled && entFilled;
 
   // Premier champ manquant → message sympa
@@ -2273,9 +2150,9 @@ function AuthSignupScreen({ onGoToLogin, onSignedUp, onSuccessDone }) {
     if (!adresse.trim())    return 'L\'adresse du compteur 🏠';
     if (!codePostal.trim()) return 'Le code postal 📮';
     if (!ville.trim())      return 'La ville 🏙️';
-    if (isEntreprise && !signerPrenom.trim()) return 'Le prénom du gérant signataire ✍️';
-    if (isEntreprise && !signerNom.trim())    return 'Le nom du gérant signataire ✍️';
-    if (isEntreprise && !signerEmail.trim())  return 'L\'email du gérant pour la signature ✉️';
+    if (isEntreprise && !userIsGerant && !signerPrenom.trim()) return 'Le prénom du gérant signataire ✍️';
+    if (isEntreprise && !userIsGerant && !signerNom.trim())    return 'Le nom du gérant signataire ✍️';
+    if (isEntreprise && !userIsGerant && !signerEmail.trim())  return 'L\'email du gérant pour la signature ✉️';
     if (!enedisConsent)     return 'Cochez la case pour autoriser la récupération de la conso ⚡';
     return null;
   };
@@ -2284,7 +2161,7 @@ function AuthSignupScreen({ onGoToLogin, onSignedUp, onSuccessDone }) {
   useEffect(() => {
     if (allFilled) { setHint(null); return; }
     setHint(h => h !== null ? firstMissingMessage() : h);
-  }, [accountType, prenom, nom, email, pwd, raisonSociale, adresse, codePostal, ville, signerPrenom, signerNom, signerEmail, enedisConsent]);
+  }, [accountType, userIsGerant, prenom, nom, email, pwd, raisonSociale, adresse, codePostal, ville, signerPrenom, signerNom, signerEmail, enedisConsent]);
 
   const ANON_KEY         = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhreGtod2VncWthcGRic2lzeHd2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc0MjY4NjksImV4cCI6MjA5MzAwMjg2OX0.9-_oHRJfwXZkl3bRYDMb5K56UzB8O1NOfa5QfrXFfkQ';
   const EDGE_URL         = 'https://hkxkhwegqkapdbsisxwv.supabase.co/functions/v1/switchgrid-v0';
@@ -2292,6 +2169,12 @@ function AuthSignupScreen({ onGoToLogin, onSignedUp, onSuccessDone }) {
 
   const handleSignup = async () => {
     setLoading(true); setError(null);
+
+    // Signataire entreprise : si l'utilisateur est le gérant, on duplique ses infos
+    // (structure DB inchangée), sinon on prend les champs gérant saisis.
+    const sigPrenom = userIsGerant ? prenom.trim() : signerPrenom.trim();
+    const sigNom    = userIsGerant ? nom.trim()    : signerNom.trim();
+    const sigEmail  = userIsGerant ? email.trim()  : signerEmail.trim();
 
     // Pré-remplir le profil AVANT signUp pour que pendingProfileRef soit prêt
     onSignedUp?.({ prenom: prenom.trim(), nom: nom.trim() });
@@ -2331,9 +2214,10 @@ function AuthSignupScreen({ onGoToLogin, onSignedUp, onSuccessDone }) {
           raison_sociale: isEntreprise ? raisonSociale.trim() : null,
           titulaire_prenom: prenom.trim(),
           titulaire_nom:  nom.trim(),
-          signer_prenom:  isEntreprise ? signerPrenom.trim() : null,
-          signer_nom:     isEntreprise ? signerNom.trim()    : null,
-          signer_email:   isEntreprise ? signerEmail.trim()  : null,
+          signer_prenom:  isEntreprise ? sigPrenom : null,
+          signer_nom:     isEntreprise ? sigNom    : null,
+          signer_email:   isEntreprise ? sigEmail  : null,
+          pdl:            pdl.trim() || null,
           adresse_ligne1: adresse.trim(),
           code_postal:    codePostal.trim(),
           ville:          ville.trim(),
@@ -2358,14 +2242,14 @@ function AuthSignupScreen({ onGoToLogin, onSignedUp, onSuccessDone }) {
             },
             body: JSON.stringify({
               site_id:        newSite.id,
-              pdl:            '',
+              pdl:            pdl.trim(),
               account_type:   accountType,
               raison_sociale: isEntreprise ? raisonSociale.trim() : null,
               firstName:      prenom.trim(),
               lastName:       nom.trim(),
-              signer_prenom:  isEntreprise ? signerPrenom.trim() : null,
-              signer_nom:     isEntreprise ? signerNom.trim()    : null,
-              signer_email:   isEntreprise ? signerEmail.trim()  : null,
+              signer_prenom:  isEntreprise ? sigPrenom : null,
+              signer_nom:     isEntreprise ? sigNom    : null,
+              signer_email:   isEntreprise ? sigEmail  : null,
               address:        adresse.trim(),
               codePostal:     codePostal.trim(),
               commune:        ville.trim(),
@@ -2408,8 +2292,43 @@ function AuthSignupScreen({ onGoToLogin, onSignedUp, onSuccessDone }) {
         consentUrl={successData.consentUrl}
         requestId={successData.requestId}
         siteId={successData.siteId}
-        onVisualiser={()=>{ onSuccessDone?.(successData.userId, 'MA_CONSO'); }}
+        onVisualiser={()=>{ try{localStorage.setItem('starvolt_focus_enedis','1');}catch{} onSuccessDone?.(successData.userId, 'MA_CONSO'); }}
       />
+    );
+  }
+
+  // ── Étape 0 — choix du type de compte (avant le formulaire) ──────────────
+  if (step === 'choice') {
+    return (
+      <div className="screen fade-in signup-compact">
+        <div className="auth-header">
+          <div className="welcome-tag">La constellation vous attend</div>
+          <h1 className="welcome-title">Créez votre<br/><span className="accent">compte</span></h1>
+        </div>
+        <div className="form-card" style={{paddingTop:24,paddingBottom:24}}>
+          <div style={{fontSize:16,fontWeight:700,color:'rgba(255,255,255,.9)',textAlign:'center',marginBottom:18}}>
+            Créer un compte pour…
+          </div>
+          <div style={{display:'flex',flexDirection:'column',gap:12}}>
+            {[['particulier','👤','Un particulier','Pour votre logement'],
+              ['entreprise','🏢','Un professionnel','Pour votre entreprise / local']].map(([val,emoji,title,sub])=>(
+              <button key={val} type="button"
+                onClick={()=>{ setAccountType(val); setStep('form'); }}
+                style={{display:'flex',alignItems:'center',gap:14,width:'100%',textAlign:'left',
+                  padding:'16px 18px',borderRadius:14,cursor:'pointer',transition:'all .15s',
+                  border:'2px solid rgba(255,255,255,.18)',background:'rgba(255,255,255,.04)',color:'#fff'}}>
+                <span style={{fontSize:28,lineHeight:1}}>{emoji}</span>
+                <span style={{display:'flex',flexDirection:'column'}}>
+                  <span style={{fontSize:16,fontWeight:800}}>{title}</span>
+                  <span style={{fontSize:12,color:'rgba(255,255,255,.55)'}}>{sub}</span>
+                </span>
+                <span style={{marginLeft:'auto',color:'#f7c948',fontSize:20,fontWeight:800}}>→</span>
+              </button>
+            ))}
+          </div>
+        </div>
+        <button className="btn-link" onClick={onGoToLogin}>Déjà membre ? Se connecter</button>
+      </div>
     );
   }
 
@@ -2417,22 +2336,17 @@ function AuthSignupScreen({ onGoToLogin, onSignedUp, onSuccessDone }) {
     <>
       <div className="screen fade-in signup-compact">
         <div className="auth-header">
-          <div className="welcome-tag">La constellation vous attend</div>
+          <button type="button" onClick={()=>setStep('choice')}
+            style={{background:'none',border:'none',color:'rgba(255,255,255,.55)',fontSize:13,fontWeight:600,cursor:'pointer',padding:'0 0 8px'}}>← Changer de type de compte</button>
+          <div className="welcome-tag">{isEntreprise?'🏢 Compte professionnel':'👤 Compte particulier'}</div>
           <h1 className="welcome-title">Créez votre<br/><span className="accent">compte</span></h1>
         </div>
         <div className="form-card">
-          {/* Type de compte — particulier (défaut) ou entreprise */}
-          <div style={{display:'flex',gap:8,marginBottom:16}}>
-            {[['particulier','👤 Particulier'],['entreprise','🏢 Entreprise']].map(([val,lbl])=>{
-              const active = accountType===val;
-              return (
-                <button key={val} type="button" onClick={()=>setAccountType(val)}
-                  style={{flex:1,padding:'11px 8px',borderRadius:10,fontSize:14,fontWeight:700,cursor:'pointer',transition:'all .15s',
-                    border:`2px solid ${active?'#f7c948':'rgba(255,255,255,.18)'}`,
-                    background:active?'rgba(247,201,72,.14)':'transparent',
-                    color:active?'#f7c948':'rgba(255,255,255,.6)'}}>{lbl}</button>
-              );
-            })}
+          {/* Bandeau de cadrage — aide à la correspondance ENEDIS */}
+          <div style={{background:'rgba(247,201,72,.1)',border:'1px solid rgba(247,201,72,.28)',borderRadius:10,padding:'10px 12px',marginBottom:16,fontSize:12.5,lineHeight:1.5,color:'rgba(255,255,255,.82)'}}>
+            {isEntreprise
+              ? <>Pour récupérer vos données de consommation sans souci, attention de bien utiliser <strong style={{color:'#f7c948'}}>la raison sociale et l'adresse</strong> que vous avez utilisées pour votre abonnement d'électricité.</>
+              : <>Pour récupérer vos données de consommation sans souci, veillez à utiliser <strong style={{color:'#f7c948'}}>le nom, le prénom et l'adresse</strong> exactement tels qu'ils figurent sur votre abonnement d'électricité.</>}
           </div>
 
           {/* Section A — vos identifiants */}
@@ -2489,25 +2403,58 @@ function AuthSignupScreen({ onGoToLogin, onSignedUp, onSuccessDone }) {
             </div>
           </div>
 
+          {/* PDL — facultatif, présenté de façon discrète */}
+          <div className="inp-group" style={{opacity:.85}}>
+            <label className="inp-label" style={{color:'rgba(255,255,255,.4)',fontWeight:500}}>
+              PDL — n° de compteur Linky <span style={{fontSize:11,fontStyle:'italic'}}>(facultatif, 14 chiffres)</span>
+            </label>
+            <input className="inp" value={pdl} onChange={e=>setPdl(e.target.value.replace(/\D/g,'').slice(0,14))}
+              placeholder="Optionnel — accélère la recherche" inputMode="numeric"
+              style={{background:'rgba(255,255,255,.03)',borderColor:'rgba(255,255,255,.1)'}}/>
+          </div>
+
           {/* Section C — signataire (entreprise uniquement) */}
           {isEntreprise && (
             <>
               <div style={{fontSize:12,fontWeight:800,letterSpacing:.5,textTransform:'uppercase',color:'rgba(255,255,255,.45)',margin:'18px 0 4px'}}>3 · Signataire du consentement</div>
-              <div style={{fontSize:12,lineHeight:1.45,color:'rgba(255,255,255,.5)',marginBottom:10}}>Le représentant légal (gérant) habilité à autoriser l'accès aux données ENEDIS. Il recevra le lien de signature par email.</div>
-              <div className="inp-row">
-                <div className="inp-group">
-                  <label className="inp-label">Prénom du gérant</label>
-                  <input className="inp" value={signerPrenom} onChange={e=>setSignerPrenom(e.target.value)} placeholder="Jean"/>
+
+              {/* L'utilisateur est-il le gérant ? Si oui, on duplique ses infos. */}
+              <label style={{display:'flex',alignItems:'center',gap:10,cursor:'pointer',padding:'8px 0 10px'}}>
+                <span style={{position:'relative',flexShrink:0}}>
+                  <input type="checkbox" checked={userIsGerant} onChange={e=>setUserIsGerant(e.target.checked)}
+                    style={{position:'absolute',opacity:0,width:20,height:20,cursor:'pointer',margin:0}}/>
+                  <span style={{display:'flex',alignItems:'center',justifyContent:'center',width:20,height:20,borderRadius:5,
+                    border:`2px solid ${userIsGerant?'#f7c948':'rgba(255,255,255,0.25)'}`,
+                    background:userIsGerant?'#f7c948':'transparent',transition:'all .2s'}}>
+                    {userIsGerant&&<span style={{fontSize:12,color:'#061e2a',fontWeight:900,lineHeight:1}}>✓</span>}
+                  </span>
+                </span>
+                <span style={{fontSize:13.5,fontWeight:600,color:'rgba(255,255,255,.85)'}}>Je suis le gérant signataire</span>
+              </label>
+
+              {userIsGerant ? (
+                <div style={{fontSize:12,lineHeight:1.45,color:'rgba(255,255,255,.5)',marginBottom:6}}>
+                  C'est vous qui signerez le consentement ENEDIS. Décochez si le représentant légal est une autre personne.
                 </div>
-                <div className="inp-group">
-                  <label className="inp-label">Nom du gérant</label>
-                  <input className="inp" value={signerNom} onChange={e=>setSignerNom(e.target.value)} placeholder="Dupont"/>
-                </div>
-              </div>
-              <div className="inp-group">
-                <label className="inp-label">Email du gérant</label>
-                <input className="inp" type="email" value={signerEmail} onChange={e=>setSignerEmail(e.target.value)} placeholder="gerant@entreprise.fr"/>
-              </div>
+              ) : (
+                <>
+                  <div style={{fontSize:12,lineHeight:1.45,color:'rgba(255,255,255,.5)',marginBottom:10}}>Le représentant légal (gérant) habilité à autoriser l'accès aux données ENEDIS.</div>
+                  <div className="inp-row">
+                    <div className="inp-group">
+                      <label className="inp-label">Prénom du gérant</label>
+                      <input className="inp" value={signerPrenom} onChange={e=>setSignerPrenom(e.target.value)} placeholder="Jean"/>
+                    </div>
+                    <div className="inp-group">
+                      <label className="inp-label">Nom du gérant</label>
+                      <input className="inp" value={signerNom} onChange={e=>setSignerNom(e.target.value)} placeholder="Dupont"/>
+                    </div>
+                  </div>
+                  <div className="inp-group">
+                    <label className="inp-label">Email du gérant</label>
+                    <input className="inp" type="email" value={signerEmail} onChange={e=>setSignerEmail(e.target.value)} placeholder="gerant@entreprise.fr"/>
+                  </div>
+                </>
+              )}
             </>
           )}
 
@@ -4086,6 +4033,9 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
   const[linkyError,setLinkyError]=useState(null);
   const[linkyErrorStep,setLinkyErrorStep]=useState(null); // 0..3 : étape où l'erreur s'est produite
   const[linkCopied,setLinkCopied]=useState(false); // feedback "lien copié" du bouton de partage consentement
+  const[consentModal,setConsentModal]=useState(null); // null | 'invite' | 'iframe' — fenêtre de consentement in-app
+  const consentShownRef=useRef(null); // requestId pour lequel l'invite a déjà été ouverte automatiquement
+  const enedisRef=useRef(null); // zone ENEDIS — cible du scroll/centre auto au retour de l'inscription
   const linkyPollRef=useRef(null);
   const[bilanGenerating,setBilanGenerating]=useState(false);
   const[bilanOpen,setBilanOpen]=useState(false);
@@ -4111,6 +4061,33 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
     }catch{}
     setLinkyRequestId(null);setLinkyStatus(null);setLinkyUserUrl(null);setLinkyError(null);
   },[activeId]);
+
+  // ── Retour de l'inscription : déplie la tuile conso + centre l'écran sur la zone ENEDIS ──
+  React.useEffect(()=>{
+    if(!activeId) return;
+    try{
+      if(localStorage.getItem('starvolt_focus_enedis')==='1'){
+        localStorage.removeItem('starvolt_focus_enedis');
+        setConsoOpen(true);
+        // laisser le rendu de la zone dépliée se faire avant de scroller
+        const t=setTimeout(()=>{ enedisRef.current?.scrollIntoView({behavior:'smooth',block:'center'}); },380);
+        return ()=>clearTimeout(t);
+      }
+    }catch{}
+  },[activeId]);
+
+  // ── Ouvre automatiquement la fenêtre de consentement dès que le lien est prêt,
+  //    et la ferme dès que le consentement est signé (statut ordering/done/error). ──
+  React.useEffect(()=>{
+    if(linkyStatus==='pending'&&linkyUserUrl){
+      if(consentShownRef.current!==linkyRequestId){
+        consentShownRef.current=linkyRequestId;
+        setConsentModal('invite');
+      }
+    } else if(linkyStatus==='ordering'||linkyStatus==='done'||linkyStatus==='error'){
+      setConsentModal(null);
+    }
+  },[linkyStatus,linkyUserUrl,linkyRequestId]);
 
   // ── Poll Edge Function tant qu'une demande est en cours ──
   React.useEffect(()=>{
@@ -4756,7 +4733,7 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
                       {tariffs.map(t=><option key={t.id} value={t.id}>{t.nom}</option>)}
                     </select>
                   </div>
-                  <div>
+                  <div ref={enedisRef}>
                     <label style={{fontSize:10,color:'rgba(255,255,255,.45)',fontWeight:700,letterSpacing:'.5px',display:'block',marginBottom:4}}>PDL (numéro compteur Linky)</label>
                     <PDLInput value={site.pdl||''} onSave={v=>updateSite({pdl:v})}/>
 
@@ -4878,10 +4855,10 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
                             : <>Ouvrez le lien ci-dessous (ou transmettez-le au titulaire du contrat) pour autoriser Starvolt à accéder aux données ENEDIS. Cette page se mettra à jour automatiquement une fois le consentement validé.</>}
                         </div>
                         <div style={{display:'flex',gap:8,flexWrap:'wrap',alignItems:'center'}}>
-                          <a href={linkyUserUrl} target="_blank" rel="noopener noreferrer"
-                            style={{display:'inline-block',background:'#f7c948',color:'#061e2a',fontWeight:800,fontSize:12,borderRadius:7,padding:'8px 14px',textDecoration:'none'}}>
+                          <button type="button" onClick={()=>setConsentModal('iframe')}
+                            style={{background:'#f7c948',color:'#061e2a',fontWeight:800,fontSize:12,borderRadius:7,padding:'8px 14px',border:'none',cursor:'pointer'}}>
                             Signer le consentement ENEDIS →
-                          </a>
+                          </button>
                           <button type="button"
                             onClick={()=>{ navigator.clipboard?.writeText(linkyUserUrl).then(()=>{setLinkCopied(true);setTimeout(()=>setLinkCopied(false),2000);}).catch(()=>{}); }}
                             style={{background:'transparent',border:'1px solid rgba(247,201,72,.5)',borderRadius:7,color:'#f7c948',fontSize:12,fontWeight:700,padding:'8px 12px',cursor:'pointer',whiteSpace:'nowrap'}}>
@@ -5218,6 +5195,44 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
         {onSimulations&&<button className="btn btn-primary" style={{fontSize:13}} onClick={onSimulations}>Simulations d'économies →</button>}
         {onComprendre&&<button className="btn" style={{fontSize:13}} onClick={onComprendre}>💡 Comprendre</button>}
       </StickyFooter>
+
+      {/* ── Fenêtre de consentement ENEDIS in-app : invite « bravo » puis iframe Switchgrid ── */}
+      {consentModal&&linkyUserUrl&&(
+        <div style={{position:'fixed',inset:0,zIndex:9000,background:'rgba(3,12,18,.82)',backdropFilter:'blur(4px)',WebkitBackdropFilter:'blur(4px)',display:'flex',alignItems:'center',justifyContent:'center',padding:consentModal==='iframe'?0:16}}>
+          {consentModal==='invite'?(
+            <div className="card" style={{maxWidth:380,width:'100%',textAlign:'center',padding:'26px 22px'}}>
+              <div style={{fontSize:42,marginBottom:8}}>🎉</div>
+              <div style={{fontSize:18,fontWeight:900,color:'#fff',marginBottom:8,lineHeight:1.2}}>Bravo !</div>
+              <div style={{color:'rgba(255,255,255,.78)',fontSize:13,lineHeight:1.55,marginBottom:18}}>
+                Nous avons trouvé dans la base ENEDIS ce qui semble être <strong style={{color:'#fff'}}>votre dossier</strong>. Dernière étape : donnez votre consentement pour autoriser l'accès à vos données de consommation.
+              </div>
+              <button onClick={()=>setConsentModal('iframe')}
+                style={{width:'100%',background:'#f7c948',color:'#061e2a',fontWeight:800,fontSize:14,borderRadius:10,padding:'12px',border:'none',cursor:'pointer'}}>
+                Donner mon consentement →
+              </button>
+              <button onClick={()=>setConsentModal(null)}
+                style={{marginTop:10,background:'none',border:'none',color:'rgba(255,255,255,.45)',fontSize:12,cursor:'pointer'}}>Plus tard</button>
+            </div>
+          ):(
+            <div style={{width:'100%',maxWidth:760,height:'100%',maxHeight:isMobile?'100vh':'92vh',display:'flex',flexDirection:'column',background:'#0a1a24',borderRadius:isMobile?0:14,overflow:'hidden',boxShadow:'0 20px 60px rgba(0,0,0,.5)'}}>
+              <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'10px 14px',borderBottom:'1px solid rgba(255,255,255,.1)',flexShrink:0}}>
+                <div style={{fontWeight:800,fontSize:13,color:'#fff',display:'flex',alignItems:'center',gap:6}}>⚡ Consentement ENEDIS</div>
+                <div style={{display:'flex',alignItems:'center',gap:10}}>
+                  <a href={linkyUserUrl} target="_blank" rel="noopener noreferrer"
+                    style={{fontSize:11,color:'rgba(247,201,72,.9)',textDecoration:'none',fontWeight:600,whiteSpace:'nowrap'}}>Ouvrir dans un onglet ↗</a>
+                  <button onClick={()=>setConsentModal(null)}
+                    style={{background:'rgba(255,255,255,.08)',border:'1px solid rgba(255,255,255,.15)',color:'rgba(255,255,255,.7)',borderRadius:7,fontSize:13,fontWeight:700,padding:'5px 11px',cursor:'pointer'}}>✕ Fermer</button>
+                </div>
+              </div>
+              <iframe src={linkyUserUrl} title="Consentement ENEDIS" allow="clipboard-write"
+                style={{flex:1,width:'100%',border:'none',background:'#fff'}}/>
+              <div style={{padding:'7px 14px',borderTop:'1px solid rgba(255,255,255,.08)',color:'rgba(255,255,255,.5)',fontSize:10,lineHeight:1.4,flexShrink:0,textAlign:'center'}}>
+                Cette fenêtre se fermera automatiquement une fois le consentement signé.
+              </div>
+            </div>
+          )}
+        </div>
+      )}
     </>
   );
 }
