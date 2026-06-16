@@ -9143,7 +9143,7 @@ function AdminDashboard({ onViewLogs, onImpersonate }) {
   );
 }
 
-function AdminScreen({ onTariffs, onUsers, onSpot, onAcc, onProduction, onGlobalVars, onPrix, onOffres, onLearn, onFeedback, onProofread, onAICosts, onAIPrompts, onViewLogs, onImpersonate, onBack }) {
+function AdminScreen({ onTariffs, onUsers, onSites, onSpot, onAcc, onProduction, onGlobalVars, onPrix, onOffres, onLearn, onFeedback, onProofread, onAICosts, onAIPrompts, onViewLogs, onImpersonate, onBack }) {
   return (
     <>
     <div className="screen screen-admin fade-in">
@@ -9218,12 +9218,20 @@ function AdminScreen({ onTariffs, onUsers, onSpot, onAcc, onProduction, onGlobal
         </div>
 
         <div className="admin-group">
-          <div className="admin-group-label"><span className="agl-ico">👥</span>Utilisateurs</div>
+          <div className="admin-group-label"><span className="agl-ico">👥</span>Data clients</div>
           <button className="sim-btn" onClick={onUsers}>
             <span className="sim-icon">🧑‍🤝‍🧑</span>
             <div className="sim-text">
               <div className="sim-title">Gestion des utilisateurs</div>
               <div className="sim-sub">Voir et gérer les membres Starvolt</div>
+            </div>
+            <span className="sim-arrow">→</span>
+          </button>
+          <button className="sim-btn" onClick={onSites}>
+            <span className="sim-icon">🏠</span>
+            <div className="sim-text">
+              <div className="sim-title">Data sites</div>
+              <div className="sim-sub">Tous les sites de tous les utilisateurs</div>
             </div>
             <span className="sim-arrow">→</span>
           </button>
@@ -10942,6 +10950,187 @@ function AdminUsersScreen({ onBack, onViewLogs, isSuperadmin }) {
   );
 }
 
+// ─── Helpers Data sites (partagés liste + édition) ───
+const SURFACE_LABELS = { small: '< 70 m²', medium: '70–150 m²', large: '> 150 m²' };
+const siteChauffageElec = (v) => v === 'elec' || v === 'pac'; // PAC = électrique (décision produit)
+const OuiNon = ({ value }) => (
+  value == null
+    ? <span style={{color:'rgba(255,255,255,.3)'}}>—</span>
+    : <span style={{
+        fontWeight:700, fontSize:12, padding:'2px 8px', borderRadius:8,
+        color: value ? '#7dd940' : 'rgba(255,255,255,.55)',
+        background: value ? 'rgba(125,217,64,.12)' : 'rgba(255,255,255,.05)',
+      }}>{value ? 'oui' : 'non'}</span>
+);
+
+// ─── AdminSitesScreen : tous les sites de tous les utilisateurs ───
+function AdminSitesScreen({ onBack, onEdit }) {
+  const [rows, setRows] = useState(null);
+  useEffect(() => { sb.rpc('admin_get_all_sites').then(({ data }) => setRows(data || [])); }, []);
+
+  const cols = ['Propriétaire', 'Site', 'Conso', 'Chauffage élec', 'ECS élec', 'Propriétaire', 'Collectif', 'Surface'];
+  const th = { textAlign:'left', padding:'8px 10px', color:'rgba(255,255,255,.4)', fontWeight:600,
+    borderBottom:'1px solid rgba(255,255,255,.08)', whiteSpace:'nowrap', fontSize:12 };
+  const td = { padding:'10px', borderBottom:'1px solid rgba(255,255,255,.06)', whiteSpace:'nowrap' };
+
+  return (
+    <>
+    <div className="screen fade-in" style={{padding:'0 0 80px', maxWidth:'100%', width:'100%'}}>
+      <div className="auth-header">
+        <div className="welcome-tag" style={{color:'#ffb340'}}>Administration</div>
+        <h1 className="welcome-title">Data<br/><span className="accent">sites {rows ? `(${rows.length})` : ''}</span></h1>
+      </div>
+
+      {!rows ? <div style={{textAlign:'center',padding:40}}><div className="spinner" style={{margin:'0 auto'}}/></div> : (
+        <div style={{overflowX:'auto', padding:'0 16px'}}>
+          <table style={{width:'100%', minWidth:840, borderCollapse:'collapse', fontSize:13}}>
+            <thead><tr>{cols.map((c,i) => <th key={i} style={th}>{c}</th>)}</tr></thead>
+            <tbody>
+              {rows.map((r) => (
+                <tr key={r.site_id} onClick={()=>onEdit(r)}
+                  style={{cursor:'pointer', transition:'background .12s'}}
+                  onMouseEnter={e=>e.currentTarget.style.background='rgba(255,255,255,.04)'}
+                  onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
+                  <td style={{...td, fontWeight:600, color:'white'}}>{`${r.owner_prenom||''} ${r.owner_nom||''}`.trim() || '—'}</td>
+                  <td style={{...td, color:'rgba(255,255,255,.85)'}}>{r.site_nom || '—'}</td>
+                  <td style={{...td, color:'rgba(255,255,255,.85)'}}>{r.conso_annuelle_kwh>0 ? `${(r.conso_annuelle_kwh/1000).toFixed(1)} MWh` : '—'}</td>
+                  <td style={td}><OuiNon value={r.flex_chauffage==null?null:siteChauffageElec(r.flex_chauffage)}/></td>
+                  <td style={td}><OuiNon value={r.flex_ecs==null?null:r.flex_ecs==='elec'}/></td>
+                  <td style={td}><OuiNon value={r.flex_statut==null?null:r.flex_statut==='proprietaire'}/></td>
+                  <td style={td}><OuiNon value={r.flex_type_logement==null?null:r.flex_type_logement==='collectif'}/></td>
+                  <td style={{...td, color:'rgba(255,255,255,.85)'}}>{SURFACE_LABELS[r.flex_surface] || '—'}</td>
+                </tr>
+              ))}
+              {rows.length===0 && <tr><td colSpan={cols.length} style={{...td, textAlign:'center', color:'rgba(255,255,255,.4)'}}>Aucun site</td></tr>}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+    <StickyFooter onBack={onBack}/>
+    </>
+  );
+}
+
+// ─── AdminSiteEditScreen : édition des champs d'un site (sauf propriétaire/nom/conso) ───
+function AdminSiteEditScreen({ site, onSave, onBack }) {
+  const [chauffage,   setChauffage]   = useState(site?.flex_chauffage || null);
+  const [ecs,         setEcs]         = useState(site?.flex_ecs || null);
+  const [surface,     setSurface]     = useState(site?.flex_surface || null);
+  const [typeLogement,setTypeLogement]= useState(site?.flex_type_logement || null);
+  const [statut,      setStatut]      = useState(site?.flex_statut || null);
+  const [saving,      setSaving]      = useState(false);
+
+  const handleSave = async () => {
+    setSaving(true);
+    const { error } = await sb.rpc('admin_update_site_flex', {
+      p_site_id: site.site_id, p_chauffage: chauffage, p_ecs: ecs,
+      p_surface: surface, p_type_logement: typeLogement, p_statut: statut,
+    });
+    setSaving(false);
+    if (error) { alert('Enregistrement refusé : ' + error.message); return; }
+    onSave();
+  };
+
+  const bS = (active) => ({
+    flex: 1, padding: '13px 6px', borderRadius: 12,
+    border: `2px solid ${active ? '#7dd940' : 'rgba(255,255,255,.13)'}`,
+    background: active ? 'rgba(125,217,64,.11)' : 'rgba(255,255,255,.04)',
+    color: 'white', cursor: 'pointer', fontFamily: 'inherit', textAlign: 'center',
+  });
+  const lS = (active) => ({ fontSize: 12, fontWeight: active ? 800 : 600, color: active ? '#7dd940' : 'rgba(255,255,255,.75)' });
+  const sec = { fontSize: 11, fontWeight: 700, color: 'rgba(255,255,255,.4)', textTransform: 'uppercase', letterSpacing: '.6px', marginBottom: 10 };
+  const toggle = (cur, val, setter) => setter(cur === val ? null : val);
+
+  return (
+    <>
+    <div className="screen fade-in">
+      <div className="auth-header">
+        <div className="welcome-tag" style={{color:'#ffb340'}}>Data sites · édition</div>
+        <h1 className="welcome-title" style={{fontSize:24}}>{site?.site_nom || 'Site'}</h1>
+      </div>
+
+      {/* Champs non éditables (3 premières colonnes) */}
+      <div className="card" style={{ padding:'14px 16px', marginBottom:14, display:'flex', flexDirection:'column', gap:8 }}>
+        {[['Propriétaire', `${site?.owner_prenom||''} ${site?.owner_nom||''}`.trim() || '—'],
+          ['Site', site?.site_nom || '—'],
+          ['Consommation', site?.conso_annuelle_kwh>0 ? `${(site.conso_annuelle_kwh/1000).toFixed(1)} MWh` : '—']].map(([k,v]) => (
+          <div key={k} style={{display:'flex', justifyContent:'space-between', alignItems:'center'}}>
+            <span style={{fontSize:12, color:'rgba(255,255,255,.4)', fontWeight:600}}>{k}</span>
+            <span style={{fontSize:14, color:'white', fontWeight:700}}>{v}</span>
+          </div>
+        ))}
+      </div>
+
+      <div className="card" style={{ padding: '16px', marginBottom: 10 }}>
+        <div style={sec}>Type de chauffage</div>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button onClick={()=>toggle(chauffage,'elec',setChauffage)} style={bS(chauffage==='elec')}>
+            <div style={{ fontSize: 22, marginBottom: 5 }}>⚡</div><div style={lS(chauffage==='elec')}>Électrique</div>
+          </button>
+          <button onClick={()=>toggle(chauffage,'pac',setChauffage)} style={bS(chauffage==='pac')}>
+            <div style={{ fontSize: 22, marginBottom: 5 }}>♨️</div><div style={lS(chauffage==='pac')}>PAC</div>
+          </button>
+          <button onClick={()=>toggle(chauffage,'autre',setChauffage)} style={bS(chauffage==='autre')}>
+            <div style={{ fontSize: 22, marginBottom: 5 }}>🔥</div><div style={lS(chauffage==='autre')}>Autre</div>
+          </button>
+        </div>
+      </div>
+
+      <div className="card" style={{ padding: '16px', marginBottom: 10 }}>
+        <div style={sec}>Eau chaude sanitaire</div>
+        <div style={{ display: 'flex', gap: 10 }}>
+          <button onClick={()=>toggle(ecs,'elec',setEcs)} style={bS(ecs==='elec')}>
+            <div style={{ fontSize: 22, marginBottom: 5 }}>⚡</div><div style={lS(ecs==='elec')}>Électrique</div>
+          </button>
+          <button onClick={()=>toggle(ecs,'autre',setEcs)} style={bS(ecs==='autre')}>
+            <div style={{ fontSize: 22, marginBottom: 5 }}>🔥</div><div style={lS(ecs==='autre')}>Autre</div>
+          </button>
+        </div>
+      </div>
+
+      <div className="card" style={{ padding: '16px', marginBottom: 10 }}>
+        <div style={sec}>Surface du logement</div>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button onClick={()=>toggle(surface,'small',setSurface)} style={bS(surface==='small')}><div style={lS(surface==='small')}>{'< 70 m²'}</div></button>
+          <button onClick={()=>toggle(surface,'medium',setSurface)} style={bS(surface==='medium')}><div style={lS(surface==='medium')}>{'70–150 m²'}</div></button>
+          <button onClick={()=>toggle(surface,'large',setSurface)} style={bS(surface==='large')}><div style={lS(surface==='large')}>{'> 150 m²'}</div></button>
+        </div>
+      </div>
+
+      <div className="card" style={{ padding: '16px', marginBottom: 10 }}>
+        <div style={sec}>Type de logement</div>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button onClick={()=>toggle(typeLogement,'maison',setTypeLogement)} style={bS(typeLogement==='maison')}>
+            <div style={{ fontSize: 26, marginBottom: 5 }}>🏠</div><div style={lS(typeLogement==='maison')}>Maison<br/>individuelle</div>
+          </button>
+          <button onClick={()=>toggle(typeLogement,'collectif',setTypeLogement)} style={bS(typeLogement==='collectif')}>
+            <div style={{ fontSize: 26, marginBottom: 5 }}>🏢</div><div style={lS(typeLogement==='collectif')}>En collectif<br/>(appartement)</div>
+          </button>
+        </div>
+      </div>
+
+      <div className="card" style={{ padding: '16px', marginBottom: 10 }}>
+        <div style={sec}>Situation</div>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button onClick={()=>toggle(statut,'locataire',setStatut)} style={bS(statut==='locataire')}>
+            <div style={{ fontSize: 26, marginBottom: 5 }}>🔑</div><div style={lS(statut==='locataire')}>Locataire</div>
+          </button>
+          <button onClick={()=>toggle(statut,'proprietaire',setStatut)} style={bS(statut==='proprietaire')}>
+            <div style={{ fontSize: 26, marginBottom: 5 }}>📜</div><div style={lS(statut==='proprietaire')}>Propriétaire</div>
+          </button>
+        </div>
+      </div>
+    </div>
+    <StickyFooter row onBack={onBack}>
+      <button className="btn btn-yes" onClick={handleSave} disabled={saving} style={{ opacity: saving?0.5:1, flex: 1 }}>
+        {saving ? 'Enregistrement…' : 'Enregistrer →'}
+      </button>
+    </StickyFooter>
+    </>
+  );
+}
+
 // ─── ResetPasswordScreen ─────────────────────
 function ResetPasswordScreen({ onDone }) {
   const [pwd,     setPwd]     = useState('');
@@ -12260,6 +12449,7 @@ function App() {
           onTariffs={()=>goTo('ADMIN_TARIFFS')}
           onSpot={()=>goTo('SPOT_PRICES')}
           onUsers={()=>goTo('ADMIN_USERS')}
+          onSites={()=>goTo('ADMIN_SITES')}
           onAcc={()=>goTo('ADMIN_ACC')}
           onProduction={()=>goTo('ADMIN_PRODUCTION')}
           onGlobalVars={()=>goTo('ADMIN_GLOBAL_VARS')}
@@ -12350,6 +12540,10 @@ function App() {
 
       case 'ADMIN_USERS':
         return <AdminUsersScreen onBack={goBack} isSuperadmin={isSuperadmin} onViewLogs={(u) => goTo('ADMIN_USER_LOGS', { logUser: u })}/>;
+      case 'ADMIN_SITES':
+        return <AdminSitesScreen onBack={goBack} onEdit={(s)=>goTo('ADMIN_SITE_EDIT', { editSite: s })}/>;
+      case 'ADMIN_SITE_EDIT':
+        return <AdminSiteEditScreen site={state.editSite} onSave={()=>goTo('ADMIN_SITES')} onBack={goBack}/>;
       case 'ADMIN_USER_LOGS':
         return <AdminUserLogsScreen userId={state.logUser?.id} userName={`${state.logUser?.prenom||''} ${state.logUser?.nom||''}`.trim() || state.logUser?.email} onBack={goBack}/>;
 
