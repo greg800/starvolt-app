@@ -4034,6 +4034,7 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
   const[linkyErrorStep,setLinkyErrorStep]=useState(null); // 0..3 : étape où l'erreur s'est produite
   const[linkCopied,setLinkCopied]=useState(false); // feedback "lien copié" du bouton de partage consentement
   const[consentModal,setConsentModal]=useState(null); // null | 'invite' | 'iframe' — fenêtre de consentement in-app
+  const[autoLinkyArmed,setAutoLinkyArmed]=useState(false); // armé au retour de l'inscription pour lancer la collecte si besoin
   const consentShownRef=useRef(null); // requestId pour lequel l'invite a déjà été ouverte automatiquement
   const enedisRef=useRef(null); // zone ENEDIS — cible du scroll/centre auto au retour de l'inscription
   const linkyPollRef=useRef(null);
@@ -4069,6 +4070,7 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
       if(localStorage.getItem('starvolt_focus_enedis')==='1'){
         localStorage.removeItem('starvolt_focus_enedis');
         setConsoOpen(true);
+        setAutoLinkyArmed(true); // lance la collecte au retour de l'inscription si aucune n'est déjà en cours
         // laisser le rendu de la zone dépliée se faire avant de scroller
         const t=setTimeout(()=>{ enedisRef.current?.scrollIntoView({behavior:'smooth',block:'center'}); },380);
         return ()=>clearTimeout(t);
@@ -4248,6 +4250,18 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
   // Statut effectif pour le suivi par étapes : si une session d'import est en
   // cours on l'utilise ; sinon, un site déjà complet est affiché comme « done ».
   const effectiveLinkyStatus = linkyStatus || (siteHasFullHourly ? 'done' : null);
+
+  // ── Repli inscription : au retour de la création de compte, si aucune collecte
+  //    n'a démarré (le lancement post-signup est silencieux et peut échouer), on la
+  //    lance ici via handleLinkyImport — qui, lui, affiche les erreurs éventuelles. ──
+  React.useEffect(()=>{
+    if(!autoLinkyArmed || !site) return;
+    setAutoLinkyArmed(false);
+    let already=false;
+    try{ already=!!localStorage.getItem(`starvolt_linky_${activeId}`); }catch{}
+    if(already || linkyStatus || siteHasFullHourly) return; // déjà lancée ou déjà complète
+    handleLinkyImport(site);
+  },[autoLinkyArmed,site,activeId,linkyStatus,siteHasFullHourly]);
 
   // Sync champs locaux quand on change de site
   // Règle : si solar au panier → valeurs de la page solaire (panier) ; sinon → valeurs DB ou défauts
