@@ -1216,6 +1216,10 @@ const sb = supabase.createClient(
   'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhreGtod2VncWthcGRic2lzeHd2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc0MjY4NjksImV4cCI6MjA5MzAwMjg2OX0.9-_oHRJfwXZkl3bRYDMb5K56UzB8O1NOfa5QfrXFfkQ'
 );
 
+// ─── Constantes Switchgrid (collecte ENEDIS) — partagées MonSiteScreen + watcher global ──
+const SWITCHGRID_EDGE_URL = 'https://hkxkhwegqkapdbsisxwv.supabase.co/functions/v1/switchgrid-v0';
+const SB_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhreGtod2VncWthcGRic2lzeHd2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc0MjY4NjksImV4cCI6MjA5MzAwMjg2OX0.9-_oHRJfwXZkl3bRYDMb5K56UzB8O1NOfa5QfrXFfkQ';
+
 // ─── Tracking événements utilisateur ──────────────
 // UID courant stocké en global pour éviter un appel réseau à chaque clic
 window.__trackUserId = null;
@@ -3669,7 +3673,7 @@ function buildBilanFacts({ site, tariffs, globalVars, prodProfil }) {
 }
 
 // ─── EnergyBalanceChart ───────────────────────
-function EnergyBalanceChart({ balance, level, selMonth, selDay, setLevel, setSelMonth, setSelDay, hourlyPrices, isDynamic }) {
+function EnergyBalanceChart({ balance, level, selMonth, selDay, setLevel, setSelMonth, setSelDay, hourlyPrices, isDynamic, tutorial, onTutorialDone }) {
   const wrapperRef = useRef(null), canvasRef = useRef(null);
   const barsRef = useRef([]);
 
@@ -3979,6 +3983,117 @@ function EnergyBalanceChart({ balance, level, selMonth, selDay, setLevel, setSel
     boxShadow:'0 2px 8px rgba(125,217,64,.35)'
   };
 
+  // ─── Tutoriel guidé (points 9-10) ──────────────────────────────────────────
+  // Bulles explicatives (avance « ok j'ai compris ») puis démo animée : curseur jaune
+  // de la largeur d'une barre qui clique (2 clignotements + clic sonore) sur juin, descend
+  // au 24 juin (zoom horaire), navigue avec les flèches, puis dézoome à l'année.
+  const H_CHART = 240;
+  const [tutoPhase, setTutoPhase] = useState('idle'); // idle | bubbles | demo | done
+  const [tutoBubble, setTutoBubble] = useState(0);
+  const [cursor, setCursor] = useState({ x: 40, y: 120, dur: 600, on: false, pulse: false, caption: '' });
+  const abortRef = useRef(false);
+  const timeoutsRef = useRef([]);
+  const audioRef = useRef(null);
+  const startedRef = useRef(false);
+
+  const TUTO_BUBBLES = [
+    { icon:'📊', title:'Votre énergie, mois par mois', text:'Chaque barre = un mois de consommation. Vous pouvez double-cliquer sur une barre pour zoomer dans le détail (jour, puis heure par heure).' },
+    { icon:'📏', title:'Deux axes à lire', text:'À gauche : la quantité d\'électricité (les barres grises = ce que vous achetez au réseau). À droite : le prix de l\'électricité (les pointillés blancs).' },
+    { icon:'✨', title:'Je vous montre', text:'Regardez : je vais explorer votre courbe pour vous. Cliquez et laissez-vous guider.' },
+  ];
+
+  const sleep = (ms) => new Promise((res, rej) => {
+    const t = setTimeout(() => { if (abortRef.current) rej('abort'); else res(); }, ms);
+    timeoutsRef.current.push(t);
+  });
+  const playClick = () => {
+    try {
+      const AC = window.AudioContext || window.webkitAudioContext; if (!AC) return;
+      const ctx = audioRef.current || (audioRef.current = new AC());
+      if (ctx.state === 'suspended') ctx.resume();
+      const o = ctx.createOscillator(), g = ctx.createGain();
+      o.type = 'square'; o.frequency.value = 880;
+      g.gain.setValueAtTime(0.0001, ctx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.22, ctx.currentTime + 0.005);
+      g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.09);
+      o.connect(g); g.connect(ctx.destination);
+      o.start(); o.stop(ctx.currentTime + 0.1);
+    } catch {}
+  };
+  const barCenter = (idx) => {
+    const b = barsRef.current[idx];
+    if (!b) return null;
+    return b.x + b.w / 2;
+  };
+  const moveTo = (x, y, dur, caption) => { setCursor(c => ({ ...c, x, y, dur, on: true, caption: caption ?? c.caption })); return sleep(dur + 60); };
+  const blinkClick = async () => {
+    for (let i = 0; i < 2; i++) { setCursor(c => ({ ...c, on: false })); await sleep(130); setCursor(c => ({ ...c, on: true })); await sleep(130); }
+    playClick();
+    setCursor(c => ({ ...c, pulse: true })); await sleep(170); setCursor(c => ({ ...c, pulse: false }));
+  };
+
+  const runDemo = async () => {
+    try {
+      const W = wrapperRef.current?.clientWidth || 320;
+      const midY = H_CHART * 0.5;
+      // 0) vue annuelle
+      setLevel('month'); setSelMonth(null); setSelDay(null);
+      await sleep(700);
+      // 1) curseur → juin (index 5), double-clic → jours de juin
+      let cx = barCenter(5); if (cx == null) cx = W * 0.5;
+      await moveTo(cx, midY, 1000, 'On regarde le mois de juin…');
+      await blinkClick();
+      setSelMonth(6); setLevel('day');
+      await sleep(1000);
+      // 2) curseur → 24 juin (index 23), clic → heure par heure
+      let dx = barCenter(23); if (dx == null) dx = W * 0.8;
+      await moveTo(dx, midY, 3000, 'Puis le 24 juin en particulier…');
+      await blinkClick();
+      setSelDay(24); setLevel('hour');
+      await sleep(1000);
+      // 3) flèche droite → 25 juin, puis 26 juin
+      await moveTo(W - 20, 20, 3000, 'La flèche → avance d\'un jour.');
+      await blinkClick(); setSelDay(25); await sleep(1000);
+      await blinkClick(); setSelDay(26); await sleep(1000);
+      // 4) flèche gauche → retour au 24 juin (≈2 s par page)
+      await moveTo(20, 20, 1300, 'La flèche ← revient en arrière.');
+      await blinkClick(); setSelDay(25); await sleep(2000);
+      await blinkClick(); setSelDay(24); await sleep(2000);
+      // 5) loupe dézoom : heure → jour → année
+      const zoomY = H_CHART - 28 - 16;
+      await moveTo(20, zoomY, 1500, 'La loupe dézoome.');
+      await blinkClick(); setLevel('day'); await sleep(1500);
+      await blinkClick(); setLevel('month'); setSelMonth(null); setSelDay(null); await sleep(900);
+      // fin
+      setCursor(c => ({ ...c, on: false }));
+      setTutoPhase('done');
+      onTutorialDone && onTutorialDone();
+    } catch (e) { /* abort sur démontage */ }
+  };
+
+  // Démarre le tutoriel quand le parent l'active
+  useEffect(() => {
+    if (tutorial && !startedRef.current) { startedRef.current = true; abortRef.current = false; setTutoPhase('bubbles'); setTutoBubble(0); }
+  }, [tutorial]);
+  // Nettoyage : annule la séquence si le composant est démonté
+  useEffect(() => () => { abortRef.current = true; timeoutsRef.current.forEach(clearTimeout); timeoutsRef.current = []; }, []);
+
+  const advanceBubble = () => {
+    if (tutoBubble < TUTO_BUBBLES.length - 1) { setTutoBubble(b => b + 1); return; }
+    setTutoPhase('demo');
+    setCursor(c => ({ ...c, on: true }));
+    runDemo();
+  };
+  const skipTutorial = () => {
+    abortRef.current = true; timeoutsRef.current.forEach(clearTimeout); timeoutsRef.current = [];
+    setCursor(c => ({ ...c, on: false }));
+    setTutoPhase('done');
+    onTutorialDone && onTutorialDone();
+  };
+
+  const tutoActive = tutoPhase === 'bubbles' || tutoPhase === 'demo';
+  const curBubble = TUTO_BUBBLES[tutoBubble];
+
   return (
     <div ref={wrapperRef} style={{position:'relative', width:'100%'}}>
       {level !== 'month' && (
@@ -4004,6 +4119,56 @@ function EnergyBalanceChart({ balance, level, selMonth, selDay, setLevel, setSel
         </button>
       )}
       {ctxLabel && <div style={{textAlign:'center',fontSize:22,fontWeight:700,color:'rgba(255,255,255,.75)',marginTop:4}}>{ctxLabel}</div>}
+
+      {/* ── Tutoriel : curseur jaune animé ── */}
+      {tutoPhase === 'demo' && (
+        <div aria-hidden="true" style={{
+          position:'absolute', left:cursor.x, top:cursor.y, zIndex:9,
+          width:26, height:26, marginLeft:-13, marginTop:-13,
+          borderRadius:'50%', background:'rgba(255,214,64,.92)',
+          border:'2px solid #fff', boxShadow:'0 0 0 4px rgba(255,214,64,.28), 0 3px 10px rgba(0,0,0,.4)',
+          opacity: cursor.on ? 1 : 0.15,
+          transform: `scale(${cursor.pulse ? 0.7 : 1})`,
+          transition: `left ${cursor.dur}ms cubic-bezier(.45,.05,.3,1), top ${cursor.dur}ms cubic-bezier(.45,.05,.3,1), opacity .12s linear, transform .14s ease`,
+          pointerEvents:'none',
+        }}/>
+      )}
+      {tutoPhase === 'demo' && cursor.caption && (
+        <div style={{
+          position:'absolute', left:0, right:0, bottom:-2, zIndex:10,
+          display:'flex', justifyContent:'center', pointerEvents:'none',
+        }}>
+          <div style={{
+            background:'rgba(19,33,46,.95)', border:'1px solid rgba(240,160,80,.4)', borderRadius:12,
+            padding:'7px 13px', fontSize:12.5, fontWeight:600, color:'rgba(255,255,255,.9)',
+            maxWidth:'90%', textAlign:'center', boxShadow:'0 6px 18px rgba(0,0,0,.4)',
+          }}>{cursor.caption}</div>
+        </div>
+      )}
+
+      {/* ── Tutoriel : bulle explicative + CTA ── */}
+      {tutoPhase === 'bubbles' && curBubble && (
+        <div style={{position:'absolute', inset:0, zIndex:11, background:'rgba(8,20,28,.55)', backdropFilter:'blur(1px)', WebkitBackdropFilter:'blur(1px)', borderRadius:12, display:'flex', alignItems:'center', justifyContent:'center', padding:14}}>
+          <div className="fade-in" style={{background:'#13212e', border:'1px solid rgba(240,160,80,.4)', borderRadius:16, padding:'18px 17px', maxWidth:330, width:'100%', boxShadow:'0 16px 44px rgba(0,0,0,.5)'}}>
+            <div style={{display:'flex', alignItems:'center', gap:9, marginBottom:9}}>
+              <div style={{fontSize:24}}>{curBubble.icon}</div>
+              <div style={{fontWeight:900, fontSize:15.5, color:'white'}}>{curBubble.title}</div>
+            </div>
+            <div style={{fontSize:13.5, lineHeight:1.55, color:'rgba(255,255,255,.85)', marginBottom:15}}>{curBubble.text}</div>
+            <div style={{display:'flex', alignItems:'center', gap:8}}>
+              <button className="btn btn-yes" style={{flex:1}} onClick={advanceBubble}>
+                {tutoBubble < TUTO_BUBBLES.length - 1 ? "ok j'ai compris" : "c'est parti"}
+              </button>
+              <button onClick={skipTutorial} style={{background:'none', border:'none', color:'rgba(255,255,255,.45)', fontSize:12, fontWeight:600, cursor:'pointer', padding:'0 4px'}}>passer</button>
+            </div>
+            <div style={{display:'flex', gap:5, justifyContent:'center', marginTop:12}}>
+              {TUTO_BUBBLES.map((_, i) => (
+                <span key={i} style={{width:i===tutoBubble?16:6, height:6, borderRadius:3, background:i===tutoBubble?'#f0a050':'rgba(255,255,255,.2)', transition:'all .2s'}}/>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -4049,6 +4214,9 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
   const linkyPollRef=useRef(null);
   const[bilanGenerating,setBilanGenerating]=useState(false);
   const[bilanOpen,setBilanOpen]=useState(false);
+  const[runTutorial,setRunTutorial]=useState(false); // tutoriel guidé du graphique (one-shot)
+  const tutoTriggeredRef=useRef(false);
+  const histoCardRef=useRef(null); // carte « Ma facture heure par heure » — cible scroll tutoriel
   const bilanGenRef=useRef({}); // {siteId:true} pour ne générer qu'une fois par session
   const ANON_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhreGtod2VncWthcGRic2lzeHd2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc0MjY4NjksImV4cCI6MjA5MzAwMjg2OX0.9-_oHRJfwXZkl3bRYDMb5K56UzB8O1NOfa5QfrXFfkQ';
   const EDGE_URL='https://hkxkhwegqkapdbsisxwv.supabase.co/functions/v1/switchgrid-v0';
@@ -4350,6 +4518,30 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
     setBalance(buildSiteBalance({site,prodProfil:prodProfilData,tariffs,spotMap,globalVars,pvKwc,batKwh,thermKwh}));
   },[site?.conso_profil,prodProfilData,pvKwc,batKwh,thermKwh,globalVars,spotMap,tariffs,site?.tarif_id,site?.heure_debut_hc1,site?.heure_fin_hc1,site?.heure_debut_hc2,site?.heure_fin_hc2]);
 
+  // ── Tutoriel guidé one-shot (points 9-10) : déclenché à la création de compte, quand le
+  //    graphique est prêt. Drapeau posé par la popup « bilan prêt » ; ne se rejoue jamais
+  //    (garde profiles.tutorial_done). ──
+  useEffect(()=>{
+    if(tutoTriggeredRef.current||runTutorial) return;
+    if(!site||!(site.conso_annuelle_kwh>0)||!balance) return;
+    if(userProfile?.tutorial_done===true) return;
+    let armed=false; try{ armed=localStorage.getItem('starvolt_run_tutorial')==='1'; }catch{}
+    if(!armed) return;
+    tutoTriggeredRef.current=true;
+    setConsoChartOpen(true);
+    const t=setTimeout(()=>{
+      histoCardRef.current?.scrollIntoView({behavior:'smooth',block:'start'});
+      setTimeout(()=>setRunTutorial(true),600);
+    },350);
+    return ()=>clearTimeout(t);
+  },[site?.id,site?.conso_annuelle_kwh,balance,userProfile?.tutorial_done]);
+
+  const handleTutorialDone=useCallback(()=>{
+    setRunTutorial(false);
+    try{ localStorage.removeItem('starvolt_run_tutorial'); }catch{}
+    if(user?.id) sb.from('profiles').update({tutorial_done:true}).eq('id',user.id).then(({error})=>{ if(error) console.warn('[tutorial_done]',error.message); });
+  },[user?.id]);
+
   // ── "Ton bilan en clair" : un SEUL appel IA quand la conso existe et que le bilan n'est pas encore écrit en dur ──
   useEffect(()=>{
     if(!site||!site.id) return;
@@ -4568,7 +4760,7 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
 
             {/* ── Tuile Consommation annuelle (graphique + stats) ── */}
             {site.conso_annuelle_kwh>0&&(
-              <div className="card" style={{padding:0,marginBottom:8,overflow:'hidden'}}>
+              <div ref={histoCardRef} className="card" style={{padding:0,marginBottom:8,overflow:'hidden'}}>
                 <div
                   style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'10px 14px 8px',borderBottom:consoChartOpen?'1px solid rgba(255,255,255,.07)':'none',cursor:'pointer',userSelect:'none'}}
                   onClick={()=>setConsoChartOpen(v=>!v)}
@@ -4698,7 +4890,7 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
                   })()}
                   {/* Graphique bilan 12 mois avec zoom */}
                   {balance?(
-                    <EnergyBalanceChart balance={balance} level={chartLevel} selMonth={chartMonth} selDay={chartDay} setLevel={setChartLevel} setSelMonth={setChartMonth} setSelDay={setChartDay} hourlyPrices={hourlyPrices} isDynamic={isDynamicTariff}/>
+                    <EnergyBalanceChart balance={balance} level={chartLevel} selMonth={chartMonth} selDay={chartDay} setLevel={setChartLevel} setSelMonth={setChartMonth} setSelDay={setChartDay} hourlyPrices={hourlyPrices} isDynamic={isDynamicTariff} tutorial={runTutorial} onTutorialDone={handleTutorialDone}/>
                   ):(
                     <div style={{color:'rgba(255,255,255,.35)',fontSize:12,padding:'8px 0'}}>Sélectionnez un tarif dans « Ma conso » pour afficher le graphique.</div>
                   )}
@@ -12331,6 +12523,144 @@ function AdminLearnQuestionEdit({ question, subjectId, onSave, onClose }) {
   );
 }
 
+// ─── Watcher global « bilan prêt » ───────────────────────────────────────────
+// Armé à la fin du questionnaire d'onboarding (drapeau localStorage starvolt_await_bilan
+// = siteId). Tourne en fond quelle que soit la page affichée (l'utilisateur lit la page
+// « Comprendre » pendant ce temps). Détecte la collecte ENEDIS (conso présente en base)
+// OU une erreur via l'edge function, génère le bilan IA si besoin, puis déclenche la popup.
+function GlobalBilanWatcher({ onReady }) {
+  const [siteId, setSiteId] = useState(() => { try { return localStorage.getItem('starvolt_await_bilan') || null; } catch { return null; } });
+  const timerRef = useRef(null);
+  const busyRef = useRef(false);
+  const firedRef = useRef(false);
+  const tariffsRef = useRef(null);
+
+  // Ré-armement quand le questionnaire se termine (event) ou changement de drapeau
+  useEffect(() => {
+    const arm = (e) => { firedRef.current = false; setSiteId(e?.detail || (()=>{ try { return localStorage.getItem('starvolt_await_bilan'); } catch { return null; } })()); };
+    window.addEventListener('starvolt-await-bilan', arm);
+    return () => window.removeEventListener('starvolt-await-bilan', arm);
+  }, []);
+
+  useEffect(() => {
+    clearInterval(timerRef.current);
+    if (!siteId || firedRef.current) return;
+
+    const disarm = () => { firedRef.current = true; clearInterval(timerRef.current); try { localStorage.removeItem('starvolt_await_bilan'); } catch {} };
+
+    const pollEnedisStatus = async () => {
+      // requestId persisté tant que la collecte n'est pas terminée
+      let requestId = null;
+      try { const raw = localStorage.getItem(`starvolt_linky_${siteId}`); if (raw) requestId = JSON.parse(raw).requestId; } catch {}
+      if (!requestId) return null;
+      try {
+        const { data: { session } } = await sb.auth.getSession();
+        if (!session) return null;
+        const res = await fetch(`${SWITCHGRID_EDGE_URL}?request_id=${requestId}`, { headers: { Authorization: `Bearer ${session.access_token}`, 'apikey': SB_ANON_KEY } });
+        const d = await res.json();
+        return { status: d.status || 'pending', error: d.error_message || null };
+      } catch { return null; }
+    };
+
+    const ensureBilan = async (site) => {
+      if (site.bilan_ia) return site.bilan_ia;
+      if (!tariffsRef.current) {
+        const { data: tf } = await sb.from('tarifs_electricite').select('*').order('nom');
+        tariffsRef.current = tf || [];
+      }
+      const facts = buildBilanFacts({ site, tariffs: tariffsRef.current, globalVars: null, prodProfil: null });
+      if (!facts) return null;
+      try {
+        const { data, error } = await sb.functions.invoke('bilan', { body: { facts } });
+        if (error || !data?.text) { console.warn('[watcher] bilan', error || data); return null; }
+        await sb.from('sites').update({ bilan_ia: data.text, bilan_ia_at: new Date().toISOString() }).eq('id', site.id);
+        return data.text;
+      } catch (e) { console.warn('[watcher] bilan ex', e); return null; }
+    };
+
+    const tick = async () => {
+      if (busyRef.current || firedRef.current) return;
+      busyRef.current = true;
+      try {
+        const { data: site } = await sb.from('sites').select('*').eq('id', siteId).single();
+        if (!site) return;
+        const collected = !!site.conso_profil && site.conso_annuelle_kwh > 0;
+        let errored = false, errorMsg = null;
+        if (!collected) {
+          const st = await pollEnedisStatus();
+          if (st?.status === 'error') { errored = true; errorMsg = st.error || 'La collecte ENEDIS a échoué.'; }
+        }
+        if (collected) {
+          const bilanText = await ensureBilan(site);
+          if (!bilanText) return; // bilan pas encore prêt → on retentera au prochain tick
+          disarm();
+          onReady({ collected: true, errored: false, errorMsg: null, bilanText, consoKwh: Math.round(site.conso_annuelle_kwh) });
+        } else if (errored) {
+          disarm();
+          onReady({ collected: false, errored: true, errorMsg, bilanText: null, consoKwh: null });
+        }
+      } catch (e) { console.warn('[watcher] tick', e); }
+      finally { busyRef.current = false; }
+    };
+
+    tick();
+    timerRef.current = setInterval(tick, 12000);
+    return () => clearInterval(timerRef.current);
+  }, [siteId, onReady]);
+
+  return null;
+}
+
+// ─── Popup « bilan prêt » (points 7-8) ───────────────────────────────────────
+function BilanReadyPopup({ data, onUnderstood }) {
+  if (!data) return null;
+  const { collected, errored, errorMsg, bilanText, consoKwh } = data;
+  return (
+    <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.72)',backdropFilter:'blur(4px)',WebkitBackdropFilter:'blur(4px)',zIndex:10001,display:'flex',alignItems:'center',justifyContent:'center',padding:20}}>
+      <div className="fade-in" style={{background:'#13212e',border:'1px solid rgba(240,160,80,.4)',borderRadius:18,padding:'22px 20px',maxWidth:420,width:'100%',maxHeight:'85vh',overflowY:'auto',boxShadow:'0 18px 50px rgba(0,0,0,.5)'}}>
+        <div style={{display:'flex',alignItems:'center',gap:11,marginBottom:14}}>
+          <div style={{width:46,height:46,borderRadius:13,background:errored?'rgba(255,138,106,.12)':'rgba(125,217,64,.12)',border:`1px solid ${errored?'rgba(255,138,106,.4)':'rgba(125,217,64,.4)'}`,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,fontSize:24}}>
+            {errored ? '⚠️' : '✅'}
+          </div>
+          <div style={{minWidth:0}}>
+            <div style={{fontWeight:900,fontSize:17,color:'white'}}>
+              {errored ? 'Collecte incomplète' : 'Vos données sont prêtes'}
+            </div>
+            <div style={{fontSize:12.5,color:'rgba(255,255,255,.55)',marginTop:2}}>
+              {errored ? 'Un point à régler' : 'Votre consommation a été récupérée'}
+            </div>
+          </div>
+        </div>
+
+        {collected && (
+          <div style={{fontSize:13.5,lineHeight:1.55,color:'rgba(255,255,255,.85)',marginBottom:bilanText?14:4}}>
+            Nous avons bien récupéré votre courbe de consommation ENEDIS
+            {consoKwh ? <> — <strong style={{color:'#7dd940'}}>{consoKwh.toLocaleString('fr-FR')} kWh/an</strong></> : null}.
+          </div>
+        )}
+        {errored && (
+          <div style={{fontSize:13.5,lineHeight:1.55,color:'rgba(255,255,255,.85)',marginBottom:4}}>
+            La récupération automatique de vos données ENEDIS n'a pas abouti{errorMsg ? ' :' : '.'}
+            {errorMsg ? <div style={{marginTop:8,padding:'9px 11px',background:'rgba(255,138,106,.1)',border:'1px solid rgba(255,138,106,.25)',borderRadius:10,fontSize:12.5,color:'rgba(255,200,180,.95)'}}>{errorMsg}</div> : null}
+            <div style={{marginTop:10,color:'rgba(255,255,255,.7)'}}>Pas d'inquiétude : vous pouvez relancer la collecte depuis votre page « Mon site, ma conso ».</div>
+          </div>
+        )}
+
+        {bilanText && (
+          <div style={{marginTop:6,marginBottom:16,padding:'13px 14px',background:'rgba(240,160,80,.07)',border:'1px solid rgba(240,160,80,.22)',borderRadius:14}}>
+            <div style={{fontWeight:800,fontSize:13,color:'white',display:'flex',alignItems:'center',gap:6,marginBottom:9}}>✨ Votre bilan en clair</div>
+            <div style={{fontSize:13.5,lineHeight:1.55,color:'rgba(255,255,255,.85)',whiteSpace:'pre-wrap'}}>{bilanText}</div>
+          </div>
+        )}
+
+        <button className="btn btn-yes" style={{width:'100%',marginTop:bilanText?0:16}} onClick={onUnderstood}>
+          ok j'ai compris
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function App() {
   const [state,       setState]      = useState(INIT);
   const [history,     setHistory]    = useState([]);
@@ -12340,6 +12670,7 @@ function App() {
   // showDemoPopup supprimé — plus de popup démo
   const [cartVersion, setCartVersion]= useState(0);
   const [feedbackSentiment, setFeedbackSentiment] = useState(null); // null | 'up' | 'down'
+  const [bilanPopup, setBilanPopup]  = useState(null); // {collected,errored,errorMsg,bilanText,consoKwh} | null — popup « bilan prêt »
   const pendingProfileRef            = useRef(null);
   const justSignedUpRef              = useRef(false); // empêche la nav auto pendant l'écran de succès signup
   const updateCart = () => setCartVersion(v => v + 1);
@@ -12347,7 +12678,7 @@ function App() {
   // Charge le profil, hydrate le site actif, et retourne l'écran cible
   const fetchProfile = useCallback(async (userId) => {
     const { data } = await sb.from('profiles')
-      .select('prenom, nom, pseudo, adresse_ligne1, code_postal, ville, telephone, pdl, active_site_id, role')
+      .select('prenom, nom, pseudo, adresse_ligne1, code_postal, ville, telephone, pdl, active_site_id, role, tutorial_done')
       .eq('id', userId).single();
     if (data) {
       setProfile(data);
@@ -12447,6 +12778,15 @@ function App() {
   }, [history, user]);
 
   const handleLogout = async () => { await sb.auth.signOut(); };
+
+  // Watcher global « bilan prêt » → ouvre la popup (points 7-8)
+  const handleBilanReady = useCallback((payload) => { setBilanPopup(payload); }, []);
+  // CTA « ok j'ai compris » → page « mon site ma conso » devant l'histogramme + arme le tutoriel (points 8-9)
+  const handleBilanUnderstood = useCallback(() => {
+    setBilanPopup(null);
+    try { localStorage.setItem('starvolt_run_tutorial', '1'); } catch {}
+    goTo('MA_CONSO', { focusHisto: true });
+  }, [goTo]);
 
   // ─── Impersonation admin (mode debug) ───────────────
   const [imperso, setImperso] = useState(() => {
@@ -12706,7 +13046,14 @@ function App() {
       case 'MA_CONSO':
         return <MonSiteScreen user={user} userProfile={profile} onBack={goBack} onSimulations={()=>goTo('SIMULATIONS')} onComprendre={()=>goTo('COMPRENDRE_HOME')} onOnboardingQuestions={(sid)=>goTo('ONBOARDING_QUESTIONS',{onbSiteId:sid})} cartVersion={cartVersion}/>;
       case 'ONBOARDING_QUESTIONS':
-        return <OnboardingTypeform siteId={state.onbSiteId} onDone={()=>goTo('COMPRENDRE_HOME')}/>;
+        return <OnboardingTypeform siteId={state.onbSiteId} onDone={()=>{
+          // Arme le watcher global : il surveillera la collecte ENEDIS + le bilan en fond
+          // pendant que l'utilisateur lit la page « Comprendre » (point 6).
+          const sid = state.onbSiteId;
+          try { if (sid) localStorage.setItem('starvolt_await_bilan', sid); } catch {}
+          try { window.dispatchEvent(new CustomEvent('starvolt-await-bilan', { detail: sid })); } catch {}
+          goTo('COMPRENDRE_HOME');
+        }}/>;
 
       case 'SIMULATIONS': {
         const base = { name: profile?.prenom||'', address:'Zone ACC', initialBill:2000, bill:2000, bravoItems:[], investment:0, eligible:true };
@@ -12870,6 +13217,8 @@ function App() {
       {feedbackSentiment && (
         <FeedbackModal sentiment={feedbackSentiment} user={user} screen={state.screen} onClose={()=>setFeedbackSentiment(null)}/>
       )}
+      {user && <GlobalBilanWatcher onReady={handleBilanReady}/>}
+      {bilanPopup && <BilanReadyPopup data={bilanPopup} onUnderstood={handleBilanUnderstood}/>}
       {user && !isAuthScreen && <ApproxConsoBanner screen={state.screen} userId={user.id}/>}
       <div className="chevrons-deco" aria-hidden="true">
         {['»','»','»','»'].map((c,i)=><span key={i}>{c}</span>)}
