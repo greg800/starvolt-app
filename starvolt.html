@@ -3882,7 +3882,7 @@ function EnergyBalanceChart({ balance, level, selMonth, selDay, setLevel, setSel
       ctx.fillStyle = 'rgba(255,255,255,.7)';
       ctx.font = 'bold 13px sans-serif';
       ctx.textAlign = 'right';
-      ctx.fillText('c€/kWh', W - 2, zeroY - 16);
+      ctx.fillText('c€/kWh', W, zeroY - 16);
 
       // Trait horizontal par barre = tarif de la période (rouge si négatif)
       newBars.forEach((bar, i) => {
