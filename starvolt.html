@@ -3862,8 +3862,8 @@ function EnergyBalanceChart({ balance, level, selMonth, selDay, setLevel, setSel
       ctx.lineWidth = 1;
       ctx.beginPath(); ctx.moveTo(axX, MT); ctx.lineTo(axX, axBottom); ctx.stroke();
 
-      // Ticks + labels en c€/kWh
-      ctx.font = (isMobChart ? '9px' : '10px') + ' sans-serif';
+      // Ticks + labels en c€/kWh (même taille que l'axe gauche)
+      ctx.font = '13px sans-serif';
       ctx.textAlign = 'left';
       const ticks = [0, maxP * 0.5, maxP];
       if (hasNegPrice) ticks.push(minP);
@@ -3881,7 +3881,7 @@ function EnergyBalanceChart({ balance, level, selMonth, selDay, setLevel, setSel
       // Label unité
       ctx.save();
       ctx.fillStyle = 'rgba(255,255,255,.5)';
-      ctx.font = (isMobChart ? '8px' : '9px') + ' sans-serif';
+      ctx.font = '13px sans-serif';
       ctx.textAlign = 'center';
       ctx.translate(W - 6, MT + (zeroY - MT) / 2);
       ctx.rotate(Math.PI / 2);
