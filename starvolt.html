@@ -1604,15 +1604,18 @@ const PERMISSION_ZONES = [
 
 // Vérificateur de permission pour le rôle courant.
 // Sémantique volontairement prudente :
-//   - bypass total pour admin / superadmin (ne peuvent jamais se verrouiller dehors) ;
+//   - anti-verrouillage CIBLÉ : un admin/superadmin garde TOUJOURS l'accès admin
+//     (zone "access" + la case "menus.admin"), même s'il décoche ces cases —
+//     sinon il se couperait l'accès à la page qui permet de les recocher. En
+//     revanche offres / sous-menus / segments / autres menus SONT enforcés même
+//     pour lui (il peut donc tester l'effet depuis son propre compte) ;
 //   - fail-open : si la zone ou la clé est absente → visible (comportement actuel).
-// On ne MASQUE donc que sur un `false` explicite. Ce checker n'est consommé pour
-// cacher quoi que ce soit qu'à partir de l'étape 1 — à l'étape 0 il sert uniquement
-// à vérifier que chaque rôle charge les bonnes permissions.
+// On ne MASQUE donc que sur un `false` explicite.
 function makePermChecker(role, permissions) {
-  const bypass = role === 'admin' || role === 'superadmin';
+  const isAdminRole = role === 'admin' || role === 'superadmin';
   return (zone, key) => {
-    if (bypass) return true;
+    // Garde anti-verrouillage : ne protège QUE l'accès admin lui-même.
+    if (isAdminRole && (zone === 'access' || (zone === 'menus' && key === 'admin'))) return true;
     const z = permissions && permissions[zone];
     if (!z || z[key] === undefined) return true; // fail-open
     return !!z[key];
