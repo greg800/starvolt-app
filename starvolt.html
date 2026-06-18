@@ -1619,6 +1619,16 @@ function makePermChecker(role, permissions) {
   };
 }
 
+// Mappe le type d'offre (offres.types_offre, côté DB) vers la clé de permission
+// de la zone "offers". Une offre sans type mappé reste visible (fail-open).
+const OFFER_TYPE_TO_PERM = {
+  optimisation_fournisseur: 'comparaison_fournisseur',
+  acc:                      'acc',
+  box:                      'box_comwatt',
+  solaire:                  'solaire_batterie',
+  diy_box:                  'diy',
+};
+
 function WelcomeScreen({ onCreateAccount, onLogin }) {
   return (
     <>
@@ -5658,7 +5668,14 @@ const PICTOS_DEFAUT = {
   solaire:                  '/maison.png',
 };
 
-function SimulationsScreen({ onACC, onBox, onSolar, onOptimisation, onDiyBox, onBack, onMonSite, onComprendre, user, userProfile }) {
+function SimulationsScreen({ onACC, onBox, onSolar, onOptimisation, onDiyBox, onBack, onMonSite, onComprendre, user, userProfile, can = () => true }) {
+  // Une offre est visible si au moins un de ses types mappés est autorisé pour
+  // le rôle courant. Sans type mappé → visible (fail-open).
+  const offerAllowed = (o) => {
+    const keys = (o.types_offre || []).map(t => OFFER_TYPE_TO_PERM[t]).filter(Boolean);
+    if (keys.length === 0) return true;
+    return keys.some(k => can('offers', k));
+  };
   const [hasConso,  setHasConso]  = useState(false);
   const [maxSaving, setMaxSaving] = useState(null);
   const [accSaving, setAccSaving] = useState(null);
@@ -5726,6 +5743,7 @@ function SimulationsScreen({ onACC, onBox, onSolar, onOptimisation, onDiyBox, on
 
   // ── Filtrage des offres ───────────────────────
   const offresFiltrees = React.useMemo(() => offres.filter(o => {
+    if (!offerAllowed(o)) return false; // permission de rôle (zone "offers")
     if (delaiFilter  != null && o.delai_min_jours    != null && o.delai_min_jours    > delaiFilter)  return false;
     if (investFilter != null && o.investissement_min != null && o.investissement_min > investFilter) return false;
     if (reductFilter != null && o.reduction_pct      != null && o.reduction_pct      < reductFilter) return false;
@@ -5994,7 +6012,7 @@ function SimulationsScreen({ onACC, onBox, onSolar, onOptimisation, onDiyBox, on
       ) : (
         /* Fallback hardcodé si aucune offre en DB */
         <div className="sim-btns" style={{gap:6}}>
-          {hasConso && (
+          {hasConso && can('offers','comparaison_fournisseur') && (
             <button className="sim-btn" onClick={onOptimisation} style={{border:'1.5px solid rgba(125,217,64,.35)',padding:'10px 14px',gap:12}}>
               <img src="/optimisation.png" alt="Optimisation" className="sim-icon" style={{mixBlendMode:'screen',width:36,height:36}}/>
               <div className="sim-text">
@@ -6004,6 +6022,7 @@ function SimulationsScreen({ onACC, onBox, onSolar, onOptimisation, onDiyBox, on
               <span className="sim-arrow">→</span>
             </button>
           )}
+          {can('offers','acc') && (
           <button className="sim-btn" onClick={onACC} style={{padding:'10px 14px',gap:12}}>
             <img src="/acc.png" alt="ACC" className="sim-icon" style={{width:36,height:36}}/>
             <div className="sim-text">
@@ -6012,6 +6031,8 @@ function SimulationsScreen({ onACC, onBox, onSolar, onOptimisation, onDiyBox, on
             </div>
             <span className="sim-arrow">→</span>
           </button>
+          )}
+          {can('offers','box_comwatt') && (
           <button className="sim-btn" onClick={onBox} style={{padding:'10px 14px',gap:12}}>
             <img src="/comwatt-box.png" alt="Box" className="sim-icon" style={{width:36,height:36}}/>
             <div className="sim-text">
@@ -6020,6 +6041,8 @@ function SimulationsScreen({ onACC, onBox, onSolar, onOptimisation, onDiyBox, on
             </div>
             <span className="sim-arrow">→</span>
           </button>
+          )}
+          {can('offers','diy') && (
           <button className="sim-btn" onClick={onDiyBox} style={{padding:'10px 14px',gap:12}}>
             <span className="sim-icon" style={{fontSize:28}}>🔧</span>
             <div className="sim-text">
@@ -6028,6 +6051,8 @@ function SimulationsScreen({ onACC, onBox, onSolar, onOptimisation, onDiyBox, on
             </div>
             <span className="sim-arrow">→</span>
           </button>
+          )}
+          {can('offers','solaire_batterie') && (
           <button className="sim-btn" onClick={onSolar} style={{padding:'10px 14px',gap:12}}>
             <img src="/maison.png" alt="Solaire" className="sim-icon" style={{width:36,height:36}}/>
             <div className="sim-text">
@@ -6036,6 +6061,7 @@ function SimulationsScreen({ onACC, onBox, onSolar, onOptimisation, onDiyBox, on
             </div>
             <span className="sim-arrow">→</span>
           </button>
+          )}
         </div>
       )}
     </div>
@@ -12979,6 +13005,8 @@ function App() {
   const pendingProfileRef            = useRef(null);
   const justSignedUpRef              = useRef(false); // empêche la nav auto pendant l'écran de succès signup
   const updateCart = () => setCartVersion(v => v + 1);
+  // Vérificateur de permission du rôle courant (bypass admin/superadmin + fail-open).
+  const can = React.useMemo(() => makePermChecker(profile?.role, rolePerms), [profile?.role, rolePerms]);
 
   // Charge le profil, hydrate le site actif, et retourne l'écran cible
   const fetchProfile = useCallback(async (userId) => {
@@ -13395,7 +13423,8 @@ function App() {
           onDiyBox={()=>goTo('DIY_BOX_SIM')}
           onBack={goBack}
           onMonSite={()=>goTo('MA_CONSO')}
-          onComprendre={()=>goTo('COMPRENDRE_HOME')}/>;
+          onComprendre={()=>goTo('COMPRENDRE_HOME')}
+          can={can}/>;
       }
 
       case 'PANIER':
