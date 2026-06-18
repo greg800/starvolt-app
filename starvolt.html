@@ -4270,7 +4270,7 @@ function EnergyBalanceChart({ balance, level, selMonth, selDay, setLevel, setSel
 }
 
 // ─── MonSiteScreen ────────────────────────────
-function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre, onOnboardingQuestions, cartVersion=0 }) {
+function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre, onOnboardingQuestions, cartVersion=0, can = () => true }) {
   const[sites,setSites]=useState(null);
   const[activeId,setActiveId]=useState(null);
   const[tariffs,setTariffs]=useState([]);
@@ -4821,7 +4821,7 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
             {!editMode?(
               <div className="card" style={{padding:'8px 14px',marginBottom:8}}>
                 <div style={{display:'flex',alignItems:'center',gap:8}}>
-                  {sites.length>1?(
+                  {sites.length>1&&can('submenus','selecteur_site')?(
                     <select className="inp inp-sel" style={{fontSize:13,padding:'6px 30px 6px 10px',maxWidth:200,flexShrink:0}} value={activeId||''} onChange={e=>{
    clearPanierLS();
    persistActiveSite(e.target.value);
@@ -4855,7 +4855,7 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
             )}
 
             {/* ── Tuile Consommation annuelle (graphique + stats) ── */}
-            {site.conso_annuelle_kwh>0&&(
+            {site.conso_annuelle_kwh>0&&can('submenus','facture_horaire')&&(
               <div ref={histoCardRef} className="card" style={{padding:0,marginBottom:8,overflow:'hidden'}}>
                 <div
                   style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'10px 14px 8px',borderBottom:consoChartOpen?'1px solid rgba(255,255,255,.07)':'none',cursor:'pointer',userSelect:'none'}}
@@ -4995,7 +4995,7 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
             )}
 
             {/* ── Tuile Ton bilan en clair (synthèse IA, écrite en dur) ── */}
-            {site.conso_annuelle_kwh>0&&(site.bilan_ia||bilanGenerating)&&(
+            {site.conso_annuelle_kwh>0&&can('submenus','bilan_clair')&&(site.bilan_ia||bilanGenerating)&&(
               <div className="card" style={{padding:'14px',marginBottom:8,position:'relative',overflow:'hidden'}}>
                 <div style={{fontWeight:800,fontSize:13,color:'white',display:'flex',alignItems:'center',gap:6,marginBottom:site.bilan_ia?10:0}}>
                   ✨ Votre bilan en clair
@@ -5028,7 +5028,7 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
             )}
 
             {/* ── Tuile Ma conso ── */}
-            <div className="card" style={{padding:0,marginBottom:8,overflow:'hidden'}}>
+            {can('submenus','ma_conso')&&<div className="card" style={{padding:0,marginBottom:8,overflow:'hidden'}}>
               <div
                 style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'10px 14px 8px',borderBottom: consoOpen ? '1px solid rgba(255,255,255,.07)' : 'none',cursor:'pointer',userSelect:'none'}}
                 onClick={()=>setConsoOpen(v=>!v)}
@@ -5242,11 +5242,11 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
                   )}
                 </div>
               </div>}
-            </div>
+            </div>}
 
             {/* ── Tuile Ma production, mon stockage et ma box ── */}
             {/* Masquée tant que le panier est vide */}
-            {(!!localStorage.getItem('starvolt_box_chosen')||!!localStorage.getItem('starvolt_solar_chosen')||!!localStorage.getItem('starvolt_optimisation_chosen')||localStorage.getItem('starvolt_acc_chosen')==='true'||!!localStorage.getItem('starvolt_diy_box_chosen'))&&<div className="card" style={{padding:0,marginBottom:8,overflow:'hidden'}}>
+            {can('submenus','production_stockage_box')&&(!!localStorage.getItem('starvolt_box_chosen')||!!localStorage.getItem('starvolt_solar_chosen')||!!localStorage.getItem('starvolt_optimisation_chosen')||localStorage.getItem('starvolt_acc_chosen')==='true'||!!localStorage.getItem('starvolt_diy_box_chosen'))&&<div className="card" style={{padding:0,marginBottom:8,overflow:'hidden'}}>
               <div
                 style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'10px 14px 8px',borderBottom: prodOpen ? '1px solid rgba(255,255,255,.07)' : 'none',cursor:'pointer',userSelect:'none'}}
                 onClick={()=>setProdOpen(v=>!v)}
@@ -13403,7 +13403,7 @@ function App() {
           onBack={goBack}/>;
 
       case 'MA_CONSO':
-        return <MonSiteScreen user={user} userProfile={profile} onBack={goBack} onSimulations={()=>goTo('SIMULATIONS')} onComprendre={()=>goTo('COMPRENDRE_HOME')} onOnboardingQuestions={(sid)=>goTo('ONBOARDING_QUESTIONS',{onbSiteId:sid})} cartVersion={cartVersion}/>;
+        return <MonSiteScreen user={user} userProfile={profile} onBack={goBack} onSimulations={()=>goTo('SIMULATIONS')} onComprendre={()=>goTo('COMPRENDRE_HOME')} onOnboardingQuestions={(sid)=>goTo('ONBOARDING_QUESTIONS',{onbSiteId:sid})} cartVersion={cartVersion} can={can}/>;
       case 'ONBOARDING_QUESTIONS':
         return <OnboardingTypeform siteId={state.onbSiteId} onDone={()=>{
           // Arme le watcher global : il surveillera la collecte ENEDIS + le bilan en fond
