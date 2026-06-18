@@ -11556,8 +11556,8 @@ function AdminRolesScreen({ onBack, isSuperadmin = false }) {
 
   const selRole = roles && roles.find(r => r.key === selKey);
   const isSystem = !!selRole?.is_system;
-  // Seul un super admin peut modifier le rôle « superadmin ».
-  const lockedRole = selRole?.key === 'superadmin' && !isSuperadmin;
+  // Seul un super admin peut modifier les rôles « admin » et « superadmin ».
+  const lockedRole = (selRole?.key === 'admin' || selRole?.key === 'superadmin') && !isSuperadmin;
 
   // helper rendu d'une case (fonction JSX, pas un sous-composant → pas de remount)
   const checkbox = (zone, item, label) => {
@@ -11620,7 +11620,7 @@ function AdminRolesScreen({ onBack, isSuperadmin = false }) {
 
           {lockedRole && (
             <div style={{marginBottom:14,padding:'9px 12px',borderRadius:9,fontSize:13,fontWeight:600,color:'#fbbf24',background:'rgba(251,191,36,.1)',border:'1px solid rgba(251,191,36,.3)'}}>
-              🔒 Le rôle « Super admin » ne peut être modifié que par un super admin.
+              🔒 Le rôle « {selRole?.label} » ne peut être modifié que par un super admin.
             </div>
           )}
 
