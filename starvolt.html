@@ -1569,12 +1569,38 @@ const ROLE_LABELS = {
   demo:       'Démo',
   user:       'Utilisateur (legacy)',
 };
-// Rôles assignables depuis le dropdown admin (hors superadmin/demo, gérés à part).
-const ASSIGNABLE_USER_ROLES = ['b2c_cate', 'b2c', 'b2b_cate', 'b2b'];
-const ADMIN_ROLES = ['admin', 'superadmin'];
 // Rôle par défaut selon le type de compte choisi au signup.
 const defaultRoleForAccountType = (accountType) =>
   accountType === 'entreprise' ? 'b2b_cate' : 'b2c_cate';
+
+// Zones de permissions éditables par rôle (écran admin "Gestion des rôles").
+// Les clés doivent rester alignées avec le seed jsonb de la table app_roles.
+const PERMISSION_ZONES = [
+  { key: 'access',   title: "Autorisations d'accès", items: [
+    ['user', 'Utilisateur'], ['admin', 'Admin'], ['superadmin', 'Super Admin'],
+  ]},
+  { key: 'offers',   title: 'Offres accessibles', items: [
+    ['comparaison_fournisseur', 'Comparaison fournisseur'],
+    ['acc', 'Autoconso collective'],
+    ['box_comwatt', 'Installer une box énergie Comwatt'],
+    ['diy', 'Installer soi-même en DIY'],
+    ['solaire_batterie', 'Solaire avec Batterie'],
+  ]},
+  { key: 'menus',    title: 'Menus accessibles', items: [
+    ['admin', 'Admin'], ['passer_action', "Passer à l'action"],
+    ['comprendre', 'Comprendre'], ['panier', 'Panier'],
+  ]},
+  { key: 'submenus', title: 'Sous-menus accessibles', items: [
+    ['selecteur_site', 'Sélecteur de site'],
+    ['facture_horaire', 'Ma facture heure par heure'],
+    ['bilan_clair', 'Votre bilan en clair'],
+    ['ma_conso', 'Ma conso'],
+    ['production_stockage_box', 'Ma production, mon stockage et ma box'],
+  ]},
+  { key: 'segments', title: 'Type de segment accessible', items: [
+    ['b2c', 'B2C'], ['b2b', 'B2B'],
+  ]},
+];
 
 function WelcomeScreen({ onCreateAccount, onLogin }) {
   return (
@@ -9518,7 +9544,7 @@ function AdminDashboard({ onViewLogs, onImpersonate }) {
   );
 }
 
-function AdminScreen({ onTariffs, onUsers, onSites, onSpot, onAcc, onProduction, onGlobalVars, onPrix, onOffres, onLearn, onFeedback, onProofread, onAICosts, onAIPrompts, onViewLogs, onImpersonate, onBack }) {
+function AdminScreen({ onTariffs, onUsers, onRoles, onSites, onSpot, onAcc, onProduction, onGlobalVars, onPrix, onOffres, onLearn, onFeedback, onProofread, onAICosts, onAIPrompts, onViewLogs, onImpersonate, onBack }) {
   return (
     <>
     <div className="screen screen-admin fade-in">
@@ -9599,6 +9625,14 @@ function AdminScreen({ onTariffs, onUsers, onSites, onSpot, onAcc, onProduction,
             <div className="sim-text">
               <div className="sim-title">Gestion des utilisateurs</div>
               <div className="sim-sub">Voir et gérer les membres Starvolt</div>
+            </div>
+            <span className="sim-arrow">→</span>
+          </button>
+          <button className="sim-btn" onClick={onRoles}>
+            <span className="sim-icon">🛡️</span>
+            <div className="sim-text">
+              <div className="sim-title">Gestion des rôles</div>
+              <div className="sim-sub">Rôles et droits d'accès (offres, menus, segments)</div>
             </div>
             <span className="sim-arrow">→</span>
           </button>
@@ -11069,11 +11103,27 @@ function AdminUsersScreen({ onBack, onViewLogs, isSuperadmin }) {
   const [copying,         setCopying]         = useState(false);
   const [copyDone,        setCopyDone]        = useState(false);
 
+  const [roleOptions, setRoleOptions] = useState([]);
+
   const load = () => {
     setLoading(true);
     sb.rpc('get_all_users').then(({ data }) => { setUsers(data || []); setLoading(false); });
   };
   useEffect(() => { load(); }, []);
+  useEffect(() => { sb.rpc('get_roles').then(({ data }) => setRoleOptions(data || [])); }, []);
+
+  // Rôles proposés dans le select pour une ligne donnée (gère superadmin/demo + rôle courant)
+  const roleOptionsFor = (u) => {
+    let list = (roleOptions || []).filter(r => {
+      if (r.key === 'superadmin' && !isSuperadmin) return false;
+      if (r.key === 'demo' && !isSuperadmin && u.role !== 'demo') return false;
+      return true;
+    });
+    if (u.role && !list.some(r => r.key === u.role)) {
+      list = [...list, { key: u.role, label: ROLE_LABELS[u.role] || u.role }];
+    }
+    return list;
+  };
 
   const handleRoleChange = async (userId, newRole) => {
     const { error } = await sb.rpc('admin_set_role', { target_user_id: userId, new_role: newRole });
@@ -11210,13 +11260,9 @@ function AdminUsersScreen({ onBack, onViewLogs, isSuperadmin }) {
                           borderRadius:6, color:'#fff', padding:'4px 8px', fontSize:12,
                           cursor:'pointer', fontFamily:'inherit'
                         }}>
-                        {ASSIGNABLE_USER_ROLES.map(r => (
-                          <option key={r} value={r}>{ROLE_LABELS[r]}</option>
+                        {roleOptionsFor(u).map(r => (
+                          <option key={r.key} value={r.key}>{r.label}</option>
                         ))}
-                        <option value="admin">{ROLE_LABELS.admin}</option>
-                        {isSuperadmin && <option value="superadmin">{ROLE_LABELS.superadmin}</option>}
-                        {u.role === 'demo' && <option value="demo">{ROLE_LABELS.demo}</option>}
-                        {u.role === 'user' && <option value="user">{ROLE_LABELS.user}</option>}
                       </select>
                     )}
                   </td>
@@ -11340,6 +11386,204 @@ const OuiNon = ({ value }) => (
         background: value ? 'rgba(125,217,64,.12)' : 'rgba(255,255,255,.05)',
       }}>{value ? 'oui' : 'non'}</span>
 );
+
+// ─── AdminRolesScreen : gestion des rôles et de leurs permissions ───
+function slugifyRoleKey(s) {
+  return (s || '')
+    .normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .toLowerCase().trim()
+    .replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+}
+function AdminRolesScreen({ onBack }) {
+  const [roles,      setRoles]      = useState(null);
+  const [selKey,     setSelKey]     = useState('');
+  const [perms,      setPerms]      = useState(null);
+  const [dirty,      setDirty]      = useState(false);
+  const [saving,     setSaving]     = useState(false);
+  const [addOpen,    setAddOpen]    = useState(false);
+  const [addLabel,   setAddLabel]   = useState('');
+  const [delTarget,  setDelTarget]  = useState('');   // rôle de réassignation
+  const [delOpen,    setDelOpen]    = useState(false);
+  const [msg,        setMsg]        = useState(null);
+
+  const load = (keepKey) => {
+    sb.rpc('get_roles').then(({ data }) => {
+      const list = data || [];
+      setRoles(list);
+      const k = keepKey && list.some(r => r.key === keepKey) ? keepKey : (list[0]?.key || '');
+      setSelKey(k);
+      const r = list.find(x => x.key === k);
+      setPerms(r ? JSON.parse(JSON.stringify(r.permissions || {})) : {});
+      setDirty(false);
+    });
+  };
+  useEffect(() => { load(); }, []);
+
+  const selectRole = (k) => {
+    setSelKey(k);
+    const r = roles.find(x => x.key === k);
+    setPerms(r ? JSON.parse(JSON.stringify(r.permissions || {})) : {});
+    setDirty(false);
+    setDelOpen(false); setAddOpen(false); setMsg(null);
+  };
+
+  const toggle = (zone, item) => {
+    setPerms(p => {
+      const next = { ...(p || {}) };
+      next[zone] = { ...(next[zone] || {}) };
+      next[zone][item] = !next[zone][item];
+      return next;
+    });
+    setDirty(true);
+  };
+
+  const save = async () => {
+    setSaving(true); setMsg(null);
+    const { error } = await sb.rpc('admin_save_role_permissions', { p_key: selKey, p_permissions: perms });
+    setSaving(false);
+    if (error) { setMsg({ t: 'err', s: 'Échec de la sauvegarde : ' + error.message }); return; }
+    setRoles(rs => rs.map(r => r.key === selKey ? { ...r, permissions: perms } : r));
+    setDirty(false);
+    setMsg({ t: 'ok', s: 'Permissions enregistrées.' });
+  };
+
+  const addRole = async () => {
+    const label = addLabel.trim();
+    const key = slugifyRoleKey(label);
+    if (!key) { setMsg({ t: 'err', s: 'Nom de rôle invalide.' }); return; }
+    if (roles.some(r => r.key === key)) { setMsg({ t: 'err', s: 'Ce rôle existe déjà.' }); return; }
+    const { error } = await sb.rpc('admin_add_role', { p_key: key, p_label: label });
+    if (error) { setMsg({ t: 'err', s: 'Échec : ' + error.message }); return; }
+    setAddLabel(''); setAddOpen(false);
+    load(key);
+    setMsg({ t: 'ok', s: 'Rôle « ' + label + ' » ajouté.' });
+  };
+
+  const deleteRole = async () => {
+    if (!delTarget || delTarget === selKey) { setMsg({ t: 'err', s: 'Choisis un rôle de réattribution.' }); return; }
+    const { error } = await sb.rpc('admin_delete_role', { p_key: selKey, p_reassign_to: delTarget });
+    if (error) { setMsg({ t: 'err', s: 'Échec : ' + error.message }); return; }
+    setDelOpen(false); setDelTarget('');
+    load();
+    setMsg({ t: 'ok', s: 'Rôle supprimé, comptes réattribués.' });
+  };
+
+  const selRole = roles && roles.find(r => r.key === selKey);
+  const isSystem = !!selRole?.is_system;
+
+  // helper rendu d'une case (fonction JSX, pas un sous-composant → pas de remount)
+  const checkbox = (zone, item, label) => {
+    const on = !!perms?.[zone]?.[item];
+    return (
+      <label key={zone + '.' + item} style={{
+        display:'flex', alignItems:'center', gap:10, padding:'9px 12px', cursor:'pointer',
+        background: on ? 'rgba(125,217,64,.10)' : 'rgba(255,255,255,.03)',
+        border:'1px solid ' + (on ? 'rgba(125,217,64,.35)' : 'rgba(255,255,255,.10)'),
+        borderRadius:9, fontSize:13, color: on ? '#cdeeb0' : 'rgba(255,255,255,.7)',
+      }}>
+        <input type="checkbox" checked={on} onChange={() => toggle(zone, item)}
+          style={{ width:16, height:16, accentColor:'#7dd940', cursor:'pointer' }}/>
+        {label}
+      </label>
+    );
+  };
+
+  return (
+    <>
+    <div className="screen screen-admin fade-in" style={{padding:'0 16px 90px'}}>
+      <div className="auth-header">
+        <div className="welcome-tag" style={{color:'#ffb340'}}>Administration</div>
+        <h1 className="welcome-title">Gestion des<br/><span className="accent">rôles</span></h1>
+      </div>
+
+      {roles === null ? (
+        <div style={{textAlign:'center',padding:40}}><div className="spinner" style={{margin:'0 auto'}}/></div>
+      ) : (
+        <>
+          {/* Sélecteur de rôle + ajout / suppression */}
+          <div style={{display:'flex',gap:8,alignItems:'center',flexWrap:'wrap',marginBottom:14}}>
+            <select value={selKey} onChange={e => selectRole(e.target.value)} style={{
+              flex:'1 1 200px', background:'rgba(255,255,255,.08)', border:'1px solid rgba(255,255,255,.15)',
+              borderRadius:9, color:'#fff', padding:'10px 12px', fontSize:14, fontFamily:'inherit', cursor:'pointer'
+            }}>
+              {roles.map(r => <option key={r.key} value={r.key}>{r.label}{r.is_system ? ' 🔒' : ''}</option>)}
+            </select>
+            <button title="Ajouter un rôle" onClick={() => { setAddOpen(o => !o); setDelOpen(false); setMsg(null); }} style={{
+              width:40, height:40, borderRadius:9, background:'rgba(125,217,64,.15)',
+              border:'1px solid rgba(125,217,64,.4)', color:'#7dd940', fontSize:22, lineHeight:1,
+              cursor:'pointer', fontFamily:'inherit'
+            }}>+</button>
+            <button title="Supprimer le rôle" disabled={isSystem}
+              onClick={() => { setDelTarget(''); setDelOpen(o => !o); setAddOpen(false); setMsg(null); }} style={{
+              width:40, height:40, borderRadius:9,
+              background: isSystem ? 'rgba(255,255,255,.05)' : 'rgba(239,68,68,.15)',
+              border:'1px solid ' + (isSystem ? 'rgba(255,255,255,.1)' : 'rgba(239,68,68,.4)'),
+              color: isSystem ? 'rgba(255,255,255,.3)' : '#f87171', fontSize:24, lineHeight:1,
+              cursor: isSystem ? 'not-allowed' : 'pointer', fontFamily:'inherit'
+            }}>−</button>
+          </div>
+
+          {/* Panneau ajout */}
+          {addOpen && (
+            <div style={{background:'rgba(255,255,255,.04)',border:'1px solid rgba(255,255,255,.12)',borderRadius:11,padding:14,marginBottom:14}}>
+              <div style={{fontSize:12,color:'rgba(255,255,255,.6)',marginBottom:8,fontWeight:600}}>Nom du nouveau rôle</div>
+              <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
+                <input value={addLabel} onChange={e => setAddLabel(e.target.value)} placeholder="ex : Partenaire installateur"
+                  style={{flex:'1 1 200px',background:'rgba(255,255,255,.08)',border:'1px solid rgba(255,255,255,.15)',borderRadius:8,color:'#fff',padding:'9px 12px',fontSize:13,fontFamily:'inherit'}}/>
+                <button onClick={addRole} style={{background:'#7dd940',border:'none',borderRadius:8,color:'#06210a',fontWeight:700,fontSize:13,padding:'9px 18px',cursor:'pointer',fontFamily:'inherit'}}>Ajouter</button>
+              </div>
+              {addLabel.trim() && <div style={{fontSize:11,color:'rgba(255,255,255,.35)',marginTop:6}}>clé : <code>{slugifyRoleKey(addLabel)}</code></div>}
+            </div>
+          )}
+
+          {/* Panneau suppression / réassignation */}
+          {delOpen && !isSystem && (
+            <div style={{background:'rgba(239,68,68,.06)',border:'1px solid rgba(239,68,68,.3)',borderRadius:11,padding:14,marginBottom:14}}>
+              <div style={{fontSize:13,color:'#fca5a5',marginBottom:8,fontWeight:600}}>
+                Supprimer « {selRole?.label} » — réattribuer les comptes concernés à :
+              </div>
+              <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
+                <select value={delTarget} onChange={e => setDelTarget(e.target.value)} style={{
+                  flex:'1 1 200px',background:'rgba(255,255,255,.08)',border:'1px solid rgba(255,255,255,.15)',borderRadius:8,color:'#fff',padding:'9px 12px',fontSize:13,fontFamily:'inherit',cursor:'pointer'
+                }}>
+                  <option value="">— Choisir un rôle —</option>
+                  {roles.filter(r => r.key !== selKey).map(r => <option key={r.key} value={r.key}>{r.label}</option>)}
+                </select>
+                <button onClick={deleteRole} style={{background:'#ef4444',border:'none',borderRadius:8,color:'#fff',fontWeight:700,fontSize:13,padding:'9px 18px',cursor:'pointer',fontFamily:'inherit'}}>Supprimer</button>
+              </div>
+            </div>
+          )}
+
+          {msg && (
+            <div style={{
+              marginBottom:14,padding:'9px 12px',borderRadius:9,fontSize:13,fontWeight:600,
+              color: msg.t === 'ok' ? '#7dd940' : '#f87171',
+              background: msg.t === 'ok' ? 'rgba(125,217,64,.1)' : 'rgba(239,68,68,.1)',
+              border:'1px solid ' + (msg.t === 'ok' ? 'rgba(125,217,64,.3)' : 'rgba(239,68,68,.3)'),
+            }}>{msg.s}</div>
+          )}
+
+          {/* Zones de permissions */}
+          {PERMISSION_ZONES.map(zone => (
+            <div key={zone.key} style={{marginBottom:18}}>
+              <div style={{fontSize:12,fontWeight:700,letterSpacing:'.6px',textTransform:'uppercase',color:'rgba(255,255,255,.5)',marginBottom:8}}>{zone.title}</div>
+              <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(220px,1fr))',gap:8}}>
+                {zone.items.map(([item, label]) => checkbox(zone.key, item, label))}
+              </div>
+            </div>
+          ))}
+        </>
+      )}
+    </div>
+
+    <StickyFooter row onBack={onBack}>
+      <button className="btn btn-yes" onClick={save} disabled={!dirty || saving || !selKey}>
+        {saving ? 'Enregistrement…' : (dirty ? 'Enregistrer les permissions →' : 'Aucune modification')}
+      </button>
+    </StickyFooter>
+    </>
+  );
+}
 
 // ─── AdminSitesScreen : tous les sites de tous les utilisateurs ───
 function AdminSitesScreen({ onBack, onEdit }) {
@@ -11600,7 +11844,7 @@ const SCREEN_LABELS = {
   BOX_SIM:'Simulation box', DIY_BOX_SIM:'Installer soi-même Comwatt',
   SOLAR_SIM:'Simulation solaire', SOLAR:'Solaire', COMWATT:'Box Comwatt',
   PANIER:'Panier', PROFILE:'Mon profil', ADDRESS:'Adresse', FINAL:'Récapitulatif final',
-  ADMIN:'Admin', ADMIN_FEEDBACK:'Admin — retours',
+  ADMIN:'Admin', ADMIN_FEEDBACK:'Admin — retours', ADMIN_ROLES_MGMT:'Admin — gestion des rôles',
 };
 const screenLabel = (s) => SCREEN_LABELS[s] || s || 'Inconnue';
 
@@ -12975,6 +13219,7 @@ function App() {
           onTariffs={()=>goTo('ADMIN_TARIFFS')}
           onSpot={()=>goTo('SPOT_PRICES')}
           onUsers={()=>goTo('ADMIN_USERS')}
+          onRoles={()=>goTo('ADMIN_ROLES_MGMT')}
           onSites={()=>goTo('ADMIN_SITES')}
           onAcc={()=>goTo('ADMIN_ACC')}
           onProduction={()=>goTo('ADMIN_PRODUCTION')}
@@ -13066,6 +13311,8 @@ function App() {
 
       case 'ADMIN_USERS':
         return <AdminUsersScreen onBack={goBack} isSuperadmin={isSuperadmin} onViewLogs={(u) => goTo('ADMIN_USER_LOGS', { logUser: u })}/>;
+      case 'ADMIN_ROLES_MGMT':
+        return <AdminRolesScreen onBack={goBack}/>;
       case 'ADMIN_SITES':
         return <AdminSitesScreen onBack={goBack} onEdit={(s)=>goTo('ADMIN_SITE_EDIT', { editSite: s })}/>;
       case 'ADMIN_SITE_EDIT':

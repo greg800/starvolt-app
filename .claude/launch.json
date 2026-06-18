@@ -4,8 +4,9 @@
     {
       "name": "starvolt",
       "runtimeExecutable": "python3",
-      "runtimeArgs": ["-m", "http.server", "3033"],
-      "port": 3033
+      "runtimeArgs": ["-m", "http.server"],
+      "port": 3033,
+      "autoPort": true
     }
   ]
 }
