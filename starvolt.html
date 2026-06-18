@@ -1554,6 +1554,28 @@ const BackBtn = ({ onBack }) =>
 
 const DEMO_VALUES = { name: 'Marie Dupont', bill: '2000', address: '14 Rue du Temple, 30250 Combas' };
 
+// ─── Rôles ───────────────────────────────────
+// Axe rôle (au niveau utilisateur, profiles.role) — pilote l'interface.
+// Les 4 rôles "utilisateur" se comportent à l'identique pour l'instant ;
+// la différenciation d'interface viendra dans une spec ultérieure.
+// 'user' = valeur legacy (avant migration) traitée comme b2c_cate.
+const ROLE_LABELS = {
+  b2c_cate:   'Utilisateur B2C CATE',
+  b2c:        'Utilisateur B2C',
+  b2b_cate:   'Utilisateur B2B CATE',
+  b2b:        'Utilisateur B2B',
+  admin:      'Admin',
+  superadmin: 'Super admin',
+  demo:       'Démo',
+  user:       'Utilisateur (legacy)',
+};
+// Rôles assignables depuis le dropdown admin (hors superadmin/demo, gérés à part).
+const ASSIGNABLE_USER_ROLES = ['b2c_cate', 'b2c', 'b2b_cate', 'b2b'];
+const ADMIN_ROLES = ['admin', 'superadmin'];
+// Rôle par défaut selon le type de compte choisi au signup.
+const defaultRoleForAccountType = (accountType) =>
+  accountType === 'entreprise' ? 'b2b_cate' : 'b2c_cate';
+
 function WelcomeScreen({ onCreateAccount, onLogin }) {
   return (
     <>
@@ -2209,6 +2231,7 @@ function AuthSignupScreen({ onGoToLogin, onSignedUp, onSuccessDone }) {
         code_postal:    codePostal.trim(),
         ville:          ville.trim(),
         enedis_consent: true,
+        role:           defaultRoleForAccountType(accountType),
       });
 
       // Créer le site principal
@@ -11187,10 +11210,13 @@ function AdminUsersScreen({ onBack, onViewLogs, isSuperadmin }) {
                           borderRadius:6, color:'#fff', padding:'4px 8px', fontSize:12,
                           cursor:'pointer', fontFamily:'inherit'
                         }}>
-                        <option value="user">Utilisateur</option>
-                        <option value="admin">Admin</option>
-                        {u.role === 'demo' && <option value="demo">Démo</option>}
-                        {isSuperadmin && <option value="superadmin">Super admin</option>}
+                        {ASSIGNABLE_USER_ROLES.map(r => (
+                          <option key={r} value={r}>{ROLE_LABELS[r]}</option>
+                        ))}
+                        <option value="admin">{ROLE_LABELS.admin}</option>
+                        {isSuperadmin && <option value="superadmin">{ROLE_LABELS.superadmin}</option>}
+                        {u.role === 'demo' && <option value="demo">{ROLE_LABELS.demo}</option>}
+                        {u.role === 'user' && <option value="user">{ROLE_LABELS.user}</option>}
                       </select>
                     )}
                   </td>
