@@ -1602,6 +1602,23 @@ const PERMISSION_ZONES = [
   ]},
 ];
 
+// Vérificateur de permission pour le rôle courant.
+// Sémantique volontairement prudente :
+//   - bypass total pour admin / superadmin (ne peuvent jamais se verrouiller dehors) ;
+//   - fail-open : si la zone ou la clé est absente → visible (comportement actuel).
+// On ne MASQUE donc que sur un `false` explicite. Ce checker n'est consommé pour
+// cacher quoi que ce soit qu'à partir de l'étape 1 — à l'étape 0 il sert uniquement
+// à vérifier que chaque rôle charge les bonnes permissions.
+function makePermChecker(role, permissions) {
+  const bypass = role === 'admin' || role === 'superadmin';
+  return (zone, key) => {
+    if (bypass) return true;
+    const z = permissions && permissions[zone];
+    if (!z || z[key] === undefined) return true; // fail-open
+    return !!z[key];
+  };
+}
+
 function WelcomeScreen({ onCreateAccount, onLogin }) {
   return (
     <>
@@ -12953,6 +12970,7 @@ function App() {
   const [history,     setHistory]    = useState([]);
   const [user,        setUser]       = useState(null);
   const [profile,     setProfile]    = useState(null);
+  const [rolePerms,   setRolePerms]  = useState(null); // permissions du rôle courant (app_roles)
   const [authLoading, setAuthLoading]= useState(true);
   // showDemoPopup supprimé — plus de popup démo
   const [cartVersion, setCartVersion]= useState(0);
@@ -12982,6 +13000,26 @@ function App() {
     }
     return 'HOME_CHOICE';
   }, []);
+
+  // Étape 0 — charge les permissions du rôle courant (AUCUN masquage pour l'instant).
+  // Sert uniquement à vérifier que chaque rôle charge les bonnes cases.
+  // Exposé sur window.__role / window.__rolePerms / window.__can pour test console.
+  useEffect(() => {
+    const role = profile?.role;
+    if (!role) { setRolePerms(null); window.__rolePerms = null; window.__role = null; return; }
+    sb.rpc('get_roles').then(({ data, error }) => {
+      if (error) { console.warn('[perms] get_roles', error.message); return; }
+      const list = data || [];
+      const match = list.find(r => r.key === role)
+        || (role === 'user' ? list.find(r => r.key === 'b2c_cate') : null); // legacy
+      const perms = match?.permissions || null;
+      setRolePerms(perms);
+      window.__role = role;
+      window.__rolePerms = perms;
+      window.__can = makePermChecker(role, perms);
+      console.log('[perms] rôle =', role, '→ permissions =', perms);
+    });
+  }, [profile?.role]);
 
   // Vide le panier une seule fois par session navigateur (rechargement de page)
   useEffect(() => {
