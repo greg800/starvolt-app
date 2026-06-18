@@ -11447,7 +11447,7 @@ function slugifyRoleKey(s) {
     .toLowerCase().trim()
     .replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
 }
-function AdminRolesScreen({ onBack }) {
+function AdminRolesScreen({ onBack, isSuperadmin = false }) {
   const [roles,      setRoles]      = useState(null);
   const [selKey,     setSelKey]     = useState('');
   const [perms,      setPerms]      = useState(null);
@@ -11556,19 +11556,21 @@ function AdminRolesScreen({ onBack }) {
 
   const selRole = roles && roles.find(r => r.key === selKey);
   const isSystem = !!selRole?.is_system;
+  // Seul un super admin peut modifier le rôle « superadmin ».
+  const lockedRole = selRole?.key === 'superadmin' && !isSuperadmin;
 
   // helper rendu d'une case (fonction JSX, pas un sous-composant → pas de remount)
   const checkbox = (zone, item, label) => {
     const on = !!perms?.[zone]?.[item];
     return (
       <label key={zone + '.' + item} style={{
-        display:'flex', alignItems:'center', gap:10, padding:'9px 12px', cursor:'pointer',
+        display:'flex', alignItems:'center', gap:10, padding:'9px 12px', cursor: lockedRole ? 'not-allowed' : 'pointer',
         background: on ? 'rgba(125,217,64,.10)' : 'rgba(255,255,255,.03)',
         border:'1px solid ' + (on ? 'rgba(125,217,64,.35)' : 'rgba(255,255,255,.10)'),
-        borderRadius:9, fontSize:13, color: on ? '#cdeeb0' : 'rgba(255,255,255,.7)',
+        borderRadius:9, fontSize:13, color: on ? '#cdeeb0' : 'rgba(255,255,255,.7)', opacity: lockedRole ? .55 : 1,
       }}>
-        <input type="checkbox" checked={on} onChange={() => toggle(zone, item)}
-          style={{ width:16, height:16, accentColor:'#7dd940', cursor:'pointer' }}/>
+        <input type="checkbox" checked={on} disabled={lockedRole} onChange={() => toggle(zone, item)}
+          style={{ width:16, height:16, accentColor:'#7dd940', cursor: lockedRole ? 'not-allowed' : 'pointer' }}/>
         {label}
       </label>
     );
@@ -11599,10 +11601,12 @@ function AdminRolesScreen({ onBack }) {
               border:'1px solid rgba(125,217,64,.4)', color:'#7dd940', fontSize:22, lineHeight:1,
               cursor:'pointer', fontFamily:'inherit'
             }}>+</button>
-            <button title="Modifier le rôle" onClick={openEdit} style={{
-              width:40, height:40, borderRadius:9, background:'rgba(247,201,72,.15)',
-              border:'1px solid rgba(247,201,72,.4)', color:'#f7c948', fontSize:17, lineHeight:1,
-              cursor:'pointer', fontFamily:'inherit'
+            <button title={lockedRole ? 'Réservé au super admin' : 'Modifier le rôle'} disabled={lockedRole} onClick={openEdit} style={{
+              width:40, height:40, borderRadius:9,
+              background: lockedRole ? 'rgba(255,255,255,.05)' : 'rgba(247,201,72,.15)',
+              border:'1px solid ' + (lockedRole ? 'rgba(255,255,255,.1)' : 'rgba(247,201,72,.4)'),
+              color: lockedRole ? 'rgba(255,255,255,.3)' : '#f7c948', fontSize:17, lineHeight:1,
+              cursor: lockedRole ? 'not-allowed' : 'pointer', fontFamily:'inherit'
             }}>✏️</button>
             <button title="Supprimer le rôle" disabled={isSystem}
               onClick={() => { setDelTarget(''); setDelOpen(o => !o); setAddOpen(false); setEditOpen(false); setMsg(null); }} style={{
@@ -11613,6 +11617,12 @@ function AdminRolesScreen({ onBack }) {
               cursor: isSystem ? 'not-allowed' : 'pointer', fontFamily:'inherit'
             }}>−</button>
           </div>
+
+          {lockedRole && (
+            <div style={{marginBottom:14,padding:'9px 12px',borderRadius:9,fontSize:13,fontWeight:600,color:'#fbbf24',background:'rgba(251,191,36,.1)',border:'1px solid rgba(251,191,36,.3)'}}>
+              🔒 Le rôle « Super admin » ne peut être modifié que par un super admin.
+            </div>
+          )}
 
           {/* Panneau édition (renommer + rôle par défaut par segment) */}
           {editOpen && selRole && (
@@ -11698,8 +11708,8 @@ function AdminRolesScreen({ onBack }) {
     </div>
 
     <StickyFooter row onBack={onBack}>
-      <button className="btn btn-yes" onClick={save} disabled={!dirty || saving || !selKey}>
-        {saving ? 'Enregistrement…' : (dirty ? 'Enregistrer les permissions →' : 'Aucune modification')}
+      <button className="btn btn-yes" onClick={save} disabled={!dirty || saving || !selKey || lockedRole}>
+        {saving ? 'Enregistrement…' : (lockedRole ? 'Réservé au super admin' : (dirty ? 'Enregistrer les permissions →' : 'Aucune modification'))}
       </button>
     </StickyFooter>
     </>
@@ -13458,7 +13468,7 @@ function App() {
       case 'ADMIN_USERS':
         return <AdminUsersScreen onBack={goBack} isSuperadmin={isSuperadmin} onViewLogs={(u) => goTo('ADMIN_USER_LOGS', { logUser: u })}/>;
       case 'ADMIN_ROLES_MGMT':
-        return <AdminRolesScreen onBack={goBack}/>;
+        return <AdminRolesScreen onBack={goBack} isSuperadmin={isSuperadmin}/>;
       case 'ADMIN_SITES':
         return <AdminSitesScreen onBack={goBack} onEdit={(s)=>goTo('ADMIN_SITE_EDIT', { editSite: s })}/>;
       case 'ADMIN_SITE_EDIT':
