@@ -11992,9 +11992,20 @@ function AdminRolesScreen({ onBack, isSuperadmin = false }) {
 // ─── AdminSitesScreen : tous les sites de tous les utilisateurs ───
 function AdminSitesScreen({ onBack, onEdit }) {
   const [rows, setRows] = useState(null);
-  useEffect(() => { sb.rpc('admin_get_all_sites').then(({ data }) => setRows(data || [])); }, []);
+  const [delId, setDelId] = useState(null);   // site_id en attente de confirmation
+  const [busy, setBusy] = useState(false);
+  const load = () => sb.rpc('admin_get_all_sites').then(({ data }) => setRows(data || []));
+  useEffect(() => { load(); }, []);
 
-  const cols = ['Propriétaire', 'Site', 'Conso', 'Chauffage élec', 'ECS élec', 'Propriétaire', 'Collectif', 'Surface'];
+  const handleDelete = async (siteId) => {
+    setBusy(true);
+    const { error } = await sb.rpc('admin_delete_site', { p_site_id: siteId });
+    setBusy(false); setDelId(null);
+    if (error) { alert('Suppression refusée : ' + error.message); return; }
+    setRows(prev => prev ? prev.filter(r => r.site_id !== siteId) : prev);
+  };
+
+  const cols = ['Propriétaire', 'Site', 'Conso', 'Chauffage élec', 'ECS élec', 'Propriétaire', 'Collectif', 'Surface', ''];
   const th = { textAlign:'left', padding:'8px 10px', color:'rgba(255,255,255,.4)', fontWeight:600,
     borderBottom:'1px solid rgba(255,255,255,.08)', whiteSpace:'nowrap', fontSize:12 };
   const td = { padding:'10px', borderBottom:'1px solid rgba(255,255,255,.06)', whiteSpace:'nowrap' };
@@ -12025,6 +12036,25 @@ function AdminSitesScreen({ onBack, onEdit }) {
                   <td style={td}><OuiNon value={r.flex_statut==null?null:r.flex_statut==='proprietaire'}/></td>
                   <td style={td}><OuiNon value={r.flex_type_logement==null?null:r.flex_type_logement==='collectif'}/></td>
                   <td style={{...td, color:'rgba(255,255,255,.85)'}}>{SURFACE_LABELS[r.flex_surface] || '—'}</td>
+                  <td style={{...td, textAlign:'right'}} onClick={e=>e.stopPropagation()}>
+                    {delId===r.site_id ? (
+                      <span style={{display:'inline-flex', gap:6}}>
+                        <button disabled={busy} onClick={()=>handleDelete(r.site_id)}
+                          style={{background:'rgba(239,68,68,.2)', border:'1px solid rgba(239,68,68,.5)', color:'#f87171', borderRadius:7, fontSize:12, fontWeight:700, padding:'5px 10px', cursor:'pointer', fontFamily:'inherit'}}>
+                          {busy ? '…' : 'Confirmer'}
+                        </button>
+                        <button disabled={busy} onClick={()=>setDelId(null)}
+                          style={{background:'rgba(255,255,255,.06)', border:'1px solid rgba(255,255,255,.16)', color:'rgba(255,255,255,.65)', borderRadius:7, fontSize:12, fontWeight:700, padding:'5px 10px', cursor:'pointer', fontFamily:'inherit'}}>
+                          Annuler
+                        </button>
+                      </span>
+                    ) : (
+                      <button title="Supprimer ce site" onClick={()=>setDelId(r.site_id)}
+                        style={{background:'none', border:'none', color:'rgba(248,113,113,.8)', fontSize:16, cursor:'pointer', padding:'4px 8px', lineHeight:1}}>
+                        🗑
+                      </button>
+                    )}
+                  </td>
                 </tr>
               ))}
               {rows.length===0 && <tr><td colSpan={cols.length} style={{...td, textAlign:'center', color:'rgba(255,255,255,.4)'}}>Aucun site</td></tr>}
