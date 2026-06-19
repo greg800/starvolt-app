@@ -10384,6 +10384,8 @@ function AdminBilanDataScreen({ onBack }) {
   const [facts, setFacts] = useState(undefined); // undefined = rien chargé, null = pas de données
   const [bilanText, setBilanText] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [generating, setGenerating] = useState(false);
+  const [genErr, setGenErr] = useState(null);
   const [isMobile, setIsMobile] = useState(window.innerWidth < 900);
 
   useEffect(() => {
@@ -10400,7 +10402,7 @@ function AdminBilanDataScreen({ onBack }) {
   }, []);
 
   const loadSite = async (siteId) => {
-    setSelId(siteId); setFacts(undefined); setBilanText(null);
+    setSelId(siteId); setFacts(undefined); setBilanText(null); setGenErr(null);
     if (!siteId) return;
     setLoading(true);
     const { data, error } = await sb.rpc('admin_get_site_bilan_data', { p_site_id: siteId });
@@ -10415,6 +10417,22 @@ function AdminBilanDataScreen({ onBack }) {
     setBilanText(row.bilan_ia || null);
     setFacts(buildBilanFacts({ site: row, tariffs, globalVars: null, prodProfil, quiz }));
     setLoading(false);
+  };
+
+  const generate = async () => {
+    if (!selId || !facts) return;
+    setGenerating(true); setGenErr(null);
+    try {
+      const { data, error } = await sb.functions.invoke('bilan', { body: { facts } });
+      if (error || !data?.text) { setGenErr('Échec de la génération : ' + (error?.message || 'réponse vide')); return; }
+      const { error: wErr } = await sb.rpc('admin_set_site_bilan', { p_site_id: selId, p_text: data.text });
+      if (wErr) { setGenErr('Génération OK mais enregistrement refusé : ' + wErr.message); return; }
+      setBilanText(data.text);
+    } catch (e) {
+      setGenErr('Erreur : ' + (e?.message || e));
+    } finally {
+      setGenerating(false);
+    }
   };
 
   const factRows = (f) => {
@@ -10502,12 +10520,25 @@ function AdminBilanDataScreen({ onBack }) {
           {(facts !== undefined || isMobile) && (
             <div style={{flex: isMobile ? '1 1 auto' : '2 1 0', minWidth:0, width: isMobile ? '100%' : 'auto'}}>
               <div className="card" style={{padding:16, position:'relative', overflow:'hidden'}}>
-                <div style={{fontWeight:800, fontSize:14, color:'#fff', display:'flex', alignItems:'center', gap:6, marginBottom:12}}>
-                  ✨ Votre bilan en clair
+                <div style={{display:'flex', alignItems:'center', justifyContent:'space-between', gap:10, flexWrap:'wrap', marginBottom:12}}>
+                  <div style={{fontWeight:800, fontSize:14, color:'#fff', display:'flex', alignItems:'center', gap:6}}>
+                    ✨ Votre bilan en clair
+                  </div>
+                  <button onClick={generate} disabled={!facts || generating || loading}
+                    style={{background: (!facts||generating||loading) ? 'rgba(255,255,255,.1)' : '#ffb340', border:'none', borderRadius:9,
+                      color: (!facts||generating||loading) ? 'rgba(255,255,255,.4)' : '#1a1208', fontSize:12.5, fontWeight:800,
+                      padding:'8px 14px', cursor:(!facts||generating||loading)?'default':'pointer', fontFamily:'inherit'}}>
+                    {generating ? 'Génération…' : (bilanText ? '↻ Régénérer le conseil' : 'Générer un conseil')}
+                  </button>
                 </div>
+                {genErr && (
+                  <div style={{marginBottom:10, fontSize:12.5, fontWeight:600, color:'#ff8080'}}>{genErr}</div>
+                )}
                 {!selId ? (
                   <div style={{color:'rgba(255,255,255,.4)', fontSize:13.5}}>Sélectionnez un site pour voir le texte généré.</div>
                 ) : loading ? (
+                  <div style={{textAlign:'center', padding:40}}><div className="spinner" style={{margin:'0 auto'}}/></div>
+                ) : generating ? (
                   <div style={{textAlign:'center', padding:40}}><div className="spinner" style={{margin:'0 auto'}}/></div>
                 ) : bilanText ? (
                   <div style={{fontSize:14, lineHeight:1.6, color:'rgba(255,255,255,.88)', whiteSpace:'pre-wrap'}}>{bilanText}</div>
