@@ -3585,7 +3585,7 @@ async function loadProdProfil(site) {
       }
     } catch {}
   }
-  sb.from('sites').update({profil_production_id:chosenId}).eq('id',site.id);
+  if (site.id) sb.from('sites').update({profil_production_id:chosenId}).eq('id',site.id);
   const { data } = await sb.from('profils_production').select('profil').eq('id', chosenId).single();
   return data?.profil || null;
 }
@@ -5855,8 +5855,8 @@ function SimulationsScreen({ onACC, onBox, onSolar, onOptimisation, onDiyBox, on
     const activeId = localStorage.getItem('starvolt_active_site_id');
     Promise.all([
       activeId
-        ? sb.from('sites').select('id,conso_profil,tarif_id,profil_production_id,heure_debut_hc1,heure_fin_hc1,heure_debut_hc2,heure_fin_hc2').eq('id', activeId).maybeSingle()
-        : sb.from('sites').select('id,conso_profil,tarif_id,profil_production_id,heure_debut_hc1,heure_fin_hc1,heure_debut_hc2,heure_fin_hc2').eq('user_id', user.id).not('conso_profil','is',null).order('created_at').limit(1).maybeSingle(),
+        ? sb.from('sites').select('id,conso_profil,tarif_id,profil_production_id,adresse_ligne1,code_postal,ville,heure_debut_hc1,heure_fin_hc1,heure_debut_hc2,heure_fin_hc2').eq('id', activeId).maybeSingle()
+        : sb.from('sites').select('id,conso_profil,tarif_id,profil_production_id,adresse_ligne1,code_postal,ville,heure_debut_hc1,heure_fin_hc1,heure_debut_hc2,heure_fin_hc2').eq('user_id', user.id).not('conso_profil','is',null).order('created_at').limit(1).maybeSingle(),
       sb.from('tarifs_electricite').select('*').order('nom'),
       sb.from('parametres_nationaux').select('*').eq('id',1).maybeSingle(),
       sb.rpc('get_spot_json'),
@@ -5889,11 +5889,8 @@ function SimulationsScreen({ onACC, onBox, onSolar, onOptimisation, onDiyBox, on
           const bSav = Math.round(flexGainSim + (storRes?.saving || 0));
           if (bSav > 0) setBoxSaving(bSav);
           // Charger le profil de production (utilisé pour estim ACC + solar)
-          let _prodProfil = null;
-          if (site.profil_production_id && site.conso_profil) {
-            const { data: pp } = await sb.from('profils_production').select('profil').eq('id', site.profil_production_id).single();
-            _prodProfil = pp?.profil || null;
-          }
+          // SOURCE UNIQUE loadProdProfil : repli GPS si profil_production_id null (comme Mon site)
+          const _prodProfil = site.conso_profil ? await loadProdProfil(site) : null;
           // accSavEst : heures prod non nulle (ou 9h–18h si pas de profil)
           const accSavEst = (() => {
             let k=0;
@@ -5932,11 +5929,7 @@ function SimulationsScreen({ onACC, onBox, onSolar, onOptimisation, onDiyBox, on
 
       // ACC savings : heures prod non nulle (ou 9h–18h si pas de profil)
       if (site.conso_profil) {
-        let _prodProfilAcc = null;
-        if (site.profil_production_id) {
-          const { data: pp } = await sb.from('profils_production').select('profil').eq('id', site.profil_production_id).single();
-          _prodProfilAcc = pp?.profil || null;
-        }
+        const _prodProfilAcc = await loadProdProfil(site);
         let kwh918 = 0;
         for (let m=1; m<=12; m++)
           for (let d=1; d<=PROF_DAYS[m-1]; d++)
@@ -7327,9 +7320,8 @@ function AccMapScreen({ user, userProfile, onBack, onJoin, onCreate, onPanier })
       const accList = acc || [];
       setAccSites(accList);
       setActiveSite(site || null);
-      if (site?.profil_production_id) {
-        sb.from('profils_production').select('profil').eq('id', site.profil_production_id).single()
-          .then(({data}) => { if(data?.profil) setActiveProdData(data.profil); });
+      if (site) {
+        loadProdProfil(site).then(prof => { if(prof) setActiveProdData(prof); });
       }
       if (site?.tarif_id) {
         const { data: t } = await sb.from('tarifs_electricite').select('prix_hp,prix_hc,nom').eq('id', site.tarif_id).maybeSingle();
@@ -8477,7 +8469,7 @@ function SolarSimScreen({ user, userProfile, onBack, onPanier, onMonSite, onCart
     if (!siteId) { setLoading(false); return; }
     setActiveSiteId(siteId);
     Promise.all([
-      sb.from('sites').select('id,conso_profil,conso_annuelle_kwh,tarif_id,profil_production_id,heure_debut_hc1,heure_fin_hc1,heure_debut_hc2,heure_fin_hc2,flex_chauffage,flex_ecs,flex_surface').eq('id', siteId).maybeSingle(),
+      sb.from('sites').select('id,conso_profil,conso_annuelle_kwh,tarif_id,profil_production_id,adresse_ligne1,code_postal,ville,heure_debut_hc1,heure_fin_hc1,heure_debut_hc2,heure_fin_hc2,flex_chauffage,flex_ecs,flex_surface').eq('id', siteId).maybeSingle(),
       sb.from('tarifs_electricite').select('*'),
       sb.rpc('get_spot_json'),
       sb.from('parametres_nationaux').select('*').eq('id', 1).maybeSingle(),
@@ -8506,12 +8498,9 @@ function SolarSimScreen({ user, userProfile, onBack, onPanier, onMonSite, onCart
       const roundedBill = bill ? Math.round(bill) : null;
       const optiSavLS = parseInt(localStorage.getItem('starvolt_optimisation_saving')||'0');
       // Charger le profil de production en premier (utilisé pour accSavComp + calcul solaire)
-      let _pp = null;
-      if (site.profil_production_id) {
-        const { data: ppData } = await sb.from('profils_production').select('profil').eq('id', site.profil_production_id).single();
-        _pp = ppData?.profil || null;
-        if (_pp) setProdData(_pp);
-      }
+      // SOURCE UNIQUE loadProdProfil : repli GPS si profil_production_id null (comme Mon site)
+      const _pp = await loadProdProfil(site);
+      if (_pp) setProdData(_pp);
       let accSavComp = 0;
       if (site.conso_profil) {
         let kwh918 = 0;
@@ -10437,11 +10426,8 @@ function AdminBilanDataScreen({ onBack }) {
     const { data, error } = await sb.rpc('admin_get_site_bilan_data', { p_site_id: siteId });
     const row = data && data[0];
     if (error || !row) { setFacts(null); setLoading(false); return; }
-    let prodProfil = null;
-    if (row.profil_production_id) {
-      const { data: pp } = await sb.from('profils_production').select('profil').eq('id', row.profil_production_id).single();
-      prodProfil = pp?.profil || null;
-    }
+    // SOURCE UNIQUE loadProdProfil : repli GPS si profil_production_id null (comme Mon site)
+    const prodProfil = await loadProdProfil(row);
     const quiz = await fetchQuizSummary(row.user_id);
     setBilanText(row.bilan_ia || null);
     setFacts(buildBilanFacts({ site: row, tariffs, globalVars: null, prodProfil, quiz }));
