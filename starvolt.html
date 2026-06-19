@@ -10354,7 +10354,15 @@ function AdminBilanDataScreen({ onBack }) {
   const [tariffs, setTariffs] = useState([]);
   const [selId, setSelId] = useState('');
   const [facts, setFacts] = useState(undefined); // undefined = rien chargé, null = pas de données
+  const [bilanText, setBilanText] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [isMobile, setIsMobile] = useState(window.innerWidth < 900);
+
+  useEffect(() => {
+    const h = () => setIsMobile(window.innerWidth < 900);
+    window.addEventListener('resize', h);
+    return () => window.removeEventListener('resize', h);
+  }, []);
 
   useEffect(() => {
     Promise.all([
@@ -10364,7 +10372,7 @@ function AdminBilanDataScreen({ onBack }) {
   }, []);
 
   const loadSite = async (siteId) => {
-    setSelId(siteId); setFacts(undefined);
+    setSelId(siteId); setFacts(undefined); setBilanText(null);
     if (!siteId) return;
     setLoading(true);
     const { data, error } = await sb.rpc('admin_get_site_bilan_data', { p_site_id: siteId });
@@ -10375,6 +10383,7 @@ function AdminBilanDataScreen({ onBack }) {
       const { data: pp } = await sb.from('profils_production').select('profil').eq('id', row.profil_production_id).single();
       prodProfil = pp?.profil || null;
     }
+    setBilanText(row.bilan_ia || null);
     setFacts(buildBilanFacts({ site: row, tariffs, globalVars: null, prodProfil }));
     setLoading(false);
   };
@@ -10413,33 +10422,58 @@ function AdminBilanDataScreen({ onBack }) {
           L'IA ne calcule rien : elle reformule uniquement ces chiffres.
         </p>
 
-        <select value={selId} onChange={e => loadSite(e.target.value)}
-          style={{width:'100%', boxSizing:'border-box', background:'rgba(0,0,0,.3)', border:'1px solid rgba(255,255,255,.16)', borderRadius:10, color:'#fff', fontSize:13.5, fontWeight:600, padding:'11px 12px', fontFamily:'inherit', marginBottom:16}}>
-          <option value="">{sites === null ? 'Chargement…' : '— Choisir un site —'}</option>
-          {(sites || []).map(s => (
-            <option key={s.site_id} value={s.site_id}>
-              {(s.site_nom || 'Site') + ' · ' + [s.owner_prenom, s.owner_nom].filter(Boolean).join(' ')}
-            </option>
-          ))}
-        </select>
+        <div style={{display:'flex', flexDirection: isMobile ? 'column' : 'row', gap:20, alignItems:'flex-start'}}>
+          {/* Colonne gauche (1/3) : menu déroulant + tableau des données */}
+          <div style={{flex: isMobile ? '1 1 auto' : '1 1 0', minWidth:0, width: isMobile ? '100%' : 'auto', maxWidth: isMobile ? '100%' : '34%'}}>
+            <select value={selId} onChange={e => loadSite(e.target.value)}
+              style={{width:'100%', boxSizing:'border-box', background:'rgba(0,0,0,.3)', border:'1px solid rgba(255,255,255,.16)', borderRadius:10, color:'#fff', fontSize:13.5, fontWeight:600, padding:'11px 12px', fontFamily:'inherit', marginBottom:16}}>
+              <option value="">{sites === null ? 'Chargement…' : '— Choisir un site —'}</option>
+              {(sites || []).map(s => (
+                <option key={s.site_id} value={s.site_id}>
+                  {(s.site_nom || 'Site') + ' · ' + [s.owner_prenom, s.owner_nom].filter(Boolean).join(' ')}
+                </option>
+              ))}
+            </select>
 
-        {loading ? (
-          <div style={{textAlign:'center', padding:40}}><div className="spinner" style={{margin:'0 auto'}}/></div>
-        ) : facts === undefined ? null
-          : facts === null ? (
-          <div style={{textAlign:'center', color:'rgba(255,255,255,.4)', fontSize:14, padding:'24px 0'}}>
-            Ce site n'a pas de profil de consommation : aucun bilan ne peut être généré.
-          </div>
-        ) : (
-          <div className="card" style={{padding:0, overflow:'hidden'}}>
-            {factRows(facts).map(([label, value], i) => (
-              <div key={label} style={{display:'flex', gap:12, padding:'11px 14px', borderTop: i ? '1px solid rgba(255,255,255,.07)' : 'none'}}>
-                <div style={{flex:'1 1 55%', fontSize:12.5, color:'rgba(255,255,255,.6)', lineHeight:1.4}}>{label}</div>
-                <div style={{flex:'1 1 45%', fontSize:13, fontWeight:700, color:'#fff', textAlign:'right', lineHeight:1.4}}>{value}</div>
+            {loading ? (
+              <div style={{textAlign:'center', padding:40}}><div className="spinner" style={{margin:'0 auto'}}/></div>
+            ) : facts === undefined ? null
+              : facts === null ? (
+              <div style={{textAlign:'center', color:'rgba(255,255,255,.4)', fontSize:14, padding:'24px 0'}}>
+                Ce site n'a pas de profil de consommation : aucun bilan ne peut être généré.
               </div>
-            ))}
+            ) : (
+              <div className="card" style={{padding:0, overflow:'hidden'}}>
+                {factRows(facts).map(([label, value], i) => (
+                  <div key={label} style={{display:'flex', gap:12, padding:'11px 14px', borderTop: i ? '1px solid rgba(255,255,255,.07)' : 'none'}}>
+                    <div style={{flex:'1 1 55%', fontSize:12.5, color:'rgba(255,255,255,.6)', lineHeight:1.4}}>{label}</div>
+                    <div style={{flex:'1 1 45%', fontSize:13, fontWeight:700, color:'#fff', textAlign:'right', lineHeight:1.4}}>{value}</div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
-        )}
+
+          {/* Colonne droite (2/3) : le texte affiché à l'utilisateur */}
+          {(facts !== undefined || isMobile) && (
+            <div style={{flex: isMobile ? '1 1 auto' : '2 1 0', minWidth:0, width: isMobile ? '100%' : 'auto'}}>
+              <div className="card" style={{padding:16, position:'relative', overflow:'hidden'}}>
+                <div style={{fontWeight:800, fontSize:14, color:'#fff', display:'flex', alignItems:'center', gap:6, marginBottom:12}}>
+                  ✨ Votre bilan en clair
+                </div>
+                {!selId ? (
+                  <div style={{color:'rgba(255,255,255,.4)', fontSize:13.5}}>Sélectionnez un site pour voir le texte généré.</div>
+                ) : loading ? (
+                  <div style={{textAlign:'center', padding:40}}><div className="spinner" style={{margin:'0 auto'}}/></div>
+                ) : bilanText ? (
+                  <div style={{fontSize:14, lineHeight:1.6, color:'rgba(255,255,255,.88)', whiteSpace:'pre-wrap'}}>{bilanText}</div>
+                ) : (
+                  <div style={{color:'rgba(255,255,255,.4)', fontSize:13.5}}>Aucun bilan n'a encore été généré pour ce site.</div>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
       </div>
     </div>
     <StickyFooter onBack={onBack}/>
