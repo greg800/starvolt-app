@@ -9480,6 +9480,7 @@ function AdminDashboard({ onViewLogs, onImpersonate }) {
   const [loading, setLoading]   = useState(true);
   const [showAll, setShowAll]   = useState(false);   // afficher toutes les lignes
   const [collapsed, setCollapsed] = useState(false); // replier tout le bloc
+  const [fails, setFails]       = useState(null);    // { user, loading, rows } — modale détail des ratés 1er coup
 
   useEffect(() => {
     sb.rpc('get_admin_dashboard').then(({ data, error }) => {
@@ -9489,14 +9490,25 @@ function AdminDashboard({ onViewLogs, onImpersonate }) {
     });
   }, []);
 
-  // Stats quizz calculées côté serveur (RPC) : quiz_ok / quiz_attempted / quiz_total.
-  // Niveau (étoiles) = même barème que HomeChoiceScreen, sur le total de quiz dispo.
+  // Stats quizz calculées côté serveur (RPC).
+  // - Niveau (étoiles) = maîtrise actuelle (quiz_ok/quiz_total), même barème que HomeChoiceScreen.
+  // - % 1er coup = vrai ratio des questions réussies du premier coup (quiz_first_ok/quiz_first_total).
   const quizFor = (u) => {
-    const ok = u.quiz_ok || 0, attempted = u.quiz_attempted || 0, total = u.quiz_total || 0;
+    const ok = u.quiz_ok || 0, total = u.quiz_total || 0;
     const masteryPct = total > 0 ? (ok / total) * 100 : 0;
     const stars = masteryPct < 10 ? 0 : masteryPct < 33 ? 1 : masteryPct < 66 ? 2 : 3;
-    const successPct = attempted > 0 ? Math.round((ok / attempted) * 100) : null;
-    return { stars, successPct };
+    const ftOk = u.quiz_first_ok || 0, ftTotal = u.quiz_first_total || 0;
+    const firstPct = ftTotal > 0 ? Math.round((ftOk / ftTotal) * 100) : null;
+    return { stars, firstPct, ftTotal };
+  };
+
+  // Clic sur le % 1er coup → liste des questions ratées au premier coup
+  const openFails = (u) => {
+    setFails({ user: u, loading: true, rows: [] });
+    sb.rpc('get_user_quiz_fails', { p_user_id: u.id }).then(({ data, error }) => {
+      if (error) console.error('get_user_quiz_fails', error);
+      setFails({ user: u, loading: false, rows: data || [] });
+    });
   };
 
   const fmtClick = (d) => {
@@ -9550,7 +9562,7 @@ function AdminDashboard({ onViewLogs, onImpersonate }) {
                   <th style={{padding:'8px 10px', fontSize:10, letterSpacing:'.5px', textTransform:'uppercase', color:'rgba(255,255,255,.4)', fontWeight:700}}>Dernier clic</th>
                   <th style={{padding:'8px 10px', fontSize:10, letterSpacing:'.5px', textTransform:'uppercase', color:'rgba(255,255,255,.4)', fontWeight:700, textAlign:'right'}}>Clics</th>
                   <th style={{padding:'8px 10px', fontSize:10, letterSpacing:'.5px', textTransform:'uppercase', color:'rgba(255,255,255,.4)', fontWeight:700, textAlign:'center', whiteSpace:'nowrap'}}>Niveau quizz</th>
-                  <th style={{padding:'8px 10px', fontSize:10, letterSpacing:'.5px', textTransform:'uppercase', color:'rgba(255,255,255,.4)', fontWeight:700, textAlign:'right', whiteSpace:'nowrap'}}>% succès quizz</th>
+                  <th style={{padding:'8px 10px', fontSize:10, letterSpacing:'.5px', textTransform:'uppercase', color:'rgba(255,255,255,.4)', fontWeight:700, textAlign:'right', whiteSpace:'nowrap'}} title="Part des questions réussies du premier coup">% 1er coup</th>
                   <th style={{padding:'8px 10px', fontSize:10, letterSpacing:'.5px', textTransform:'uppercase', color:'rgba(255,255,255,.4)', fontWeight:700, textAlign:'right'}}>Tickets</th>
                 </tr>
               </thead>
@@ -9585,8 +9597,10 @@ function AdminDashboard({ onViewLogs, onImpersonate }) {
                           ? <span style={{letterSpacing:'-1px'}}>{'⭐'.repeat(q.stars)}</span>
                           : <span title="Ourson — aucune étoile">🐻</span>}
                       </td>
-                      <td style={{padding:'9px 10px', borderTop:'1px solid rgba(255,255,255,.06)', textAlign:'right', fontWeight:700, fontVariantNumeric:'tabular-nums', color: q.successPct==null ? 'rgba(255,255,255,.25)' : q.successPct>=66 ? '#7dd940' : q.successPct>=33 ? '#f7c948' : '#ff8a6a'}}>
-                        {q.successPct==null ? '—' : q.successPct + '%'}
+                      <td onClick={() => q.firstPct!=null && openFails(u)}
+                          title={q.firstPct==null ? 'Pas encore de quiz passé (depuis le suivi du 1er coup)' : 'Voir les questions ratées au premier coup'}
+                          style={{padding:'9px 10px', borderTop:'1px solid rgba(255,255,255,.06)', textAlign:'right', fontWeight:700, fontVariantNumeric:'tabular-nums', cursor: q.firstPct==null?'default':'pointer', textDecoration: q.firstPct==null?'none':'underline', textUnderlineOffset:3, color: q.firstPct==null ? 'rgba(255,255,255,.25)' : q.firstPct>=66 ? '#7dd940' : q.firstPct>=33 ? '#f7c948' : '#ff8a6a'}}>
+                        {q.firstPct==null ? '—' : q.firstPct + '%'}
                       </td>
                     </>); })()}
                     <td onClick={() => onViewLogs && onViewLogs(u)} style={{padding:'9px 10px', borderTop:'1px solid rgba(255,255,255,.06)', textAlign:'right', cursor:'pointer'}}
@@ -9616,6 +9630,32 @@ function AdminDashboard({ onViewLogs, onImpersonate }) {
           )}
         </div>
       ))}
+
+      {fails && (
+        <div onClick={() => setFails(null)} style={{position:'fixed', inset:0, zIndex:1000, background:'rgba(0,0,0,.6)', display:'flex', alignItems:'flex-end', justifyContent:'center'}}>
+          <div onClick={e => e.stopPropagation()} style={{width:'100%', maxWidth:520, maxHeight:'80vh', background:'#0e2a36', borderTopLeftRadius:18, borderTopRightRadius:18, border:'1px solid rgba(255,255,255,.12)', borderBottom:'none', display:'flex', flexDirection:'column', overflow:'hidden'}}>
+            <div style={{display:'flex', alignItems:'center', justifyContent:'space-between', padding:'16px 18px', borderBottom:'1px solid rgba(255,255,255,.08)'}}>
+              <div>
+                <div style={{fontWeight:800, fontSize:15, color:'#fff'}}>Questions ratées au 1er coup</div>
+                <div style={{fontSize:12, color:'rgba(255,255,255,.5)', marginTop:2}}>{fails.user.prenom || fails.user.email || '—'}</div>
+              </div>
+              <button onClick={() => setFails(null)} style={{background:'rgba(255,255,255,.08)', border:'none', cursor:'pointer', color:'#fff', width:30, height:30, borderRadius:8, fontSize:16, lineHeight:1}}>×</button>
+            </div>
+            <div style={{overflowY:'auto', padding:'8px 14px 22px'}}>
+              {fails.loading ? (
+                <div style={{textAlign:'center', padding:30}}><div className="spinner" style={{margin:'0 auto'}}/></div>
+              ) : fails.rows.length === 0 ? (
+                <div style={{textAlign:'center', padding:'26px 10px', color:'rgba(255,255,255,.5)', fontSize:13}}>Aucune erreur au premier coup 🎉</div>
+              ) : fails.rows.map((r, i) => (
+                <div key={r.question_id || i} style={{padding:'11px 0', borderBottom: i<fails.rows.length-1 ? '1px solid rgba(255,255,255,.06)' : 'none'}}>
+                  {r.subject && <div style={{fontSize:10.5, textTransform:'uppercase', letterSpacing:'.5px', color:'#f7c948', fontWeight:700, marginBottom:3}}>{r.subject}</div>}
+                  <div style={{fontSize:13.5, color:'rgba(255,255,255,.9)', lineHeight:1.45}}>{r.question}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -12601,6 +12641,13 @@ function ComprendreScoreScreen({ user, subject, score, total, results, isRevisio
           failed_question_ids: failedIds,
         }, { onConflict: 'user_id,subject_id' });
         if (error) console.error('Erreur enregistrement progression quiz', error);
+        // Premier essai (immuable) : on fige le résultat du tout premier passage de ce sujet.
+        // Le filtre .is('first_try_total', null) garantit qu'une reprise ne réécrit jamais cette donnée.
+        const { error: ftErr } = await sb.from('user_learn_progress')
+          .update({ first_try_total: total, first_try_failed_ids: failedIds })
+          .eq('user_id', user.id).eq('subject_id', subject.id)
+          .is('first_try_total', null);
+        if (ftErr) console.error('Erreur enregistrement premier essai quiz', ftErr);
       })();
     }
     // Révision : on retire les questions désormais réussies de failed_question_ids,
