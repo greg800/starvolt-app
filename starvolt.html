@@ -9475,12 +9475,11 @@ function AdminPrixMateriauxScreen({ onBack }) {
 
 // ─── AdminScreen ──────────────────────────────
 // ─── AdminDashboard : tableau de bord d'activité (en tête du menu admin) ──────
-function AdminDashboard({ onViewLogs, onImpersonate }) {
+function AdminDashboard({ onViewLogs, onImpersonate, onViewFails }) {
   const [rows, setRows]         = useState([]);
   const [loading, setLoading]   = useState(true);
   const [showAll, setShowAll]   = useState(false);   // afficher toutes les lignes
   const [collapsed, setCollapsed] = useState(false); // replier tout le bloc
-  const [fails, setFails]       = useState(null);    // { user, loading, rows } — modale détail des ratés 1er coup
 
   useEffect(() => {
     sb.rpc('get_admin_dashboard').then(({ data, error }) => {
@@ -9500,15 +9499,6 @@ function AdminDashboard({ onViewLogs, onImpersonate }) {
     const ftOk = u.quiz_first_ok || 0, ftTotal = u.quiz_first_total || 0;
     const firstPct = ftTotal > 0 ? Math.round((ftOk / ftTotal) * 100) : null;
     return { stars, firstPct, ftTotal };
-  };
-
-  // Clic sur le % 1er coup → liste des questions ratées au premier coup
-  const openFails = (u) => {
-    setFails({ user: u, loading: true, rows: [] });
-    sb.rpc('get_user_quiz_fails', { p_user_id: u.id }).then(({ data, error }) => {
-      if (error) console.error('get_user_quiz_fails', error);
-      setFails({ user: u, loading: false, rows: data || [] });
-    });
   };
 
   const fmtClick = (d) => {
@@ -9597,7 +9587,7 @@ function AdminDashboard({ onViewLogs, onImpersonate }) {
                           ? <span style={{letterSpacing:'-1px'}}>{'⭐'.repeat(q.stars)}</span>
                           : <span title="Ourson — aucune étoile">🐻</span>}
                       </td>
-                      <td onClick={() => q.firstPct!=null && openFails(u)}
+                      <td onClick={() => q.firstPct!=null && onViewFails && onViewFails(u)}
                           title={q.firstPct==null ? 'Pas encore de quiz passé (depuis le suivi du 1er coup)' : 'Voir les questions ratées au premier coup'}
                           style={{padding:'9px 10px', borderTop:'1px solid rgba(255,255,255,.06)', textAlign:'right', fontWeight:700, fontVariantNumeric:'tabular-nums', cursor: q.firstPct==null?'default':'pointer', textDecoration: q.firstPct==null?'none':'underline', textUnderlineOffset:3, color: q.firstPct==null ? 'rgba(255,255,255,.25)' : q.firstPct>=66 ? '#7dd940' : q.firstPct>=33 ? '#f7c948' : '#ff8a6a'}}>
                         {q.firstPct==null ? '—' : q.firstPct + '%'}
@@ -9630,37 +9620,74 @@ function AdminDashboard({ onViewLogs, onImpersonate }) {
           )}
         </div>
       ))}
-
-      {fails && (
-        <div onClick={() => setFails(null)} style={{position:'fixed', inset:0, zIndex:1000, background:'rgba(0,0,0,.6)', display:'flex', alignItems:'flex-end', justifyContent:'center'}}>
-          <div onClick={e => e.stopPropagation()} style={{width:'100%', maxWidth:520, maxHeight:'80vh', background:'#0e2a36', borderTopLeftRadius:18, borderTopRightRadius:18, border:'1px solid rgba(255,255,255,.12)', borderBottom:'none', display:'flex', flexDirection:'column', overflow:'hidden'}}>
-            <div style={{display:'flex', alignItems:'center', justifyContent:'space-between', padding:'16px 18px', borderBottom:'1px solid rgba(255,255,255,.08)'}}>
-              <div>
-                <div style={{fontWeight:800, fontSize:15, color:'#fff'}}>Questions ratées au 1er coup</div>
-                <div style={{fontSize:12, color:'rgba(255,255,255,.5)', marginTop:2}}>{fails.user.prenom || fails.user.email || '—'}</div>
-              </div>
-              <button onClick={() => setFails(null)} style={{background:'rgba(255,255,255,.08)', border:'none', cursor:'pointer', color:'#fff', width:30, height:30, borderRadius:8, fontSize:16, lineHeight:1}}>×</button>
-            </div>
-            <div style={{overflowY:'auto', padding:'8px 14px 22px'}}>
-              {fails.loading ? (
-                <div style={{textAlign:'center', padding:30}}><div className="spinner" style={{margin:'0 auto'}}/></div>
-              ) : fails.rows.length === 0 ? (
-                <div style={{textAlign:'center', padding:'26px 10px', color:'rgba(255,255,255,.5)', fontSize:13}}>Aucune erreur au premier coup 🎉</div>
-              ) : fails.rows.map((r, i) => (
-                <div key={r.question_id || i} style={{padding:'11px 0', borderBottom: i<fails.rows.length-1 ? '1px solid rgba(255,255,255,.06)' : 'none'}}>
-                  {r.subject && <div style={{fontSize:10.5, textTransform:'uppercase', letterSpacing:'.5px', color:'#f7c948', fontWeight:700, marginBottom:3}}>{r.subject}</div>}
-                  <div style={{fontSize:13.5, color:'rgba(255,255,255,.9)', lineHeight:1.45}}>{r.question}</div>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
 
-function AdminScreen({ onTariffs, onUsers, onRoles, onSites, onSpot, onAcc, onProduction, onGlobalVars, onPrix, onOffres, onLearn, onFeedback, onProofread, onAICosts, onAIPrompts, onViewLogs, onImpersonate, onBack }) {
+// ─── AdminQuizFailsScreen : page dédiée — questions ratées au 1er coup d'un user ──
+function AdminQuizFailsScreen({ user, onBack }) {
+  const [rows, setRows]       = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!user?.id) { setLoading(false); return; }
+    sb.rpc('get_user_quiz_fails', { p_user_id: user.id }).then(({ data, error }) => {
+      if (error) console.error('get_user_quiz_fails', error);
+      setRows(data || []);
+      setLoading(false);
+    });
+  }, [user && user.id]);
+
+  // Regroupement par sujet pour un affichage lisible
+  const groups = [];
+  rows.forEach(r => {
+    const key = r.subject || '—';
+    let g = groups.find(x => x.subject === key);
+    if (!g) { g = { subject: key, items: [] }; groups.push(g); }
+    g.items.push(r);
+  });
+
+  return (
+    <>
+    <div className="screen fade-in" style={{padding:'0 0 80px'}}>
+      <div style={{display:'flex',alignItems:'center',gap:12,marginBottom:4,marginTop:4}}>
+        <button onClick={onBack} style={{background:'none',border:'none',color:'rgba(255,255,255,.6)',fontSize:22,cursor:'pointer',padding:'4px 8px',lineHeight:1}}>←</button>
+        <div>
+          <div style={{fontSize:9,color:'rgba(247,201,72,.85)',fontWeight:700,textTransform:'uppercase',letterSpacing:'.5px'}}>Questions ratées au 1er coup</div>
+          <div style={{fontSize:18,fontWeight:900,color:'white',lineHeight:1.2}}>{user?.prenom || user?.email || 'Utilisateur'}</div>
+        </div>
+      </div>
+
+      {loading ? (
+        <div style={{textAlign:'center',padding:40}}><div className="spinner" style={{margin:'0 auto'}}/></div>
+      ) : rows.length === 0 ? (
+        <div className="card" style={{textAlign:'center',padding:'28px 20px',color:'rgba(255,255,255,.5)',fontSize:14}}>
+          Aucune erreur au premier coup 🎉
+        </div>
+      ) : (
+        <div style={{marginTop:14,display:'flex',flexDirection:'column',gap:16}}>
+          {groups.map((g, gi) => (
+            <div key={gi}>
+              <div style={{fontSize:11,textTransform:'uppercase',letterSpacing:'.5px',color:'#f7c948',fontWeight:800,marginBottom:8,paddingLeft:2}}>{g.subject}</div>
+              <div style={{display:'flex',flexDirection:'column',gap:8}}>
+                {g.items.map((r, i) => (
+                  <div key={r.question_id || i} className="card" style={{padding:'13px 15px',display:'flex',gap:11,alignItems:'flex-start'}}>
+                    <span style={{flexShrink:0,fontSize:15,lineHeight:1.4}}>❌</span>
+                    <div style={{fontSize:14,color:'rgba(255,255,255,.9)',lineHeight:1.5,fontWeight:500}}>{r.question}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+    <StickyFooter onBack={onBack}/>
+    </>
+  );
+}
+
+function AdminScreen({ onTariffs, onUsers, onRoles, onSites, onSpot, onAcc, onProduction, onGlobalVars, onPrix, onOffres, onLearn, onFeedback, onProofread, onAICosts, onAIPrompts, onViewLogs, onViewFails, onImpersonate, onBack }) {
   return (
     <>
     <div className="screen screen-admin fade-in">
@@ -9668,7 +9695,7 @@ function AdminScreen({ onTariffs, onUsers, onRoles, onSites, onSpot, onAcc, onPr
         <div className="welcome-tag" style={{color:'#ffb340'}}>Administration</div>
         <h1 className="welcome-title">Menu<br/><span className="accent">admin</span></h1>
       </div>
-      <AdminDashboard onViewLogs={onViewLogs} onImpersonate={onImpersonate}/>
+      <AdminDashboard onViewLogs={onViewLogs} onViewFails={onViewFails} onImpersonate={onImpersonate}/>
       <div className="admin-grid">
         <div className="admin-group">
           <div className="admin-group-label"><span className="agl-ico">📥</span>Import de data</div>
@@ -13458,8 +13485,12 @@ function App() {
           onAICosts={()=>goTo('ADMIN_AI_COSTS')}
           onAIPrompts={()=>goTo('ADMIN_AI_PROMPTS')}
           onViewLogs={(u)=>goTo('ADMIN_USER_LOGS', { logUser: u })}
+          onViewFails={(u)=>goTo('ADMIN_QUIZ_FAILS', { failUser: u })}
           onImpersonate={startImpersonation}
           onBack={goBack}/>;
+
+      case 'ADMIN_QUIZ_FAILS':
+        return <AdminQuizFailsScreen user={state.failUser} onBack={goBack}/>;
 
       case 'ADMIN_FEEDBACK':
         return <AdminFeedbackScreen onBack={goBack}/>;
