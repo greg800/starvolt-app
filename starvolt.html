@@ -9477,44 +9477,27 @@ function AdminPrixMateriauxScreen({ onBack }) {
 // ─── AdminDashboard : tableau de bord d'activité (en tête du menu admin) ──────
 function AdminDashboard({ onViewLogs, onImpersonate }) {
   const [rows, setRows]         = useState([]);
-  const [quizMap, setQuizMap]   = useState({});      // { [userId]: { stars, successPct } }
   const [loading, setLoading]   = useState(true);
   const [showAll, setShowAll]   = useState(false);   // afficher toutes les lignes
   const [collapsed, setCollapsed] = useState(false); // replier tout le bloc
 
   useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      const [{ data, error }, { data: qs }, { data: prog }] = await Promise.all([
-        sb.rpc('get_admin_dashboard'),
-        sb.from('learn_questions').select('id,subject_id'),
-        sb.from('user_learn_progress').select('user_id,subject_id,failed_question_ids'),
-      ]);
+    sb.rpc('get_admin_dashboard').then(({ data, error }) => {
       if (error) console.error('get_admin_dashboard', error);
-      // Nombre total de questions (pour le niveau) + nombre de questions par sujet
-      const totalQuiz = (qs || []).length;
-      const qBySubject = {};
-      (qs || []).forEach(q => { qBySubject[q.subject_id] = (qBySubject[q.subject_id] || 0) + 1; });
-      // Agrégation par utilisateur
-      const map = {};
-      (prog || []).forEach(r => {
-        const qc = qBySubject[r.subject_id] || 0;
-        const failed = (r.failed_question_ids && r.failed_question_ids.length) || 0;
-        const m = map[r.user_id] || (map[r.user_id] = { ok: 0, attempted: 0 });
-        m.ok += Math.max(0, qc - failed);   // réponses réussies
-        m.attempted += qc;                  // réponses tentées
-      });
-      Object.values(map).forEach(m => {
-        // Niveau (étoiles) : même barème que HomeChoiceScreen — sur le total de quiz dispo
-        const masteryPct = totalQuiz > 0 ? (m.ok / totalQuiz) * 100 : 0;
-        m.stars = masteryPct < 10 ? 0 : masteryPct < 33 ? 1 : masteryPct < 66 ? 2 : 3;
-        // % de succès : sur les réponses tentées, combien sont un succès
-        m.successPct = m.attempted > 0 ? Math.round((m.ok / m.attempted) * 100) : null;
-      });
-      if (!cancelled) { setRows(data || []); setQuizMap(map); setLoading(false); }
-    })();
-    return () => { cancelled = true; };
+      setRows(data || []);
+      setLoading(false);
+    });
   }, []);
+
+  // Stats quizz calculées côté serveur (RPC) : quiz_ok / quiz_attempted / quiz_total.
+  // Niveau (étoiles) = même barème que HomeChoiceScreen, sur le total de quiz dispo.
+  const quizFor = (u) => {
+    const ok = u.quiz_ok || 0, attempted = u.quiz_attempted || 0, total = u.quiz_total || 0;
+    const masteryPct = total > 0 ? (ok / total) * 100 : 0;
+    const stars = masteryPct < 10 ? 0 : masteryPct < 33 ? 1 : masteryPct < 66 ? 2 : 3;
+    const successPct = attempted > 0 ? Math.round((ok / attempted) * 100) : null;
+    return { stars, successPct };
+  };
 
   const fmtClick = (d) => {
     if (!d) return '—';
@@ -9595,7 +9578,7 @@ function AdminDashboard({ onViewLogs, onImpersonate }) {
                     <td style={{padding:'9px 10px', borderTop:'1px solid rgba(255,255,255,.06)', color:'rgba(255,255,255,.85)', fontWeight:700, textAlign:'right', fontVariantNumeric:'tabular-nums'}}>
                       {u.click_count}
                     </td>
-                    {(() => { const q = quizMap[u.id] || { stars:0, successPct:null }; return (<>
+                    {(() => { const q = quizFor(u); return (<>
                       <td style={{padding:'9px 10px', borderTop:'1px solid rgba(255,255,255,.06)', textAlign:'center', whiteSpace:'nowrap'}}
                           title={`Niveau quizz : ${q.stars} étoile${q.stars>1?'s':''}`}>
                         {q.stars > 0
