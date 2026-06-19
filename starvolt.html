@@ -3696,6 +3696,28 @@ function deriveSiteImpact({ balance, site, prodProfil, tariffs, spotMap, globalV
   return { billAvant, billApresNet, consoApres, injApres, consoTot, flexRev, accRev, energySaving, totalSaving, reductionPct, hasBalance, effectiveTariff };
 }
 
+// 3bis) Balaye PV (2→9 kWc) × batterie (2→15 kWh) et renvoie le couple au meilleur ROI (retour mini).
+//       Moteur partagé (SOURCE UNIQUE). Yield à chaque palier PV pour laisser tourner l'étoile.
+async function findBestPvBat({ site, prodProfil, tariffs, spotMap, globalVars, thermKwh, prixMat }) {
+  if (!site?.conso_profil || !prodProfil) return null;
+  const pvPrices = prixMat?.pv_prices || [], batPrices = prixMat?.bat_prices || [];
+  let best = null;
+  for (let pv = 2; pv <= 9; pv++) {
+    for (let bat = 2; bat <= 15; bat++) {
+      const bal = buildSiteBalance({ site, prodProfil, tariffs, spotMap, globalVars, pvKwc: String(pv), batKwh: String(bat), thermKwh });
+      const imp = deriveSiteImpact({ balance: bal, site, prodProfil, tariffs, spotMap, globalVars, batKwh: String(bat), thermKwh });
+      const saving = imp?.totalSaving || 0;
+      const invest = interpPrix(pv, pvPrices) + interpPrix(bat, batPrices);
+      if (saving > 0 && invest > 0) {
+        const payback = invest / saving;
+        if (!best || payback < best.payback) best = { pv, bat, saving: Math.round(saving), invest, payback };
+      }
+    }
+    await new Promise(r => setTimeout(r, 0));
+  }
+  return best;
+}
+
 // 4) Construit les CHIFFRES déjà calculés envoyés à l'IA pour "Ton bilan en clair".
 //    L'IA ne calcule RIEN : on lui livre des faits déterministes issus du moteur.
 //    leviers_classement = ordre qualitatif des leviers (sans euros, pour ne pas contredire le simulateur).
@@ -4740,21 +4762,7 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
     if(optimizing||!site?.conso_profil||!prodProfilData) return;
     setOptimizing(true); setOptimResult(null);
     await new Promise(r=>setTimeout(r,30)); // laisser le spinner s'afficher
-    const pvPrices=prixMat?.pv_prices||[], batPrices=prixMat?.bat_prices||[];
-    let best=null;
-    for(let pv=2;pv<=9;pv++){
-      for(let bat=2;bat<=15;bat++){
-        const bal=buildSiteBalance({site,prodProfil:prodProfilData,tariffs,spotMap,globalVars,pvKwc:String(pv),batKwh:String(bat),thermKwh});
-        const imp=deriveSiteImpact({balance:bal,site,prodProfil:prodProfilData,tariffs,spotMap,globalVars,batKwh:String(bat),thermKwh});
-        const saving=imp?.totalSaving||0;
-        const invest=interpPrix(pv,pvPrices)+interpPrix(bat,batPrices);
-        if(saving>0&&invest>0){
-          const payback=invest/saving;
-          if(!best||payback<best.payback) best={pv,bat,saving:Math.round(saving),invest,payback};
-        }
-      }
-      await new Promise(r=>setTimeout(r,0)); // yield → le spinner s'anime
-    }
+    const best=await findBestPvBat({site,prodProfil:prodProfilData,tariffs,spotMap,globalVars,thermKwh,prixMat});
     if(best){
       setPvKwc(String(best.pv)); setBatKwh(String(best.bat));
       setOptimResult(best);
@@ -8513,6 +8521,11 @@ function SolarSimScreen({ user, userProfile, onBack, onPanier, onMonSite, onCart
   const [globalVars, setGlobalVars] = useState(null);
   const [realSaving, setRealSaving] = useState(null);
   const [autoPct,    setAutoPct]    = useState(null);
+  // Optimiseur PV+batterie (lancé au clic "Je veux des panneaux + batterie + Box")
+  const [tariffs,    setTariffs]    = useState(null);
+  const [spotMap,    setSpotMap]    = useState(null);
+  const [prixMat,    setPrixMat]    = useState(null);
+  const [optimizing, setOptimizing] = useState(false);
 
   useEffect(() => {
     const siteId = localStorage.getItem('starvolt_active_site_id');
@@ -8523,7 +8536,11 @@ function SolarSimScreen({ user, userProfile, onBack, onPanier, onMonSite, onCart
       sb.from('tarifs_electricite').select('*'),
       sb.rpc('get_spot_json'),
       sb.from('parametres_nationaux').select('*').eq('id', 1).maybeSingle(),
-    ]).then(async ([{ data: site }, { data: tariffs }, { data: spotRows }, { data: nat }]) => {
+      sb.from('prix_materiaux').select('*').eq('id', 1).maybeSingle(),
+    ]).then(async ([{ data: site }, { data: tariffs }, { data: spotRows }, { data: nat }, { data: pm }]) => {
+      setTariffs(tariffs || []);
+      setSpotMap(spotRows ? buildSpotMap(spotRows) : null);
+      setPrixMat(pm);
       const _lsFlexS=(()=>{try{const v=localStorage.getItem('starvolt_flex_'+siteId);const p=v?JSON.parse(v):null;return(p?.chauffage&&p?.ecs&&p?.surface)?p:null;}catch{return null;}})();
       const _flexS=_lsFlexS||(site?.flex_chauffage&&site.flex_ecs&&site.flex_surface?{chauffage:site.flex_chauffage,ecs:site.flex_ecs,surface:site.flex_surface}:null);
       if(_flexS) setSiteFlex(_flexS);
@@ -8618,6 +8635,35 @@ function SolarSimScreen({ user, userProfile, onBack, onPanier, onMonSite, onCart
     if(flex.ecs==='elec') kw+=[2,3,4][idx];
     try{const d=JSON.parse(localStorage.getItem('starvolt_solar_defaults')||'{}');d.thermKwh=String(kw);localStorage.setItem('starvolt_solar_defaults',JSON.stringify(d));}catch{}
     setThermKwh(String(kw));
+  };
+
+  // Clic "Je veux des panneaux + batterie + Box" → on active le solaire puis on optimise PV+batterie
+  const handleChooseSolar = async () => {
+    if (optimizing) return;
+    // 1) Flags panier AVANT le calcul (mergeGlobalVars / buildSiteBalance les lisent)
+    localStorage.setItem('starvolt_solar_chosen','solar_box');
+    localStorage.removeItem('starvolt_box_chosen');
+    localStorage.removeItem('starvolt_box_saving');
+    setPanierServicesChecked({opti_solaire:true,opti_tarif:true,opti_flex:true});
+    // 2) Optimisation PV×batterie (étoile qui tourne) si on a tout ce qu'il faut
+    let bestPv='6', bestBat='10';
+    if (prixMat && prodData && siteRef?.site?.conso_profil) {
+      setOptimizing(true);
+      await new Promise(r=>setTimeout(r,30));
+      const gv = mergeGlobalVars(globalVars||{}) || globalVars;
+      const best = await findBestPvBat({ site:siteRef.site, prodProfil:prodData, tariffs, spotMap, globalVars:gv, thermKwh, prixMat });
+      if (best) { bestPv=String(best.pv); bestBat=String(best.bat); }
+      setOptimizing(false);
+    }
+    // 3) Appliquer le couple retenu (state + localStorage + DB)
+    setPvKwc(bestPv); setBatKwh(bestBat);
+    try{const d=JSON.parse(localStorage.getItem('starvolt_solar_defaults')||'{}');localStorage.setItem('starvolt_solar_defaults',JSON.stringify({...d,pvKwc:bestPv,batKwh:bestBat}));}catch{localStorage.setItem('starvolt_solar_defaults',JSON.stringify({pvKwc:bestPv,batKwh:bestBat,thermKwh:'0'}));}
+    if (activeSiteId) sb.from('sites').update({puissance_pv_kwc:parseFloat(bestPv),batterie_capacite_kwh:parseFloat(bestBat)}).eq('id',activeSiteId);
+    if (solarBoxSaving) localStorage.setItem('starvolt_solar_saving',String(solarBoxSaving));
+    // 4) Suite du flux existant
+    setChosen('solar_box');
+    if (siteFlex) { applyExistingFlexSolar(siteFlex); setJustConfirmed(true); if(onCartUpdate) onCartUpdate(); }
+    else { setShowThermForm(true); }
   };
 
   if (showThermForm) {
@@ -8769,8 +8815,10 @@ function SolarSimScreen({ user, userProfile, onBack, onPanier, onMonSite, onCart
           </StickyFooter>
         ) : (
           <StickyFooter onBack={onBack}>
-            <button className="btn btn-yes" onClick={() => { localStorage.setItem('starvolt_solar_chosen','solar_box'); try{const d=JSON.parse(localStorage.getItem('starvolt_solar_defaults')||'{}');localStorage.setItem('starvolt_solar_defaults',JSON.stringify({...d,pvKwc:'6',batKwh:'10'}));}catch{localStorage.setItem('starvolt_solar_defaults',JSON.stringify({pvKwc:'6',batKwh:'10',thermKwh:'0'}));} setPvKwc('6'); setBatKwh('10'); if(solarBoxSaving) localStorage.setItem('starvolt_solar_saving',String(solarBoxSaving)); localStorage.removeItem('starvolt_box_chosen'); localStorage.removeItem('starvolt_box_saving'); setPanierServicesChecked({opti_solaire:true,opti_tarif:true,opti_flex:true}); setChosen('solar_box'); if(siteFlex){applyExistingFlexSolar(siteFlex);setJustConfirmed(true);if(onCartUpdate)onCartUpdate();}else{setShowThermForm(true);} }}>
-              ☀️ Je veux des panneaux + batterie + Box
+            <button className="btn btn-yes" disabled={optimizing} style={optimizing?{opacity:.85}:undefined} onClick={handleChooseSolar}>
+              {optimizing
+                ? <span style={{display:'inline-flex',alignItems:'center',gap:8,justifyContent:'center'}}><StarSpinner size={18} color="#06121e"/> Optimisation PV + batterie…</span>
+                : '☀️ Je veux des panneaux + batterie + Box'}
             </button>
           </StickyFooter>
         )
