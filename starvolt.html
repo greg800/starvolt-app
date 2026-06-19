@@ -6996,8 +6996,7 @@ function GlobalVarsScreen({ onBack }) {
     setSavingGlobal(true); setSaveGlobalMsg(null);
     const num  = v => v === '' ? null : parseFloat(v);
     const intr = v => v === '' ? null : parseInt(v);
-    const { error } = await sb.from('parametres_nationaux').upsert({
-      id: 1,
+    const { error } = await sb.from('parametres_nationaux').update({
       ratio_puissance_stockage:                     num(globalForm.ratio_puissance_stockage),
       pertes_batterie:                              num(globalForm.pertes_batterie),
       ratio_puissance_stockage_thermique:           num(globalForm.ratio_puissance_stockage_thermique),
@@ -7021,7 +7020,7 @@ function GlobalVarsScreen({ onBack }) {
       opti_solaire:                 !!globalForm.opti_solaire,
       opti_tarif:                   !!globalForm.opti_tarif,
       updated_at: new Date().toISOString(),
-    }, { onConflict: 'id' });
+    }).eq('id', 1);
     setSavingGlobal(false);
     if (error) { setSaveGlobalMsg('Erreur : ' + error.message); return; }
     setSaveGlobalMsg('✓ Variables enregistrées');
