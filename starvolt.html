@@ -3667,7 +3667,27 @@ function deriveSiteImpact({ balance, site, prodProfil, tariffs, spotMap, globalV
 // 4) Construit les CHIFFRES déjà calculés envoyés à l'IA pour "Ton bilan en clair".
 //    L'IA ne calcule RIEN : on lui livre des faits déterministes issus du moteur.
 //    leviers_classement = ordre qualitatif des leviers (sans euros, pour ne pas contredire le simulateur).
-function buildBilanFacts({ site, tariffs, globalVars, prodProfil }) {
+const FLEX_CHAUFFAGE_LBL = { elec:'électrique', pac:'pompe à chaleur', autre:'autre' };
+const FLEX_ECS_LBL       = { elec:'électrique', autre:'autre' };
+const FLEX_SURFACE_LBL   = { small:'moins de 70 m²', medium:'70 à 150 m²', large:'plus de 150 m²' };
+const FLEX_TYPELOG_LBL   = { maison:'maison individuelle', collectif:'logement collectif (appartement)' };
+const FLEX_STATUT_LBL    = { proprietaire:'propriétaire', locataire:'locataire' };
+
+// Résumé quizz d'un utilisateur (étoiles + taux d'erreur 1er coup) — RPC self-or-admin.
+async function fetchQuizSummary(userId) {
+  if (!userId) return null;
+  const { data, error } = await sb.rpc('get_user_quiz_summary', { p_user_id: userId });
+  const r = data && data[0];
+  if (error || !r) return null;
+  const ok = Number(r.quiz_ok) || 0, tot = Number(r.quiz_total) || 0;
+  const masteryPct = tot > 0 ? ok / tot * 100 : 0;
+  const stars = masteryPct < 10 ? 0 : masteryPct < 33 ? 1 : masteryPct < 66 ? 2 : 3;
+  const ftTotal = Number(r.ft_total) || 0, ftFailed = Number(r.ft_failed) || 0;
+  const errorPct = ftTotal > 0 ? Math.round(ftFailed / ftTotal * 100) : null;
+  return { stars, errorPct, ftTotal };
+}
+
+function buildBilanFacts({ site, tariffs, globalVars, prodProfil, quiz }) {
   if (!site?.conso_profil || !(site.conso_annuelle_kwh > 0)) return null;
   const cp = site.conso_profil;
   const consoAnnuelle = Math.round(site.conso_annuelle_kwh);
@@ -3755,6 +3775,13 @@ function buildBilanFacts({ site, tariffs, globalVars, prodProfil }) {
     repartition_horaire_pct: repartition,
     saisonnalite_pct: saisonnalite,
     leviers_classement: leviersClassement,
+    chauffage: site.flex_chauffage ? (FLEX_CHAUFFAGE_LBL[site.flex_chauffage] || site.flex_chauffage) : null,
+    eau_chaude: site.flex_ecs ? (FLEX_ECS_LBL[site.flex_ecs] || site.flex_ecs) : null,
+    surface_logement: site.flex_surface ? (FLEX_SURFACE_LBL[site.flex_surface] || site.flex_surface) : null,
+    type_habitat: site.flex_type_logement ? (FLEX_TYPELOG_LBL[site.flex_type_logement] || site.flex_type_logement) : null,
+    statut_occupation: site.flex_statut ? (FLEX_STATUT_LBL[site.flex_statut] || site.flex_statut) : null,
+    quiz_niveau_etoiles: quiz?.stars ?? null,
+    quiz_taux_erreur_pct: quiz?.errorPct ?? null,
   };
 }
 
@@ -4652,13 +4679,14 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
     if(site.bilan_ia) return;                     // déjà écrit en dur → jamais rappelé
     if(!tariffs?.length) return;                  // besoin des tarifs pour les faits
     if(bilanGenRef.current[site.id]) return;      // pas deux fois dans la même session
-    const facts=buildBilanFacts({site,tariffs,globalVars,prodProfil:prodProfilData});
-    if(!facts) return;
     bilanGenRef.current[site.id]=true;
     const sid=site.id;
     setBilanGenerating(true);
     (async()=>{
       try{
+        const quiz=await fetchQuizSummary(user.id);
+        const facts=buildBilanFacts({site,tariffs,globalVars,prodProfil:prodProfilData,quiz});
+        if(!facts) return;
         const{data,error}=await sb.functions.invoke('bilan',{body:{facts}});
         if(error||!data?.text){ console.warn('bilan error',error||data); return; }
         await sb.from('sites').update({bilan_ia:data.text,bilan_ia_at:new Date().toISOString()}).eq('id',sid);
@@ -10383,8 +10411,9 @@ function AdminBilanDataScreen({ onBack }) {
       const { data: pp } = await sb.from('profils_production').select('profil').eq('id', row.profil_production_id).single();
       prodProfil = pp?.profil || null;
     }
+    const quiz = await fetchQuizSummary(row.user_id);
     setBilanText(row.bilan_ia || null);
-    setFacts(buildBilanFacts({ site: row, tariffs, globalVars: null, prodProfil }));
+    setFacts(buildBilanFacts({ site: row, tariffs, globalVars: null, prodProfil, quiz }));
     setLoading(false);
   };
 
@@ -10404,6 +10433,13 @@ function AdminBilanDataScreen({ onBack }) {
       ['Répartition — soir (22h-24h)', (r.soir_22h_24h ?? 0) + ' %'],
       ['Saisonnalité — été', (s.ete ?? 0) + ' %'],
       ['Saisonnalité — hiver', (s.hiver ?? 0) + ' %'],
+      ['Chauffage', f.chauffage || '—'],
+      ['Eau chaude sanitaire', f.eau_chaude || '—'],
+      ['Surface du logement', f.surface_logement || '—'],
+      ['Type d’habitat', f.type_habitat || '—'],
+      ['Statut d’occupation', f.statut_occupation || '—'],
+      ['Niveau quizz', f.quiz_niveau_etoiles != null ? (f.quiz_niveau_etoiles > 0 ? '⭐'.repeat(f.quiz_niveau_etoiles) : '🐻 (0 étoile)') : '—'],
+      ['Quizz — taux d’erreur (1er coup)', f.quiz_taux_erreur_pct != null ? f.quiz_taux_erreur_pct + ' %' : '—'],
       ['Leviers classés (du + au - prometteur)', (f.leviers_classement || []).length ? f.leviers_classement.join(' › ') : '—'],
     ];
   };
@@ -13222,7 +13258,8 @@ function GlobalBilanWatcher({ onReady }) {
         const { data: tf } = await sb.from('tarifs_electricite').select('*').order('nom');
         tariffsRef.current = tf || [];
       }
-      const facts = buildBilanFacts({ site, tariffs: tariffsRef.current, globalVars: null, prodProfil: null });
+      const quiz = await fetchQuizSummary(site.user_id);
+      const facts = buildBilanFacts({ site, tariffs: tariffsRef.current, globalVars: null, prodProfil: null, quiz });
       if (!facts) return null;
       try {
         const { data, error } = await sb.functions.invoke('bilan', { body: { facts } });
