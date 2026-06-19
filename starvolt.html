@@ -10464,11 +10464,19 @@ function AdminBilanDataScreen({ onBack }) {
             <select value={selId} onChange={e => loadSite(e.target.value)}
               style={{width:'100%', boxSizing:'border-box', background:'rgba(0,0,0,.3)', border:'1px solid rgba(255,255,255,.16)', borderRadius:10, color:'#fff', fontSize:13.5, fontWeight:600, padding:'11px 12px', fontFamily:'inherit', marginBottom:16}}>
               <option value="">{sites === null ? 'Chargement…' : '— Choisir un site —'}</option>
-              {(sites || []).map(s => (
-                <option key={s.site_id} value={s.site_id}>
-                  {(s.site_nom || 'Site') + ' · ' + [s.owner_prenom, s.owner_nom].filter(Boolean).join(' ')}
-                </option>
-              ))}
+              {(() => {
+                const list = sites || [];
+                const base = s => (s.site_nom || 'Site') + ' · ' + [s.owner_prenom, s.owner_nom].filter(Boolean).join(' ');
+                const counts = {};
+                list.forEach(s => { const b = base(s); counts[b] = (counts[b] || 0) + 1; });
+                return list.map(s => {
+                  const b = base(s);
+                  const extra = counts[b] > 1
+                    ? (s.conso_annuelle_kwh != null ? ' · ' + Math.round(s.conso_annuelle_kwh) + ' kWh' : '') + ' · #' + String(s.site_id).slice(0, 4)
+                    : '';
+                  return <option key={s.site_id} value={s.site_id}>{b + extra}</option>;
+                });
+              })()}
             </select>
 
             {loading ? (
