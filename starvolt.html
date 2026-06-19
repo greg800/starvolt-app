@@ -10246,7 +10246,7 @@ function AdminAICostsScreen({ onBack }) {
 }
 
 // ─── AdminAIPromptsScreen : éditer les prompts qui cadrent chaque service IA ───
-function AdminAIPromptsScreen({ onBack }) {
+function AdminAIPromptsScreen({ onBack, onBilanData }) {
   const [rows, setRows] = useState(null);       // [{feature,label,system_prompt,updated_at,updated_by}]
   const [drafts, setDrafts] = useState({});     // {feature: texte en cours d'édition}
   const [savingFeat, setSavingFeat] = useState(null);
@@ -10332,9 +10332,114 @@ function AdminAIPromptsScreen({ onBack }) {
                   {msg.text}
                 </div>
               )}
+              {r.feature==='bilan' && (
+                <button onClick={onBilanData}
+                  style={{marginTop:12, width:'100%', background:'rgba(255,179,64,.12)', border:'1px solid rgba(255,179,64,.35)', borderRadius:10, color:'#ffb340', fontSize:13, fontWeight:800, padding:'10px 14px', cursor:'pointer', fontFamily:'inherit'}}>
+                  📊 Voir les données utilisées
+                </button>
+              )}
             </div>
           );
         })}
+      </div>
+    </div>
+    <StickyFooter onBack={onBack}/>
+    </>
+  );
+}
+
+// ─── AdminBilanDataScreen — données transmises à l'IA "Votre bilan en clair" ───
+function AdminBilanDataScreen({ onBack }) {
+  const [sites, setSites] = useState(null);
+  const [tariffs, setTariffs] = useState([]);
+  const [selId, setSelId] = useState('');
+  const [facts, setFacts] = useState(undefined); // undefined = rien chargé, null = pas de données
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    Promise.all([
+      sb.rpc('admin_get_all_sites'),
+      sb.from('tarifs_electricite').select('*').order('nom'),
+    ]).then(([{ data: s }, { data: t }]) => { setSites(s || []); setTariffs(t || []); });
+  }, []);
+
+  const loadSite = async (siteId) => {
+    setSelId(siteId); setFacts(undefined);
+    if (!siteId) return;
+    setLoading(true);
+    const { data, error } = await sb.rpc('admin_get_site_bilan_data', { p_site_id: siteId });
+    const row = data && data[0];
+    if (error || !row) { setFacts(null); setLoading(false); return; }
+    let prodProfil = null;
+    if (row.profil_production_id) {
+      const { data: pp } = await sb.from('profils_production').select('profil').eq('id', row.profil_production_id).single();
+      prodProfil = pp?.profil || null;
+    }
+    setFacts(buildBilanFacts({ site: row, tariffs, globalVars: null, prodProfil }));
+    setLoading(false);
+  };
+
+  const factRows = (f) => {
+    if (!f) return [];
+    const r = f.repartition_horaire_pct || {}, s = f.saisonnalite_pct || {};
+    return [
+      ['Consommation annuelle', f.conso_annuelle_kwh != null ? f.conso_annuelle_kwh + ' kWh' : '—'],
+      ['Facture actuelle estimée', f.facture_actuelle_eur != null ? f.facture_actuelle_eur + ' €/an' : '—'],
+      ['Prix moyen', f.prix_moyen_ceur_kwh != null ? f.prix_moyen_ceur_kwh + ' c€/kWh' : '—'],
+      ['Type de tarif', f.type_tarif || '—'],
+      ['Part en heures creuses', f.pct_heures_creuses != null ? f.pct_heures_creuses + ' %' : '—'],
+      ['Répartition — nuit (0h-6h)', (r.nuit_0h_6h ?? 0) + ' %'],
+      ['Répartition — matin (6h-9h)', (r.matin_6h_9h ?? 0) + ' %'],
+      ['Répartition — journée (9h-18h)', (r.journee_9h_18h ?? 0) + ' %'],
+      ['Répartition — pointe (18h-22h)', (r.pointe_18h_22h ?? 0) + ' %'],
+      ['Répartition — soir (22h-24h)', (r.soir_22h_24h ?? 0) + ' %'],
+      ['Saisonnalité — été', (s.ete ?? 0) + ' %'],
+      ['Saisonnalité — hiver', (s.hiver ?? 0) + ' %'],
+      ['Leviers classés (du + au - prometteur)', (f.leviers_classement || []).length ? f.leviers_classement.join(' › ') : '—'],
+    ];
+  };
+
+  return (
+    <>
+    <div className="screen fade-in" style={{padding:'0 0 90px', maxWidth:'100%', width:'100%'}}>
+      <div className="auth-header">
+        <div className="welcome-tag" style={{color:'#ffb340'}}>Administration</div>
+        <h1 className="welcome-title">Données du<br/><span className="accent">bilan IA</span></h1>
+      </div>
+
+      <div style={{padding:'0 16px'}}>
+        <p style={{color:'rgba(255,255,255,.55)', fontSize:13, lineHeight:1.55, margin:'0 0 16px'}}>
+          Voici les données déterministes transmises à l'IA pour rédiger « Votre bilan en clair ».
+          L'IA ne calcule rien : elle reformule uniquement ces chiffres.
+        </p>
+
+        <select value={selId} onChange={e => loadSite(e.target.value)}
+          style={{width:'100%', boxSizing:'border-box', background:'rgba(0,0,0,.3)', border:'1px solid rgba(255,255,255,.16)', borderRadius:10, color:'#fff', fontSize:13.5, fontWeight:600, padding:'11px 12px', fontFamily:'inherit', marginBottom:16}}>
+          <option value="">{sites === null ? 'Chargement…' : '— Choisir un site —'}</option>
+          {(sites || []).map(s => (
+            <option key={s.site_id} value={s.site_id}>
+              {(s.site_nom || 'Site') + ' · ' + [s.owner_prenom, s.owner_nom].filter(Boolean).join(' ')}
+            </option>
+          ))}
+        </select>
+
+        {loading ? (
+          <div style={{textAlign:'center', padding:40}}><div className="spinner" style={{margin:'0 auto'}}/></div>
+        ) : facts === undefined ? null
+          : facts === null ? (
+          <div style={{textAlign:'center', color:'rgba(255,255,255,.4)', fontSize:14, padding:'24px 0'}}>
+            Ce site n'a pas de profil de consommation : aucun bilan ne peut être généré.
+          </div>
+        ) : (
+          <div className="card" style={{padding:0, overflow:'hidden'}}>
+            {factRows(facts).map(([label, value], i) => (
+              <div key={label} style={{display:'flex', gap:12, padding:'11px 14px', borderTop: i ? '1px solid rgba(255,255,255,.07)' : 'none'}}>
+                <div style={{flex:'1 1 55%', fontSize:12.5, color:'rgba(255,255,255,.6)', lineHeight:1.4}}>{label}</div>
+                <div style={{flex:'1 1 45%', fontSize:13, fontWeight:700, color:'#fff', textAlign:'right', lineHeight:1.4}}>{value}</div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
     <StickyFooter onBack={onBack}/>
@@ -13502,7 +13607,10 @@ function App() {
         return <AdminAICostsScreen onBack={goBack}/>;
 
       case 'ADMIN_AI_PROMPTS':
-        return <AdminAIPromptsScreen onBack={goBack}/>;
+        return <AdminAIPromptsScreen onBack={goBack} onBilanData={()=>goTo('ADMIN_BILAN_DATA')}/>;
+
+      case 'ADMIN_BILAN_DATA':
+        return <AdminBilanDataScreen onBack={goBack}/>;
 
       case 'ADMIN_LEARN':
         return <AdminLearnScreen
