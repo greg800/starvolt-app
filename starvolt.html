@@ -4357,6 +4357,8 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
   const[globalVars,setGlobalVars]=useState(()=>{try{const c=localStorage.getItem('starvolt_global_vars_cache');return c?JSON.parse(c):null;}catch{return null;}});
   const[prixMat,setPrixMat]=useState(null);
   const[spotMap,setSpotMap]=useState(null);
+  const[optimizing,setOptimizing]=useState(false);
+  const[optimResult,setOptimResult]=useState(null);
   const[isMobile,setIsMobile]=useState(window.innerWidth<640);
   const[consoOpen,setConsoOpen]=useState(false);
   const[prodOpen,setProdOpen]=useState(false);
@@ -4729,6 +4731,37 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
   },[site?.id,site?.conso_annuelle_kwh,site?.bilan_ia,tariffs,globalVars,prodProfilData]);
 
   const updateSite=async(updates)=>{ await sb.from('sites').update(updates).eq('id',activeId); await load(); };
+
+  // Cherche le couple (PV kWc, batterie kWh) au meilleur ROI (retour le plus court).
+  // Balayage PV 2→9 kWc × batterie 2→15 kWh (pas de 1). Économie via le moteur partagé
+  // (buildSiteBalance + deriveSiteImpact), investissement via les prix admin (interpPrix).
+  // Yield après chaque palier PV pour laisser tourner le spinner étoile.
+  const optimizePvBat=async()=>{
+    if(optimizing||!site?.conso_profil||!prodProfilData) return;
+    setOptimizing(true); setOptimResult(null);
+    await new Promise(r=>setTimeout(r,30)); // laisser le spinner s'afficher
+    const pvPrices=prixMat?.pv_prices||[], batPrices=prixMat?.bat_prices||[];
+    let best=null;
+    for(let pv=2;pv<=9;pv++){
+      for(let bat=2;bat<=15;bat++){
+        const bal=buildSiteBalance({site,prodProfil:prodProfilData,tariffs,spotMap,globalVars,pvKwc:String(pv),batKwh:String(bat),thermKwh});
+        const imp=deriveSiteImpact({balance:bal,site,prodProfil:prodProfilData,tariffs,spotMap,globalVars,batKwh:String(bat),thermKwh});
+        const saving=imp?.totalSaving||0;
+        const invest=interpPrix(pv,pvPrices)+interpPrix(bat,batPrices);
+        if(saving>0&&invest>0){
+          const payback=invest/saving;
+          if(!best||payback<best.payback) best={pv,bat,saving:Math.round(saving),invest,payback};
+        }
+      }
+      await new Promise(r=>setTimeout(r,0)); // yield → le spinner s'anime
+    }
+    if(best){
+      setPvKwc(String(best.pv)); setBatKwh(String(best.bat));
+      setOptimResult(best);
+      await updateSite({puissance_pv_kwc:best.pv,batterie_capacite_kwh:best.bat});
+    }
+    setOptimizing(false);
+  };
 
   const handleAddSite=async(data)=>{
     const{data:ns}=await sb.from('sites').insert({user_id:user.id,...data}).select().single();
@@ -5448,6 +5481,23 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
                         <div style={{...T,fontSize:13,color:'rgba(255,200,80,.7)',background:'rgba(255,200,0,.04)',alignItems:'center',justifyContent:'center',textAlign:'center'}}>⚠️ Importez votre consommation</div>
                       )}
                     </div>
+
+                    {/* ── Optimiseur PV + batterie (meilleur ROI) ── */}
+                    {prixMat&&prodProfilData&&site?.conso_profil&&((parseFloat(pvKwc)||0)>0||(parseFloat(batKwh)||0)>0)&&(
+                      <div style={{display:'flex',alignItems:'center',gap:12,flexWrap:'wrap'}}>
+                        <button onClick={optimizePvBat} disabled={optimizing}
+                          style={{display:'inline-flex',alignItems:'center',gap:8,background:optimizing?'rgba(125,217,64,.15)':'rgba(125,217,64,.92)',color:optimizing?'#7dd940':'#06202c',border:'none',borderRadius:10,padding:'9px 14px',fontWeight:800,fontSize:13,cursor:optimizing?'default':'pointer'}}>
+                          {optimizing
+                            ? <><StarSpinner size={18} color="#7dd940"/><span>Recherche du meilleur couple…</span></>
+                            : <span>✨ Optimiser PV + batterie</span>}
+                        </button>
+                        {optimResult&&!optimizing&&(
+                          <span style={{fontSize:12,color:'rgba(255,255,255,.85)'}}>
+                            Meilleur ROI : <b style={{color:'#7dd940'}}>{optimResult.pv} kWc + {optimResult.bat} kWh</b> · retour ≈ <b>{optimResult.payback.toFixed(1)} ans</b> <span style={{color:'rgba(255,255,255,.5)'}}>(invest. {optimResult.invest.toLocaleString('fr-FR')} € · −{optimResult.saving.toLocaleString('fr-FR')} €/an)</span>
+                          </span>
+                        )}
+                      </div>
+                    )}
 
                     {/* ── Rangée 2 : Batterie · Thermique · Box · Solaire · Achat · Injection ── */}
                     <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
