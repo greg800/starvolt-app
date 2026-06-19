@@ -3558,6 +3558,38 @@ function resolveCartEquipment(site) {
   return { pvKwc: solarDef.pvKwc||'0', batKwh: solarDef.batKwh||'0', thermKwh: solarDef.thermKwh||'0' };
 }
 
+// 1bis) Profil de production solaire d'un site — SOURCE UNIQUE.
+//    Si site.profil_production_id existe → on le charge. Sinon, repli identique à Mon site :
+//    auto-sélection du profil le plus proche par GPS (et persistance), pour que le Panier
+//    et Mon site partent du MÊME profil de prod (sinon le Panier perd le solaire → divergence).
+async function loadProdProfil(site) {
+  if (!site) return null;
+  if (site.profil_production_id) {
+    const { data } = await sb.from('profils_production').select('profil').eq('id', site.profil_production_id).single();
+    return data?.profil || null;
+  }
+  const { data: list } = await sb.from('profils_production').select('id,latitude,longitude').order('nom');
+  if (!list || list.length === 0) return null;
+  const geo = list.filter(p => p.latitude && p.longitude);
+  let chosenId = (geo[0] || list[0]).id;
+  const q = `${site.adresse_ligne1||''} ${site.code_postal||''} ${site.ville||''}`.trim();
+  if (geo.length && q) {
+    try {
+      const r = await fetch(`https://api-adresse.data.gouv.fr/search/?q=${encodeURIComponent(q)}&limit=1`).then(r=>r.json());
+      const feat = r.features?.[0];
+      if (feat) {
+        const [lon,lat] = feat.geometry.coordinates;
+        let best = geo[0], bestD = haversine(lat,lon,best.latitude,best.longitude);
+        geo.forEach(p=>{const d=haversine(lat,lon,p.latitude,p.longitude); if(d<bestD){bestD=d;best=p;}});
+        chosenId = best.id;
+      }
+    } catch {}
+  }
+  sb.from('sites').update({profil_production_id:chosenId}).eq('id',site.id);
+  const { data } = await sb.from('profils_production').select('profil').eq('id', chosenId).single();
+  return data?.profil || null;
+}
+
 // 2) Bilan énergétique horaire selon le panier (sélection du moteur).
 //    Retourne l'objet balance ({billWithout, billWithStorage, saving, monthly, hourly...}) ou null.
 function buildSiteBalance({ site, prodProfil, tariffs, spotMap, globalVars, pvKwc, batKwh, thermKwh }) {
@@ -8768,7 +8800,7 @@ function PanierScreen({ user, onBack, onGoTo, onMonSite }) {
     const siteId = localStorage.getItem('starvolt_active_site_id');
     if (!siteId) { setLoading(false); return; }
     Promise.all([
-      sb.from('sites').select('id,conso_profil,conso_annuelle_kwh,tarif_id,profil_production_id,heure_debut_hc1,heure_fin_hc1,heure_debut_hc2,heure_fin_hc2,hc_debut1,hc_fin1,hc_debut2,hc_fin2').eq('id', siteId).maybeSingle(),
+      sb.from('sites').select('id,conso_profil,conso_annuelle_kwh,tarif_id,profil_production_id,adresse_ligne1,code_postal,ville,heure_debut_hc1,heure_fin_hc1,heure_debut_hc2,heure_fin_hc2,hc_debut1,hc_fin1,hc_debut2,hc_fin2').eq('id', siteId).maybeSingle(),
       sb.from('tarifs_electricite').select('*'),
       sb.rpc('get_spot_json'),
       sb.from('parametres_nationaux').select('*').eq('id',1).maybeSingle(),
@@ -8794,11 +8826,8 @@ function PanierScreen({ user, onBack, onGoTo, onMonSite }) {
       if (!bill && kwh_total > 0) bill = Math.round(kwh_total * 0.18);
       bill = bill ? Math.round(bill) : null;
       // Charger le profil de production une fois (ACC + projection solaire)
-      let _prodProfil = null;
-      if (site.profil_production_id) {
-        const { data: pp } = await sb.from('profils_production').select('profil').eq('id', site.profil_production_id).single();
-        _prodProfil = pp?.profil || null;
-      }
+      // SOURCE UNIQUE loadProdProfil : repli GPS si profil_production_id null (comme Mon site)
+      const _prodProfil = await loadProdProfil(site);
       // SOURCE UNIQUE : même moteur intégré que "Mon site" (buildSiteBalance + deriveSiteImpact)
       // gv = nat + override opti_* depuis le cache (sinon flags périmés → divergence)
       const gv = mergeGlobalVars(nat);
