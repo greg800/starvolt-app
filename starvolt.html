@@ -7909,7 +7909,9 @@ function ThermaleForm({ onDone, onBack, siteId=null, initial=null }) {
           </button>
         ) : (
           <button className="btn" disabled
-            style={{ opacity: 0.4, flex: 1, cursor: 'not-allowed' }}>
+            style={{ flex: 1, cursor: 'not-allowed',
+              background: 'rgba(255,255,255,.10)', color: 'rgba(255,255,255,.9)',
+              border: '1px solid rgba(255,255,255,.18)' }}>
             Il vous reste {remaining} réponse{remaining > 1 ? 's' : ''} à faire
           </button>
         )}
