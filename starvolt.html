@@ -7755,11 +7755,23 @@ function ThermaleForm({ onDone, onBack, siteId=null, initial=null }) {
     onDone(kw);
   }
 
-  const ready = true; // toujours autorisé, même si des champs sont null
-  let previewKw = null;
-  if (ready) {
+  // Champs obligatoires : chauffage, eau chaude, surface (onglet « Vos appareils »).
+  const remaining = [chauffage, ecs, surface].filter(v => !v).length;
+  const ready = remaining === 0;
+
+  // Auto-enregistrement dès que les 3 réponses sont complètes (inutile de cliquer).
+  // On saute le tout premier rendu pour ne pas enregistrer/quitter à l'ouverture
+  // quand le formulaire est déjà pré-rempli (cas édition).
+  const savingRef   = useRef(false);
+  const firstRunRef = useRef(true);
+  useEffect(() => {
+    if (firstRunRef.current) { firstRunRef.current = false; return; }
+    if (ready && !savingRef.current) { savingRef.current = true; handleDone(); }
+  }, [chauffage, ecs, surface]);
+
+  let previewKw = 0;
+  {
     const idx = surface === 'small' ? 0 : surface === 'medium' ? 1 : 2;
-    previewKw = 0;
     if (chauffage === 'elec' || chauffage === 'pac') previewKw += [3, 7, 12][idx];
     if (ecs === 'elec') previewKw += [2, 3, 4][idx];
   }
@@ -7891,10 +7903,16 @@ function ThermaleForm({ onDone, onBack, siteId=null, initial=null }) {
         )}
       </div>
       <StickyFooter row onBack={onBack}>
-        <button className="btn btn-yes" onClick={handleDone} disabled={!ready}
-          style={{ opacity: ready ? 1 : 0.35, flex: 1 }}>
-          Enregistrer →
-        </button>
+        {ready ? (
+          <button className="btn btn-yes" onClick={handleDone} style={{ flex: 1 }}>
+            Enregistrer →
+          </button>
+        ) : (
+          <button className="btn" disabled
+            style={{ opacity: 0.4, flex: 1, cursor: 'not-allowed' }}>
+            Il vous reste {remaining} réponse{remaining > 1 ? 's' : ''} à faire
+          </button>
+        )}
       </StickyFooter>
     </>
   );
