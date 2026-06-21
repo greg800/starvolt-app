@@ -13693,7 +13693,7 @@ function App() {
 
   const goBack = useCallback(() => {
     if (!history.length) {
-      if (user) setState(s => ({ ...s, screen: 'HOME_LOGGED_IN' }));
+      if (user) setState(s => ({ ...s, screen: 'HOME_CHOICE' }));
       return;
     }
     const prev = history[history.length - 1];
@@ -13842,8 +13842,8 @@ function App() {
           onHome={()=>goTo('COMPRENDRE_HOME')}/>;
       }
 
-      case 'HOME_LOGGED_IN':
-        return <HomeLoggedInScreen profile={profile}/>;
+      case 'HOME_LOGGED_IN': // ancien écran retiré → on redirige vers la nouvelle landing
+        return <HomeChoiceScreen profile={profile} user={user} onComprendre={()=>goTo('COMPRENDRE_HOME')} onAction={()=>goTo('MA_CONSO')} can={can}/>;
 
       case 'PROFILE':
         return <ProfileScreen
@@ -14042,7 +14042,7 @@ function App() {
         return <AuthLoginScreen onGoToSignup={()=>goTo('AUTH_SIGNUP')}/>;
 
       case 'RESET_PASSWORD':
-        return <ResetPasswordScreen onDone={()=>{ inRecoveryRef.current=false; fetchProfile(user?.id); setState(s=>({...s,screen:'HOME_LOGGED_IN'})); setHistory([]); }}/>;
+        return <ResetPasswordScreen onDone={()=>{ inRecoveryRef.current=false; fetchProfile(user?.id); setState(s=>({...s,screen:'HOME_CHOICE'})); setHistory([]); }}/>;
 
       case 'WELCOME':
         return <WelcomeScreen
