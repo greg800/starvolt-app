@@ -2445,7 +2445,8 @@ function AuthSignupScreen({ onGoToLogin, onSignedUp, onSuccessDone }) {
           <div className="welcome-tag">{isEntreprise?'🏢 Compte professionnel':'👤 Compte particulier'}</div>
           <h1 className="welcome-title">Créez votre<br/><span className="accent">compte</span></h1>
         </div>
-        <div className="form-card">
+        <form className="form-card" id="signup-form"
+          onSubmit={e=>{ e.preventDefault(); if(allFilled){ handleSignup(); } else { setHint(firstMissingMessage()); } }}>
           {/* Bandeau de cadrage — aide à la correspondance ENEDIS */}
           <div style={{background:'rgba(247,201,72,.1)',border:'1px solid rgba(247,201,72,.28)',borderRadius:10,padding:'10px 12px',marginBottom:16,fontSize:12.5,lineHeight:1.5,color:'rgba(255,255,255,.82)'}}>
             {isEntreprise
@@ -2467,12 +2468,12 @@ function AuthSignupScreen({ onGoToLogin, onSignedUp, onSuccessDone }) {
           </div>
           <div className="inp-group">
             <label className="inp-label">Email</label>
-            <input className="inp" type="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder="marie@exemple.fr"/>
+            <input className="inp" type="email" name="email" id="signup-email" autoComplete="username" value={email} onChange={e=>setEmail(e.target.value)} placeholder="marie@exemple.fr"/>
           </div>
           <div className="inp-group">
             <label className="inp-label">Mot de passe <span style={{fontWeight:400,color:'rgba(255,255,255,.4)',fontSize:11}}>(généré, modifiable)</span></label>
             <div style={{position:'relative'}}>
-              <input className="inp" type={showPwd?'text':'password'} value={pwd} onChange={e=>setPwd(e.target.value)} placeholder="••••••••" autoComplete="new-password" style={{paddingRight:74}}/>
+              <input className="inp" type={showPwd?'text':'password'} name="new-password" value={pwd} onChange={e=>setPwd(e.target.value)} placeholder="••••••••" autoComplete="new-password" style={{paddingRight:74}}/>
               <div style={{position:'absolute',right:6,top:'50%',transform:'translateY(-50%)',display:'flex',gap:2}}>
                 <button type="button" onClick={()=>setPwd(genPassword())} title="Générer un nouveau mot de passe"
                   style={{background:'none',border:'none',cursor:'pointer',fontSize:16,lineHeight:1,padding:'5px 6px'}}>🎲</button>
@@ -2586,7 +2587,7 @@ function AuthSignupScreen({ onGoToLogin, onSignedUp, onSuccessDone }) {
             </span>
           </label>
           {error&&<div className="auth-error">{error}</div>}
-        </div>
+        </form>
         <button className="btn-link" onClick={onGoToLogin}>Déjà membre ? Se connecter</button>
       </div>
       <StickyFooter>
@@ -2600,8 +2601,8 @@ function AuthSignupScreen({ onGoToLogin, onSignedUp, onSuccessDone }) {
             </div>
           ) : (
             <button
+              type="submit" form="signup-form"
               className={allFilled?'btn btn-yes':'btn'}
-              onClick={()=>{ if(allFilled){ handleSignup(); } else { setHint(firstMissingMessage()); } }}
               style={allFilled
                 ? {animation:'popIn .25s ease'}
                 : {background:'rgba(255,255,255,.12)',color:'rgba(255,255,255,.5)',cursor:'pointer'}}>
