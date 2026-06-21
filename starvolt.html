@@ -2191,6 +2191,91 @@ function SignupSuccessScreen({ firstName, onVisualiser }) {
   );
 }
 
+// ─── Autocomplétion d'adresse (Base Adresse Nationale — api gratuite data.gouv.fr) ──
+// Propose des adresses connues pendant la saisie ; en sélectionner une remplit
+// rue + code postal + ville d'un coup → saisie robuste, sans fautes.
+function AddressAutocomplete({ value, onChange, onPick, placeholder, style }) {
+  const [items, setItems] = useState([]);
+  const [open,  setOpen]  = useState(false);
+  useEffect(() => {
+    const q = (value || '').trim();
+    if (!open || q.length < 3) { setItems([]); return; }
+    let cancelled = false;
+    const t = setTimeout(() => {
+      fetch(`https://api-adresse.data.gouv.fr/search/?q=${encodeURIComponent(q)}&limit=5&autocomplete=1`)
+        .then(r => r.json())
+        .then(j => { if (!cancelled) setItems(j.features || []); })
+        .catch(() => { if (!cancelled) setItems([]); });
+    }, 250);
+    return () => { cancelled = true; clearTimeout(t); };
+  }, [value, open]);
+
+  return (
+    <div style={{ position: 'relative' }}>
+      <input className="inp" style={style} value={value} placeholder={placeholder} autoComplete="off"
+        onChange={e => { onChange(e.target.value); setOpen(true); }}
+        onFocus={() => setOpen(true)}
+        onBlur={() => setTimeout(() => setOpen(false), 150)} />
+      {open && items.length > 0 && (
+        <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 60,
+          background: '#0b2533', border: '1px solid rgba(255,255,255,.18)', borderRadius: 10,
+          marginTop: 4, overflow: 'hidden', boxShadow: '0 12px 32px rgba(0,0,0,.45)' }}>
+          {items.map((f, i) => (
+            <button type="button" key={i}
+              onMouseDown={e => { e.preventDefault(); onPick(f.properties); setOpen(false); setItems([]); }}
+              style={{ display: 'block', width: '100%', textAlign: 'left', padding: '10px 12px',
+                background: 'none', border: 'none', cursor: 'pointer', color: '#fff', fontSize: 13,
+                fontFamily: 'inherit', borderBottom: i < items.length - 1 ? '1px solid rgba(255,255,255,.08)' : 'none' }}>
+              {f.properties.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Code postal → ville : remplit automatiquement si une seule commune, sinon
+// propose la liste des communes du code postal (choix limité).
+function PostalCityFields({ cp, setCp, ville, setVille, cpStyle }) {
+  const [cities, setCities] = useState([]);
+  useEffect(() => {
+    if (!/^\d{5}$/.test(cp)) { setCities([]); return; }
+    let cancelled = false;
+    fetch(`https://geo.api.gouv.fr/communes?codePostal=${cp}&fields=nom&format=json`)
+      .then(r => r.json())
+      .then(list => {
+        if (cancelled) return;
+        const names = (list || []).map(c => c.nom);
+        setCities(names);
+        if (names.length === 1) setVille(names[0]);
+        else if (names.length > 1 && !names.includes(ville)) setVille('');
+      })
+      .catch(() => { if (!cancelled) setCities([]); });
+    return () => { cancelled = true; };
+  }, [cp]);
+
+  return (
+    <div className="inp-row">
+      <div className="inp-group" style={{ flex: '0 0 38%' }}>
+        <label className="inp-label">Code postal</label>
+        <input className="inp" value={cp} placeholder="75001" maxLength={5} inputMode="numeric"
+          onChange={e => setCp(e.target.value.replace(/\D/g, '').slice(0, 5))} style={cpStyle} />
+      </div>
+      <div className="inp-group">
+        <label className="inp-label">Ville</label>
+        {cities.length > 1
+          ? <select className="inp" value={ville} onChange={e => setVille(e.target.value)}
+              style={{ appearance: 'auto' }}>
+              <option value="">Choisir…</option>
+              {cities.map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
+          : <input className="inp" value={ville} placeholder="Paris" onChange={e => setVille(e.target.value)} />}
+      </div>
+    </div>
+  );
+}
+
 // ─── AuthSignupScreen ─────────────────────────
 // Génère un mot de passe aléatoire lisible (sans caractères ambigus)
 function genPassword() {
@@ -2495,18 +2580,10 @@ function AuthSignupScreen({ onGoToLogin, onSignedUp, onSuccessDone }) {
           )}
           <div className="inp-group">
             <label className="inp-label">Adresse du compteur</label>
-            <input className="inp" value={adresse} onChange={e=>setAdresse(e.target.value)} placeholder="12 rue de la Paix"/>
+            <AddressAutocomplete value={adresse} onChange={setAdresse} placeholder="12 rue de la Paix"
+              onPick={p => { setAdresse(p.name || p.label || ''); if (p.postcode) setCodePostal(p.postcode); if (p.city) setVille(p.city); }} />
           </div>
-          <div className="inp-row">
-            <div className="inp-group" style={{flex:'0 0 38%'}}>
-              <label className="inp-label">Code postal</label>
-              <input className="inp" value={codePostal} onChange={e=>setCodePostal(e.target.value)} placeholder="75001" maxLength={5} inputMode="numeric"/>
-            </div>
-            <div className="inp-group">
-              <label className="inp-label">Ville</label>
-              <input className="inp" value={ville} onChange={e=>setVille(e.target.value)} placeholder="Paris"/>
-            </div>
-          </div>
+          <PostalCityFields cp={codePostal} setCp={setCodePostal} ville={ville} setVille={setVille} />
 
           {/* PDL — facultatif, présenté de façon discrète */}
           <div className="inp-group" style={{opacity:.85}}>
@@ -6769,18 +6846,10 @@ function ProfileScreen({ user, profile, onSave, onCancel, onLogout, onDeleted })
           </div>
           <div className="inp-group">
             <label className="inp-label">Numéro et rue</label>
-            <input className="inp" value={adresse} onChange={e=>setAdresse(e.target.value)} placeholder="12 rue de la Paix"/>
+            <AddressAutocomplete value={adresse} onChange={setAdresse} placeholder="12 rue de la Paix"
+              onPick={p => { setAdresse(p.name || p.label || ''); if (p.postcode) setCp(p.postcode); if (p.city) setVille(p.city); }} />
           </div>
-          <div className="inp-row">
-            <div className="inp-group">
-              <label className="inp-label">Code postal</label>
-              <input className="inp" value={cp} onChange={e=>setCp(e.target.value)} placeholder="75001"/>
-            </div>
-            <div className="inp-group">
-              <label className="inp-label">Ville</label>
-              <input className="inp" value={ville} onChange={e=>setVille(e.target.value)} placeholder="Paris"/>
-            </div>
-          </div>
+          <PostalCityFields cp={cp} setCp={setCp} ville={ville} setVille={setVille} />
           <div className="inp-group">
             <label className="inp-label">Téléphone</label>
             <input className="inp" type="tel" value={tel} onChange={e=>setTel(e.target.value)} placeholder="06 12 34 56 78"/>
