@@ -3019,6 +3019,87 @@ function TxtInput({value,onSave,placeholder,style}){
     onChange={e=>setV(e.target.value)} onBlur={()=>{if(v!==value)onSave(v);}}/>;
 }
 
+// ─── SiteEnedisDetail ─────────────────────────
+// Fiche « infos compteur » : tout ce qui a été collecté via ENEDIS / Switchgrid pour un site.
+// Sert à diagnostiquer une confusion de PDL (ex : deux sites affichant la même conso).
+function SiteEnedisDetail({ site, tariffs=[], onBack }){
+  const pdl = (site.pdl||'').trim();
+  const pdlOk = pdl.length===14 && /^\d{14}$/.test(pdl);
+  const tarif = tariffs.find(t=>t.id===site.tarif_id);
+  const isEntreprise = (site.account_type||'particulier')==='entreprise';
+  const fmtDate = (s)=>{ if(!s) return null; try{ return new Date(s).toLocaleString('fr-FR',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'}); }catch(_){ return s; } };
+  const sourceLbl = ({loadcurve:'Courbe de charge (pas 30 min)',daily:'Énergies journalières',manual:'Saisie manuelle',estimate:'Estimation'})[site.conso_source] || site.conso_source || null;
+  const hcWindows = [
+    [site.hc_debut1, site.hc_fin1],
+    [site.hc_debut2, site.hc_fin2],
+  ].filter(([a,b])=>a&&b).map(([a,b])=>`${a} → ${b}`);
+
+  const lbl = { fontSize:10, color:'rgba(255,255,255,.45)', fontWeight:700, letterSpacing:'.5px', textTransform:'uppercase' };
+  const val = (v)=> v ? <span style={{fontSize:14,color:'white',fontWeight:600,wordBreak:'break-word'}}>{v}</span>
+                       : <span style={{fontSize:13,color:'rgba(255,255,255,.35)',fontStyle:'italic'}}>Non collecté</span>;
+  const Row = ({label,children})=> (
+    <div style={{display:'flex',flexDirection:'column',gap:3,padding:'8px 0',borderBottom:'1px solid rgba(255,255,255,.06)'}}>
+      <div style={lbl}>{label}</div>
+      <div>{children}</div>
+    </div>
+  );
+  const Card = ({title,emoji,children})=> (
+    <div className="card" style={{padding:'14px 16px',marginBottom:12}}>
+      <div style={{fontSize:12,fontWeight:800,color:'#7dd940',textTransform:'uppercase',letterSpacing:'.6px',marginBottom:4}}>{emoji} {title}</div>
+      {children}
+    </div>
+  );
+
+  return (
+    <>
+      <div className="screen fade-in">
+        <div style={{marginBottom:14,marginTop:4}}>
+          <div style={{fontSize:9,letterSpacing:'.8px',color:'rgba(125,217,64,.85)',fontWeight:700,textTransform:'uppercase',marginBottom:6}}>Données compteur</div>
+          <div style={{fontSize:19,fontWeight:900,color:'white',lineHeight:1.25}}>Infos collectées<br/>via ENEDIS</div>
+          <div style={{fontSize:12,color:'rgba(255,255,255,.5)',marginTop:6}}>{site.nom||'Ce site'}</div>
+        </div>
+
+        {!pdlOk && (
+          <div style={{background:'rgba(247,144,72,.12)',border:'1px solid rgba(247,144,72,.4)',borderRadius:12,padding:'12px 14px',marginBottom:12,fontSize:13,color:'#f7c948',lineHeight:1.45}}>
+            ⚠️ Aucun numéro de PDL valide n'est enregistré pour ce site. Si une consommation s'affiche quand même, elle a probablement été reprise d'un autre site : vérifiez le compteur et relancez la collecte ENEDIS.
+          </div>
+        )}
+
+        <Card title="Compteur (PDL)" emoji="🔌">
+          <Row label="Numéro de PDL">{val(pdlOk ? pdl : (pdl||null))}</Row>
+          <Row label="Adresse du compteur">{val([site.adresse_ligne1, [site.code_postal,site.ville].filter(Boolean).join(' ')].filter(Boolean).join(', '))}</Row>
+        </Card>
+
+        <Card title="Titulaire du contrat" emoji={isEntreprise?'🏢':'👤'}>
+          <Row label="Type de contrat">{val(isEntreprise?'Entreprise':'Particulier')}</Row>
+          {isEntreprise && <Row label="Raison sociale">{val(site.raison_sociale)}</Row>}
+          <Row label={isEntreprise?'Titulaire (personne)':'Nom du titulaire'}>{val([site.titulaire_prenom,site.titulaire_nom].filter(Boolean).join(' '))}</Row>
+          {isEntreprise && <Row label="Signataire du consentement">{val([site.signer_prenom,site.signer_nom].filter(Boolean).join(' ')+(site.signer_email?` — ${site.signer_email}`:''))}</Row>}
+        </Card>
+
+        <Card title="Contrat ENEDIS" emoji="📄">
+          <Row label="Puissance souscrite">{val(site.puissance_souscrite_kva ? `${site.puissance_souscrite_kva} kVA` : null)}</Row>
+          <Row label="Option tarifaire ENEDIS">{val(site.enedis_option_tarifaire)}</Row>
+          <Row label="Tarif d'électricité (dans l'app)">{val(tarif?.nom)}</Row>
+          <Row label="Heures creuses">{hcWindows.length ? val(hcWindows.join('  •  ')) : val(null)}</Row>
+        </Card>
+
+        <Card title="Consommation collectée" emoji="📊">
+          <Row label="Consommation annuelle">{val(site.conso_annuelle_kwh ? `${Math.round(site.conso_annuelle_kwh).toLocaleString('fr-FR')} kWh/an` : null)}</Row>
+          <Row label="Source des données">{val(sourceLbl)}</Row>
+          <Row label="Couverture des données">{val(site.conso_coverage!=null ? `${Math.round(site.conso_coverage*100)} %` : null)}</Row>
+          <Row label="Dernière collecte">{val(fmtDate(site.conso_imported_at))}</Row>
+        </Card>
+
+        <div style={{fontSize:11,color:'rgba(255,255,255,.35)',lineHeight:1.5,marginTop:4,marginBottom:8}}>
+          Certaines données contractuelles (puissance, option tarifaire, heures creuses) ne sont pas toujours renvoyées par ENEDIS et apparaissent alors comme « non collecté ».
+        </div>
+      </div>
+      <StickyFooter onBack={onBack}/>
+    </>
+  );
+}
+
 // ─── SiteFormCard ─────────────────────────────
 const EDF_TRV_ID = '5f805745-8e02-46bc-bbda-caaa28390370';
 
@@ -4524,6 +4605,7 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
   const[prodOpen,setProdOpen]=useState(false);
   const[consoChartOpen,setConsoChartOpen]=useState(true);
   const[showFlexForm,setShowFlexForm]=useState(false);
+  const[showEnedis,setShowEnedis]=useState(false); // fiche « infos compteur ENEDIS »
   const[linkyStatus,setLinkyStatus]=useState(null); // null | 'loading' | 'pending' | 'ordering' | 'done' | 'error'
   const[linkyUserUrl,setLinkyUserUrl]=useState(null);
   const[linkyRequestId,setLinkyRequestId]=useState(null);
@@ -5035,6 +5117,9 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
       onDone={(kw)=>{setThermKwh(String(kw));setShowFlexForm(false);load();}}
     />;
   }
+  if(showEnedis&&site){
+    return <SiteEnedisDetail site={site} tariffs={tariffs} onBack={()=>setShowEnedis(false)}/>;
+  }
 
   const firstDefault=sites.length===0?{adresse_ligne1:userProfile?.adresse_ligne1||'',code_postal:userProfile?.code_postal||'',ville:userProfile?.ville||'',pdl:userProfile?.pdl||''}:{};
   const showActions=!showAdd&&!editMode;
@@ -5314,7 +5399,12 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
                   </div>
                   <div ref={enedisRef}>
                     <label style={{fontSize:10,color:'rgba(255,255,255,.45)',fontWeight:700,letterSpacing:'.5px',display:'block',marginBottom:4}}>PDL (numéro compteur Linky)</label>
-                    <PDLInput value={site.pdl||''} onSave={v=>updateSite({pdl:v})}/>
+                    <div style={{display:'flex',alignItems:'center',gap:8}}>
+                      <div style={{flex:1}}><PDLInput value={site.pdl||''} onSave={v=>updateSite({pdl:v})}/></div>
+                      <button type="button" title="Voir les infos collectées via ENEDIS" onClick={()=>setShowEnedis(true)}
+                        style={{flexShrink:0,width:40,height:40,borderRadius:10,cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center',fontSize:18,
+                          background:'rgba(125,217,64,.12)',border:'1px solid rgba(125,217,64,.3)',color:'#7dd940'}}>👁</button>
+                    </div>
 
                     {/* Type de compte ENEDIS — particulier ou entreprise.
                         Détermine le nom utilisé pour la recherche du compteur (titulaire vs raison sociale)
