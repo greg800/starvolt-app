@@ -2194,7 +2194,7 @@ function SignupSuccessScreen({ firstName, onVisualiser }) {
 // ─── Autocomplétion d'adresse (Base Adresse Nationale — api gratuite data.gouv.fr) ──
 // Propose des adresses connues pendant la saisie ; en sélectionner une remplit
 // rue + code postal + ville d'un coup → saisie robuste, sans fautes.
-function AddressAutocomplete({ value, onChange, onPick, placeholder, style }) {
+function AddressAutocomplete({ value, onChange, onPick, placeholder, style, onBlur }) {
   const [items, setItems] = useState([]);
   const [open,  setOpen]  = useState(false);
   useEffect(() => {
@@ -2215,14 +2215,14 @@ function AddressAutocomplete({ value, onChange, onPick, placeholder, style }) {
       <input className="inp" style={style} value={value} placeholder={placeholder} autoComplete="off"
         onChange={e => { onChange(e.target.value); setOpen(true); }}
         onFocus={() => setOpen(true)}
-        onBlur={() => setTimeout(() => setOpen(false), 150)} />
+        onBlur={() => { setTimeout(() => setOpen(false), 150); if (onBlur) onBlur(); }} />
       {open && items.length > 0 && (
         <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 60,
           background: '#0b2533', border: '1px solid rgba(255,255,255,.18)', borderRadius: 10,
           marginTop: 4, overflow: 'hidden', boxShadow: '0 12px 32px rgba(0,0,0,.45)' }}>
           {items.map((f, i) => (
             <button type="button" key={i}
-              onMouseDown={e => { e.preventDefault(); onPick(f.properties); setOpen(false); setItems([]); }}
+              onMouseDown={e => { e.preventDefault(); onPick({ ...f.properties, _coords: f.geometry && f.geometry.coordinates }); setOpen(false); setItems([]); }}
               style={{ display: 'block', width: '100%', textAlign: 'left', padding: '10px 12px',
                 background: 'none', border: 'none', cursor: 'pointer', color: '#fff', fontSize: 13,
                 fontFamily: 'inherit', borderBottom: i < items.length - 1 ? '1px solid rgba(255,255,255,.08)' : 'none' }}>
@@ -2235,9 +2235,9 @@ function AddressAutocomplete({ value, onChange, onPick, placeholder, style }) {
   );
 }
 
-// Code postal → ville : remplit automatiquement si une seule commune, sinon
-// propose la liste des communes du code postal (choix limité).
-function PostalCityFields({ cp, setCp, ville, setVille, cpStyle }) {
+// Hook : code postal (5 chiffres) → communes associées (geo.api.gouv.fr).
+// Remplit la ville si une seule commune, sinon vide pour forcer le choix.
+function usePostalCity(cp, ville, setVille) {
   const [cities, setCities] = useState([]);
   useEffect(() => {
     if (!/^\d{5}$/.test(cp)) { setCities([]); return; }
@@ -2254,7 +2254,14 @@ function PostalCityFields({ cp, setCp, ville, setVille, cpStyle }) {
       .catch(() => { if (!cancelled) setCities([]); });
     return () => { cancelled = true; };
   }, [cp]);
+  return cities;
+}
 
+// Code postal → ville : remplit automatiquement si une seule commune, sinon
+// propose la liste des communes du code postal (choix limité). Mise en page
+// « inp-group » avec libellés (formulaires inscription / profil).
+function PostalCityFields({ cp, setCp, ville, setVille, cpStyle }) {
+  const cities = usePostalCity(cp, ville, setVille);
   return (
     <div className="inp-row">
       <div className="inp-group" style={{ flex: '0 0 38%' }}>
@@ -2271,6 +2278,40 @@ function PostalCityFields({ cp, setCp, ville, setVille, cpStyle }) {
               {cities.map(c => <option key={c} value={c}>{c}</option>)}
             </select>
           : <input className="inp" value={ville} placeholder="Paris" onChange={e => setVille(e.target.value)} />}
+      </div>
+    </div>
+  );
+}
+
+// Édition inline de l'adresse d'un site (page « Mon site »), avec assistant BAN.
+// Persiste via updateSite : tout de suite à la sélection d'une adresse, sinon au blur.
+function SiteAddressEditor({ site, updateSite }) {
+  const [adr, setAdr]     = useState(site.adresse_ligne1 || '');
+  const [cp, setCp]       = useState(site.code_postal || '');
+  const [ville, setVille] = useState(site.ville || '');
+  const cities   = usePostalCity(cp, ville, setVille);
+  const adrRef   = useRef(adr); adrRef.current = adr;
+  const skipBlur = useRef(false);
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+      <AddressAutocomplete value={adr} onChange={setAdr} placeholder="Rue et numéro"
+        onPick={p => { const a = p.name || p.label || ''; setAdr(a);
+          const ncp = p.postcode || cp, nv = p.city || ville;
+          if (p.postcode) setCp(p.postcode); if (p.city) setVille(p.city);
+          skipBlur.current = true; updateSite({ adresse_ligne1: a, code_postal: ncp, ville: nv }); }}
+        onBlur={() => { if (skipBlur.current) { skipBlur.current = false; return; } updateSite({ adresse_ligne1: adrRef.current }); }} />
+      <div style={{ display: 'flex', gap: 6 }}>
+        <input className="inp" placeholder="Code postal" value={cp} maxLength={5} inputMode="numeric"
+          onChange={e => setCp(e.target.value.replace(/\D/g, '').slice(0, 5))}
+          onBlur={() => updateSite({ code_postal: cp, ville })} style={{ flex: '0 0 105px' }} />
+        {cities.length > 1
+          ? <select className="inp" value={ville} style={{ flex: 1, appearance: 'auto' }}
+              onChange={e => { setVille(e.target.value); updateSite({ ville: e.target.value, code_postal: cp }); }}>
+              <option value="">Choisir…</option>
+              {cities.map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
+          : <input className="inp" placeholder="Ville" value={ville} style={{ flex: 1 }}
+              onChange={e => setVille(e.target.value)} onBlur={() => updateSite({ ville })} />}
       </div>
     </div>
   );
@@ -2993,6 +3034,7 @@ function SiteFormCard({initial={},onSave,onCancel}){
   const[hc1e,setHc1e]=React.useState(initial.hc_fin1||initial.heure_fin_hc1||'');
   const[hc2s,setHc2s]=React.useState(initial.hc_debut2||initial.heure_debut_hc2||'');
   const[hc2e,setHc2e]=React.useState(initial.hc_fin2||initial.heure_fin_hc2||'');
+  const siteCities=usePostalCity(cp,ville,setVille);
   return(
     <div className="card" style={{padding:'14px 16px',marginBottom:10}}>
       <div style={{fontWeight:700,fontSize:14,color:'white',marginBottom:12}}>{initial.id?'Modifier le site':'Nouveau site'}</div>
@@ -3005,10 +3047,17 @@ function SiteFormCard({initial={},onSave,onCancel}){
           <input className="inp" placeholder="Prénom *" value={prenom} onChange={e=>setPrenom(e.target.value)} style={{flex:1}}/>
           <input className="inp" placeholder="Nom *" value={nomTit} onChange={e=>setNomTit(e.target.value)} style={{flex:1}}/>
         </div>
-        <input className="inp" placeholder="Rue et numéro" value={adr} onChange={e=>setAdr(e.target.value)}/>
+        <AddressAutocomplete value={adr} onChange={setAdr} placeholder="Rue et numéro"
+          onPick={p=>{ setAdr(p.name||p.label||''); if(p.postcode) setCp(p.postcode); if(p.city) setVille(p.city); }} />
         <div style={{display:'flex',gap:8}}>
-          <input className="inp" placeholder="Code postal" value={cp} onChange={e=>setCp(e.target.value)} style={{flex:'0 0 120px'}}/>
-          <input className="inp" placeholder="Ville" value={ville} onChange={e=>setVille(e.target.value)}/>
+          <input className="inp" placeholder="Code postal" value={cp} maxLength={5} inputMode="numeric"
+            onChange={e=>setCp(e.target.value.replace(/\D/g,'').slice(0,5))} style={{flex:'0 0 120px'}}/>
+          {siteCities.length>1
+            ? <select className="inp" value={ville} onChange={e=>setVille(e.target.value)} style={{flex:1,appearance:'auto'}}>
+                <option value="">Choisir…</option>
+                {siteCities.map(c=><option key={c} value={c}>{c}</option>)}
+              </select>
+            : <input className="inp" placeholder="Ville" value={ville} onChange={e=>setVille(e.target.value)} style={{flex:1}}/>}
         </div>
         <input className="inp" placeholder="PDL (14 chiffres, optionnel)" value={pdl} onChange={e=>setPdl(e.target.value)} maxLength={14} inputMode="numeric"/>
         <div style={{fontSize:10,color:'rgba(255,255,255,.4)',fontWeight:700,textTransform:'uppercase',letterSpacing:.5,marginTop:6}}>
@@ -5303,13 +5352,7 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
                     </div>
                     <div style={{marginTop:6}}>
                       <label style={{fontSize:10,color:'rgba(255,255,255,.35)',fontWeight:700,letterSpacing:'.5px',display:'block',marginBottom:4}}>ADRESSE DU COMPTEUR (doit correspondre à ENEDIS)</label>
-                      <div style={{display:'flex',flexDirection:'column',gap:5}}>
-                        <TxtInput value={site.adresse_ligne1||''} placeholder="Rue et numéro" onSave={v=>updateSite({adresse_ligne1:v})}/>
-                        <div style={{display:'flex',gap:6}}>
-                          <TxtInput value={site.code_postal||''} placeholder="Code postal" onSave={v=>updateSite({code_postal:v})} style={{flex:'0 0 105px'}}/>
-                          <TxtInput value={site.ville||''} placeholder="Ville" onSave={v=>updateSite({ville:v})} style={{flex:1}}/>
-                        </div>
-                      </div>
+                      <SiteAddressEditor site={site} updateSite={updateSite}/>
                     </div>
 
                     {/* Signataire du consentement — entreprise uniquement (gérant / représentant légal). */}
@@ -9369,7 +9412,10 @@ function AdminProductionScreen({ onBack }) {
           <label style={{fontSize:10,color:'rgba(255,255,255,.45)',fontWeight:700,letterSpacing:'.5px',display:'block',marginBottom:4}}>NOM DU PROFIL *</label>
           <input className="inp" style={{marginBottom:10}} placeholder="ex : Montpellier plein sud" value={nom} onChange={e=>setNom(e.target.value)}/>
           <label style={{fontSize:10,color:'rgba(255,255,255,.45)',fontWeight:700,letterSpacing:'.5px',display:'block',marginBottom:4}}>ADRESSE (pour géolocalisation)</label>
-          <input className="inp" style={{marginBottom:12}} placeholder="ex : 1 rue de la Paix, 34000 Montpellier" value={adresse} onChange={e=>setAdresse(e.target.value)}/>
+          <div style={{marginBottom:12}}>
+            <AddressAutocomplete value={adresse} onChange={setAdresse} placeholder="ex : 1 rue de la Paix, 34000 Montpellier"
+              onPick={p=>setAdresse(p.label||'')} />
+          </div>
           <div style={{display:'flex',gap:8}}>
             <button className="btn btn-primary" style={{flex:1,fontSize:13}} onClick={handleSave} disabled={saving||!nom.trim()}>
               {saving ? '⏳ Enregistrement…' : '💾 Enregistrer'}
@@ -11542,7 +11588,10 @@ function AdminAccEditScreen({ site, onSave, onDelete, onBack }) {
         </div>
         <div className="form-card">
           <div style={{marginBottom:10}}>{lbl('Nom du site')}{fi('nom','text','Ex: Parc solaire Nîmes Sud')}</div>
-          <div style={{marginBottom:10}}>{lbl('Adresse')}{fi('adresse','text','Ex: 14 rue du Soleil, 30000 Nîmes')}</div>
+          <div style={{marginBottom:10}}>{lbl('Adresse')}
+            <AddressAutocomplete value={f.adresse} onChange={v=>upd('adresse',v)} placeholder="Ex: 14 rue du Soleil, 30000 Nîmes" style={inpStyle}
+              onPick={p=>{ upd('adresse',p.label||''); if(p.postcode) upd('code_postal',p.postcode); if(p._coords){ upd('longitude',p._coords[0]); upd('latitude',p._coords[1]); } }} />
+          </div>
           <div style={{marginBottom:10}}>{lbl('Code postal *')}{fi('code_postal','text','30000')}</div>
           <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8,marginBottom:10}}>
             <div>{lbl('Puissance PV (kWc)')}{fi('puissance_pv','number','100')}</div>
