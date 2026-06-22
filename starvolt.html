@@ -4611,6 +4611,7 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
   const[linkyRequestId,setLinkyRequestId]=useState(null);
   const[linkyError,setLinkyError]=useState(null);
   const[linkyErrorStep,setLinkyErrorStep]=useState(null); // 0..3 : étape où l'erreur s'est produite
+  const[meterCandidates,setMeterCandidates]=useState(null); // [{prm,nom,adresse}] à confirmer avant extraction
   const[linkCopied,setLinkCopied]=useState(false); // feedback "lien copié" du bouton de partage consentement
   const[consentModal,setConsentModal]=useState(null); // null | 'invite' | 'iframe' — fenêtre de consentement in-app
   const[autoLinkyArmed,setAutoLinkyArmed]=useState(false); // armé au retour de l'inscription pour lancer la collecte si besoin
@@ -4728,10 +4729,10 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
     return ()=>clearInterval(linkyPollRef.current);
   },[linkyRequestId,linkyStatus]);
 
-  const handleLinkyImport=async(site)=>{
+  const handleLinkyImport=async(site,pdlOverride)=>{
     if(!site) return;
 
-    const pdl         = (site.pdl||'').trim();
+    const pdl         = (pdlOverride ?? site.pdl ?? '').trim();
     const firstName   = (site.titulaire_prenom || userProfile?.prenom || '').trim();
     const lastName    = (site.titulaire_nom    || userProfile?.nom    || '').trim();
     const rue         = (site.adresse_ligne1   || userProfile?.adresse_ligne1 || '').trim();
@@ -4765,7 +4766,7 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
     }
 
     // ── Appel Switchgrid ─────────────────────────────────────────────────────
-    setLinkyStatus('loading'); setLinkyError(null); setLinkyErrorStep(null); setLinkyUserUrl(null); setLinkyRequestId(null);
+    setLinkyStatus('loading'); setLinkyError(null); setLinkyErrorStep(null); setLinkyUserUrl(null); setLinkyRequestId(null); setMeterCandidates(null);
     try{
       const { data:{session} } = await sb.auth.getSession();
       if(!session) throw new Error('Non connecté');
@@ -4788,11 +4789,12 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
       });
       const d=await res.json();
 
-      // Plusieurs compteurs trouvés → afficher la liste
-      if(d.error==='MULTIPLE_CONTRACTS'){
+      // Compteur(s) à confirmer → l'utilisateur doit valider avant toute extraction.
+      // Aucune collecte n'est lancée côté serveur tant qu'un PDL exact n'est pas confirmé.
+      if(d.error==='CONFIRM_METER' || d.error==='MULTIPLE_CONTRACTS'){
         setLinkyStatus('error'); setLinkyErrorStep(0);
-        const list=d.results.map(r=>`• ${r.prm} — ${r.nom} (${r.adresse})`).join('\n');
-        setLinkyError(`${d.message}\n${list}`);
+        setLinkyError(d.message||'Vérifiez le compteur avant de lancer la collecte.');
+        setMeterCandidates(Array.isArray(d.results)?d.results:[]);
         return;
       }
 
@@ -4851,7 +4853,11 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
   // Site déjà importé avec la totalité des données heure par heure (courbe de
   // charge complète : 8784 valeurs ET source non journalière). Dans ce cas, on
   // masque le bouton de collecte et on affiche les 4 étapes au vert.
-  const siteHasFullHourly = !!site && site.conso_source!=='daily' && site.conso_profil?.length===8784;
+  // Un PDL valide (14 chiffres) est requis pour considérer la collecte comme fiable :
+  // sans PDL confirmé, des données présentes peuvent provenir d'un autre site (bug
+  // de confusion de compteur) → on n'affiche pas les 4 étapes au vert, on propose la collecte.
+  const siteHasValidPdl = !!site && /^\d{14}$/.test((site.pdl||'').trim());
+  const siteHasFullHourly = !!site && siteHasValidPdl && site.conso_source!=='daily' && site.conso_profil?.length===8784;
   // Statut effectif pour le suivi par étapes : si une session d'import est en
   // cours on l'utilise ; sinon, un site déjà complet est affiché comme « done ».
   const effectiveLinkyStatus = linkyStatus || (siteHasFullHourly ? 'done' : null);
@@ -5500,6 +5506,31 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
 
                     {/* Suivi par étapes du processus ENEDIS */}
                     <LinkyProgress status={effectiveLinkyStatus} errorStep={linkyErrorStep} consoSource={site.conso_source}/>
+
+                    {/* Confirmation du compteur : ENEDIS a renvoyé un ou plusieurs compteurs
+                        dont l'adresse ne correspond pas exactement à celle saisie. L'utilisateur
+                        doit choisir le bon compteur — aucune collecte n'est lancée sans cette validation. */}
+                    {meterCandidates&&meterCandidates.length>0&&(
+                      <div style={{marginTop:10,background:'rgba(247,201,72,.1)',border:'1px solid rgba(247,201,72,.35)',borderRadius:10,padding:'12px 14px'}}>
+                        <div style={{color:'#f7c948',fontWeight:800,fontSize:12,marginBottom:4}}>
+                          🔎 Vérifiez le compteur avant de lancer la collecte
+                        </div>
+                        <div style={{color:'rgba(255,255,255,.7)',fontSize:11,lineHeight:1.5,marginBottom:10}}>
+                          L'adresse trouvée chez ENEDIS ne correspond pas exactement à celle du site. Sélectionnez le compteur qui correspond vraiment à <strong style={{color:'#fff'}}>{site.adresse_ligne1}, {site.code_postal} {site.ville}</strong>. Si aucun ne correspond, corrigez le nom du titulaire ou l'adresse puis relancez.
+                        </div>
+                        <div style={{display:'flex',flexDirection:'column',gap:8}}>
+                          {meterCandidates.map((c)=>(
+                            <button key={c.prm} type="button"
+                              onClick={()=>{ setMeterCandidates(null); updateSite({pdl:c.prm}); handleLinkyImport(site,c.prm); }}
+                              style={{textAlign:'left',background:'rgba(255,255,255,.04)',border:'1px solid rgba(255,255,255,.15)',borderRadius:8,padding:'10px 12px',cursor:'pointer'}}>
+                              <div style={{color:'#fff',fontWeight:700,fontSize:12}}>{c.nom||'Compteur'}</div>
+                              <div style={{color:'rgba(255,255,255,.6)',fontSize:11,marginTop:2}}>{c.adresse||'Adresse non précisée'}</div>
+                              <div style={{color:'#7dd940',fontSize:11,marginTop:3,fontWeight:700}}>PDL {c.prm} — c'est ce compteur →</div>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
 
                     {/* Étape 2 en cours : lien de consentement (disparaît dès le consentement signé).
                         Gardé par linkyLive : si le consentement est déjà donné, le poll renvoie
