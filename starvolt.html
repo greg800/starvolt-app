@@ -4019,10 +4019,14 @@ function buildBilanFacts({ site, tariffs, globalVars, prodProfil, quiz }) {
     }
     const prixHp = curT?.prix_hp || (prixMoyen?prixMoyen/100:0.20);
     leviers.rejoindre_acc = Math.max(0, Math.round(kwhSolaire*Math.max(0, prixHp-0.09)));
-    // 3) Box flexibilité
-    leviers.box_flexibilite = Math.round(140 + factureActuelle*(typeTarif==='dynamique'?0.20:0.10));
-    // 4) Panneaux solaires
-    leviers.panneaux_solaires = Math.round(factureActuelle*0.5);
+    // 3) Box flexibilité — seulement si un usage électrique est pilotable
+    //    (chauffage élec/PAC ou eau chaude électrique). Sinon rien à piloter.
+    const flexPossible = site.flex_chauffage==='elec' || site.flex_chauffage==='pac' || site.flex_ecs==='elec';
+    if (flexPossible) leviers.box_flexibilite = Math.round(140 + factureActuelle*(typeTarif==='dynamique'?0.20:0.10));
+    // 4) Panneaux solaires — seulement si l'utilisateur peut en installer
+    //    (propriétaire ET maison individuelle). Locataire ou collectif → impossible.
+    const pvPossible = site.flex_statut!=='locataire' && site.flex_type_logement!=='collectif';
+    if (pvPossible) leviers.panneaux_solaires = Math.round(factureActuelle*0.5);
   }
 
   // ── Classement qualitatif des leviers (du plus au moins rentable) ──
@@ -4999,6 +5003,10 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
 
   const handleAddSite=async(data)=>{
     const{data:ns}=await sb.from('sites').insert({user_id:user.id,...data}).select().single();
+    // Arme le tunnel de questions pour ce nouveau site : il se déclenchera après la
+    // signature du consentement ENEDIS (cf. effet onboarding) → 100% des sites renseignés.
+    try{ localStorage.setItem('starvolt_onboarding','1'); }catch{}
+    onbFiredRef.current=false;
     setShowAdd(false); await load(); if(ns)persistActiveSite(ns.id);
   };
 
@@ -5116,7 +5124,7 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
 
   if(sites===null)return(<><div className="screen fade-in"><div style={{textAlign:'center',padding:40,color:'rgba(255,255,255,.5)'}}>Chargement…</div></div><StickyFooter onBack={onBack}/></>);
   if(showFlexForm&&site){
-    return <ThermaleForm
+    return <OnboardingTypeform
       siteId={activeId}
       initial={(site.flex_chauffage||site.flex_type_logement)?{chauffage:site.flex_chauffage,ecs:site.flex_ecs,surface:site.flex_surface,type_logement:site.flex_type_logement,statut:site.flex_statut}:null}
       onBack={()=>setShowFlexForm(false)}
@@ -7961,202 +7969,12 @@ function AccResultScreen({ state, onBack, onPanier, onMonSite }) {
   );
 }
 
-// ─── ThermaleForm ─────────────────────────────
-function ThermaleForm({ onDone, onBack, siteId=null, initial=null }) {
-  const [tab,          setTab]          = useState('appareils');
-  const [chauffage,    setChauffage]    = useState(initial?.chauffage||null);
-  const [ecs,          setEcs]          = useState(initial?.ecs||null);
-  const [surface,      setSurface]      = useState(initial?.surface||null);
-  const [typeLogement, setTypeLogement] = useState(initial?.type_logement||null);
-  const [statut,       setStatut]       = useState(initial?.statut||null);
-
-  async function handleDone() {
-    const idx = surface === 'small' ? 0 : surface === 'medium' ? 1 : 2;
-    let kw = 0;
-    if (chauffage === 'elec' || chauffage === 'pac') kw += [3, 7, 12][idx];
-    if (ecs === 'elec') kw += [2, 3, 4][idx];
-    try {
-      const d = JSON.parse(localStorage.getItem('starvolt_solar_defaults') || '{}');
-      d.thermKwh = String(kw);
-      localStorage.setItem('starvolt_solar_defaults', JSON.stringify(d));
-    } catch {}
-    // Persiste en base ET en localStorage si on connaît le siteId — await pour que load() voie les nouvelles valeurs
-    if (siteId) {
-      await sb.from('sites').update({flex_chauffage:chauffage,flex_ecs:ecs,flex_surface:surface,flex_type_logement:typeLogement||null,flex_statut:statut||null}).eq('id',siteId);
-      try { localStorage.setItem('starvolt_flex_'+siteId, JSON.stringify({chauffage,ecs,surface,type_logement:typeLogement,statut})); } catch {}
-    }
-    onDone(kw);
-  }
-
-  // Champs obligatoires : chauffage, eau chaude, surface (onglet « Vos appareils »).
-  const remaining = [chauffage, ecs, surface].filter(v => !v).length;
-  const ready = remaining === 0;
-
-  // Auto-enregistrement dès que les 3 réponses sont complètes (inutile de cliquer).
-  // On saute le tout premier rendu pour ne pas enregistrer/quitter à l'ouverture
-  // quand le formulaire est déjà pré-rempli (cas édition).
-  const savingRef   = useRef(false);
-  const firstRunRef = useRef(true);
-  useEffect(() => {
-    if (firstRunRef.current) { firstRunRef.current = false; return; }
-    if (ready && !savingRef.current) { savingRef.current = true; handleDone(); }
-  }, [chauffage, ecs, surface]);
-
-  let previewKw = 0;
-  {
-    const idx = surface === 'small' ? 0 : surface === 'medium' ? 1 : 2;
-    if (chauffage === 'elec' || chauffage === 'pac') previewKw += [3, 7, 12][idx];
-    if (ecs === 'elec') previewKw += [2, 3, 4][idx];
-  }
-
-  const bS = (active) => ({
-    flex: 1, padding: '13px 6px', borderRadius: 12,
-    border: `2px solid ${active ? '#7dd940' : 'rgba(255,255,255,.13)'}`,
-    background: active ? 'rgba(125,217,64,.11)' : 'rgba(255,255,255,.04)',
-    color: 'white', cursor: 'pointer', fontFamily: 'inherit', textAlign: 'center',
-  });
-  const lS = (active) => ({ fontSize: 12, fontWeight: active ? 800 : 600, color: active ? '#7dd940' : 'rgba(255,255,255,.75)' });
-  const sec = { fontSize: 11, fontWeight: 700, color: 'rgba(255,255,255,.4)', textTransform: 'uppercase', letterSpacing: '.6px', marginBottom: 10 };
-
-  const tabS = (active) => ({
-    flex: 1, padding: '9px 6px', borderRadius: 10, cursor: 'pointer', fontFamily: 'inherit',
-    border: `1.5px solid ${active ? '#7dd940' : 'rgba(255,255,255,.13)'}`,
-    background: active ? 'rgba(125,217,64,.12)' : 'rgba(255,255,255,.04)',
-    color: active ? '#7dd940' : 'rgba(255,255,255,.55)',
-    fontWeight: active ? 800 : 600, fontSize: 12, textAlign: 'center',
-  });
-
-  return (
-    <>
-      <div className="screen fade-in">
-        <div style={{ marginBottom: 16, marginTop: 4 }}>
-          <div style={{ fontSize: 9, letterSpacing: '.8px', color: 'rgba(125,217,64,.85)', fontWeight: 700, textTransform: 'uppercase', marginBottom: 6 }}>Votre logement</div>
-          <div style={{ fontSize: 19, fontWeight: 900, color: 'white', lineHeight: 1.25 }}>Quelques infos pour<br/>affiner votre simulation</div>
-        </div>
-
-        {/* ── Onglets ── */}
-        <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
-          <button style={tabS(tab==='logement')} onClick={() => setTab('logement')}>🏠 Votre logement</button>
-          <button style={tabS(tab==='appareils')} onClick={() => setTab('appareils')}>⚡ Vos appareils</button>
-        </div>
-
-        {tab === 'logement' && (
-          <>
-            <div className="card" style={{ padding: '16px', marginBottom: 10 }}>
-              <div style={sec}>Type de logement</div>
-              <div style={{ display: 'flex', gap: 8 }}>
-                <button onClick={() => setTypeLogement(v => v==='maison'?null:'maison')} style={bS(typeLogement==='maison')}>
-                  <div style={{ fontSize: 26, marginBottom: 5 }}>🏠</div>
-                  <div style={lS(typeLogement==='maison')}>Maison<br/>individuelle</div>
-                </button>
-                <button onClick={() => setTypeLogement(v => v==='collectif'?null:'collectif')} style={bS(typeLogement==='collectif')}>
-                  <div style={{ fontSize: 26, marginBottom: 5 }}>🏢</div>
-                  <div style={lS(typeLogement==='collectif')}>En collectif<br/>(appartement)</div>
-                </button>
-              </div>
-            </div>
-
-            <div className="card" style={{ padding: '16px', marginBottom: 10 }}>
-              <div style={sec}>Situation</div>
-              <div style={{ display: 'flex', gap: 8 }}>
-                <button onClick={() => setStatut(v => v==='locataire'?null:'locataire')} style={bS(statut==='locataire')}>
-                  <div style={{ fontSize: 26, marginBottom: 5 }}>🔑</div>
-                  <div style={lS(statut==='locataire')}>Locataire</div>
-                </button>
-                <button onClick={() => setStatut(v => v==='proprietaire'?null:'proprietaire')} style={bS(statut==='proprietaire')}>
-                  <div style={{ fontSize: 26, marginBottom: 5 }}>📜</div>
-                  <div style={lS(statut==='proprietaire')}>Propriétaire</div>
-                </button>
-              </div>
-            </div>
-          </>
-        )}
-
-        {tab === 'appareils' && (
-          <>
-            <div className="card" style={{ padding: '16px', marginBottom: 10 }}>
-              <div style={sec}>Type de chauffage</div>
-              <div style={{ display: 'flex', gap: 8 }}>
-                <button onClick={() => setChauffage(v => v==='elec'?null:'elec')} style={bS(chauffage==='elec')}>
-                  <div style={{ fontSize: 22, marginBottom: 5 }}>⚡</div>
-                  <div style={lS(chauffage==='elec')}>Électrique</div>
-                </button>
-                <button onClick={() => setChauffage(v => v==='pac'?null:'pac')} style={bS(chauffage==='pac')}>
-                  <div style={{ fontSize: 22, marginBottom: 5 }}>♨️</div>
-                  <div style={lS(chauffage==='pac')}>PAC</div>
-                </button>
-                <button onClick={() => setChauffage(v => v==='autre'?null:'autre')} style={bS(chauffage==='autre')}>
-                  <div style={{ fontSize: 22, marginBottom: 5 }}>🔥</div>
-                  <div style={lS(chauffage==='autre')}>Autre</div>
-                </button>
-              </div>
-            </div>
-
-            <div className="card" style={{ padding: '16px', marginBottom: 10 }}>
-              <div style={sec}>Eau chaude sanitaire</div>
-              <div style={{ display: 'flex', gap: 10 }}>
-                <button onClick={() => setEcs(v => v==='elec'?null:'elec')} style={bS(ecs==='elec')}>
-                  <div style={{ fontSize: 22, marginBottom: 5 }}>⚡</div>
-                  <div style={lS(ecs==='elec')}>Électrique</div>
-                </button>
-                <button onClick={() => setEcs(v => v==='autre'?null:'autre')} style={bS(ecs==='autre')}>
-                  <div style={{ fontSize: 22, marginBottom: 5 }}>🔥</div>
-                  <div style={lS(ecs==='autre')}>Autre</div>
-                </button>
-              </div>
-            </div>
-
-            <div className="card" style={{ padding: '16px', marginBottom: 10 }}>
-              <div style={sec}>Surface du logement</div>
-              <div style={{ display: 'flex', gap: 8 }}>
-                <button onClick={() => setSurface(v => v==='small'?null:'small')} style={bS(surface==='small')}>
-                  <div style={lS(surface==='small')}>{'< 70 m²'}</div>
-                </button>
-                <button onClick={() => setSurface(v => v==='medium'?null:'medium')} style={bS(surface==='medium')}>
-                  <div style={lS(surface==='medium')}>{'70–150 m²'}</div>
-                </button>
-                <button onClick={() => setSurface(v => v==='large'?null:'large')} style={bS(surface==='large')}>
-                  <div style={lS(surface==='large')}>{' > 150 m²'}</div>
-                </button>
-              </div>
-            </div>
-
-            {previewKw !== null && (
-              <div style={{ textAlign: 'center', padding: '14px 0 4px' }}>
-                <div style={{ fontSize: 11, color: 'rgba(255,255,255,.4)', marginBottom: 4 }}>Stockage thermique estimé</div>
-                {previewKw > 0
-                  ? <div style={{ fontSize: 34, fontWeight: 900, color: '#7dd940', lineHeight: 1 }}>
-                      {previewKw} <span style={{ fontSize: 18, fontWeight: 600, color: 'rgba(125,217,64,.7)' }}>kWh</span>
-                    </div>
-                  : <div style={{ fontSize: 15, fontWeight: 700, color: 'rgba(255,255,255,.35)' }}>Stockage thermique non applicable</div>
-                }
-              </div>
-            )}
-          </>
-        )}
-      </div>
-      <StickyFooter row onBack={onBack}>
-        {ready ? (
-          <button className="btn btn-yes" onClick={handleDone} style={{ flex: 1 }}>
-            Enregistrer →
-          </button>
-        ) : (
-          <button className="btn" disabled
-            style={{ flex: 1, cursor: 'not-allowed',
-              background: 'rgba(255,255,255,.10)', color: 'rgba(255,255,255,.9)',
-              border: '1px solid rgba(255,255,255,.18)' }}>
-            Il vous reste {remaining} réponse{remaining > 1 ? 's' : ''} à faire
-          </button>
-        )}
-      </StickyFooter>
-    </>
-  );
-}
-
 // ─── OnboardingTypeform ───────────────────────
 // Questionnaire « une question par écran », auto-avance au clic (pas de bouton valider),
-// transition slide. Affiché juste après la signature du consentement, pendant la collecte
-// ENEDIS. Persiste les mêmes champs flex_* que ThermaleForm puis envoie vers « Comprendre ».
+// transition slide. Unique formulaire de collecte des champs flex_* : force les 5 réponses,
+// donc aucun site partiellement renseigné. Sert à l'onboarding (après consentement ENEDIS),
+// à l'édition « Mon logement » et aux simulations (box, solaire, install soi-même).
+// Props : siteId, onDone(kw), onBack (optionnel), initial (pré-remplissage en édition).
 const ONBOARDING_QUESTIONS = [
   { key:'chauffage', title:'Comment chauffez-vous votre logement ?', cols:3, options:[
     { value:'elec',  emoji:'⚡',  label:'Électrique' },
@@ -8182,9 +8000,19 @@ const ONBOARDING_QUESTIONS = [
   ]},
 ];
 
-function OnboardingTypeform({ siteId, onDone }) {
+function OnboardingTypeform({ siteId, onDone, onBack, initial=null }) {
   const [step,    setStep]    = useState(0);
-  const [answers, setAnswers] = useState({});
+  const [answers, setAnswers] = useState(() => {
+    if (!initial) return {};
+    const { chauffage, ecs, surface, type_logement, statut } = initial;
+    const a = {};
+    if (chauffage)     a.chauffage     = chauffage;
+    if (ecs)           a.ecs           = ecs;
+    if (surface)       a.surface       = surface;
+    if (type_logement) a.type_logement = type_logement;
+    if (statut)        a.statut        = statut;
+    return a;
+  });
   const [busy,    setBusy]    = useState(false); // bloque les clics pendant l'auto-avance
   const advanceRef = useRef(null);
   useEffect(() => () => clearTimeout(advanceRef.current), []);
@@ -8209,7 +8037,7 @@ function OnboardingTypeform({ siteId, onDone }) {
         localStorage.setItem('starvolt_flex_'+siteId, JSON.stringify({ chauffage, ecs, surface, type_logement, statut }));
       } catch {}
     }
-    onDone?.();
+    onDone?.(kw);
   };
 
   const pick = (value) => {
@@ -8224,8 +8052,25 @@ function OnboardingTypeform({ siteId, onDone }) {
     }, 320);
   };
 
+  // Retour : recule d'une question, ou quitte le formulaire au premier écran (si onBack fourni).
+  const canGoBack = step > 0 || !!onBack;
+  const goBack = () => {
+    if (busy) return;
+    if (step > 0) setStep(step - 1);
+    else onBack?.();
+  };
+
   return (
     <div className="screen" style={{ display:'flex', flexDirection:'column', minHeight:'100vh', padding:'0 0 40px' }}>
+      {/* retour */}
+      {canGoBack && (
+        <div style={{ padding:'14px 18px 0' }}>
+          <button onClick={goBack} style={{
+            background:'none', border:'none', color:'rgba(255,255,255,.55)',
+            fontSize:14, fontWeight:600, cursor:'pointer', padding:0, fontFamily:'inherit',
+          }}>← Retour</button>
+        </div>
+      )}
       {/* progression */}
       <div style={{ display:'flex', gap:6, padding:'22px 18px 0' }}>
         {ONBOARDING_QUESTIONS.map((_, i) => (
@@ -8341,7 +8186,7 @@ function BoxSimScreen({ user, userProfile, onBack, onPanier, onMonSite, onCartUp
   };
 
   if (showThermForm) {
-    return <ThermaleForm
+    return <OnboardingTypeform
       siteId={activeSiteId}
       initial={siteFlex}
       onBack={() => setShowThermForm(false)}
@@ -8601,7 +8446,7 @@ function InstallSoiMemeScreen({ user, userProfile, onBack, onPanier, onMonSite, 
 
   // ── Étape 1 : formulaire équipements ──
   if (step === 'therm') {
-    return <ThermaleForm
+    return <OnboardingTypeform
       siteId={siteId}
       initial={siteFlex}
       onBack={onBack}
@@ -8931,7 +8776,7 @@ function SolarSimScreen({ user, userProfile, onBack, onPanier, onMonSite, onCart
   };
 
   if (showThermForm) {
-    return <ThermaleForm
+    return <OnboardingTypeform
       siteId={activeSiteId}
       initial={siteFlex}
       onBack={() => setShowThermForm(false)}
