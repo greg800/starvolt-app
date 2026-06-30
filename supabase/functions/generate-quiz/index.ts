@@ -71,10 +71,7 @@ async function dbSelect(path: string): Promise<any> {
   return await res.json();
 }
 
-Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
-  if (req.method !== "POST") return json({ error: "method_not_allowed" }, 405);
-
+async function handle(req: Request): Promise<Response> {
   // 1) Auth — admin only
   const auth = req.headers.get("Authorization") || "";
   const jwt = auth.replace(/^Bearer\s+/i, "");
@@ -276,4 +273,17 @@ Deno.serve(async (req) => {
     usage,
     cost: { usd: costUsd, eur: costUsd / USD_PER_EUR },
   });
+}
+
+Deno.serve(async (req) => {
+  if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
+  if (req.method !== "POST") return json({ error: "method_not_allowed" }, 405);
+  try {
+    return await handle(req);
+  } catch (e) {
+    // Toute erreur non gérée renvoie quand même les en-têtes CORS,
+    // sinon le navigateur affiche "Failed to send a request to the Edge Function".
+    console.error("generate-quiz unhandled error:", e);
+    return json({ error: "unhandled", message: String((e as any)?.message || e) }, 500);
+  }
 });
