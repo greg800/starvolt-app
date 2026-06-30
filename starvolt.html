@@ -10447,6 +10447,9 @@ function AdminGenQuizScreen({ onBack }) {
   const [subjects, setSubjects] = useState([]);   // sujets du groupe sélectionné
   const [subjId, setSubjId] = useState('');
   const [prompt, setPrompt] = useState(DEFAULT_QUIZ_PROMPT);
+  const [savedPrompt, setSavedPrompt] = useState(DEFAULT_QUIZ_PROMPT); // dernier prompt persisté
+  const [promptSaving, setPromptSaving] = useState(false);
+  const [promptMsg, setPromptMsg] = useState(null); // { ok, text }
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState(null);
   const [questions, setQuestions] = useState(null); // [{question, choices:[{text,is_correct}]}]
@@ -10462,9 +10465,19 @@ function AdminGenQuizScreen({ onBack }) {
     });
     sb.rpc('get_ai_prompts').then(({ data }) => {
       const row = (data || []).find(r => r.feature === 'generate_quiz');
-      if (row?.system_prompt) setPrompt(row.system_prompt);
+      if (row?.system_prompt) { setPrompt(row.system_prompt); setSavedPrompt(row.system_prompt); }
     });
   }, []);
+
+  // Enregistre le prompt général (commun à tous les quiz) dans ai_prompts.
+  const savePrompt = async () => {
+    setPromptSaving(true); setPromptMsg(null);
+    const { error } = await sb.rpc('set_ai_prompt', { p_feature: 'generate_quiz', p_prompt: prompt });
+    if (error) setPromptMsg({ ok: false, text: error.message || 'Échec de l\'enregistrement.' });
+    else { setSavedPrompt(prompt); setPromptMsg({ ok: true, text: 'Prompt enregistré.' }); }
+    setPromptSaving(false);
+  };
+  const promptDirty = prompt !== savedPrompt;
 
   // Charger les thèmes du groupe sélectionné
   useEffect(() => {
@@ -10586,6 +10599,21 @@ function AdminGenQuizScreen({ onBack }) {
           style={{width:'100%', minHeight:150, resize:'vertical', boxSizing:'border-box',
             background:'rgba(0,0,0,.25)', border:'1px solid rgba(255,255,255,.14)', borderRadius:10,
             color:'rgba(255,255,255,.9)', fontSize:12.5, lineHeight:1.5, padding:'10px 12px', fontFamily:'inherit'}}/>
+
+        {/* Enregistrer le prompt (persiste dans ai_prompts, commun à tous les quiz) */}
+        <div style={{display:'flex', alignItems:'center', gap:12, marginTop:8, flexWrap:'wrap'}}>
+          <button onClick={savePrompt} disabled={promptSaving || !promptDirty} style={{
+            background: !promptDirty ? 'rgba(255,255,255,.08)' : 'rgba(255,179,64,.16)',
+            border:`1px solid ${!promptDirty ? 'rgba(255,255,255,.12)' : 'rgba(255,179,64,.45)'}`,
+            borderRadius:10, color: !promptDirty ? 'rgba(255,255,255,.4)' : '#ffb340',
+            fontSize:13, fontWeight:700, padding:'9px 16px', cursor: promptSaving||!promptDirty ? 'default':'pointer',
+            fontFamily:'inherit', display:'inline-flex', alignItems:'center', gap:8
+          }}>
+            {promptSaving ? (<><span className="spinner" style={{width:14,height:14}}/> Enregistrement…</>) : '💾 Enregistrer la mise à jour du prompt'}
+          </button>
+          {promptDirty && !promptSaving && <span style={{fontSize:12, color:'rgba(255,255,255,.45)'}}>Modifications non enregistrées</span>}
+          {promptMsg && <span style={{fontSize:12, color: promptMsg.ok ? '#7dd940' : '#ff8a6a'}}>{promptMsg.ok ? '✅ ' : '⚠️ '}{promptMsg.text}</span>}
+        </div>
 
         {/* 4) CTA */}
         <button onClick={generate} disabled={!subjId || generating || saving} style={{
