@@ -13276,7 +13276,16 @@ function ComprendreQuizScreen({ user, questions, subject, isRevision, onDone, on
     return () => window.__setFeedbackDetail(null);
   }, [idx, q && q.id]);
 
-  if (!q) return null;
+  if (!q) return (
+    <>
+    <div className="screen fade-in" style={{textAlign:'center',padding:'40px 20px'}}>
+      <div style={{fontSize:42,marginBottom:12}}>📭</div>
+      <div style={{fontSize:17,fontWeight:800,color:'#fff',marginBottom:8}}>Aucune question pour ce thème</div>
+      <div style={{fontSize:13,color:'rgba(255,255,255,.6)',lineHeight:1.6}}>Ce quiz n'a pas encore de question. Reviens plus tard.</div>
+    </div>
+    <StickyFooter onBack={onBack}/>
+    </>
+  );
 
   const choices      = q.learn_choices || [];
   const correctIds   = choices.filter(c => c.is_correct).map(c => c.id);
@@ -13907,6 +13916,32 @@ function BilanReadyPopup({ data, onUnderstood }) {
   );
 }
 
+// ─── ErrorBoundary : évite l'« écran vert » (arbre React démonté → dégradé du body
+// visible) quand un écran plante au rendu. Affiche l'erreur lisible + bouton recharger.
+class ErrorBoundary extends React.Component {
+  constructor(props) { super(props); this.state = { error: null }; }
+  static getDerivedStateFromError(error) { return { error }; }
+  componentDidCatch(error, info) {
+    console.error('ErrorBoundary a capturé une erreur de rendu :', error, info?.componentStack);
+  }
+  render() {
+    if (!this.state.error) return this.props.children;
+    const msg = String(this.state.error?.message || this.state.error);
+    return (
+      <div className="screen fade-in" style={{textAlign:'center',padding:'40px 20px'}}>
+        <div style={{fontSize:46,marginBottom:14}}>⚠️</div>
+        <div style={{fontSize:18,fontWeight:800,color:'#fff',marginBottom:8}}>Une erreur est survenue</div>
+        <div style={{fontSize:13,color:'rgba(255,255,255,.6)',lineHeight:1.6,marginBottom:18}}>
+          Cet écran n'a pas pu s'afficher. Tu peux revenir en arrière ou recharger l'application.
+        </div>
+        <div style={{fontSize:11,color:'rgba(255,255,255,.4)',fontFamily:'monospace',background:'rgba(0,0,0,.25)',
+          borderRadius:10,padding:'10px 12px',marginBottom:18,wordBreak:'break-word',textAlign:'left'}}>{msg}</div>
+        <button className="btn btn-yes" style={{width:'100%'}} onClick={()=>window.location.reload()}>Recharger l'application</button>
+      </div>
+    );
+  }
+}
+
 function App() {
   const [state,       setState]      = useState(INIT);
   const [history,     setHistory]    = useState([]);
@@ -14517,7 +14552,7 @@ function App() {
       <div className="chevrons-deco" aria-hidden="true">
         {['»','»','»','»'].map((c,i)=><span key={i}>{c}</span>)}
       </div>
-      {render()}
+      <ErrorBoundary key={state.screen}>{render()}</ErrorBoundary>
       {/* DemoSitesPopup supprimé */}
       {isHome && (
         <StickyFooter row>
