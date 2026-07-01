@@ -10501,7 +10501,7 @@ function AdminGenQuizScreen({ onBack }) {
         try { const ctx = await error.context?.json?.(); if (ctx?.message) detail = ctx.message; else if (ctx?.error) detail = ctx.error; } catch(_){}
         throw new Error(detail);
       }
-      const qs = data?.questions || [];
+      const qs = Array.isArray(data?.questions) ? data.questions : [];
       if (!qs.length) throw new Error('Aucune question générée. Réessaie.');
       setQuestions(qs);
       setEditK(null);

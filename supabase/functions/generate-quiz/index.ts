@@ -242,7 +242,7 @@ async function handle(req: Request): Promise<Response> {
   const block = (aiJson.content || []).find(
     (b: any) => b.type === "tool_use" && b.name === "report_questions"
   );
-  let questions = block?.input?.questions || [];
+  let questions = Array.isArray(block?.input?.questions) ? block.input.questions : [];
 
   // Garde-fous : 3-5 choix, au moins une bonne réponse
   questions = (questions as any[])
