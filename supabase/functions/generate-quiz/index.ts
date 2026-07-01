@@ -121,6 +121,29 @@ async function handle(req: Request): Promise<Response> {
     );
   }
 
+  // 4b) Questions DÉJÀ enregistrées pour ce thème (pour ne jamais les reproduire).
+  //     On les liste avec leurs réponses afin que le modèle varie les angles.
+  let existingBlock = "";
+  try {
+    const existing = await dbSelect(
+      `learn_questions?subject_id=eq.${subjectId}&select=question,ordre,learn_choices(text,is_correct)&order=ordre`
+    );
+    if (Array.isArray(existing) && existing.length) {
+      const lines = existing.map((q: any, i: number) => {
+        const ch = (q.learn_choices || [])
+          .map((c: any) => `${c.is_correct ? "[bonne]" : "[fausse]"} ${String(c.text || "").trim()}`)
+          .join(" / ");
+        return `${i + 1}. ${String(q.question || "").trim()}${ch ? `  [${ch}]` : ""}`;
+      });
+      existingBlock =
+        `\n\nQUESTIONS DÉJÀ POSÉES SUR CE THÈME (${existing.length}) — tu ne dois EN REPRODUIRE AUCUNE, ` +
+        `ni sur le fond ni reformulée ; aborde des angles/notions différents :\n` +
+        lines.join("\n");
+    }
+  } catch {
+    /* best-effort : si la lecture échoue, on génère quand même */
+  }
+
   // 5) Prompt système : body.prompt (édité par l'admin) > ai_prompts > défaut
   let systemPrompt = DEFAULT_SYSTEM_PROMPT;
   if (typeof body?.prompt === "string" && body.prompt.trim()) {
@@ -141,8 +164,12 @@ async function handle(req: Request): Promise<Response> {
   const userContent =
     `GROUPE : ${groupTitle || "—"}\n` +
     `THÈME : ${subject.title || "—"}\n\n` +
-    `CONTENU DU THÈME :\n${themeText}\n\n` +
-    `Génère ${count} questions de quiz d'après ce contenu.`;
+    `CONTENU DU THÈME :\n${themeText}` +
+    existingBlock +
+    `\n\nGénère ${count} questions de quiz d'après ce contenu` +
+    (existingBlock
+      ? `, DIFFÉRENTES des questions déjà posées ci-dessus (angles et notions nouveaux).`
+      : `.`);
 
   const tool = {
     name: "report_questions",
