@@ -136,8 +136,8 @@ async function handle(req: Request): Promise<Response> {
         return `${i + 1}. ${String(q.question || "").trim()}${ch ? `  [${ch}]` : ""}`;
       });
       existingBlock =
-        `\n\nQUESTIONS DÉJÀ POSÉES SUR CE THÈME (${existing.length}) — tu ne dois EN REPRODUIRE AUCUNE, ` +
-        `ni sur le fond ni reformulée ; aborde des angles/notions différents :\n` +
+        `\n\nQUESTIONS DÉJÀ POSÉES SUR CE THÈME (${existing.length}) — évite de les répéter ` +
+        `et varie les angles/notions abordés (ne te contente pas de les reformuler) :\n` +
         lines.join("\n");
     }
   } catch {
@@ -161,15 +161,21 @@ async function handle(req: Request): Promise<Response> {
   }
 
   // 6) Appel Claude avec tool forcé
-  const userContent =
+  const baseContent =
     `GROUPE : ${groupTitle || "—"}\n` +
     `THÈME : ${subject.title || "—"}\n\n` +
-    `CONTENU DU THÈME :\n${themeText}` +
+    `CONTENU DU THÈME :\n${themeText}`;
+  // Impératif : produire N questions PASSE AVANT l'anti-doublons. On ne renvoie
+  // jamais un tableau vide — s'il faut, on approfondit des aspects déjà couverts.
+  const userContent =
+    baseContent +
     existingBlock +
-    `\n\nGénère ${count} questions de quiz d'après ce contenu` +
+    `\n\nTu DOIS générer exactement ${count} questions de quiz d'après ce contenu` +
     (existingBlock
-      ? `, DIFFÉRENTES des questions déjà posées ci-dessus (angles et notions nouveaux).`
-      : `.`);
+      ? `, en variant les angles par rapport aux questions déjà posées. Même si le thème ` +
+        `est déjà partiellement couvert, il reste forcément des aspects, chiffres, conséquences ` +
+        `ou nuances à interroger : trouve ${count} questions exploitables. Ne renvoie JAMAIS de liste vide.`
+      : `. Ne renvoie JAMAIS de liste vide.`);
 
   const tool = {
     name: "report_questions",
@@ -209,8 +215,7 @@ async function handle(req: Request): Promise<Response> {
     },
   };
 
-  let aiJson: any;
-  try {
+  const askClaude = async (uc: string) => {
     const aiRes = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
@@ -220,29 +225,54 @@ async function handle(req: Request): Promise<Response> {
       },
       body: JSON.stringify({
         model: MODEL,
-        max_tokens: 2000,
+        max_tokens: 3000,
         system: systemPrompt,
         tools: [tool],
         tool_choice: { type: "tool", name: "report_questions" },
-        messages: [{ role: "user", content: userContent }],
+        messages: [{ role: "user", content: uc }],
       }),
     });
-    aiJson = await aiRes.json();
-    if (!aiRes.ok) {
+    const jsonRes = await aiRes.json();
+    return { ok: aiRes.ok, jsonRes };
+  };
+
+  const extractRaw = (aj: any) => {
+    const b = (aj?.content || []).find(
+      (x: any) => x.type === "tool_use" && x.name === "report_questions"
+    );
+    return { block: b, raw: Array.isArray(b?.input?.questions) ? b.input.questions : [] };
+  };
+
+  let aiJson: any;
+  try {
+    const first = await askClaude(userContent);
+    if (!first.ok) {
       return json(
-        { error: "ai_error", message: aiJson?.error?.message || "Erreur Claude." },
+        { error: "ai_error", message: first.jsonRes?.error?.message || "Erreur Claude." },
         502
       );
+    }
+    aiJson = first.jsonRes;
+    // Relance : si la 1re tentative rend un tableau vide alors qu'on a des questions
+    // existantes, l'anti-doublons a probablement bloqué le modèle. On réessaie une
+    // fois sans le bloc anti-doublons pour garantir une production de questions.
+    if (extractRaw(aiJson).raw.length === 0 && existingBlock) {
+      const retryContent =
+        baseContent +
+        `\n\nGénère exactement ${count} questions de quiz d'après ce contenu. ` +
+        `Priorité absolue : produire ${count} questions exploitables. Ne renvoie JAMAIS de liste vide.`;
+      const second = await askClaude(retryContent);
+      if (second.ok && extractRaw(second.jsonRes).raw.length > 0) {
+        aiJson = second.jsonRes;
+      }
     }
   } catch (e) {
     return json({ error: "ai_fetch_failed", message: String(e) }, 502);
   }
 
   // 7) Extraire le tool_use
-  const block = (aiJson.content || []).find(
-    (b: any) => b.type === "tool_use" && b.name === "report_questions"
-  );
-  let questions = Array.isArray(block?.input?.questions) ? block.input.questions : [];
+  const { block, raw: rawQuestions } = extractRaw(aiJson);
+  let questions = rawQuestions;
 
   // Mélange Fisher-Yates : le modèle liste toujours les bonnes réponses en tête,
   // on répartit l'ordre aléatoirement pour ne pas trahir la solution.
@@ -275,6 +305,27 @@ async function handle(req: Request): Promise<Response> {
         q.choices.length >= 3 &&
         q.choices.some((c: any) => c.is_correct)
     );
+
+  // 7b) Diagnostic : si rien ne survit, expliquer pourquoi (stop_reason, brut, motifs de rejet).
+  if (!questions.length) {
+    const reasons: Record<string, number> = {};
+    for (const q of rawQuestions as any[]) {
+      const choices = (q?.choices || []).filter((c: any) => String(c?.text || "").trim());
+      let r = "ok";
+      if (!String(q?.question || "").trim()) r = "enonce_vide";
+      else if (choices.length < 3) r = `moins_de_3_choix(${choices.length})`;
+      else if (!choices.some((c: any) => c?.is_correct)) r = "aucune_bonne_reponse";
+      reasons[r] = (reasons[r] || 0) + 1;
+    }
+    const dbg =
+      `stop=${aiJson?.stop_reason} · block=${!!block} · brut=${rawQuestions.length} · ` +
+      `motifs=${JSON.stringify(reasons)}`;
+    console.error("generate-quiz vide:", dbg, JSON.stringify(aiJson?.content || []).slice(0, 800));
+    return json(
+      { error: "empty_result", message: `Aucune question exploitable. [diag] ${dbg}` },
+      422
+    );
+  }
 
   // 8) Coût + log
   const usage = {
