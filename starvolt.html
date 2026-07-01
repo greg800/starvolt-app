@@ -10457,6 +10457,24 @@ function AdminGenQuizScreen({ onBack }) {
   const [saving, setSaving] = useState(false);
   const [doneMsg, setDoneMsg] = useState(null);
   const [lastRun, setLastRun] = useState(null);
+  const [counts, setCounts] = useState({ subj: {}, group: {} }); // nb de questions par thème / par groupe
+
+  // Recompte le nombre de questions par thème et par groupe (menus déroulants).
+  const loadCounts = async () => {
+    const [{ data: qs }, { data: subs }] = await Promise.all([
+      sb.from('learn_questions').select('subject_id'),
+      sb.from('learn_subjects').select('id,group_id'),
+    ]);
+    const subjToGroup = {};
+    (subs || []).forEach(s => { subjToGroup[s.id] = s.group_id; });
+    const subj = {}, group = {};
+    (qs || []).forEach(q => {
+      subj[q.subject_id] = (subj[q.subject_id] || 0) + 1;
+      const g = subjToGroup[q.subject_id];
+      if (g) group[g] = (group[g] || 0) + 1;
+    });
+    setCounts({ subj, group });
+  };
 
   // Charger les groupes + le prompt par défaut (ai_prompts feature=generate_quiz)
   useEffect(() => {
@@ -10467,6 +10485,7 @@ function AdminGenQuizScreen({ onBack }) {
       const row = (data || []).find(r => r.feature === 'generate_quiz');
       if (row?.system_prompt) { setPrompt(row.system_prompt); setSavedPrompt(row.system_prompt); }
     });
+    loadCounts();
   }, []);
 
   // Enregistre le prompt général (commun à tous les quiz) dans ai_prompts.
@@ -10574,6 +10593,7 @@ function AdminGenQuizScreen({ onBack }) {
       }
       setDoneMsg(`${ok} question(s) ajoutée(s) au thème « ${selSubject?.title || ''} ».`);
       setQuestions(null); setEditK(null);
+      loadCounts(); // rafraîchit les compteurs des menus déroulants
     } catch (e) {
       setError('Échec de l\'enregistrement : ' + String(e.message || e));
     } finally {
@@ -10611,14 +10631,14 @@ function AdminGenQuizScreen({ onBack }) {
         <label className="inp-label" style={{display:'block', marginBottom:6}}>Groupe</label>
         <select value={groupId} onChange={e=>setGroupId(e.target.value)} style={selStyle} disabled={groups===null}>
           <option value="">{groups===null ? 'Chargement…' : '— Choisir un groupe —'}</option>
-          {(groups||[]).map(g => <option key={g.id} value={g.id}>{g.title}</option>)}
+          {(groups||[]).map(g => <option key={g.id} value={g.id}>{g.title} ({counts.group[g.id] || 0})</option>)}
         </select>
 
         {/* 2) Thème */}
         <label className="inp-label" style={{display:'block', margin:'14px 0 6px'}}>Thème</label>
         <select value={subjId} onChange={e=>{ setSubjId(e.target.value); setQuestions(null); setDoneMsg(null); }} style={selStyle} disabled={!groupId}>
           <option value="">{!groupId ? '— Choisis d\'abord un groupe —' : (subjects.length ? '— Choisir un thème —' : 'Aucun thème dans ce groupe')}</option>
-          {subjects.map(s => <option key={s.id} value={s.id}>{s.title}</option>)}
+          {subjects.map(s => <option key={s.id} value={s.id}>{s.title} ({counts.subj[s.id] || 0})</option>)}
         </select>
 
         {selSubject && !((selSubject.content||'').trim()) && (
