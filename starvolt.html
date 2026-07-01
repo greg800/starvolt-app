@@ -10453,7 +10453,7 @@ function AdminGenQuizScreen({ onBack }) {
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState(null);
   const [questions, setQuestions] = useState(null); // [{question, choices:[{text,is_correct}]}]
-  const [sel, setSel] = useState({});               // index -> bool
+  const [editK, setEditK] = useState(null);         // champ en cours d'édition : `q{qi}` ou `c{qi}_{ci}`
   const [saving, setSaving] = useState(false);
   const [doneMsg, setDoneMsg] = useState(null);
   const [lastRun, setLastRun] = useState(null);
@@ -10504,8 +10504,7 @@ function AdminGenQuizScreen({ onBack }) {
       const qs = data?.questions || [];
       if (!qs.length) throw new Error('Aucune question générée. Réessaie.');
       setQuestions(qs);
-      const s = {}; qs.forEach((_, i) => { s[i] = true; });
-      setSel(s);
+      setEditK(null);
       setLastRun(data?.cost ? { usage: data.usage, cost: data.cost } : null);
     } catch (e) {
       setError(String(e.message || e));
@@ -10514,20 +10513,47 @@ function AdminGenQuizScreen({ onBack }) {
     }
   };
 
-  const toggleQ = (i) => setSel(s => ({ ...s, [i]: !s[i] }));
+  // ── Édition de l'aperçu : modifier / ajouter / supprimer questions & réponses ──
   const toggleChoice = (qi, ci) => setQuestions(qs => qs.map((q, j) =>
     j !== qi ? q : { ...q, choices: q.choices.map((c, k) => k === ci ? { ...c, is_correct: !c.is_correct } : c) }
   ));
+  const setQuestionText = (qi, text) => setQuestions(qs => qs.map((q, j) => j === qi ? { ...q, question: text } : q));
+  const setChoiceText = (qi, ci, text) => setQuestions(qs => qs.map((q, j) =>
+    j !== qi ? q : { ...q, choices: q.choices.map((c, k) => k === ci ? { ...c, text } : c) }
+  ));
+  const deleteQuestion = (qi) => { setQuestions(qs => qs.filter((_, j) => j !== qi)); setEditK(null); };
+  const deleteChoice = (qi, ci) => setQuestions(qs => qs.map((q, j) =>
+    j !== qi ? q : { ...q, choices: q.choices.filter((_, k) => k !== ci) }
+  ));
+  const addChoice = (qi) => { setQuestions(qs => qs.map((q, j) =>
+    j !== qi ? q : (q.choices.length >= 6 ? q : { ...q, choices: [...q.choices, { text: '', is_correct: false }] })
+  )); setEditK(`c${qi}_${(questions[qi]?.choices.length) || 0}`); };
+  const addQuestion = () => {
+    const list = questions || [];
+    setQuestions([...list, { question: '', choices: [{ text: '', is_correct: false }, { text: '', is_correct: false }, { text: '', is_correct: false }] }]);
+    setEditK(`q${list.length}`);
+  };
 
-  const nbSel = questions ? questions.filter((_, i) => sel[i]).length : 0;
+  // Validation d'une question de l'aperçu (renvoie null si OK, sinon le motif).
+  const invalidReason = (q) => {
+    if (!String(q.question || '').trim()) return 'énoncé vide';
+    const filled = (q.choices || []).filter(c => String(c.text || '').trim());
+    if (filled.length < 2) return 'au moins 2 réponses avec du texte';
+    if (!filled.some(c => c.is_correct)) return 'au moins 1 bonne réponse';
+    return null;
+  };
+  const nbValid = (questions || []).filter(q => !invalidReason(q)).length;
 
   const save = async () => {
     if (!questions || !subjId) return;
-    const toAdd = questions.map((q, i) => ({ q, i })).filter(x => sel[x.i]).map(x => x.q);
-    if (!toAdd.length) { setDoneMsg('Aucune question sélectionnée.'); return; }
-    // Garde-fou : chaque question gardée doit avoir au moins une bonne réponse
-    const bad = toAdd.find(q => !q.choices.some(c => c.is_correct));
-    if (bad) { setError('Chaque question doit avoir au moins une bonne réponse cochée.'); return; }
+    if (!questions.length) { setDoneMsg('Aucune question à enregistrer.'); return; }
+    // Garde-fou : toutes les questions affichées doivent être valides
+    const bad = questions.map((q, i) => ({ i, r: invalidReason(q) })).filter(x => x.r);
+    if (bad.length) {
+      setError('À corriger avant d\'enregistrer — ' + bad.map(x => `question ${x.i + 1} (${x.r})`).join(', ') + '.');
+      return;
+    }
+    const toAdd = questions;
     setSaving(true); setError(null); setDoneMsg(null);
     try {
       // Ordre de départ : après les questions existantes du thème
@@ -10547,7 +10573,7 @@ function AdminGenQuizScreen({ onBack }) {
         nextOrdre++; ok++;
       }
       setDoneMsg(`${ok} question(s) ajoutée(s) au thème « ${selSubject?.title || ''} ».`);
-      setQuestions(null); setSel({});
+      setQuestions(null); setEditK(null);
     } catch (e) {
       setError('Échec de l\'enregistrement : ' + String(e.message || e));
     } finally {
@@ -10560,6 +10586,12 @@ function AdminGenQuizScreen({ onBack }) {
     border:'1px solid rgba(255,255,255,.14)', borderRadius:10, color:'#fff',
     fontSize:14, padding:'11px 12px', fontFamily:'inherit', cursor:'pointer'
   };
+  const iconBtn = {
+    flexShrink:0, width:28, height:28, borderRadius:7, background:'rgba(255,255,255,.06)',
+    border:'1px solid rgba(255,255,255,.14)', color:'rgba(255,255,255,.75)', fontSize:13,
+    cursor:'pointer', padding:0, display:'inline-flex', alignItems:'center', justifyContent:'center', fontFamily:'inherit'
+  };
+  const iconBtnSm = { ...iconBtn, width:24, height:24, fontSize:12 };
 
   return (
     <>
@@ -10642,47 +10674,92 @@ function AdminGenQuizScreen({ onBack }) {
           <div style={{marginTop:16, background:'rgba(125,217,64,.12)', border:'1px solid rgba(125,217,64,.4)', borderRadius:10, padding:'12px 14px', color:'#7dd940', fontSize:13, lineHeight:1.5}}>✅ {doneMsg}</div>
         )}
 
-        {/* Aperçu des questions générées */}
-        {questions && questions.length > 0 && (
+        {/* Aperçu ÉDITABLE des questions générées : modifier ✎ / ajouter ➕ / supprimer ✕ */}
+        {questions !== null && (
           <>
             <div style={{margin:'22px 0 10px', color:'#fff', fontWeight:700, fontSize:14}}>
-              {questions.length} question(s) proposée(s)
-              <span style={{color:'rgba(255,255,255,.4)', fontWeight:500, fontSize:12.5}}> · décoche celles à écarter, ajuste les bonnes réponses si besoin</span>
+              {questions.length} question(s) · {nbValid} prête(s) à enregistrer
+              <span style={{color:'rgba(255,255,255,.4)', fontWeight:500, fontSize:12.5, display:'block', marginTop:3}}>
+                ✎ modifier le texte · ➕ ajouter · ✕ supprimer · coche ✓ les bonnes réponses
+              </span>
             </div>
             <div style={{display:'flex', flexDirection:'column', gap:12}}>
-              {questions.map((q, qi) => (
+              {questions.map((q, qi) => {
+                const bad = invalidReason(q);
+                return (
                 <div key={qi} style={{
-                  background: sel[qi] ? 'rgba(125,217,64,.06)' : 'rgba(255,255,255,.03)',
-                  border:`1px solid ${sel[qi] ? 'rgba(125,217,64,.32)' : 'rgba(255,255,255,.1)'}`,
+                  background:'rgba(255,255,255,.03)',
+                  border:`1px solid ${bad ? 'rgba(255,138,106,.35)' : 'rgba(255,255,255,.1)'}`,
                   borderRadius:12, padding:'12px 14px'
                 }}>
-                  <div onClick={()=>toggleQ(qi)} style={{display:'flex', alignItems:'flex-start', gap:10, cursor:'pointer', marginBottom:10}}>
-                    <span style={{width:20, height:20, borderRadius:6, flexShrink:0, marginTop:1, display:'inline-flex', alignItems:'center', justifyContent:'center',
-                      background: sel[qi] ? '#7dd940' : 'transparent', border:`1.5px solid ${sel[qi] ? '#7dd940' : 'rgba(255,255,255,.3)'}`,
-                      color:'#0a1f0a', fontSize:13, fontWeight:900}}>{sel[qi] ? '✓' : ''}</span>
-                    <span style={{fontSize:14, fontWeight:700, color:'#fff', lineHeight:1.4}}>{q.question}</span>
+                  {/* En-tête : numéro + énoncé (éditable) + ✎ + ✕ */}
+                  <div style={{display:'flex', alignItems:'flex-start', gap:8, marginBottom:10}}>
+                    <span style={{color:'rgba(255,255,255,.35)', fontSize:12.5, fontWeight:800, marginTop:6, flexShrink:0}}>{qi+1}.</span>
+                    {editK===`q${qi}` ? (
+                      <textarea autoFocus value={q.question} rows={2}
+                        onChange={e=>setQuestionText(qi, e.target.value)}
+                        onBlur={()=>setEditK(null)}
+                        onKeyDown={e=>{ if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); setEditK(null); } }}
+                        style={{flex:1, resize:'vertical', boxSizing:'border-box', background:'rgba(0,0,0,.3)',
+                          border:'1px solid rgba(125,217,64,.5)', borderRadius:8, color:'#fff', fontSize:14, fontWeight:700,
+                          lineHeight:1.4, padding:'8px 10px', fontFamily:'inherit'}}/>
+                    ) : (
+                      <span onClick={()=>setEditK(`q${qi}`)} style={{flex:1, fontSize:14, fontWeight:700, color:'#fff', lineHeight:1.4, cursor:'text', minHeight:20}}>
+                        {q.question || <span style={{color:'rgba(255,255,255,.35)', fontWeight:500, fontStyle:'italic'}}>Énoncé vide — clique pour écrire</span>}
+                      </span>
+                    )}
+                    <button title="Modifier l'énoncé" onClick={()=>setEditK(editK===`q${qi}` ? null : `q${qi}`)} style={iconBtn}>✎</button>
+                    <button title="Supprimer la question" onClick={()=>deleteQuestion(qi)} style={{...iconBtn, color:'#ff8a6a'}}>✕</button>
                   </div>
-                  <div style={{display:'flex', flexDirection:'column', gap:6, paddingLeft:30}}>
+                  {/* Réponses */}
+                  <div style={{display:'flex', flexDirection:'column', gap:6, paddingLeft:22}}>
                     {q.choices.map((c, ci) => (
-                      <div key={ci} onClick={()=>toggleChoice(qi, ci)} style={{display:'flex', alignItems:'center', gap:8, cursor:'pointer'}}>
-                        <span style={{width:18, height:18, borderRadius:5, flexShrink:0, display:'inline-flex', alignItems:'center', justifyContent:'center',
-                          background: c.is_correct ? '#7dd940' : 'transparent', border:`1.5px solid ${c.is_correct ? '#7dd940' : 'rgba(255,255,255,.25)'}`,
-                          color:'#0a1f0a', fontSize:11, fontWeight:900}}>{c.is_correct ? '✓' : ''}</span>
-                        <span style={{fontSize:13, color: c.is_correct ? '#cfeeb4' : 'rgba(255,255,255,.75)', lineHeight:1.4}}>{c.text}</span>
+                      <div key={ci} style={{display:'flex', alignItems:'center', gap:8}}>
+                        <button title={c.is_correct?'Bonne réponse (clique pour retirer)':'Marquer comme bonne réponse'}
+                          onClick={()=>toggleChoice(qi, ci)}
+                          style={{width:20, height:20, borderRadius:5, flexShrink:0, padding:0, cursor:'pointer', display:'inline-flex', alignItems:'center', justifyContent:'center',
+                            background: c.is_correct ? '#7dd940' : 'transparent', border:`1.5px solid ${c.is_correct ? '#7dd940' : 'rgba(255,255,255,.25)'}`,
+                            color:'#0a1f0a', fontSize:12, fontWeight:900}}>{c.is_correct ? '✓' : ''}</button>
+                        {editK===`c${qi}_${ci}` ? (
+                          <input autoFocus value={c.text}
+                            onChange={e=>setChoiceText(qi, ci, e.target.value)}
+                            onBlur={()=>setEditK(null)}
+                            onKeyDown={e=>{ if(e.key==='Enter'){ e.preventDefault(); setEditK(null); } }}
+                            style={{flex:1, boxSizing:'border-box', background:'rgba(0,0,0,.3)', border:'1px solid rgba(125,217,64,.5)',
+                              borderRadius:8, color:'#fff', fontSize:13, padding:'6px 9px', fontFamily:'inherit'}}/>
+                        ) : (
+                          <span onClick={()=>setEditK(`c${qi}_${ci}`)} style={{flex:1, fontSize:13, color: c.is_correct ? '#cfeeb4' : 'rgba(255,255,255,.75)', lineHeight:1.4, cursor:'text', minHeight:18}}>
+                            {c.text || <span style={{color:'rgba(255,255,255,.3)', fontStyle:'italic'}}>Réponse vide — clique pour écrire</span>}
+                          </span>
+                        )}
+                        <button title="Modifier la réponse" onClick={()=>setEditK(editK===`c${qi}_${ci}` ? null : `c${qi}_${ci}`)} style={iconBtnSm}>✎</button>
+                        <button title="Supprimer la réponse" onClick={()=>deleteChoice(qi, ci)} style={{...iconBtnSm, color:'#ff8a6a'}}>✕</button>
                       </div>
                     ))}
+                    {q.choices.length < 6 && (
+                      <button onClick={()=>addChoice(qi)} style={{alignSelf:'flex-start', marginTop:2, background:'transparent',
+                        border:'1px dashed rgba(255,255,255,.25)', borderRadius:8, color:'rgba(255,255,255,.6)', fontSize:12, fontWeight:600,
+                        padding:'5px 10px', cursor:'pointer', fontFamily:'inherit', display:'inline-flex', alignItems:'center', gap:6}}>➕ Ajouter une réponse</button>
+                    )}
                   </div>
+                  {bad && <div style={{marginTop:8, color:'#ff8a6a', fontSize:11.5}}>⚠️ Incomplète : {bad}.</div>}
                 </div>
-              ))}
+              );})}
             </div>
 
-            <button onClick={save} disabled={saving || nbSel===0} style={{
-              width:'100%', marginTop:18, background: nbSel===0 ? 'rgba(255,255,255,.08)' : 'linear-gradient(135deg,#7dd940,#5cb82e)',
-              border:'none', borderRadius:12, color: nbSel===0 ? 'rgba(255,255,255,.4)' : '#0a1f0a',
-              fontSize:15, fontWeight:800, padding:'14px', cursor: saving||nbSel===0 ? 'default':'pointer',
+            <button onClick={addQuestion} style={{width:'100%', marginTop:12, background:'transparent',
+              border:'1.5px dashed rgba(255,179,64,.4)', borderRadius:12, color:'#ffb340', fontSize:13.5, fontWeight:700,
+              padding:'12px', cursor:'pointer', fontFamily:'inherit', display:'flex', alignItems:'center', justifyContent:'center', gap:8}}>
+              ➕ Ajouter une question
+            </button>
+
+            <button onClick={save} disabled={saving || questions.length===0} style={{
+              width:'100%', marginTop:12, background: questions.length===0 ? 'rgba(255,255,255,.08)' : 'linear-gradient(135deg,#7dd940,#5cb82e)',
+              border:'none', borderRadius:12, color: questions.length===0 ? 'rgba(255,255,255,.4)' : '#0a1f0a',
+              fontSize:15, fontWeight:800, padding:'14px', cursor: saving||questions.length===0 ? 'default':'pointer',
               fontFamily:'inherit', display:'flex', alignItems:'center', justifyContent:'center', gap:9
             }}>
-              {saving ? (<><span className="spinner" style={{width:18,height:18}}/> Ajout…</>) : `✓ Ajouter au thème (${nbSel})`}
+              {saving ? (<><span className="spinner" style={{width:18,height:18}}/> Ajout…</>) : `✓ Ajouter au thème (${questions.length})`}
             </button>
           </>
         )}
