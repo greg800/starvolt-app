@@ -244,17 +244,30 @@ async function handle(req: Request): Promise<Response> {
   );
   let questions = Array.isArray(block?.input?.questions) ? block.input.questions : [];
 
+  // Mélange Fisher-Yates : le modèle liste toujours les bonnes réponses en tête,
+  // on répartit l'ordre aléatoirement pour ne pas trahir la solution.
+  const shuffle = <T,>(arr: T[]): T[] => {
+    const a = arr.slice();
+    for (let i = a.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [a[i], a[j]] = [a[j], a[i]];
+    }
+    return a;
+  };
+
   // Garde-fous : 3-5 choix, au moins une bonne réponse
   questions = (questions as any[])
     .map((q) => ({
       question: String(q.question || "").trim(),
-      choices: (q.choices || [])
-        .map((c: any) => ({
-          text: String(c.text || "").trim(),
-          is_correct: !!c.is_correct,
-        }))
-        .filter((c: any) => c.text)
-        .slice(0, 5),
+      choices: shuffle(
+        (q.choices || [])
+          .map((c: any) => ({
+            text: String(c.text || "").trim(),
+            is_correct: !!c.is_correct,
+          }))
+          .filter((c: any) => c.text)
+          .slice(0, 5)
+      ),
     }))
     .filter(
       (q) =>
