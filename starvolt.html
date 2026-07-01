@@ -13381,6 +13381,17 @@ function ComprendreQuizScreen({ user, questions, subject, isRevision, onDone, on
     return () => window.__setFeedbackDetail(null);
   }, [idx, q && q.id]);
 
+  // Ordre des réponses mélangé à chaque affichage de question (Fisher-Yates).
+  // Mémoïsé sur q.id : stable pendant qu'on répond, re-mélangé à chaque lancement du quiz.
+  const choices = useMemo(() => {
+    const arr = (q?.learn_choices || []).slice();
+    for (let i = arr.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [arr[i], arr[j]] = [arr[j], arr[i]];
+    }
+    return arr;
+  }, [q && q.id]);
+
   if (!q) return (
     <>
     <div className="screen fade-in" style={{textAlign:'center',padding:'40px 20px'}}>
@@ -13392,7 +13403,6 @@ function ComprendreQuizScreen({ user, questions, subject, isRevision, onDone, on
     </>
   );
 
-  const choices      = q.learn_choices || [];
   const correctIds   = choices.filter(c => c.is_correct).map(c => c.id);
   const correctCount = Math.max(1, correctIds.length); // nb de réponses attendues
   const multi        = correctCount > 1;
