@@ -6580,11 +6580,12 @@ function getTurpeRate(mois, heure, natParams) {
   const debut = natParams?.turpe_ete_debut ?? 4;
   const fin   = natParams?.turpe_ete_fin   ?? 10;
   const isEte = mois >= debut && mois <= fin;
-  // Plages horaires TURPE (acheminement) : FIXES et réglementaires, INDÉPENDANTES des
-  // heures creuses commerciales du client. Par défaut HP 6h–22h, donc HC 22h–6h.
-  const hcStart = natParams?.turpe_hc_debut ?? 22;
-  const hcEnd   = natParams?.turpe_hc_fin   ?? 6;
-  const isHc = hcStart < hcEnd ? (heure >= hcStart && heure < hcEnd) : (heure >= hcStart || heure < hcEnd);
+  // Plages horaires HP TURPE (acheminement) : FIXES et réglementaires, INDÉPENDANTES des
+  // heures creuses commerciales du client, et distinctes été/hiver. Par défaut HP 6h–22h.
+  const hpStart = isEte ? (natParams?.turpe_hp_ete_debut   ?? 6)  : (natParams?.turpe_hp_hiver_debut ?? 6);
+  const hpEnd   = isEte ? (natParams?.turpe_hp_ete_fin     ?? 22) : (natParams?.turpe_hp_hiver_fin   ?? 22);
+  const isHp = hpStart < hpEnd ? (heure >= hpStart && heure < hpEnd) : (heure >= hpStart || heure < hpEnd);
+  const isHc = !isHp;
   if (isEte  && isHc)  return (natParams?.turpe_hc_ete   || 0) / 100;
   if (isEte  && !isHc) return (natParams?.turpe_hp_ete   || 0) / 100;
   if (!isEte && isHc)  return (natParams?.turpe_hc_hiver || 0) / 100;
@@ -7224,6 +7225,10 @@ function GlobalVarsScreen({ onBack }) {
           seuil_optimisation_stockage:        n.seuil_optimisation_stockage        ?? 10,
           turpe_ete_debut:          n.turpe_ete_debut          ?? 4,
           turpe_ete_fin:            n.turpe_ete_fin            ?? 10,
+          turpe_hp_ete_debut:       n.turpe_hp_ete_debut       ?? 6,
+          turpe_hp_ete_fin:         n.turpe_hp_ete_fin         ?? 22,
+          turpe_hp_hiver_debut:     n.turpe_hp_hiver_debut     ?? 6,
+          turpe_hp_hiver_fin:       n.turpe_hp_hiver_fin       ?? 22,
           turpe_hp_hiver:                     n.turpe_hp_hiver                     ?? '',
           turpe_hc_hiver:           n.turpe_hc_hiver           ?? '',
           turpe_hp_ete:             n.turpe_hp_ete             ?? '',
@@ -7256,6 +7261,10 @@ function GlobalVarsScreen({ onBack }) {
       seuil_optimisation_stockage:                  num(globalForm.seuil_optimisation_stockage),
       turpe_ete_debut:              intr(globalForm.turpe_ete_debut),
       turpe_ete_fin:                intr(globalForm.turpe_ete_fin),
+      turpe_hp_ete_debut:           intr(globalForm.turpe_hp_ete_debut),
+      turpe_hp_ete_fin:             intr(globalForm.turpe_hp_ete_fin),
+      turpe_hp_hiver_debut:         intr(globalForm.turpe_hp_hiver_debut),
+      turpe_hp_hiver_fin:           intr(globalForm.turpe_hp_hiver_fin),
       turpe_hp_hiver:                               num(globalForm.turpe_hp_hiver),
       turpe_hc_hiver:               num(globalForm.turpe_hc_hiver),
       turpe_hp_ete:                 num(globalForm.turpe_hp_ete),
@@ -7399,6 +7408,16 @@ function GlobalVarsScreen({ onBack }) {
             <input className="inp" type="number" step="1" min="1" max="12" placeholder="10" value={String(globalForm.turpe_ete_fin)}
               onChange={e=>setGlobalForm(p=>({...p,turpe_ete_fin:e.target.value}))} style={F}/>
           </div>
+        </div>
+        <div style={{...SL,marginTop:4}}>Horaires heures pleines TURPE (h) — le reste = heures creuses</div>
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr 1fr',gap:6,marginBottom:8}}>
+          {[['HP été début','turpe_hp_ete_debut','6'],['HP été fin','turpe_hp_ete_fin','22'],['HP hiver début','turpe_hp_hiver_debut','6'],['HP hiver fin','turpe_hp_hiver_fin','22']].map(([lbl,key,ph])=>(
+            <div key={key}>
+              <div style={FL}>{lbl}</div>
+              <input className="inp" type="number" step="1" min="0" max="24" placeholder={ph} value={String(globalForm[key])}
+                onChange={e=>setGlobalForm(p=>({...p,[key]:e.target.value}))} style={F}/>
+            </div>
+          ))}
         </div>
         <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:6,marginBottom:10}}>
           {[['HP Hiver','turpe_hp_hiver','ex: 1.47'],['HC Hiver','turpe_hc_hiver','ex: 0.89'],['HP Été (avr–oct)','turpe_hp_ete','ex: 0.86'],['HC Été','turpe_hc_ete','ex: 0.52']].map(([lbl,key,ph])=>(
