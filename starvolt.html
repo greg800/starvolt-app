@@ -4063,9 +4063,10 @@ function buildBilanFacts({ site, tariffs, globalVars, prodProfil, quiz }) {
 }
 
 // ─── EnergyBalanceChart ───────────────────────
-function EnergyBalanceChart({ balance, level, selMonth, selDay, setLevel, setSelMonth, setSelDay, hourlyPrices, isDynamic, tutorial, onTutorialDone }) {
+function EnergyBalanceChart({ balance, level, selMonth, selDay, setLevel, setSelMonth, setSelDay, hourlyPrices, turpeHourly, accise=0, tva=0.2, isDynamic, tutorial, onTutorialDone }) {
   const wrapperRef = useRef(null), canvasRef = useRef(null);
   const barsRef = useRef([]);
+  const [priceBubble, setPriceBubble] = useState(null); // décomposition prix (électron/TURPE/taxes) au clic sur le trait blanc
 
   // Données à afficher selon le niveau de zoom
   const chartData = useMemo(() => {
@@ -4119,6 +4120,19 @@ function EnergyBalanceChart({ balance, level, selMonth, selDay, setLevel, setSel
     let s=0; for(let h=0;h<24;h++) s+=hourlyPrices[profIdx(selMonth,selDay,h)]||0; return s/24;
   }, [isDynamic, level, selMonth, selDay, hourlyPrices]);
 
+  // Part TURPE moyenne par barre (même agrégation que priceData) — pour la bulle de décomposition
+  const turpeData = useMemo(() => {
+    if (!turpeHourly) return null;
+    if (level === 'month') return Array.from({length:12}, (_, mi) => {
+      let s=0, cnt=0;
+      for(let d=1;d<=PROF_DAYS[mi];d++) for(let h=0;h<24;h++){s+=turpeHourly[profIdx(mi+1,d,h)]||0;cnt++;}
+      return cnt>0?s/cnt:0;
+    });
+    if (level === 'day') { const days=PROF_DAYS[selMonth-1]; return Array.from({length:days},(_,di)=>{let s=0;for(let h=0;h<24;h++)s+=turpeHourly[profIdx(selMonth,di+1,h)]||0;return s/24;}); }
+    if (level === 'hour') return Array.from({length:24},(_,h)=>turpeHourly[profIdx(selMonth,selDay,h)]||0);
+    return null;
+  }, [turpeHourly, level, selMonth, selDay]);
+
   const handleDblClick = (e) => {
     if (level === 'hour') return;
     const canvas = canvasRef.current; if (!canvas) return;
@@ -4129,6 +4143,27 @@ function EnergyBalanceChart({ balance, level, selMonth, selDay, setLevel, setSel
     if (idx === -1) return;
     if (level === 'month') { setSelMonth(idx + 1); setLevel('day'); }
     else if (level === 'day') { setSelDay(idx + 1); setLevel('hour'); }
+  };
+
+  // Clic sur le trait blanc (tarif soutirage) → bulle de décomposition électron / TURPE / taxes.
+  // Les 3 parts sont la moyenne sur la période de la barre, en c€/kWh, et somment au total TTC.
+  const handleCanvasClick = (e) => {
+    if (!priceData) { setPriceBubble(null); return; }
+    const canvas = canvasRef.current; if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    const dpr = window.devicePixelRatio || 1;
+    const cx = (e.clientX - rect.left) * (canvas.width / dpr) / rect.width;
+    const cy = (e.clientY - rect.top) * (canvas.height / dpr) / rect.height;
+    const idx = barsRef.current.findIndex(b => cx >= b.x && cx <= b.x + b.w);
+    if (idx === -1) { setPriceBubble(null); return; }
+    const bar = barsRef.current[idx];
+    if (bar.py == null || Math.abs(cy - bar.py) > 14) { setPriceBubble(null); return; }
+    const line  = priceData[idx] || 0;                     // €/kWh TTC (le trait blanc)
+    const turpe = turpeData ? (turpeData[idx] || 0) : 0;   // €/kWh HT (acheminement)
+    const htTotal  = line / (1 + (tva || 0));
+    const electron = htTotal - turpe - (accise || 0);      // énergie + marge (résiduel HT)
+    const taxes    = line - electron - turpe;              // accise + TVA
+    setPriceBubble({ left: bar.x + bar.w / 2, top: bar.py, label: xLabels[idx], electron, turpe, taxes, total: line });
   };
 
   const zoomOut = () => {
@@ -4209,7 +4244,7 @@ function EnergyBalanceChart({ balance, level, selMonth, selDay, setLevel, setSel
     const newBars = [];
     data.forEach((m, i) => {
       const x = ML + i * bTW + bPad;
-      newBars.push({x, w: bW});
+      newBars.push({x, w: bW, py: null});
       const sDirect = Math.max(0, m.s - m.b - m.t);
       // Direct solaire
       if (sDirect > 0) { ctx.fillStyle = '#f0a050'; ctx.fillRect(x, zeroY - sDirect * scalePos, bW, sDirect * scalePos); }
@@ -4280,6 +4315,7 @@ function EnergyBalanceChart({ balance, level, selMonth, selDay, setLevel, setSel
         const p = priceData[i];
         const py = priceY(p);
         if (py < MT - 4 || py > axBottom + 4) return;
+        bar.py = py; // mémorisé pour la détection du clic (bulle de décomposition)
         ctx.strokeStyle = p < 0 ? 'rgba(255,80,80,.95)' : 'white';
         ctx.lineWidth = 2;
         ctx.beginPath(); ctx.moveTo(bar.x, py); ctx.lineTo(bar.x + bar.w, py); ctx.stroke();
@@ -4358,6 +4394,9 @@ function EnergyBalanceChart({ balance, level, selMonth, selDay, setLevel, setSel
       });
     }
   }, [chartData, xLabels, level, priceData, dailyAvgPrice]);
+
+  // La bulle de décomposition est indexée sur les barres du niveau courant : on la ferme au changement de vue.
+  useEffect(() => { setPriceBubble(null); }, [level, selMonth, selDay]);
 
   const ctxLabel = level === 'day' ? MOIS_FULL[selMonth-1] : level === 'hour' ? `${selDay} ${MOIS_FULL[selMonth-1]}` : null;
 
@@ -4495,7 +4534,25 @@ function EnergyBalanceChart({ balance, level, selMonth, selDay, setLevel, setSel
       {level !== 'month' && (
         <button onClick={handleNext} title="Période suivante" style={{...navBtnStyle, top:4, right:4}}>→</button>
       )}
-      <canvas ref={canvasRef} style={{display:'block', cursor: level!=='hour'?'crosshair':'default'}} onDoubleClick={handleDblClick}/>
+      <canvas ref={canvasRef} style={{display:'block', cursor: level!=='hour'?'crosshair':'default'}} onDoubleClick={handleDblClick} onClick={handleCanvasClick}/>
+      {priceBubble && (
+        <div onClick={()=>setPriceBubble(null)} style={{position:'absolute', left:priceBubble.left, top:priceBubble.top-10, zIndex:12, transform:'translate(-50%,-100%)', cursor:'pointer'}}>
+          <div style={{background:'#13212e', border:'1px solid rgba(255,255,255,.18)', borderRadius:10, padding:'8px 10px', boxShadow:'0 8px 24px rgba(0,0,0,.5)', minWidth:158, fontSize:12}}>
+            <div style={{fontSize:10, color:'rgba(255,255,255,.5)', fontWeight:700, marginBottom:5, textTransform:'uppercase', letterSpacing:.5}}>{priceBubble.label} · prix moyen</div>
+            {[['Électron', priceBubble.electron, '#f0a050'], ['TURPE', priceBubble.turpe, '#9fd0ff'], ['Autres taxes', priceBubble.taxes, 'rgba(255,255,255,.75)']].map(([lbl,val,col])=>(
+              <div key={lbl} style={{display:'flex', justifyContent:'space-between', gap:14, lineHeight:1.75}}>
+                <span style={{color:col}}>{lbl}</span>
+                <span style={{color:'white', fontWeight:700, fontVariantNumeric:'tabular-nums'}}>{(val*100).toFixed(2)}<span style={{opacity:.55, fontWeight:400, marginLeft:2}}>c€</span></span>
+              </div>
+            ))}
+            <div style={{display:'flex', justifyContent:'space-between', gap:14, borderTop:'1px solid rgba(255,255,255,.12)', marginTop:5, paddingTop:5}}>
+              <span style={{color:'rgba(255,255,255,.85)', fontWeight:700}}>Total TTC</span>
+              <span style={{color:'white', fontWeight:800, fontVariantNumeric:'tabular-nums'}}>{(priceBubble.total*100).toFixed(2)}<span style={{opacity:.55, fontWeight:400, marginLeft:2}}>c€/kWh</span></span>
+            </div>
+          </div>
+          <div style={{width:0, height:0, margin:'0 auto', borderLeft:'6px solid transparent', borderRight:'6px solid transparent', borderTop:'6px solid #13212e'}}/>
+        </div>
+      )}
       {level !== 'month' && (
         <button onClick={zoomOut} title="Zoom arrière" style={{
           position:'absolute', bottom:28, left:4, zIndex:2,
@@ -5109,6 +5166,15 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
     return arr;
   },[effectiveTariff,site?.heure_debut_hc1,site?.heure_fin_hc1,site?.heure_debut_hc2,site?.heure_fin_hc2,site?.hc_debut1,site?.hc_fin1,site?.hc_debut2,site?.hc_fin2,globalVars,spotMap,prodProfilData,balance,site?.conso_annuelle_kwh]);
 
+  // Part TURPE (acheminement, €/kWh HT) heure par heure — sert à décomposer le prix
+  // affiché (trait blanc) en électron / TURPE / taxes dans la bulle du graphique.
+  const turpeHourly = useMemo(()=>{
+    const arr=new Float32Array(8784);
+    for(let m=1;m<=12;m++) for(let d=1;d<=PROF_DAYS[m-1];d++) for(let h=0;h<24;h++)
+      arr[profIdx(m,d,h)]=getTurpeRate(m,h,globalVars);
+    return arr;
+  },[globalVars]);
+
   // Charger les données spot si tarif dynamique (avec ou sans PV)
   useEffect(()=>{
     const optiChosen=!!localStorage.getItem('starvolt_optimisation_chosen');
@@ -5331,7 +5397,7 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
                   })()}
                   {/* Graphique bilan 12 mois avec zoom */}
                   {balance?(
-                    <EnergyBalanceChart balance={balance} level={chartLevel} selMonth={chartMonth} selDay={chartDay} setLevel={setChartLevel} setSelMonth={setChartMonth} setSelDay={setChartDay} hourlyPrices={hourlyPrices} isDynamic={isDynamicTariff} tutorial={runTutorial} onTutorialDone={handleTutorialDone}/>
+                    <EnergyBalanceChart balance={balance} level={chartLevel} selMonth={chartMonth} selDay={chartDay} setLevel={setChartLevel} setSelMonth={setChartMonth} setSelDay={setChartDay} hourlyPrices={hourlyPrices} turpeHourly={turpeHourly} accise={(globalVars?.accise||0)/100} tva={(globalVars?.tva??20)/100} isDynamic={isDynamicTariff} tutorial={runTutorial} onTutorialDone={handleTutorialDone}/>
                   ):(
                     <div style={{color:'rgba(255,255,255,.35)',fontSize:12,padding:'8px 0'}}>Sélectionnez un tarif dans « Ma conso » pour afficher le graphique.</div>
                   )}
