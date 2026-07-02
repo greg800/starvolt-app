@@ -6575,11 +6575,16 @@ function getPrixMulti(m, d, h, periodes) {
   return 0;
 }
 
-function getTurpeRate(mois, heure, natParams, hcWindows) {
+function getTurpeRate(mois, heure, natParams) {
+  // Saison TURPE : haute saison = hiver, basse saison = été. Par défaut été = avril→octobre.
   const debut = natParams?.turpe_ete_debut ?? 4;
   const fin   = natParams?.turpe_ete_fin   ?? 10;
   const isEte = mois >= debut && mois <= fin;
-  const isHc  = hcWindows?.length > 0 && isHcHour(heure, hcWindows);
+  // Plages horaires TURPE (acheminement) : FIXES et réglementaires, INDÉPENDANTES des
+  // heures creuses commerciales du client. Par défaut HP 6h–22h, donc HC 22h–6h.
+  const hcStart = natParams?.turpe_hc_debut ?? 22;
+  const hcEnd   = natParams?.turpe_hc_fin   ?? 6;
+  const isHc = hcStart < hcEnd ? (heure >= hcStart && heure < hcEnd) : (heure >= hcStart || heure < hcEnd);
   if (isEte  && isHc)  return (natParams?.turpe_hc_ete   || 0) / 100;
   if (isEte  && !isHc) return (natParams?.turpe_hp_ete   || 0) / 100;
   if (!isEte && isHc)  return (natParams?.turpe_hc_hiver || 0) / 100;
