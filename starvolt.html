@@ -5131,22 +5131,32 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
     const arr=new Float32Array(8784);    // total TTC (le trait blanc)
     const elArr=new Float32Array(8784);  // électron HT (énergie + marge fournisseur)
     const aboArr=new Float32Array(8784); // abonnement HT amorti par kWh
+    const trpArr=new Float32Array(8784); // TURPE HT amorti (variable + part fixe amortie en dyn)
     // Taxes non stockées : déduites côté graphe = total − électron − abo − TURPE
-    // (= accise + TVA totale, y compris la TVA de l'abonnement).
+    // (= accise + CTA + TVA totale, y compris la TVA de l'abonnement).
     if(effectiveTariff.tarif_dynamique&&spotMap){
       const marge=(effectiveTariff.marge_fournisseur_ceur_kwh||0)/100;
+      // En dynamique, abo_annuel / turpe_fixe / cta_fixe sont HT (cf. calcul de facture :
+      // billWithStorage = (varCostHT + abo + turpe_fixe + cta_fixe) × (1+TVA)).
       const abo=effectiveTariff.abo_annuel||0;
+      const turpeFixe=effectiveTariff.turpe_fixe||0;
+      const ctaFixe=effectiveTariff.cta_fixe||0;
       const kwhGrid=balance
         ?balance.monthly.reduce((s,m)=>s+m.grid_buy,0)
         :(site?.conso_annuelle_kwh||null);
-      const aboKwh=abo>0&&kwhGrid>0?abo/kwhGrid:0;   // TTC, amorti par kWh soutiré
-      const aboHT=aboKwh/(1+tva);
+      const denom=kwhGrid>0?kwhGrid:0;
+      const aboHT   = denom&&abo>0      ? abo/denom      : 0; // HT amorti par kWh soutiré
+      const turpeFixHT = denom&&turpeFixe>0 ? turpeFixe/denom : 0; // HT amorti → dans TURPE
+      const ctaHT   = denom&&ctaFixe>0  ? ctaFixe/denom  : 0; // HT amorti → dans les taxes (résidu)
       for(let m=1;m<=12;m++) for(let d=1;d<=PROF_DAYS[m-1];d++) for(let h=0;h<24;h++){
         const idx=profIdx(m,d,h);
         const spot=spotMap[`${m}_${d}_${h}`]||0;
-        arr[idx]=(spot+getTurpeRate(m,h,globalVars)+acciseNat+marge)*(1+tva)+aboKwh;
-        elArr[idx]=spot+marge;   // électron HT
-        aboArr[idx]=aboHT;       // abonnement HT amorti
+        const turpeVar=getTurpeRate(m,h,globalVars);
+        // Tout est HT puis ×(1+TVA) ; le CTA amorti n'est dans aucun bucket → il tombe dans les taxes.
+        arr[idx]=(spot+marge+turpeVar+turpeFixHT+ctaHT+aboHT+acciseNat)*(1+tva);
+        elArr[idx]=spot+marge;               // électron HT
+        aboArr[idx]=aboHT;                   // abonnement HT amorti
+        trpArr[idx]=turpeVar+turpeFixHT;     // TURPE HT (variable + fixe amorti)
       }
     } else if(effectiveTariff.type_tarif==='multi'&&effectiveTariff.periodes?.length>0){
       const periodes=effectiveTariff.periodes;
@@ -5162,6 +5172,7 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
         arr[idx]=comTTC+aboKwh;
         elArr[idx]=comTTC/(1+tva)-getTurpeRate(m,h,globalVars)-acciseNat; // électron HT résiduel
         aboArr[idx]=aboHT;
+        trpArr[idx]=getTurpeRate(m,h,globalVars);
       }
     } else {
       const ph=parseFloat(effectiveTariff.prix_hp)||0;
@@ -5179,31 +5190,24 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
         arr[idx]=comTTC+aboKwh;
         elArr[idx]=comTTC/(1+tva)-getTurpeRate(m,h,globalVars)-acciseNat; // électron HT résiduel
         aboArr[idx]=aboHT;
+        trpArr[idx]=getTurpeRate(m,h,globalVars);
       }
     }
     // Si ACC au panier : remplacer le prix des heures de prod ACC par (prix_vente_ACC + TURPE)×(1+TVA).
     // L'ACC est exonérée d'accise ET l'abonnement disparaît sur ces heures : on force
-    // électron=prix_vente_ACC, abo=0 → les taxes déduites ne contiennent plus que la TVA (accise=0).
+    // électron=prix_vente_ACC, abo=0, TURPE=variable seul → taxes déduites = TVA seule.
     if(localStorage.getItem('starvolt_acc_chosen')==='true'){
       const _accPHT=parseFloat(localStorage.getItem('starvolt_acc_price_ht')||'0.09');
       for(let m=1;m<=12;m++) for(let d=1;d<=PROF_DAYS[m-1];d++) for(let h=0;h<24;h++){
         const idx=profIdx(m,d,h);
         if(prodProfilData?!(prodProfilData[idx]>0):(h<9||h>=18)) continue;
-        const accTTC=(_accPHT+getTurpeRate(m,h,globalVars))*(1+tva);
-        if(accTTC<arr[idx]){ arr[idx]=accTTC; elArr[idx]=_accPHT; aboArr[idx]=0; }
+        const turpeVar=getTurpeRate(m,h,globalVars);
+        const accTTC=(_accPHT+turpeVar)*(1+tva);
+        if(accTTC<arr[idx]){ arr[idx]=accTTC; elArr[idx]=_accPHT; aboArr[idx]=0; trpArr[idx]=turpeVar; }
       }
     }
-    return {total:arr, electron:elArr, abo:aboArr};
+    return {total:arr, electron:elArr, abo:aboArr, turpe:trpArr};
   },[effectiveTariff,site?.heure_debut_hc1,site?.heure_fin_hc1,site?.heure_debut_hc2,site?.heure_fin_hc2,site?.hc_debut1,site?.hc_fin1,site?.hc_debut2,site?.hc_fin2,globalVars,spotMap,prodProfilData,balance,site?.conso_annuelle_kwh]);
-
-  // Part TURPE (acheminement, €/kWh HT) heure par heure — sert à décomposer le prix
-  // affiché (trait blanc) en électron / TURPE / taxes dans la bulle du graphique.
-  const turpeHourly = useMemo(()=>{
-    const arr=new Float32Array(8784);
-    for(let m=1;m<=12;m++) for(let d=1;d<=PROF_DAYS[m-1];d++) for(let h=0;h<24;h++)
-      arr[profIdx(m,d,h)]=getTurpeRate(m,h,globalVars);
-    return arr;
-  },[globalVars]);
 
   // Charger les données spot si tarif dynamique (avec ou sans PV)
   useEffect(()=>{
@@ -5427,7 +5431,7 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
                   })()}
                   {/* Graphique bilan 12 mois avec zoom */}
                   {balance?(
-                    <EnergyBalanceChart balance={balance} level={chartLevel} selMonth={chartMonth} selDay={chartDay} setLevel={setChartLevel} setSelMonth={setChartMonth} setSelDay={setChartDay} hourlyPrices={hourlyPrices?.total} electronHourly={hourlyPrices?.electron} aboHourly={hourlyPrices?.abo} turpeHourly={turpeHourly} isDynamic={isDynamicTariff} tutorial={runTutorial} onTutorialDone={handleTutorialDone}/>
+                    <EnergyBalanceChart balance={balance} level={chartLevel} selMonth={chartMonth} selDay={chartDay} setLevel={setChartLevel} setSelMonth={setChartMonth} setSelDay={setChartDay} hourlyPrices={hourlyPrices?.total} electronHourly={hourlyPrices?.electron} aboHourly={hourlyPrices?.abo} turpeHourly={hourlyPrices?.turpe} isDynamic={isDynamicTariff} tutorial={runTutorial} onTutorialDone={handleTutorialDone}/>
                   ):(
                     <div style={{color:'rgba(255,255,255,.35)',fontSize:12,padding:'8px 0'}}>Sélectionnez un tarif dans « Ma conso » pour afficher le graphique.</div>
                   )}
