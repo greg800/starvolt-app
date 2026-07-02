@@ -3309,7 +3309,7 @@ function computeStorageOptimization(consoProfile, tariff, baseTariff, site, batK
           varCost += kWh * p;
         }
     if (t.tarif_dynamique && spotMap)
-      return Math.round((varCost + (t.abo_annuel||0) + (t.turpe_fixe||0) + (t.cta_fixe||0)) * (1+tva));
+      return Math.round((varCost + (t.turpe_fixe||0) + (t.cta_fixe||0)) * (1+tva) + (t.abo_annuel||0) * (1 + (globalVars?.tva_abo??5.5)/100));
     return Math.round(varCost + (t.abo_annuel||0));
   };
 
@@ -3429,7 +3429,9 @@ function computeStorageOptimization(consoProfile, tariff, baseTariff, site, batK
     const marge  = (tariff.marge_fournisseur_ceur_kwh || 0) / 100;
     const accise = (globalVars?.accise  || 0) / 100;
     const tva    = (globalVars?.tva     ?? 20) / 100;
-    const fixedHT = (tariff.abo_annuel || 0) + (tariff.turpe_fixe || 0) + (tariff.cta_fixe || 0);
+    const tvaAbo = (globalVars?.tva_abo ?? 5.5) / 100;
+    // TVA : abonnement à 5,5 %, part fixe acheminement (turpe_fixe+cta_fixe) à 20 %.
+    const fixedHT = (tariff.turpe_fixe || 0) + (tariff.cta_fixe || 0);
     const hcWin   = [
       { s: toHcH(site?.hc_debut1 ?? site?.heure_debut_hc1 ?? globalVars?.hc_debut1), e: toHcH(site?.hc_fin1 ?? site?.heure_fin_hc1 ?? globalVars?.hc_fin1) },
       { s: toHcH(site?.hc_debut2 ?? site?.heure_debut_hc2 ?? globalVars?.hc_debut2), e: toHcH(site?.hc_fin2 ?? site?.heure_fin_hc2 ?? globalVars?.hc_fin2) },
@@ -3449,7 +3451,7 @@ function computeStorageOptimization(consoProfile, tariff, baseTariff, site, batK
 
     // Mode dynamique : utilise le seuil global pour filtrer les heures marginales
     const {varCostHT_with} = runLoop(getPrice, getDailyAvg, seuil);
-    billWithStorage = Math.round((varCostHT_with + fixedHT) * (1 + tva));
+    billWithStorage = Math.round((varCostHT_with + fixedHT) * (1 + tva) + (tariff.abo_annuel||0) * (1 + tvaAbo));
 
   // ── MODE MULTI-PÉRIODES : prix variables selon plages dates/heures ───────────
   } else if (isMulti) {
@@ -3569,7 +3571,7 @@ function computeCombinedOptimization(consoProfile, prodNorm, pvKwc, batKwh, ther
         for (let h = 0; h < 24; h++)
           varCost += ((consoProfile[profIdx(m,d,h)] || 0) / 1000) * priceFn(m, d, h);
     if (t.tarif_dynamique && spotMap) {
-      return Math.round((varCost + (t.abo_annuel||0) + (t.turpe_fixe||0) + (t.cta_fixe||0)) * (1 + tva));
+      return Math.round((varCost + (t.turpe_fixe||0) + (t.cta_fixe||0)) * (1 + tva) + (t.abo_annuel||0) * (1 + (globalVars?.tva_abo??5.5)/100));
     }
     return Math.round(varCost + (t.abo_annuel || 0));
   };
@@ -3729,8 +3731,9 @@ function computeCombinedOptimization(consoProfile, prodNorm, pvKwc, batKwh, ther
   const injCredit = annInjKwh * prixRachat;
   let billWithStorage;
   if (isDynamic) {
-    const fixedHT = (tariff.abo_annuel||0) + (tariff.turpe_fixe||0) + (tariff.cta_fixe||0);
-    billWithStorage = Math.round(Math.max(0, (varCostHT_with + fixedHT) * (1 + tva) - injCredit));
+    const tvaAbo = (globalVars?.tva_abo ?? 5.5) / 100;
+    const fixedHT = (tariff.turpe_fixe||0) + (tariff.cta_fixe||0);
+    billWithStorage = Math.round(Math.max(0, (varCostHT_with + fixedHT) * (1 + tva) + (tariff.abo_annuel||0) * (1 + tvaAbo) - injCredit));
   } else {
     billWithStorage = Math.round(Math.max(0, varCostHT_with + (tariff.abo_annuel||0) - injCredit));
   }
@@ -5127,6 +5130,7 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
       {s:parseHcHour(site?.hc_debut2??site?.heure_debut_hc2??globalVars?.hc_debut2), e:parseHcHour(site?.hc_fin2??site?.heure_fin_hc2??globalVars?.hc_fin2)},
     ].filter(w=>w.s!==null&&w.e!==null);
     const tva=(globalVars?.tva??20)/100;
+    const tvaAbo=(globalVars?.tva_abo??5.5)/100;   // TVA réduite sur l'abonnement
     const acciseNat=(globalVars?.accise||0)/100;
     const arr=new Float32Array(8784);    // total TTC (le trait blanc)
     const elArr=new Float32Array(8784);  // électron HT (énergie + marge fournisseur)
@@ -5136,8 +5140,8 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
     // (= accise + CTA + TVA totale, y compris la TVA de l'abonnement).
     if(effectiveTariff.tarif_dynamique&&spotMap){
       const marge=(effectiveTariff.marge_fournisseur_ceur_kwh||0)/100;
-      // En dynamique, abo_annuel / turpe_fixe / cta_fixe sont HT (cf. calcul de facture :
-      // billWithStorage = (varCostHT + abo + turpe_fixe + cta_fixe) × (1+TVA)).
+      // En dynamique, abo_annuel / turpe_fixe / cta_fixe sont HT (cf. calcul de facture).
+      // TVA : abonnement à 5,5 %, tout le reste (énergie, TURPE, CTA, accise) à 20 %.
       const abo=effectiveTariff.abo_annuel||0;
       const turpeFixe=effectiveTariff.turpe_fixe||0;
       const ctaFixe=effectiveTariff.cta_fixe||0;
@@ -5152,8 +5156,9 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
         const idx=profIdx(m,d,h);
         const spot=spotMap[`${m}_${d}_${h}`]||0;
         const turpeVar=getTurpeRate(m,h,globalVars);
-        // Tout est HT puis ×(1+TVA) ; le CTA amorti n'est dans aucun bucket → il tombe dans les taxes.
-        arr[idx]=(spot+marge+turpeVar+turpeFixHT+ctaHT+aboHT+acciseNat)*(1+tva);
+        // Énergie+TURPE+CTA+accise ×(1+TVA 20%) ; abonnement ×(1+TVA abo 5,5%).
+        // Le CTA amorti n'est dans aucun bucket → il tombe dans les taxes.
+        arr[idx]=(spot+marge+turpeVar+turpeFixHT+ctaHT+acciseNat)*(1+tva)+aboHT*(1+tvaAbo);
         elArr[idx]=spot+marge;               // électron HT
         aboArr[idx]=aboHT;                   // abonnement HT amorti
         trpArr[idx]=turpeVar+turpeFixHT;     // TURPE HT (variable + fixe amorti)
@@ -5164,8 +5169,8 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
       const kwhGrid=balance
         ?balance.monthly.reduce((s,m)=>s+m.grid_buy,0)
         :(site?.conso_annuelle_kwh||null);
-      const aboKwh=abo>0&&kwhGrid>0?abo/kwhGrid:0;   // TTC
-      const aboHT=aboKwh/(1+tva);
+      const aboKwh=abo>0&&kwhGrid>0?abo/kwhGrid:0;   // TTC (abonnement à TVA 5,5%)
+      const aboHT=aboKwh/(1+tvaAbo);
       for(let m=1;m<=12;m++) for(let d=1;d<=PROF_DAYS[m-1];d++) for(let h=0;h<24;h++){
         const idx=profIdx(m,d,h);
         const comTTC=getPrixMulti(m,d,h,periodes); // prix commercial TTC
@@ -5182,8 +5187,8 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
       const kwhGrid=balance
         ?balance.monthly.reduce((s,m)=>s+m.grid_buy,0)
         :(site?.conso_annuelle_kwh||null);
-      const aboKwh=abo>0&&kwhGrid>0?abo/kwhGrid:0;   // TTC
-      const aboHT=aboKwh/(1+tva);
+      const aboKwh=abo>0&&kwhGrid>0?abo/kwhGrid:0;   // TTC (abonnement à TVA 5,5%)
+      const aboHT=aboKwh/(1+tvaAbo);
       for(let m=1;m<=12;m++) for(let d=1;d<=PROF_DAYS[m-1];d++) for(let h=0;h<24;h++){
         const idx=profIdx(m,d,h);
         const comTTC=(hcWin.length>0&&isHcHour(h,hcWin)?pc:ph); // prix commercial TTC
@@ -6729,14 +6734,16 @@ function calcDynamicCost(tariff, consoProfile, spotMap, natParams, userProfile) 
       }
   }
   const kwh_total_dyn = kwh_ete + kwh_hiver;
-  const fixedHT = (tariff.abo_annuel || 0) + (tariff.turpe_fixe || 0) + (tariff.cta_fixe || 0);
-  const total   = (varCost + fixedHT) * (1 + tva);
+  const tvaAbo = (natParams?.tva_abo ?? 5.5) / 100;
+  // TVA : abonnement à 5,5 %, part fixe acheminement (turpe_fixe+cta_fixe) à 20 %, énergie à 20 %.
+  const fixedTTC = ((tariff.turpe_fixe || 0) + (tariff.cta_fixe || 0)) * (1 + tva) + (tariff.abo_annuel || 0) * (1 + tvaAbo);
+  const total   = varCost * (1 + tva) + fixedTTC;
   const avgCeur = (vc, kwh) => {
     if (!kwh || !kwh_total_dyn) return null;
-    return ((vc + fixedHT * kwh / kwh_total_dyn) * (1 + tva) / kwh) * 100;
+    return ((vc * (1 + tva) + fixedTTC * kwh / kwh_total_dyn) / kwh) * 100;
   };
   return {
-    total, varCost: varCost * (1 + tva), fixedCost: fixedHT * (1 + tva), abo: fixedHT * (1 + tva),
+    total, varCost: varCost * (1 + tva), fixedCost: fixedTTC, abo: fixedTTC,
     is_base: false, is_dynamic: true,
     avg_ete_ceur:   avgCeur(varCost_ete,   kwh_ete),
     avg_hiver_ceur: avgCeur(varCost_hiver, kwh_hiver),
@@ -7323,22 +7330,6 @@ function GlobalVarsScreen({ onBack }) {
           ratio_puissance_stockage_thermique: n.ratio_puissance_stockage_thermique ?? 50,
           pertes_thermique:                   n.pertes_thermique                   ?? 0,
           seuil_optimisation_stockage:        n.seuil_optimisation_stockage        ?? 10,
-          turpe_ete_debut:          n.turpe_ete_debut          ?? 4,
-          turpe_ete_fin:            n.turpe_ete_fin            ?? 10,
-          turpe_hp_ete_debut:       n.turpe_hp_ete_debut       ?? 6,
-          turpe_hp_ete_fin:         n.turpe_hp_ete_fin         ?? 22,
-          turpe_hp_hiver_debut:     n.turpe_hp_hiver_debut     ?? 6,
-          turpe_hp_hiver_fin:       n.turpe_hp_hiver_fin       ?? 22,
-          turpe_hp_hiver:                     n.turpe_hp_hiver                     ?? '',
-          turpe_hc_hiver:           n.turpe_hc_hiver           ?? '',
-          turpe_hp_ete:             n.turpe_hp_ete             ?? '',
-          turpe_hc_ete:             n.turpe_hc_ete             ?? '',
-          accise:                   n.accise                   ?? '',
-          tva:                      n.tva                      ?? 20,
-          hc_debut1:                n.hc_debut1                ?? '',
-          hc_fin1:                  n.hc_fin1                  ?? '',
-          hc_debut2:                n.hc_debut2                ?? '',
-          hc_fin2:                  n.hc_fin2                  ?? '',
           taux_inflation_electricite:   n.taux_inflation_electricite   ?? 4,
           taux_inflation_electricite_2: n.taux_inflation_electricite_2 ?? 0,
           prix_rachat_injection:        n.prix_rachat_injection        ?? 0.04,
@@ -7359,22 +7350,6 @@ function GlobalVarsScreen({ onBack }) {
       ratio_puissance_stockage_thermique:           num(globalForm.ratio_puissance_stockage_thermique),
       pertes_thermique:                             num(globalForm.pertes_thermique),
       seuil_optimisation_stockage:                  num(globalForm.seuil_optimisation_stockage),
-      turpe_ete_debut:              intr(globalForm.turpe_ete_debut),
-      turpe_ete_fin:                intr(globalForm.turpe_ete_fin),
-      turpe_hp_ete_debut:           intr(globalForm.turpe_hp_ete_debut),
-      turpe_hp_ete_fin:             intr(globalForm.turpe_hp_ete_fin),
-      turpe_hp_hiver_debut:         intr(globalForm.turpe_hp_hiver_debut),
-      turpe_hp_hiver_fin:           intr(globalForm.turpe_hp_hiver_fin),
-      turpe_hp_hiver:                               num(globalForm.turpe_hp_hiver),
-      turpe_hc_hiver:               num(globalForm.turpe_hc_hiver),
-      turpe_hp_ete:                 num(globalForm.turpe_hp_ete),
-      turpe_hc_ete:                 num(globalForm.turpe_hc_ete),
-      accise:                       num(globalForm.accise),
-      tva:                          num(globalForm.tva),
-      hc_debut1:                    intr(globalForm.hc_debut1),
-      hc_fin1:                      intr(globalForm.hc_fin1),
-      hc_debut2:                    intr(globalForm.hc_debut2),
-      hc_fin2:                      intr(globalForm.hc_fin2),
       taux_inflation_electricite:   num(globalForm.taux_inflation_electricite),
       taux_inflation_electricite_2: num(globalForm.taux_inflation_electricite_2),
       prix_rachat_injection:        num(globalForm.prix_rachat_injection),
@@ -7495,54 +7470,6 @@ function GlobalVarsScreen({ onBack }) {
           </div>
         </div>
 
-        {/* ── TURPE ── */}
-        <div style={{...SL,marginTop:10}}>TURPE variable (c€/kWh) — 4 combinaisons</div>
-        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:6,marginBottom:8}}>
-          <div>
-            <div style={FL}>Début été (mois, ex: 4 = avril)</div>
-            <input className="inp" type="number" step="1" min="1" max="12" placeholder="4" value={String(globalForm.turpe_ete_debut)}
-              onChange={e=>setGlobalForm(p=>({...p,turpe_ete_debut:e.target.value}))} style={F}/>
-          </div>
-          <div>
-            <div style={FL}>Fin été (mois, ex: 10 = octobre)</div>
-            <input className="inp" type="number" step="1" min="1" max="12" placeholder="10" value={String(globalForm.turpe_ete_fin)}
-              onChange={e=>setGlobalForm(p=>({...p,turpe_ete_fin:e.target.value}))} style={F}/>
-          </div>
-        </div>
-        <div style={{...SL,marginTop:4}}>Horaires heures pleines TURPE (h) — le reste = heures creuses</div>
-        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr 1fr',gap:6,marginBottom:8}}>
-          {[['HP été début','turpe_hp_ete_debut','6'],['HP été fin','turpe_hp_ete_fin','22'],['HP hiver début','turpe_hp_hiver_debut','6'],['HP hiver fin','turpe_hp_hiver_fin','22']].map(([lbl,key,ph])=>(
-            <div key={key}>
-              <div style={FL}>{lbl}</div>
-              <input className="inp" type="number" step="1" min="0" max="24" placeholder={ph} value={String(globalForm[key])}
-                onChange={e=>setGlobalForm(p=>({...p,[key]:e.target.value}))} style={F}/>
-            </div>
-          ))}
-        </div>
-        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:6,marginBottom:10}}>
-          {[['HP Hiver','turpe_hp_hiver','ex: 1.47'],['HC Hiver','turpe_hc_hiver','ex: 0.89'],['HP Été (avr–oct)','turpe_hp_ete','ex: 0.86'],['HC Été','turpe_hc_ete','ex: 0.52']].map(([lbl,key,ph])=>(
-            <div key={key}>
-              <div style={FL}>{lbl}</div>
-              <input className="inp" type="number" step="0.01" placeholder={ph} value={String(globalForm[key])}
-                onChange={e=>setGlobalForm(p=>({...p,[key]:e.target.value}))} style={F}/>
-            </div>
-          ))}
-        </div>
-
-        {/* ── Accise + TVA ── */}
-        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:6,marginBottom:10}}>
-          <div>
-            <div style={FL}>Accise (c€/kWh)</div>
-            <input className="inp" type="number" step="0.001" placeholder="ex: 2.139" value={String(globalForm.accise)}
-              onChange={e=>setGlobalForm(p=>({...p,accise:e.target.value}))} style={F}/>
-          </div>
-          <div>
-            <div style={FL}>TVA (%)</div>
-            <input className="inp" type="number" step="0.1" placeholder="20" value={String(globalForm.tva)}
-              onChange={e=>setGlobalForm(p=>({...p,tva:e.target.value}))} style={F}/>
-          </div>
-        </div>
-
         {/* ── Inflation ── */}
         <div style={SL}>Hypothèses hausse prix électricité (%/an)</div>
         <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:6,marginBottom:10}}>
@@ -7558,21 +7485,171 @@ function GlobalVarsScreen({ onBack }) {
           </div>
         </div>
 
+        {saveGlobalMsg && <div style={{fontSize:11,fontWeight:700,color:saveGlobalMsg.startsWith('✓')?'var(--green)':'#ff9090',marginBottom:6}}>{saveGlobalMsg}</div>}
+        <button onClick={saveGlobalParams} disabled={savingGlobal} style={{width:'100%',background:'rgba(125,217,64,.2)',border:'1px solid rgba(125,217,64,.4)',color:'#7dd940',fontFamily:'var(--font)',fontSize:12,fontWeight:700,borderRadius:8,padding:'8px',cursor:'pointer'}}>
+          {savingGlobal ? 'Enregistrement…' : '✓ Enregistrer'}
+        </button>
+      </div>
+    </div>
+    <StickyFooter onBack={onBack}/>
+    </>
+  );
+}
+
+// ─── FactureVarsScreen ────────────────────────
+// Variables de calcul de la facture d'électricité : TURPE, accise, TVA, plages HC.
+function FactureVarsScreen({ onBack }) {
+  const [loading, setLoading] = useState(true);
+  const [form,    setForm]    = useState(null);
+  const [saving,  setSaving]  = useState(false);
+  const [msg,     setMsg]     = useState(null);
+
+  useEffect(() => {
+    sb.from('parametres_nationaux').select('*').eq('id',1).maybeSingle()
+      .then(({data}) => {
+        const n = data || {};
+        setForm({
+          turpe_ete_debut:      n.turpe_ete_debut      ?? 4,
+          turpe_ete_fin:        n.turpe_ete_fin        ?? 10,
+          turpe_hp_ete_debut:   n.turpe_hp_ete_debut   ?? 6,
+          turpe_hp_ete_fin:     n.turpe_hp_ete_fin     ?? 22,
+          turpe_hp_hiver_debut: n.turpe_hp_hiver_debut ?? 6,
+          turpe_hp_hiver_fin:   n.turpe_hp_hiver_fin   ?? 22,
+          turpe_hp_hiver:       n.turpe_hp_hiver       ?? '',
+          turpe_hc_hiver:       n.turpe_hc_hiver       ?? '',
+          turpe_hp_ete:         n.turpe_hp_ete         ?? '',
+          turpe_hc_ete:         n.turpe_hc_ete         ?? '',
+          accise:               n.accise               ?? '',
+          tva:                  n.tva                  ?? 20,
+          tva_abo:              n.tva_abo              ?? 5.5,
+          hc_debut1:            n.hc_debut1            ?? '',
+          hc_fin1:              n.hc_fin1              ?? '',
+          hc_debut2:            n.hc_debut2            ?? '',
+          hc_fin2:              n.hc_fin2              ?? '',
+        });
+        setLoading(false);
+      });
+  }, []);
+
+  const save = async () => {
+    setSaving(true); setMsg(null);
+    const num  = v => v === '' ? null : parseFloat(v);
+    const intr = v => v === '' ? null : parseInt(v);
+    const { error } = await sb.from('parametres_nationaux').update({
+      turpe_ete_debut:      intr(form.turpe_ete_debut),
+      turpe_ete_fin:        intr(form.turpe_ete_fin),
+      turpe_hp_ete_debut:   intr(form.turpe_hp_ete_debut),
+      turpe_hp_ete_fin:     intr(form.turpe_hp_ete_fin),
+      turpe_hp_hiver_debut: intr(form.turpe_hp_hiver_debut),
+      turpe_hp_hiver_fin:   intr(form.turpe_hp_hiver_fin),
+      turpe_hp_hiver:       num(form.turpe_hp_hiver),
+      turpe_hc_hiver:       num(form.turpe_hc_hiver),
+      turpe_hp_ete:         num(form.turpe_hp_ete),
+      turpe_hc_ete:         num(form.turpe_hc_ete),
+      accise:               num(form.accise),
+      tva:                  num(form.tva),
+      tva_abo:              num(form.tva_abo),
+      hc_debut1:            intr(form.hc_debut1),
+      hc_fin1:              intr(form.hc_fin1),
+      hc_debut2:            intr(form.hc_debut2),
+      hc_fin2:              intr(form.hc_fin2),
+      updated_at: new Date().toISOString(),
+    }).eq('id', 1);
+    setSaving(false);
+    if (error) { setMsg('Erreur : ' + error.message); return; }
+    setMsg('✓ Variables enregistrées');
+  };
+
+  if (loading || !form) return (
+    <><div className="screen fade-in"><div style={{textAlign:'center',padding:40}}><div className="spinner" style={{margin:'0 auto'}}/></div></div><StickyFooter onBack={onBack}/></>
+  );
+
+  const F  = {fontSize:13,padding:'6px 8px'};
+  const SL = {fontSize:11,color:'rgba(255,217,64,.75)',fontWeight:700,marginBottom:6};
+  const FL = {fontSize:10,color:'rgba(255,255,255,.45)',fontWeight:700,marginBottom:2};
+
+  return (
+    <>
+    <div className="screen fade-in">
+      <div className="auth-header">
+        <div className="welcome-tag" style={{color:'#ffb340'}}>Administration</div>
+        <h1 className="welcome-title">Variables<br/><span className="accent">facture élec</span></h1>
+      </div>
+
+      <div className="card" style={{padding:'12px 14px',marginBottom:8}}>
+        <div style={{fontSize:11,color:'rgba(255,255,255,.5)',marginBottom:12,lineHeight:1.4}}>
+          Variables servant à décomposer et recalculer la facture d'électricité (acheminement, taxes).
+        </div>
+
+        {/* ── TURPE ── */}
+        <div style={SL}>TURPE variable (c€/kWh) — 4 combinaisons</div>
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:6,marginBottom:8}}>
+          <div>
+            <div style={FL}>Début été (mois, ex: 4 = avril)</div>
+            <input className="inp" type="number" step="1" min="1" max="12" placeholder="4" value={String(form.turpe_ete_debut)}
+              onChange={e=>setForm(p=>({...p,turpe_ete_debut:e.target.value}))} style={F}/>
+          </div>
+          <div>
+            <div style={FL}>Fin été (mois, ex: 10 = octobre)</div>
+            <input className="inp" type="number" step="1" min="1" max="12" placeholder="10" value={String(form.turpe_ete_fin)}
+              onChange={e=>setForm(p=>({...p,turpe_ete_fin:e.target.value}))} style={F}/>
+          </div>
+        </div>
+        <div style={{...SL,marginTop:4}}>Horaires heures pleines TURPE (h) — le reste = heures creuses</div>
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr 1fr',gap:6,marginBottom:8}}>
+          {[['HP été début','turpe_hp_ete_debut','6'],['HP été fin','turpe_hp_ete_fin','22'],['HP hiver début','turpe_hp_hiver_debut','6'],['HP hiver fin','turpe_hp_hiver_fin','22']].map(([lbl,key,ph])=>(
+            <div key={key}>
+              <div style={FL}>{lbl}</div>
+              <input className="inp" type="number" step="1" min="0" max="24" placeholder={ph} value={String(form[key])}
+                onChange={e=>setForm(p=>({...p,[key]:e.target.value}))} style={F}/>
+            </div>
+          ))}
+        </div>
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:6,marginBottom:10}}>
+          {[['HP Hiver','turpe_hp_hiver','ex: 1.47'],['HC Hiver','turpe_hc_hiver','ex: 0.89'],['HP Été (avr–oct)','turpe_hp_ete','ex: 0.86'],['HC Été','turpe_hc_ete','ex: 0.52']].map(([lbl,key,ph])=>(
+            <div key={key}>
+              <div style={FL}>{lbl}</div>
+              <input className="inp" type="number" step="0.01" placeholder={ph} value={String(form[key])}
+                onChange={e=>setForm(p=>({...p,[key]:e.target.value}))} style={F}/>
+            </div>
+          ))}
+        </div>
+
+        {/* ── Accise + TVA ── */}
+        <div style={SL}>Accise & TVA</div>
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:6,marginBottom:10}}>
+          <div>
+            <div style={FL}>Accise (c€/kWh)</div>
+            <input className="inp" type="number" step="0.001" placeholder="ex: 3.085" value={String(form.accise)}
+              onChange={e=>setForm(p=>({...p,accise:e.target.value}))} style={F}/>
+          </div>
+          <div>
+            <div style={FL}>TVA énergie (%)</div>
+            <input className="inp" type="number" step="0.1" placeholder="20" value={String(form.tva)}
+              onChange={e=>setForm(p=>({...p,tva:e.target.value}))} style={F}/>
+          </div>
+          <div>
+            <div style={FL}>TVA abonnement (%)</div>
+            <input className="inp" type="number" step="0.1" placeholder="5.5" value={String(form.tva_abo)}
+              onChange={e=>setForm(p=>({...p,tva_abo:e.target.value}))} style={F}/>
+          </div>
+        </div>
+
         {/* ── Plages HC ── */}
         <div style={SL}>Plages HC (pour heatmap TTC)</div>
         <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr 1fr',gap:6,marginBottom:10}}>
           {[['HC1 début h','hc_debut1','22'],['HC1 fin h','hc_fin1','6'],['HC2 début h','hc_debut2',''],['HC2 fin h','hc_fin2','']].map(([lbl,key,ph])=>(
             <div key={key}>
               <div style={FL}>{lbl}</div>
-              <input className="inp" type="number" min="0" max="23" placeholder={ph} value={String(globalForm[key])}
-                onChange={e=>setGlobalForm(p=>({...p,[key]:e.target.value}))} style={F}/>
+              <input className="inp" type="number" min="0" max="23" placeholder={ph} value={String(form[key])}
+                onChange={e=>setForm(p=>({...p,[key]:e.target.value}))} style={F}/>
             </div>
           ))}
         </div>
 
-        {saveGlobalMsg && <div style={{fontSize:11,fontWeight:700,color:saveGlobalMsg.startsWith('✓')?'var(--green)':'#ff9090',marginBottom:6}}>{saveGlobalMsg}</div>}
-        <button onClick={saveGlobalParams} disabled={savingGlobal} style={{width:'100%',background:'rgba(125,217,64,.2)',border:'1px solid rgba(125,217,64,.4)',color:'#7dd940',fontFamily:'var(--font)',fontSize:12,fontWeight:700,borderRadius:8,padding:'8px',cursor:'pointer'}}>
-          {savingGlobal ? 'Enregistrement…' : '✓ Enregistrer'}
+        {msg && <div style={{fontSize:11,fontWeight:700,color:msg.startsWith('✓')?'var(--green)':'#ff9090',marginBottom:6}}>{msg}</div>}
+        <button onClick={save} disabled={saving} style={{width:'100%',background:'rgba(125,217,64,.2)',border:'1px solid rgba(125,217,64,.4)',color:'#7dd940',fontFamily:'var(--font)',fontSize:12,fontWeight:700,borderRadius:8,padding:'8px',cursor:'pointer'}}>
+          {saving ? 'Enregistrement…' : '✓ Enregistrer'}
         </button>
       </div>
     </div>
@@ -10061,7 +10138,7 @@ function AdminQuizFailsScreen({ user, onBack }) {
   );
 }
 
-function AdminScreen({ onTariffs, onUsers, onRoles, onSites, onSpot, onAcc, onProduction, onGlobalVars, onPrix, onOffres, onLearn, onFeedback, onProofread, onGenQuiz, onAICosts, onAIPrompts, onViewLogs, onViewFails, onImpersonate, onBack }) {
+function AdminScreen({ onTariffs, onUsers, onRoles, onSites, onSpot, onAcc, onProduction, onGlobalVars, onFactureVars, onPrix, onOffres, onLearn, onFeedback, onProofread, onGenQuiz, onAICosts, onAIPrompts, onViewLogs, onViewFails, onImpersonate, onBack }) {
   return (
     <>
     <div className="screen screen-admin fade-in">
@@ -10077,7 +10154,15 @@ function AdminScreen({ onTariffs, onUsers, onRoles, onSites, onSpot, onAcc, onPr
             <span className="sim-icon">⚙️</span>
             <div className="sim-text">
               <div className="sim-title">Variables globales</div>
-              <div className="sim-sub">Hypothèses stockage, TURPE, inflation, plages HC</div>
+              <div className="sim-sub">Hypothèses stockage, optimisation, inflation, vente surplus</div>
+            </div>
+            <span className="sim-arrow">→</span>
+          </button>
+          <button className="sim-btn" onClick={onFactureVars}>
+            <span className="sim-icon">🧾</span>
+            <div className="sim-text">
+              <div className="sim-title">Variables facture d'électricité</div>
+              <div className="sim-sub">TURPE, accise, TVA (énergie & abonnement), plages HC</div>
             </div>
             <span className="sim-arrow">→</span>
           </button>
@@ -14504,6 +14589,7 @@ function App() {
           onAcc={()=>goTo('ADMIN_ACC')}
           onProduction={()=>goTo('ADMIN_PRODUCTION')}
           onGlobalVars={()=>goTo('ADMIN_GLOBAL_VARS')}
+          onFactureVars={()=>goTo('ADMIN_FACTURE_VARS')}
           onPrix={()=>goTo('ADMIN_PRIX_MATERIAUX')}
           onOffres={()=>goTo('ADMIN_OFFRES')}
           onLearn={()=>goTo('ADMIN_LEARN')}
@@ -14580,6 +14666,9 @@ function App() {
 
       case 'ADMIN_GLOBAL_VARS':
         return <GlobalVarsScreen onBack={goBack}/>;
+
+      case 'ADMIN_FACTURE_VARS':
+        return <FactureVarsScreen onBack={goBack}/>;
 
       case 'ADMIN_PRODUCTION':
         return <AdminProductionScreen onBack={goBack}/>;
