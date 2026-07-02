@@ -3309,7 +3309,7 @@ function computeStorageOptimization(consoProfile, tariff, baseTariff, site, batK
           varCost += kWh * p;
         }
     if (t.tarif_dynamique && spotMap)
-      return Math.round((varCost + (t.turpe_fixe||0) + (t.cta_fixe||0)) * (1+tva) + (t.abo_annuel||0) * (1 + (globalVars?.tva_abo??5.5)/100));
+      return Math.round(varCost * (1+tva) + ((t.abo_annuel||0) + (t.turpe_fixe||0) + (t.cta_fixe||0)) * (1 + (globalVars?.tva_abo??5.5)/100));
     return Math.round(varCost + (t.abo_annuel||0));
   };
 
@@ -3430,8 +3430,8 @@ function computeStorageOptimization(consoProfile, tariff, baseTariff, site, batK
     const accise = (globalVars?.accise  || 0) / 100;
     const tva    = (globalVars?.tva     ?? 20) / 100;
     const tvaAbo = (globalVars?.tva_abo ?? 5.5) / 100;
-    // TVA : abonnement à 5,5 %, part fixe acheminement (turpe_fixe+cta_fixe) à 20 %.
-    const fixedHT = (tariff.turpe_fixe || 0) + (tariff.cta_fixe || 0);
+    // TVA réelle : part fixe (abonnement + acheminement fixe + CTA) à 5,5 %, consommation à 20 %.
+    const fixedHT = (tariff.abo_annuel || 0) + (tariff.turpe_fixe || 0) + (tariff.cta_fixe || 0);
     const hcWin   = [
       { s: toHcH(site?.hc_debut1 ?? site?.heure_debut_hc1 ?? globalVars?.hc_debut1), e: toHcH(site?.hc_fin1 ?? site?.heure_fin_hc1 ?? globalVars?.hc_fin1) },
       { s: toHcH(site?.hc_debut2 ?? site?.heure_debut_hc2 ?? globalVars?.hc_debut2), e: toHcH(site?.hc_fin2 ?? site?.heure_fin_hc2 ?? globalVars?.hc_fin2) },
@@ -3451,7 +3451,7 @@ function computeStorageOptimization(consoProfile, tariff, baseTariff, site, batK
 
     // Mode dynamique : utilise le seuil global pour filtrer les heures marginales
     const {varCostHT_with} = runLoop(getPrice, getDailyAvg, seuil);
-    billWithStorage = Math.round((varCostHT_with + fixedHT) * (1 + tva) + (tariff.abo_annuel||0) * (1 + tvaAbo));
+    billWithStorage = Math.round(varCostHT_with * (1 + tva) + fixedHT * (1 + tvaAbo));
 
   // ── MODE MULTI-PÉRIODES : prix variables selon plages dates/heures ───────────
   } else if (isMulti) {
@@ -3571,7 +3571,7 @@ function computeCombinedOptimization(consoProfile, prodNorm, pvKwc, batKwh, ther
         for (let h = 0; h < 24; h++)
           varCost += ((consoProfile[profIdx(m,d,h)] || 0) / 1000) * priceFn(m, d, h);
     if (t.tarif_dynamique && spotMap) {
-      return Math.round((varCost + (t.turpe_fixe||0) + (t.cta_fixe||0)) * (1 + tva) + (t.abo_annuel||0) * (1 + (globalVars?.tva_abo??5.5)/100));
+      return Math.round(varCost * (1 + tva) + ((t.abo_annuel||0) + (t.turpe_fixe||0) + (t.cta_fixe||0)) * (1 + (globalVars?.tva_abo??5.5)/100));
     }
     return Math.round(varCost + (t.abo_annuel || 0));
   };
@@ -3732,8 +3732,8 @@ function computeCombinedOptimization(consoProfile, prodNorm, pvKwc, batKwh, ther
   let billWithStorage;
   if (isDynamic) {
     const tvaAbo = (globalVars?.tva_abo ?? 5.5) / 100;
-    const fixedHT = (tariff.turpe_fixe||0) + (tariff.cta_fixe||0);
-    billWithStorage = Math.round(Math.max(0, (varCostHT_with + fixedHT) * (1 + tva) + (tariff.abo_annuel||0) * (1 + tvaAbo) - injCredit));
+    const fixedHT = (tariff.abo_annuel||0) + (tariff.turpe_fixe||0) + (tariff.cta_fixe||0);
+    billWithStorage = Math.round(Math.max(0, varCostHT_with * (1 + tva) + fixedHT * (1 + tvaAbo) - injCredit));
   } else {
     billWithStorage = Math.round(Math.max(0, varCostHT_with + (tariff.abo_annuel||0) - injCredit));
   }
@@ -5141,7 +5141,8 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
     if(effectiveTariff.tarif_dynamique&&spotMap){
       const marge=(effectiveTariff.marge_fournisseur_ceur_kwh||0)/100;
       // En dynamique, abo_annuel / turpe_fixe / cta_fixe sont HT (cf. calcul de facture).
-      // TVA : abonnement à 5,5 %, tout le reste (énergie, TURPE, CTA, accise) à 20 %.
+      // TVA réelle : part fixe (abonnement + acheminement fixe + CTA) à 5,5 %,
+      // consommation (énergie + TURPE variable + accise) à 20 %.
       const abo=effectiveTariff.abo_annuel||0;
       const turpeFixe=effectiveTariff.turpe_fixe||0;
       const ctaFixe=effectiveTariff.cta_fixe||0;
@@ -5156,9 +5157,10 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
         const idx=profIdx(m,d,h);
         const spot=spotMap[`${m}_${d}_${h}`]||0;
         const turpeVar=getTurpeRate(m,h,globalVars);
-        // Énergie+TURPE+CTA+accise ×(1+TVA 20%) ; abonnement ×(1+TVA abo 5,5%).
+        // Consommation (énergie + TURPE variable + accise) ×(1+20%) ;
+        // part fixe (abo + TURPE fixe + CTA) ×(1+5,5%).
         // Le CTA amorti n'est dans aucun bucket → il tombe dans les taxes.
-        arr[idx]=(spot+marge+turpeVar+turpeFixHT+ctaHT+acciseNat)*(1+tva)+aboHT*(1+tvaAbo);
+        arr[idx]=(spot+marge+turpeVar+acciseNat)*(1+tva)+(aboHT+turpeFixHT+ctaHT)*(1+tvaAbo);
         elArr[idx]=spot+marge;               // électron HT
         aboArr[idx]=aboHT;                   // abonnement HT amorti
         trpArr[idx]=turpeVar+turpeFixHT;     // TURPE HT (variable + fixe amorti)
@@ -6735,8 +6737,8 @@ function calcDynamicCost(tariff, consoProfile, spotMap, natParams, userProfile) 
   }
   const kwh_total_dyn = kwh_ete + kwh_hiver;
   const tvaAbo = (natParams?.tva_abo ?? 5.5) / 100;
-  // TVA : abonnement à 5,5 %, part fixe acheminement (turpe_fixe+cta_fixe) à 20 %, énergie à 20 %.
-  const fixedTTC = ((tariff.turpe_fixe || 0) + (tariff.cta_fixe || 0)) * (1 + tva) + (tariff.abo_annuel || 0) * (1 + tvaAbo);
+  // TVA réelle : part fixe (abonnement + acheminement fixe + CTA) à 5,5 %, consommation à 20 %.
+  const fixedTTC = ((tariff.abo_annuel || 0) + (tariff.turpe_fixe || 0) + (tariff.cta_fixe || 0)) * (1 + tvaAbo);
   const total   = varCost * (1 + tva) + fixedTTC;
   const avgCeur = (vc, kwh) => {
     if (!kwh || !kwh_total_dyn) return null;
@@ -7629,10 +7631,13 @@ function FactureVarsScreen({ onBack }) {
               onChange={e=>setForm(p=>({...p,tva:e.target.value}))} style={F}/>
           </div>
           <div>
-            <div style={FL}>TVA abonnement (%)</div>
+            <div style={FL}>TVA part fixe (%)</div>
             <input className="inp" type="number" step="0.1" placeholder="5.5" value={String(form.tva_abo)}
               onChange={e=>setForm(p=>({...p,tva_abo:e.target.value}))} style={F}/>
           </div>
+        </div>
+        <div style={{fontSize:9,color:'rgba(255,255,255,.35)',marginTop:-4,marginBottom:10,lineHeight:1.4}}>
+          TVA part fixe (5,5 %) : abonnement + acheminement fixe + CTA. TVA énergie (20 %) : consommation + accise.
         </div>
 
         {/* ── Plages HC ── */}
