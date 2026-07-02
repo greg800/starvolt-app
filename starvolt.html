@@ -3988,7 +3988,7 @@ function buildBilanFacts({ site, tariffs, globalVars, prodProfil, quiz }) {
 
   // ── Tarif courant + facture actuelle (déterministe) ──
   const curT = (tariffs||[]).find(t=>t.id===site.tarif_id) || null;
-  const { kwh_hc, kwh_hp, hasHC } = calcHcHp(cp, site);
+  const { kwh_hc, kwh_hp, hasHC } = calcHcHp(cp, site, globalVars);
   let factureActuelle = null, typeTarif = 'inconnu';
   if (curT) {
     typeTarif = (curT.tarif_dynamique||curT.type_tarif==='dynamique') ? 'dynamique'
@@ -4932,7 +4932,7 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
   // Calculer le bilan énergétique dès que les données sont prêtes — moteur partagé buildSiteBalance
   useEffect(()=>{
     setBalance(buildSiteBalance({site,prodProfil:prodProfilData,tariffs,spotMap,globalVars,pvKwc,batKwh,thermKwh}));
-  },[site?.conso_profil,prodProfilData,pvKwc,batKwh,thermKwh,globalVars,spotMap,tariffs,site?.tarif_id,site?.heure_debut_hc1,site?.heure_fin_hc1,site?.heure_debut_hc2,site?.heure_fin_hc2]);
+  },[site?.conso_profil,prodProfilData,pvKwc,batKwh,thermKwh,globalVars,spotMap,tariffs,site?.tarif_id,site?.heure_debut_hc1,site?.heure_fin_hc1,site?.heure_debut_hc2,site?.heure_fin_hc2,site?.hc_debut1,site?.hc_fin1,site?.hc_debut2,site?.hc_fin2]);
 
   // ── Tutoriel guidé one-shot (points 9-10) : déclenché à la création de compte, quand le
   //    graphique est prêt. Drapeau posé par la popup « bilan prêt » ; ne se rejoue jamais
@@ -5107,7 +5107,7 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
       }
     }
     return arr;
-  },[effectiveTariff,site?.heure_debut_hc1,site?.heure_fin_hc1,site?.heure_debut_hc2,site?.heure_fin_hc2,globalVars,spotMap,prodProfilData,balance,site?.conso_annuelle_kwh]);
+  },[effectiveTariff,site?.heure_debut_hc1,site?.heure_fin_hc1,site?.heure_debut_hc2,site?.heure_fin_hc2,site?.hc_debut1,site?.hc_fin1,site?.hc_debut2,site?.hc_fin2,globalVars,spotMap,prodProfilData,balance,site?.conso_annuelle_kwh]);
 
   // Charger les données spot si tarif dynamique (avec ou sans PV)
   useEffect(()=>{
@@ -6174,8 +6174,8 @@ function SimulationsScreen({ onACC, onBox, onSolar, onOptimisation, onDiyBox, on
     const activeId = localStorage.getItem('starvolt_active_site_id');
     Promise.all([
       activeId
-        ? sb.from('sites').select('id,conso_profil,tarif_id,profil_production_id,adresse_ligne1,code_postal,ville,heure_debut_hc1,heure_fin_hc1,heure_debut_hc2,heure_fin_hc2').eq('id', activeId).maybeSingle()
-        : sb.from('sites').select('id,conso_profil,tarif_id,profil_production_id,adresse_ligne1,code_postal,ville,heure_debut_hc1,heure_fin_hc1,heure_debut_hc2,heure_fin_hc2').eq('user_id', user.id).not('conso_profil','is',null).order('created_at').limit(1).maybeSingle(),
+        ? sb.from('sites').select('id,conso_profil,tarif_id,profil_production_id,adresse_ligne1,code_postal,ville,heure_debut_hc1,heure_fin_hc1,heure_debut_hc2,heure_fin_hc2,hc_debut1,hc_fin1,hc_debut2,hc_fin2').eq('id', activeId).maybeSingle()
+        : sb.from('sites').select('id,conso_profil,tarif_id,profil_production_id,adresse_ligne1,code_postal,ville,heure_debut_hc1,heure_fin_hc1,heure_debut_hc2,heure_fin_hc2,hc_debut1,hc_fin1,hc_debut2,hc_fin2').eq('user_id', user.id).not('conso_profil','is',null).order('created_at').limit(1).maybeSingle(),
       sb.from('tarifs_electricite').select('*').order('nom'),
       sb.from('parametres_nationaux').select('*').eq('id',1).maybeSingle(),
       sb.rpc('get_spot_json'),
@@ -6184,7 +6184,7 @@ function SimulationsScreen({ onACC, onBox, onSolar, onOptimisation, onDiyBox, on
       if (!site?.conso_profil) return;
       setHasConso(true);
 
-      const { kwh_hc, kwh_hp } = calcHcHp(site.conso_profil, site);
+      const { kwh_hc, kwh_hp } = calcHcHp(site.conso_profil, site, nat);
       const kwh_total = kwh_hc + kwh_hp;
 
       // Optimisation savings
@@ -6513,21 +6513,14 @@ function isHcHour(h, windows) {
   return false;
 }
 
-function calcHcHp(consoProfile, userProfile) {
+function calcHcHp(consoProfile, userProfile, globalVars = null) {
+  // Priorité plages HC : ENEDIS (hc_debut1) → saisie manuelle (heure_debut_hc1) → défaut national.
   const windows = [
-    { s: parseHcHour(userProfile?.heure_debut_hc1), e: parseHcHour(userProfile?.heure_fin_hc1) },
-    { s: parseHcHour(userProfile?.heure_debut_hc2), e: parseHcHour(userProfile?.heure_fin_hc2) },
+    { s: parseHcHour(userProfile?.hc_debut1 ?? userProfile?.heure_debut_hc1 ?? globalVars?.hc_debut1), e: parseHcHour(userProfile?.hc_fin1 ?? userProfile?.heure_fin_hc1 ?? globalVars?.hc_fin1) },
+    { s: parseHcHour(userProfile?.hc_debut2 ?? userProfile?.heure_debut_hc2 ?? globalVars?.hc_debut2), e: parseHcHour(userProfile?.hc_fin2 ?? userProfile?.heure_fin_hc2 ?? globalVars?.hc_fin2) },
   ].filter(w => w.s !== null && w.e !== null);
 
   let kwh_hc = 0, kwh_hp = 0;
-  for (let m = 1; m <= 12; m++)
-    for (let d = 1; d <= PROF_DAYS[m - 1]; d++)
-      for (let h = 0; h < 24; h++) {
-        const kwh = (consoProfile[profIdx(m, d, h)] || 0) / 1000;
-        (windows.length > 0 && isHcHour(h, windows) ? kwh_hc : (kwh_hp += kwh, 0)) && (kwh_hc += kwh);
-      }
-  // fix the ternary side-effect above with cleaner version:
-  kwh_hc = 0; kwh_hp = 0;
   for (let m = 1; m <= 12; m++)
     for (let d = 1; d <= PROF_DAYS[m - 1]; d++)
       for (let h = 0; h < 24; h++) {
@@ -6607,9 +6600,10 @@ function buildSpotMap(spotAll) {
 }
 
 function calcDynamicCost(tariff, consoProfile, spotMap, natParams, userProfile) {
+  // Priorité plages HC : ENEDIS (hc_debut1) → saisie manuelle (heure_debut_hc1) → défaut national.
   const windows = [
-    { s: parseHcHour(userProfile?.heure_debut_hc1), e: parseHcHour(userProfile?.heure_fin_hc1) },
-    { s: parseHcHour(userProfile?.heure_debut_hc2), e: parseHcHour(userProfile?.heure_fin_hc2) },
+    { s: parseHcHour(userProfile?.hc_debut1 ?? userProfile?.heure_debut_hc1 ?? natParams?.hc_debut1), e: parseHcHour(userProfile?.hc_fin1 ?? userProfile?.heure_fin_hc1 ?? natParams?.hc_fin1) },
+    { s: parseHcHour(userProfile?.hc_debut2 ?? userProfile?.heure_debut_hc2 ?? natParams?.hc_debut2), e: parseHcHour(userProfile?.hc_fin2 ?? userProfile?.heure_fin_hc2 ?? natParams?.hc_fin2) },
   ].filter(w => w.s !== null && w.e !== null);
   const marge  = (tariff.marge_fournisseur_ceur_kwh || 0) / 100;
   const accise = (natParams?.accise || 0) / 100;
@@ -6658,7 +6652,7 @@ function OptimisationScreen({ user, userProfile, onBack, onPanier, onMonSite, on
 
   useEffect(() => {
     Promise.all([
-      sb.from('sites').select('id,nom,conso_profil,conso_annuelle_kwh,tarif_id,heure_debut_hc1,heure_fin_hc1,heure_debut_hc2,heure_fin_hc2').eq('user_id', user.id).not('conso_profil', 'is', null).order('created_at'),
+      sb.from('sites').select('id,nom,conso_profil,conso_annuelle_kwh,tarif_id,heure_debut_hc1,heure_fin_hc1,heure_debut_hc2,heure_fin_hc2,hc_debut1,hc_fin1,hc_debut2,hc_fin2').eq('user_id', user.id).not('conso_profil', 'is', null).order('created_at'),
       sb.from('tarifs_electricite').select('*').order('nom'),
       sb.rpc('get_spot_json'),
       sb.from('parametres_nationaux').select('*').eq('id', 1).maybeSingle(),
@@ -6674,7 +6668,7 @@ function OptimisationScreen({ user, userProfile, onBack, onPanier, onMonSite, on
   const site = sites?.find(s => s.id === activeId) || null;
 
   const { kwh_hc, kwh_hp, hasHC } = site?.conso_profil
-    ? calcHcHp(site.conso_profil, site)
+    ? calcHcHp(site.conso_profil, site, natParams)
     : { kwh_hc: 0, kwh_hp: 0, hasHC: false };
 
   const kwh_total = kwh_hc + kwh_hp;
@@ -8129,7 +8123,7 @@ function BoxSimScreen({ user, userProfile, onBack, onPanier, onMonSite, onCartUp
     const siteId = localStorage.getItem('starvolt_active_site_id');
     if (!siteId) { setLoading(false); return; }
     Promise.all([
-      sb.from('sites').select('id,conso_profil,tarif_id,heure_debut_hc1,heure_fin_hc1,heure_debut_hc2,heure_fin_hc2,flex_chauffage,flex_ecs,flex_surface').eq('id', siteId).maybeSingle(),
+      sb.from('sites').select('id,conso_profil,tarif_id,heure_debut_hc1,heure_fin_hc1,heure_debut_hc2,heure_fin_hc2,hc_debut1,hc_fin1,hc_debut2,hc_fin2,flex_chauffage,flex_ecs,flex_surface').eq('id', siteId).maybeSingle(),
       sb.from('tarifs_electricite').select('*'),
       sb.rpc('get_spot_json'),
       sb.from('parametres_nationaux').select('*').eq('id', 1).maybeSingle(),
@@ -8140,7 +8134,7 @@ function BoxSimScreen({ user, userProfile, onBack, onPanier, onMonSite, onCartUp
       const _flex=_lsFlex||(site.flex_chauffage&&site.flex_ecs&&site.flex_surface?{chauffage:site.flex_chauffage,ecs:site.flex_ecs,surface:site.flex_surface}:null);
       if(_flex) setSiteFlex(_flex);
       const curTariff = site.tarif_id ? (tariffs || []).find(t => t.id === site.tarif_id) : null;
-      const { kwh_hc, kwh_hp } = calcHcHp(site.conso_profil, site);
+      const { kwh_hc, kwh_hp } = calcHcHp(site.conso_profil, site, nat);
       const kwh_total = kwh_hc + kwh_hp;
       let bill = null;
       if (curTariff?.tarif_dynamique) {
@@ -8641,7 +8635,7 @@ function SolarSimScreen({ user, userProfile, onBack, onPanier, onMonSite, onCart
     if (!siteId) { setLoading(false); return; }
     setActiveSiteId(siteId);
     Promise.all([
-      sb.from('sites').select('id,conso_profil,conso_annuelle_kwh,tarif_id,profil_production_id,adresse_ligne1,code_postal,ville,heure_debut_hc1,heure_fin_hc1,heure_debut_hc2,heure_fin_hc2,flex_chauffage,flex_ecs,flex_surface').eq('id', siteId).maybeSingle(),
+      sb.from('sites').select('id,conso_profil,conso_annuelle_kwh,tarif_id,profil_production_id,adresse_ligne1,code_postal,ville,heure_debut_hc1,heure_fin_hc1,heure_debut_hc2,heure_fin_hc2,hc_debut1,hc_fin1,hc_debut2,hc_fin2,flex_chauffage,flex_ecs,flex_surface').eq('id', siteId).maybeSingle(),
       sb.from('tarifs_electricite').select('*'),
       sb.rpc('get_spot_json'),
       sb.from('parametres_nationaux').select('*').eq('id', 1).maybeSingle(),
@@ -8655,7 +8649,7 @@ function SolarSimScreen({ user, userProfile, onBack, onPanier, onMonSite, onCart
       if(_flexS) setSiteFlex(_flexS);
       if (!site?.conso_profil) { setLoading(false); return; }
       const curTariff = site.tarif_id ? (tariffs || []).find(t => t.id === site.tarif_id) : null;
-      const { kwh_hc, kwh_hp } = calcHcHp(site.conso_profil, site);
+      const { kwh_hc, kwh_hp } = calcHcHp(site.conso_profil, site, nat);
       const kwh_total = kwh_hc + kwh_hp;
       // Utiliser conso_annuelle_kwh (DB) pour cohérence avec l'affichage Ma conso
       const siteKwh = site.conso_annuelle_kwh || kwh_total;
@@ -9005,7 +8999,7 @@ function PanierScreen({ user, onBack, onGoTo, onMonSite }) {
       if (nat?.taux_inflation_electricite)   setTaux(Number(nat.taux_inflation_electricite));
       if (nat?.taux_inflation_electricite_2 != null) setTaux2(Number(nat.taux_inflation_electricite_2));
 
-      const { kwh_hc, kwh_hp } = calcHcHp(site.conso_profil, site);
+      const { kwh_hc, kwh_hp } = calcHcHp(site.conso_profil, site, nat);
       const kwh_total = kwh_hc + kwh_hp;
       const curTariff = site.tarif_id ? (tariffs||[]).find(t=>t.id===site.tarif_id) : null;
 
