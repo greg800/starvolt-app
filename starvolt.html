@@ -3278,13 +3278,8 @@ function computeStorageOptimization(consoProfile, tariff, baseTariff, site, batK
   const monthly = Array.from({length:12}, () => ({on_site:0, grid_buy:0, injection:0, via_bat:0, via_therm:0}));
   const hourly  = new Array(8784);
 
-  const toHcH = v => { if (v == null || v === '') return null; const n = parseInt(String(v).split(':')[0]); return isNaN(n) ? null : n; };
-
-  // Plages HC (communes à tous les modes)
-  const hcWinCommon = [
-    { s: toHcH(site?.hc_debut1 ?? site?.heure_debut_hc1 ?? globalVars?.hc_debut1), e: toHcH(site?.hc_fin1 ?? site?.heure_fin_hc1 ?? globalVars?.hc_fin1) },
-    { s: toHcH(site?.hc_debut2 ?? site?.heure_debut_hc2 ?? globalVars?.hc_debut2), e: toHcH(site?.hc_fin2 ?? site?.heure_fin_hc2 ?? globalVars?.hc_fin2) },
-  ].filter(w => w.s !== null && w.e !== null);
+  // Plages HC (communes à tous les modes) — ENEDIS/manuel, sinon fallback HP/HC TURPE
+  const hcWinCommon = getHcWindows(site, globalVars);
 
   // ── Helper : facture annuelle d'un tarif sur la conso brute (pas de PV ni stockage) ──
   const simpleAnnualBill = t => {
@@ -3432,10 +3427,7 @@ function computeStorageOptimization(consoProfile, tariff, baseTariff, site, batK
     const tvaAbo = (globalVars?.tva_abo ?? 5.5) / 100;
     // TVA réelle : part fixe (abonnement + acheminement fixe + CTA) à 5,5 %, consommation à 20 %.
     const fixedHT = (tariff.abo_annuel || 0) + (tariff.turpe_fixe || 0) + (tariff.cta_fixe || 0);
-    const hcWin   = [
-      { s: toHcH(site?.hc_debut1 ?? site?.heure_debut_hc1 ?? globalVars?.hc_debut1), e: toHcH(site?.hc_fin1 ?? site?.heure_fin_hc1 ?? globalVars?.hc_fin1) },
-      { s: toHcH(site?.hc_debut2 ?? site?.heure_debut_hc2 ?? globalVars?.hc_debut2), e: toHcH(site?.hc_fin2 ?? site?.heure_fin_hc2 ?? globalVars?.hc_fin2) },
-    ].filter(w => w.s !== null && w.e !== null);
+    const hcWin   = getHcWindows(site, globalVars);
 
     // Prix HT de l'heure (spot + TURPE + accise + marge)
     const getPrice = (m, d, h) => {
@@ -3464,12 +3456,8 @@ function computeStorageOptimization(consoProfile, tariff, baseTariff, site, batK
 
   // ── MODE HC/HP FIXE : moyenne annuelle constante ─────────────────────────────
   } else {
-    // Plages HC : site d'abord, sinon fallback sur les valeurs globales (parametres_nationaux)
-    // toHcH() gère les entiers (DB) et les strings ("22" ou "22:00")
-    const hcWindows = [
-      { s: toHcH(site?.hc_debut1 ?? site?.heure_debut_hc1 ?? globalVars?.hc_debut1), e: toHcH(site?.hc_fin1 ?? site?.heure_fin_hc1 ?? globalVars?.hc_fin1) },
-      { s: toHcH(site?.hc_debut2 ?? site?.heure_debut_hc2 ?? globalVars?.hc_debut2), e: toHcH(site?.hc_fin2 ?? site?.heure_fin_hc2 ?? globalVars?.hc_fin2) },
-    ].filter(w => w.s !== null && w.e !== null);
+    // Plages HC : ENEDIS/manuel du site, sinon fallback sur les HP/HC TURPE
+    const hcWindows = getHcWindows(site, globalVars);
 
     // Pas de plages HC renseignées → pas de déplacement possible, stockage inactif
     if (hcWindows.length === 0) {
@@ -3536,13 +3524,8 @@ function computeCombinedOptimization(consoProfile, prodNorm, pvKwc, batKwh, ther
   const monthly = Array.from({length:12}, ()=>({on_site:0, grid_buy:0, injection:0, via_bat:0, via_therm:0}));
   const hourly  = new Array(8784);
 
-  const toHcH = v => { if (v == null || v === '') return null; const n = parseInt(String(v).split(':')[0]); return isNaN(n) ? null : n; };
-
-  // Plages HC communes (depuis le site, avec fallback sur variables globales)
-  const hcWinArr = [
-    { s: toHcH(site?.hc_debut1 ?? site?.heure_debut_hc1 ?? globalVars?.hc_debut1), e: toHcH(site?.hc_fin1 ?? site?.heure_fin_hc1 ?? globalVars?.hc_fin1) },
-    { s: toHcH(site?.hc_debut2 ?? site?.heure_debut_hc2 ?? globalVars?.hc_debut2), e: toHcH(site?.hc_fin2 ?? site?.heure_fin_hc2 ?? globalVars?.hc_fin2) },
-  ].filter(w => w.s !== null && w.e !== null);
+  // Plages HC communes : ENEDIS/manuel du site, sinon fallback HP/HC TURPE
+  const hcWinArr = getHcWindows(site, globalVars);
 
   // ── Helper : construit une fonction getPrice(m,d,h) pour un tarif donné ───
   const makePriceFn = t => {
@@ -3880,10 +3863,7 @@ function deriveSiteImpact({ balance, site, prodProfil, tariffs, spotMap, globalV
   if (_hasAcc && effectiveTariff && site?.conso_profil) {
     const _accPHT = parseFloat(localStorage.getItem('starvolt_acc_price_ht')||'0.09');
     const _tva = (globalVars?.tva??20)/100;
-    const _hcw = [
-      {s:parseHcHour(site?.hc_debut1??site?.heure_debut_hc1??globalVars?.hc_debut1),e:parseHcHour(site?.hc_fin1??site?.heure_fin_hc1??globalVars?.hc_fin1)},
-      {s:parseHcHour(site?.hc_debut2??site?.heure_debut_hc2??globalVars?.hc_debut2),e:parseHcHour(site?.hc_fin2??site?.heure_fin_hc2??globalVars?.hc_fin2)},
-    ].filter(w=>w.s!==null&&w.e!==null);
+    const _hcw = getHcWindows(site, globalVars);
     const _ph = parseFloat(effectiveTariff.prix_hp)||0;
     const _pc = effectiveTariff.prix_hc!=null ? parseFloat(effectiveTariff.prix_hc)||0 : _ph;
     for (let _m=1;_m<=12;_m++) for (let _d=1;_d<=PROF_DAYS[_m-1];_d++) for (let _h=0;_h<24;_h++) {
@@ -5125,10 +5105,7 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
   // Prix horaire (€/kWh) pour l'axe droit du graphique
   const hourlyPrices = useMemo(()=>{
     if(!effectiveTariff) return null;
-    const hcWin=[
-      {s:parseHcHour(site?.hc_debut1??site?.heure_debut_hc1??globalVars?.hc_debut1), e:parseHcHour(site?.hc_fin1??site?.heure_fin_hc1??globalVars?.hc_fin1)},
-      {s:parseHcHour(site?.hc_debut2??site?.heure_debut_hc2??globalVars?.hc_debut2), e:parseHcHour(site?.hc_fin2??site?.heure_fin_hc2??globalVars?.hc_fin2)},
-    ].filter(w=>w.s!==null&&w.e!==null);
+    const hcWin=getHcWindows(site, globalVars);
     const tva=(globalVars?.tva??20)/100;
     const tvaAbo=(globalVars?.tva_abo??5.5)/100;   // TVA réduite sur l'abonnement
     const acciseNat=(globalVars?.accise||0)/100;
@@ -6590,6 +6567,22 @@ function SimulationsScreen({ onACC, onBox, onSolar, onOptimisation, onDiyBox, on
 // ─── Optimisation utilities ───────────────────
 function parseHcHour(s) { if (s == null || s === '') return null; if (typeof s === 'number') return Math.round(s); const n = parseInt(String(s).split(':')[0]); return isNaN(n) ? null : n; }
 
+// Plages heures creuses effectives d'un profil/site.
+// Priorité : HC réelles ENEDIS (hc_debut1) → saisie manuelle (heure_debut_hc1)
+// → à défaut, complément des heures pleines TURPE (HC = tout ce qui n'est pas HP
+//   acheminement ; par défaut HP 6h→22h, donc HC 22h→6h). Mêmes horaires pour la
+//   part énergie et la part TURPE, faute de plages HC commerciales renseignées.
+function getHcWindows(profile, natParams) {
+  const wins = [
+    { s: parseHcHour(profile?.hc_debut1 ?? profile?.heure_debut_hc1), e: parseHcHour(profile?.hc_fin1 ?? profile?.heure_fin_hc1) },
+    { s: parseHcHour(profile?.hc_debut2 ?? profile?.heure_debut_hc2), e: parseHcHour(profile?.hc_fin2 ?? profile?.heure_fin_hc2) },
+  ].filter(w => w.s !== null && w.e !== null);
+  if (wins.length) return wins;
+  const hpStart = natParams?.turpe_hp_hiver_debut ?? 6;
+  const hpEnd   = natParams?.turpe_hp_hiver_fin   ?? 22;
+  return [{ s: hpEnd, e: hpStart }]; // HC = de la fin des HP TURPE au début des HP TURPE
+}
+
 // Formatte une heure HC pour affichage : "1H36" → "01:36", "07:00" → "07:00"
 function fmtHcTime(v) {
   if (!v && v !== 0) return null;
@@ -6621,11 +6614,8 @@ function isHcHour(h, windows) {
 }
 
 function calcHcHp(consoProfile, userProfile, globalVars = null) {
-  // Priorité plages HC : ENEDIS (hc_debut1) → saisie manuelle (heure_debut_hc1) → défaut national.
-  const windows = [
-    { s: parseHcHour(userProfile?.hc_debut1 ?? userProfile?.heure_debut_hc1 ?? globalVars?.hc_debut1), e: parseHcHour(userProfile?.hc_fin1 ?? userProfile?.heure_fin_hc1 ?? globalVars?.hc_fin1) },
-    { s: parseHcHour(userProfile?.hc_debut2 ?? userProfile?.heure_debut_hc2 ?? globalVars?.hc_debut2), e: parseHcHour(userProfile?.hc_fin2 ?? userProfile?.heure_fin_hc2 ?? globalVars?.hc_fin2) },
-  ].filter(w => w.s !== null && w.e !== null);
+  // Plages HC : ENEDIS/manuel du profil, sinon fallback HP/HC TURPE
+  const windows = getHcWindows(userProfile, globalVars);
 
   let kwh_hc = 0, kwh_hp = 0;
   for (let m = 1; m <= 12; m++)
@@ -6713,11 +6703,8 @@ function buildSpotMap(spotAll) {
 }
 
 function calcDynamicCost(tariff, consoProfile, spotMap, natParams, userProfile) {
-  // Priorité plages HC : ENEDIS (hc_debut1) → saisie manuelle (heure_debut_hc1) → défaut national.
-  const windows = [
-    { s: parseHcHour(userProfile?.hc_debut1 ?? userProfile?.heure_debut_hc1 ?? natParams?.hc_debut1), e: parseHcHour(userProfile?.hc_fin1 ?? userProfile?.heure_fin_hc1 ?? natParams?.hc_fin1) },
-    { s: parseHcHour(userProfile?.hc_debut2 ?? userProfile?.heure_debut_hc2 ?? natParams?.hc_debut2), e: parseHcHour(userProfile?.hc_fin2 ?? userProfile?.heure_fin_hc2 ?? natParams?.hc_fin2) },
-  ].filter(w => w.s !== null && w.e !== null);
+  // Plages HC : ENEDIS/manuel du profil, sinon fallback HP/HC TURPE
+  const windows = getHcWindows(userProfile, natParams);
   const marge  = (tariff.marge_fournisseur_ceur_kwh || 0) / 100;
   const accise = (natParams?.accise || 0) / 100;
   const tva    = (natParams?.tva ?? 20) / 100;
@@ -7221,10 +7208,8 @@ function SpotHeatmapCanvas({ spotAll, natParams, heatmapMode }) {
   const wrapperRef = useRef(null);
   const canvasRef  = useRef(null);
 
-  const hcWindows = useMemo(() => natParams ? [
-    { s: natParams.hc_debut1 ?? null, e: natParams.hc_fin1 ?? null },
-    { s: natParams.hc_debut2 ?? null, e: natParams.hc_fin2 ?? null },
-  ].filter(w => w.s !== null && w.e !== null) : [], [natParams]);
+  // Pas de site ici (vue nationale) → HC = fallback HP/HC TURPE
+  const hcWindows = useMemo(() => natParams ? getHcWindows(null, natParams) : [], [natParams]);
 
   const draw = useCallback((containerW) => {
     if (!canvasRef.current || !spotAll || spotAll.length === 0 || containerW < 10) return;
@@ -7499,7 +7484,7 @@ function GlobalVarsScreen({ onBack }) {
 }
 
 // ─── FactureVarsScreen ────────────────────────
-// Variables de calcul de la facture d'électricité : TURPE, accise, TVA, plages HC.
+// Variables de calcul de la facture d'électricité : TURPE, accise, TVA.
 function FactureVarsScreen({ onBack }) {
   const [loading, setLoading] = useState(true);
   const [form,    setForm]    = useState(null);
@@ -7524,10 +7509,6 @@ function FactureVarsScreen({ onBack }) {
           accise:               n.accise               ?? '',
           tva:                  n.tva                  ?? 20,
           tva_abo:              n.tva_abo              ?? 5.5,
-          hc_debut1:            n.hc_debut1            ?? '',
-          hc_fin1:              n.hc_fin1              ?? '',
-          hc_debut2:            n.hc_debut2            ?? '',
-          hc_fin2:              n.hc_fin2              ?? '',
         });
         setLoading(false);
       });
@@ -7551,10 +7532,6 @@ function FactureVarsScreen({ onBack }) {
       accise:               num(form.accise),
       tva:                  num(form.tva),
       tva_abo:              num(form.tva_abo),
-      hc_debut1:            intr(form.hc_debut1),
-      hc_fin1:              intr(form.hc_fin1),
-      hc_debut2:            intr(form.hc_debut2),
-      hc_fin2:              intr(form.hc_fin2),
       updated_at: new Date().toISOString(),
     }).eq('id', 1);
     setSaving(false);
@@ -7638,18 +7615,6 @@ function FactureVarsScreen({ onBack }) {
         </div>
         <div style={{fontSize:9,color:'rgba(255,255,255,.35)',marginTop:-4,marginBottom:10,lineHeight:1.4}}>
           TVA part fixe (5,5 %) : abonnement + acheminement fixe + CTA. TVA énergie (20 %) : consommation + accise.
-        </div>
-
-        {/* ── Plages HC ── */}
-        <div style={SL}>Plages HC (pour heatmap TTC)</div>
-        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr 1fr',gap:6,marginBottom:10}}>
-          {[['HC1 début h','hc_debut1','22'],['HC1 fin h','hc_fin1','6'],['HC2 début h','hc_debut2',''],['HC2 fin h','hc_fin2','']].map(([lbl,key,ph])=>(
-            <div key={key}>
-              <div style={FL}>{lbl}</div>
-              <input className="inp" type="number" min="0" max="23" placeholder={ph} value={String(form[key])}
-                onChange={e=>setForm(p=>({...p,[key]:e.target.value}))} style={F}/>
-            </div>
-          ))}
         </div>
 
         {msg && <div style={{fontSize:11,fontWeight:700,color:msg.startsWith('✓')?'var(--green)':'#ff9090',marginBottom:6}}>{msg}</div>}
@@ -10167,7 +10132,7 @@ function AdminScreen({ onTariffs, onUsers, onRoles, onSites, onSpot, onAcc, onPr
             <span className="sim-icon">🧾</span>
             <div className="sim-text">
               <div className="sim-title">Variables facture d'électricité</div>
-              <div className="sim-sub">TURPE, accise, TVA (énergie & abonnement), plages HC</div>
+              <div className="sim-sub">TURPE, accise, TVA (énergie & abonnement)</div>
             </div>
             <span className="sim-arrow">→</span>
           </button>
