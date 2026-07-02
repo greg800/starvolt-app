@@ -5135,12 +5135,18 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
     // (= accise + TVA totale, y compris la TVA de l'abonnement).
     if(effectiveTariff.tarif_dynamique&&spotMap){
       const marge=(effectiveTariff.marge_fournisseur_ceur_kwh||0)/100;
+      const abo=effectiveTariff.abo_annuel||0;
+      const kwhGrid=balance
+        ?balance.monthly.reduce((s,m)=>s+m.grid_buy,0)
+        :(site?.conso_annuelle_kwh||null);
+      const aboKwh=abo>0&&kwhGrid>0?abo/kwhGrid:0;   // TTC, amorti par kWh soutiré
+      const aboHT=aboKwh/(1+tva);
       for(let m=1;m<=12;m++) for(let d=1;d<=PROF_DAYS[m-1];d++) for(let h=0;h<24;h++){
         const idx=profIdx(m,d,h);
         const spot=spotMap[`${m}_${d}_${h}`]||0;
-        arr[idx]=(spot+getTurpeRate(m,h,globalVars)+acciseNat+marge)*(1+tva);
+        arr[idx]=(spot+getTurpeRate(m,h,globalVars)+acciseNat+marge)*(1+tva)+aboKwh;
         elArr[idx]=spot+marge;   // électron HT
-        aboArr[idx]=0;           // abonnement absent du prix horaire dynamique
+        aboArr[idx]=aboHT;       // abonnement HT amorti
       }
     } else if(effectiveTariff.type_tarif==='multi'&&effectiveTariff.periodes?.length>0){
       const periodes=effectiveTariff.periodes;
