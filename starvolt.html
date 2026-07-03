@@ -4074,8 +4074,8 @@ function buildBilanFacts({ site, tariffs, globalVars, prodProfil, quiz }) {
     jours_tres_faible_conso: {
       nb_jours: vacantDays,
       pct_annee: nbJoursAnnee>0 ? Math.round(vacantDays/nbJoursAnnee*100) : 0,
-      conso_moy_kwh_jour_inoccupe: vacantDays>0 ? Math.round(vacantTotalWh/vacantDays/100)/10 : null,
-      conso_moy_kwh_jour_occupe: occupiedDays>0 ? Math.round(occupiedTotalWh/occupiedDays/100)/10 : null,
+      conso_moy_kwh_jour_faible_conso: vacantDays>0 ? Math.round(vacantTotalWh/vacantDays/100)/10 : null,
+      conso_moy_kwh_jour_normal: occupiedDays>0 ? Math.round(occupiedTotalWh/occupiedDays/100)/10 : null,
     },
   };
 }
@@ -11364,8 +11364,8 @@ function AdminBilanDataScreen({ onBack }) {
       ['Veille élevée', f.veille_elevee ? 'oui' : 'non'],
       ['Veille — économie potentielle', f.economie_potentielle_veille_eur != null ? f.economie_potentielle_veille_eur + ' €/an' : '—'],
       ['Jours avec très faible conso', f.jours_tres_faible_conso ? `${f.jours_tres_faible_conso.nb_jours} j (${f.jours_tres_faible_conso.pct_annee} %)` : '—'],
-      ['Conso moy. jour à très faible conso', f.jours_tres_faible_conso?.conso_moy_kwh_jour_inoccupe != null ? f.jours_tres_faible_conso.conso_moy_kwh_jour_inoccupe + ' kWh' : '—'],
-      ['Conso moy. jour normal', f.jours_tres_faible_conso?.conso_moy_kwh_jour_occupe != null ? f.jours_tres_faible_conso.conso_moy_kwh_jour_occupe + ' kWh' : '—'],
+      ['Conso moy. jour à très faible conso', f.jours_tres_faible_conso?.conso_moy_kwh_jour_faible_conso != null ? f.jours_tres_faible_conso.conso_moy_kwh_jour_faible_conso + ' kWh' : '—'],
+      ['Conso moy. jour normal', f.jours_tres_faible_conso?.conso_moy_kwh_jour_normal != null ? f.jours_tres_faible_conso.conso_moy_kwh_jour_normal + ' kWh' : '—'],
     ];
   };
 
