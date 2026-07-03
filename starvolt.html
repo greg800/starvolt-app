@@ -11355,7 +11355,7 @@ function AdminBilanDataScreen({ onBack }) {
       ['Niveau quizz', f.quiz_niveau_etoiles != null ? (f.quiz_niveau_etoiles > 0 ? '⭐'.repeat(f.quiz_niveau_etoiles) : '🐻 (0 étoile)') : '—'],
       ['Quizz — taux d’erreur (1er coup)', f.quiz_taux_erreur_pct != null ? f.quiz_taux_erreur_pct + ' %' : '—'],
       ['Puissance max (courbe)', f.puissance_max_kw != null ? f.puissance_max_kw + ' kW' + (f.puissance_max_survenue ? ` (${f.puissance_max_survenue.mois}, ${f.puissance_max_survenue.heure}h)` : '') : '—'],
-      ['Puissance min / veille', f.puissance_min_kw != null ? f.puissance_min_kw + ' kW' : '—'],
+      ['Puissance min / veille', f.puissance_min_kw != null ? f.puissance_min_kw + ' kW' + (f.puissance_min_survenue ? ` (${f.puissance_min_survenue.mois}, ${f.puissance_min_survenue.heure}h)` : '') : '—'],
       ['Puissance souscrite', f.puissance_souscrite_kva != null ? f.puissance_souscrite_kva + ' kVA' : '—'],
       ['Écart souscrite − max', f.ecart_puissance_kw != null ? f.ecart_puissance_kw + ' kW' : '—'],
       ['Souscription surdimensionnée', f.souscription_surdimensionnee ? 'oui' : 'non'],
