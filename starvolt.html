@@ -4058,6 +4058,10 @@ function buildBilanFacts({ site, tariffs, globalVars, prodProfil, quiz }) {
     surface_logement: site.flex_surface ? (FLEX_SURFACE_LBL[site.flex_surface] || site.flex_surface) : null,
     type_habitat: site.flex_type_logement ? (FLEX_TYPELOG_LBL[site.flex_type_logement] || site.flex_type_logement) : null,
     statut_occupation: site.flex_statut ? (FLEX_STATUT_LBL[site.flex_statut] || site.flex_statut) : null,
+    pv_existant_kwc: site.flex_has_solar ? (site.puissance_pv_kwc != null ? Number(site.puissance_pv_kwc) : null) : (site.flex_has_solar === false ? 0 : null),
+    pv_declaration_client: site.flex_has_solar ? (site.flex_pv_comment || null) : null,
+    batterie_existante_kwh: site.flex_has_battery ? (site.batterie_capacite_kwh != null ? Number(site.batterie_capacite_kwh) : null) : (site.flex_has_battery === false ? 0 : null),
+    equipements_energivores_autres: site.flex_other_equipment || null,
     quiz_niveau_etoiles: quiz?.stars ?? null,
     quiz_taux_erreur_pct: quiz?.errorPct ?? null,
     puissance_max_kw: puissanceMaxKw,
@@ -5265,7 +5269,17 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
   if(showFlexForm&&site){
     return <OnboardingTypeform
       siteId={activeId}
-      initial={(site.flex_chauffage||site.flex_type_logement)?{chauffage:site.flex_chauffage,ecs:site.flex_ecs,surface:site.flex_surface,type_logement:site.flex_type_logement,statut:site.flex_statut}:null}
+      extended
+      initial={(site.flex_chauffage||site.flex_type_logement)?{
+        chauffage:site.flex_chauffage,ecs:site.flex_ecs,surface:site.flex_surface,
+        type_logement:site.flex_type_logement,statut:site.flex_statut,
+        has_solar: site.flex_has_solar==null?undefined:(site.flex_has_solar?'oui':'non'),
+        pv_kwc: site.flex_has_solar ? (site.flex_pv_comment?'__unknown__':(site.puissance_pv_kwc>0?String(site.puissance_pv_kwc):undefined)) : undefined,
+        pv_comment: site.flex_pv_comment||undefined,
+        has_battery: site.flex_has_battery==null?undefined:(site.flex_has_battery?'oui':'non'),
+        battery_kwh: site.flex_has_battery && site.batterie_capacite_kwh>0 ? String(site.batterie_capacite_kwh) : undefined,
+        other_equip: site.flex_other_equipment||undefined,
+      }:null}
       onBack={()=>setShowFlexForm(false)}
       onDone={(kw)=>{setThermKwh(String(kw));setShowFlexForm(false);load();}}
     />;
@@ -8265,6 +8279,25 @@ function AccResultScreen({ state, onBack, onPanier, onMonSite }) {
 // donc aucun site partiellement renseigné. Sert à l'onboarding (après consentement ENEDIS),
 // à l'édition « Mon logement » et aux simulations (box, solaire, install soi-même).
 // Props : siteId, onDone(kw), onBack (optionnel), initial (pré-remplissage en édition).
+// Heuristique de traduction du commentaire libre client → puissance PV (kWc).
+// Règles produit : puissance en kWc si donnée ; sinon surface × 200 Wc/m² ;
+// sinon nb de panneaux × 500 W (moyenne d'une fourchette) ; sinon défaut 3 kWc.
+function parsePvComment(txt) {
+  const s = (txt || '').toLowerCase().replace(/,/g, '.');
+  let m = s.match(/(\d+(?:\.\d+)?)\s*kwc/);
+  if (m) return Math.round(parseFloat(m[1]) * 10) / 10;
+  m = s.match(/(\d+(?:\.\d+)?)\s*(?:m2|m²|mètre|metre)/);
+  if (m) return Math.round(parseFloat(m[1]) * 0.2 * 10) / 10;
+  if (/panneau/.test(s)) {
+    const nums = (s.match(/\d+(?:\.\d+)?/g) || []).map(Number);
+    if (nums.length) {
+      const avg = nums.reduce((a, b) => a + b, 0) / nums.length;
+      return Math.round(avg * 0.5 * 10) / 10;
+    }
+  }
+  return 3;
+}
+
 const ONBOARDING_QUESTIONS = [
   { key:'chauffage', title:'Comment chauffez-vous votre logement ?', cols:3, options:[
     { value:'elec',  emoji:'⚡',  label:'Électrique' },
@@ -8290,44 +8323,118 @@ const ONBOARDING_QUESTIONS = [
   ]},
 ];
 
-function OnboardingTypeform({ siteId, onDone, onBack, initial=null }) {
+// Questions supplémentaires — UNIQUEMENT propriétaire en maison individuelle (prop extended).
+const ownerHouse = a => a.type_logement === 'maison' && a.statut === 'proprietaire';
+const ONBOARDING_EXTRA_QUESTIONS = [
+  { key:'has_solar', title:'Avez-vous déjà des panneaux solaires en autoconsommation ?', cols:2,
+    when: ownerHouse, options:[
+    { value:'oui', emoji:'☀️', label:'Oui' },
+    { value:'non', emoji:'🚫', label:'Non' },
+  ]},
+  { key:'pv_kwc', type:'number', unit:'kWc', placeholder:'ex : 3', dontKnow:true,
+    title:'Quelle est la puissance photovoltaïque installée ?',
+    when: a => ownerHouse(a) && a.has_solar === 'oui' },
+  { key:'pv_comment', type:'text',
+    title:'Aidez-nous à estimer votre installation',
+    subtitle:"Si vous ne savez pas exactement quelle est la puissance de votre installation solaire, dites-nous, si vous le savez, le nombre de panneaux ou la surface en m² occupée par les panneaux.",
+    placeholder:'ex : j\'ai 6 à 8 panneaux, ou environ 15 m²', optional:true,
+    when: a => ownerHouse(a) && a.has_solar === 'oui' && a.pv_kwc === '__unknown__' },
+  { key:'has_battery', title:'Avez-vous une batterie de stockage ?', cols:2,
+    when: ownerHouse, options:[
+    { value:'oui', emoji:'🔋', label:'Oui' },
+    { value:'non', emoji:'🚫', label:'Non' },
+  ]},
+  { key:'battery_kwh', type:'number', unit:'kWh', placeholder:'ex : 5', dontKnow:true,
+    title:'Quelle est la capacité de stockage de cette batterie ?',
+    when: a => ownerHouse(a) && a.has_battery === 'oui' },
+  { key:'other_equip', type:'text', optional:true,
+    title:"Avez-vous d'autres équipements énergivores que nous n'avons pas listés ensemble ici ?",
+    placeholder:'ex : piscine, spa, borne de recharge, climatisation…',
+    when: ownerHouse },
+];
+
+function OnboardingTypeform({ siteId, onDone, onBack, initial=null, extended=false }) {
+  const allQuestions = extended ? [...ONBOARDING_QUESTIONS, ...ONBOARDING_EXTRA_QUESTIONS] : ONBOARDING_QUESTIONS;
   const [step,    setStep]    = useState(0);
   const [answers, setAnswers] = useState(() => {
     if (!initial) return {};
-    const { chauffage, ecs, surface, type_logement, statut } = initial;
     const a = {};
-    if (chauffage)     a.chauffage     = chauffage;
-    if (ecs)           a.ecs           = ecs;
-    if (surface)       a.surface       = surface;
-    if (type_logement) a.type_logement = type_logement;
-    if (statut)        a.statut        = statut;
+    ['chauffage','ecs','surface','type_logement','statut',
+     'has_solar','pv_kwc','pv_comment','has_battery','battery_kwh','other_equip']
+      .forEach(k => { if (initial[k] != null && initial[k] !== '') a[k] = initial[k]; });
     return a;
   });
   const [busy,    setBusy]    = useState(false); // bloque les clics pendant l'auto-avance
+  const [inputVal, setInputVal] = useState('');
   const advanceRef = useRef(null);
   useEffect(() => () => clearTimeout(advanceRef.current), []);
 
-  const q = ONBOARDING_QUESTIONS[step];
-  const total = ONBOARDING_QUESTIONS.length;
+  const activeOf = (ans) => allQuestions.filter(qq => !qq.when || qq.when(ans));
+  const activeQs = activeOf(answers);
+  const q = activeQs[step];
+  const total = activeQs.length;
+
+  // Réinitialise le champ de saisie à chaque changement d'étape (question number/text).
+  useEffect(() => {
+    const v = q && (q.type === 'number' || q.type === 'text') ? answers[q.key] : '';
+    setInputVal(v && v !== '__unknown__' ? String(v) : '');
+  }, [step, q?.key]);
 
   const finish = async (allAnswers) => {
-    const { chauffage=null, ecs=null, surface=null, type_logement=null, statut=null } = allAnswers;
+    const { chauffage=null, ecs=null, surface=null, type_logement=null, statut=null,
+            has_solar=null, pv_kwc=null, pv_comment=null, has_battery=null, battery_kwh=null, other_equip=null } = allAnswers;
     const idx = surface === 'small' ? 0 : surface === 'medium' ? 1 : 2;
     let kw = 0;
     if (chauffage === 'elec' || chauffage === 'pac') kw += [3, 7, 12][idx];
     if (ecs === 'elec') kw += [2, 3, 4][idx];
+
+    // Équipement solaire/batterie DÉJÀ installé (déclaré par le client) → puissance projet.
+    const hasSolar = has_solar === 'oui', hasBattery = has_battery === 'oui';
+    const pvTxt = (pv_comment || '').trim();
+    let pvKwc = null;
+    if (hasSolar) {
+      if (pv_kwc && pv_kwc !== '__unknown__' && parseFloat(pv_kwc) > 0) pvKwc = Math.round(parseFloat(pv_kwc) * 10) / 10;
+      else if (pvTxt) pvKwc = parsePvComment(pvTxt);
+      else pvKwc = 3;
+    }
+    let batKwh = null;
+    if (hasBattery) {
+      if (battery_kwh && battery_kwh !== '__unknown__' && parseFloat(battery_kwh) > 0) batKwh = Math.round(parseFloat(battery_kwh) * 10) / 10;
+      else batKwh = 5;
+    }
+    const otherTxt = (other_equip || '').trim();
+
     try {
       const d = JSON.parse(localStorage.getItem('starvolt_solar_defaults') || '{}');
       d.thermKwh = String(kw);
+      if (pvKwc != null) d.pvKwc = String(pvKwc);
+      if (batKwh != null) d.batKwh = String(batKwh);
       localStorage.setItem('starvolt_solar_defaults', JSON.stringify(d));
     } catch {}
     if (siteId) {
       try {
-        await sb.from('sites').update({ flex_chauffage:chauffage, flex_ecs:ecs, flex_surface:surface, flex_type_logement:type_logement, flex_statut:statut }).eq('id', siteId);
+        const upd = { flex_chauffage:chauffage, flex_ecs:ecs, flex_surface:surface, flex_type_logement:type_logement, flex_statut:statut };
+        if (has_solar != null)   upd.flex_has_solar = hasSolar;
+        if (has_battery != null) upd.flex_has_battery = hasBattery;
+        if (extended) {
+          upd.flex_pv_comment = hasSolar && pvTxt ? pvTxt : null;
+          upd.flex_other_equipment = otherTxt || null;
+        }
+        if (pvKwc != null)  upd.puissance_pv_kwc = pvKwc;           // met à jour le projet PV
+        if (batKwh != null) upd.batterie_capacite_kwh = batKwh;     // met à jour le projet batterie
+        await sb.from('sites').update(upd).eq('id', siteId);
         localStorage.setItem('starvolt_flex_'+siteId, JSON.stringify({ chauffage, ecs, surface, type_logement, statut }));
       } catch {}
     }
     onDone?.(kw);
+  };
+
+  // Avance vers l'étape suivante (ou termine) selon les réponses fournies.
+  const advanceWith = (next) => {
+    const act = activeOf(next);
+    if (step + 1 >= act.length) { finish(next); return; }
+    setStep(step + 1);
+    setBusy(false);
   };
 
   const pick = (value) => {
@@ -8335,11 +8442,15 @@ function OnboardingTypeform({ siteId, onDone, onBack, initial=null }) {
     setBusy(true);
     const next = { ...answers, [q.key]: value };
     setAnswers(next);
-    advanceRef.current = setTimeout(() => {
-      if (step + 1 >= total) { finish(next); return; }
-      setStep(step + 1);
-      setBusy(false);
-    }, 320);
+    advanceRef.current = setTimeout(() => advanceWith(next), 320);
+  };
+
+  // Validation d'une réponse saisie (number/text) — pas d'auto-avance, déclenchée par bouton.
+  const submitInput = (value) => {
+    if (busy) return;
+    const next = { ...answers, [q.key]: value };
+    setAnswers(next);
+    advanceWith(next);
   };
 
   // Retour : recule d'une question, ou quitte le formulaire au premier écran (si onBack fourni).
@@ -8349,6 +8460,8 @@ function OnboardingTypeform({ siteId, onDone, onBack, initial=null }) {
     if (step > 0) setStep(step - 1);
     else onBack?.();
   };
+
+  const isInput = q && (q.type === 'number' || q.type === 'text');
 
   return (
     <div className="screen" style={{ display:'flex', flexDirection:'column', minHeight:'100vh', padding:'0 0 40px' }}>
@@ -8363,7 +8476,7 @@ function OnboardingTypeform({ siteId, onDone, onBack, initial=null }) {
       )}
       {/* progression */}
       <div style={{ display:'flex', gap:6, padding:'22px 18px 0' }}>
-        {ONBOARDING_QUESTIONS.map((_, i) => (
+        {activeQs.map((_, i) => (
           <div key={i} style={{
             flex:1, height:4, borderRadius:2,
             background: i <= step ? '#7dd940' : 'rgba(255,255,255,.12)',
@@ -8377,25 +8490,86 @@ function OnboardingTypeform({ siteId, onDone, onBack, initial=null }) {
           <div style={{ fontSize:9, letterSpacing:'.8px', color:'rgba(125,217,64,.85)', fontWeight:700, textTransform:'uppercase', marginBottom:10 }}>
             Question {step + 1} / {total}
           </div>
-          <h1 style={{ fontSize:24, fontWeight:900, color:'white', lineHeight:1.25, margin:'0 0 26px' }}>{q.title}</h1>
+          <h1 style={{ fontSize:24, fontWeight:900, color:'white', lineHeight:1.25, margin: q.subtitle ? '0 0 12px' : '0 0 26px' }}>{q.title}</h1>
+          {q.subtitle && (
+            <p style={{ fontSize:14, color:'rgba(255,255,255,.6)', lineHeight:1.5, margin:'0 0 22px' }}>{q.subtitle}</p>
+          )}
 
-          <div style={{ display:'grid', gridTemplateColumns:`repeat(${q.cols}, 1fr)`, gap:10 }}>
-            {q.options.map(opt => {
-              const active = answers[q.key] === opt.value;
-              return (
-                <button key={opt.value} onClick={() => pick(opt.value)} style={{
-                  padding:'22px 8px', borderRadius:16,
-                  border:`2px solid ${active ? '#7dd940' : 'rgba(255,255,255,.13)'}`,
-                  background: active ? 'rgba(125,217,64,.13)' : 'rgba(255,255,255,.04)',
-                  color:'white', cursor:'pointer', fontFamily:'inherit', textAlign:'center',
-                  transition:'border-color .15s, background .15s, transform .1s',
+          {isInput ? (
+            <div>
+              <div style={{ position:'relative', display:'flex', alignItems:'center' }}>
+                {q.type === 'text' ? (
+                  <textarea
+                    value={inputVal} onChange={e => setInputVal(e.target.value)}
+                    placeholder={q.placeholder} rows={3} autoFocus
+                    style={{
+                      width:'100%', padding:'16px 14px', borderRadius:16, resize:'vertical',
+                      border:'2px solid rgba(255,255,255,.13)', background:'rgba(255,255,255,.04)',
+                      color:'white', fontFamily:'inherit', fontSize:16, lineHeight:1.4, outline:'none',
+                    }}
+                  />
+                ) : (
+                  <>
+                    <input
+                      type="number" inputMode="decimal" min="0" step="0.1"
+                      value={inputVal} onChange={e => setInputVal(e.target.value)}
+                      placeholder={q.placeholder} autoFocus
+                      onKeyDown={e => { if (e.key === 'Enter' && parseFloat(inputVal) > 0) submitInput(inputVal); }}
+                      style={{
+                        width:'100%', padding:'18px 56px 18px 16px', borderRadius:16,
+                        border:'2px solid rgba(255,255,255,.13)', background:'rgba(255,255,255,.04)',
+                        color:'white', fontFamily:'inherit', fontSize:22, fontWeight:800, outline:'none',
+                      }}
+                    />
+                    <span style={{ position:'absolute', right:16, color:'rgba(255,255,255,.5)', fontSize:15, fontWeight:700 }}>{q.unit}</span>
+                  </>
+                )}
+              </div>
+
+              <button
+                onClick={() => submitInput(inputVal)}
+                disabled={q.type === 'number' && !(parseFloat(inputVal) > 0)}
+                style={{
+                  width:'100%', marginTop:16, padding:'16px', borderRadius:16, border:'none',
+                  background: (q.type === 'text' || parseFloat(inputVal) > 0) ? '#7dd940' : 'rgba(255,255,255,.08)',
+                  color: (q.type === 'text' || parseFloat(inputVal) > 0) ? '#06222b' : 'rgba(255,255,255,.35)',
+                  fontFamily:'inherit', fontSize:16, fontWeight:800,
+                  cursor: (q.type === 'text' || parseFloat(inputVal) > 0) ? 'pointer' : 'default',
                 }}>
-                  <div style={{ fontSize:34, marginBottom:10 }}>{opt.emoji}</div>
-                  <div style={{ fontSize:13, fontWeight: active ? 800 : 600, color: active ? '#7dd940' : 'rgba(255,255,255,.82)', lineHeight:1.3 }}>{opt.label}</div>
+                {q.type === 'text' && q.optional && !inputVal.trim() ? 'Passer' : 'Continuer →'}
+              </button>
+
+              {q.dontKnow && (
+                <button
+                  onClick={() => submitInput('__unknown__')}
+                  style={{
+                    width:'100%', marginTop:10, padding:'12px', borderRadius:14, border:'none',
+                    background:'none', color:'rgba(255,255,255,.55)', fontFamily:'inherit',
+                    fontSize:14, fontWeight:600, cursor:'pointer', textDecoration:'underline',
+                  }}>
+                  Je ne sais pas
                 </button>
-              );
-            })}
-          </div>
+              )}
+            </div>
+          ) : (
+            <div style={{ display:'grid', gridTemplateColumns:`repeat(${q.cols}, 1fr)`, gap:10 }}>
+              {q.options.map(opt => {
+                const sel = answers[q.key] === opt.value;
+                return (
+                  <button key={opt.value} onClick={() => pick(opt.value)} style={{
+                    padding:'22px 8px', borderRadius:16,
+                    border:`2px solid ${sel ? '#7dd940' : 'rgba(255,255,255,.13)'}`,
+                    background: sel ? 'rgba(125,217,64,.13)' : 'rgba(255,255,255,.04)',
+                    color:'white', cursor:'pointer', fontFamily:'inherit', textAlign:'center',
+                    transition:'border-color .15s, background .15s, transform .1s',
+                  }}>
+                    <div style={{ fontSize:34, marginBottom:10 }}>{opt.emoji}</div>
+                    <div style={{ fontSize:13, fontWeight: sel ? 800 : 600, color: sel ? '#7dd940' : 'rgba(255,255,255,.82)', lineHeight:1.3 }}>{opt.label}</div>
+                  </button>
+                );
+              })}
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -11352,6 +11526,10 @@ function AdminBilanDataScreen({ onBack }) {
       ['Surface du logement', f.surface_logement || '—'],
       ['Type d’habitat', f.type_habitat || '—'],
       ['Statut d’occupation', f.statut_occupation || '—'],
+      ['Panneaux solaires existants', f.pv_existant_kwc != null ? (f.pv_existant_kwc > 0 ? f.pv_existant_kwc + ' kWc' : 'non') : '—'],
+      ['Déclaration installation PV (client)', f.pv_declaration_client || '—'],
+      ['Batterie existante', f.batterie_existante_kwh != null ? (f.batterie_existante_kwh > 0 ? f.batterie_existante_kwh + ' kWh' : 'non') : '—'],
+      ['Autres équipements énergivores', f.equipements_energivores_autres || '—'],
       ['Niveau quizz', f.quiz_niveau_etoiles != null ? (f.quiz_niveau_etoiles > 0 ? '⭐'.repeat(f.quiz_niveau_etoiles) : '🐻 (0 étoile)') : '—'],
       ['Quizz — taux d’erreur (1er coup)', f.quiz_taux_erreur_pct != null ? f.quiz_taux_erreur_pct + ' %' : '—'],
       ['Puissance max (courbe)', f.puissance_max_kw != null ? f.puissance_max_kw + ' kW' + (f.puissance_max_survenue ? ` (${f.puissance_max_survenue.mois}, ${f.puissance_max_survenue.heure}h)` : '') : '—'],
@@ -14822,7 +15000,7 @@ function App() {
       case 'MA_CONSO':
         return <MonSiteScreen user={user} userProfile={profile} onBack={goBack} onSimulations={()=>goTo('SIMULATIONS')} onComprendre={()=>goTo('COMPRENDRE_HOME')} onOnboardingQuestions={(sid)=>goTo('ONBOARDING_QUESTIONS',{onbSiteId:sid})} onOptimisation={()=>goTo('OPTIMISATION')} cartVersion={cartVersion} can={can}/>;
       case 'ONBOARDING_QUESTIONS':
-        return <OnboardingTypeform siteId={state.onbSiteId} onDone={()=>{
+        return <OnboardingTypeform siteId={state.onbSiteId} extended onDone={()=>{
           // Arme le watcher global : il surveillera la collecte ENEDIS + le bilan en fond
           // pendant que l'utilisateur lit la page « Comprendre » (point 6).
           const sid = state.onbSiteId;
