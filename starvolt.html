@@ -4710,7 +4710,7 @@ function EnergyBalanceChart({ balance, level, selMonth, selDay, setLevel, setSel
 }
 
 // ─── MonSiteScreen ────────────────────────────
-function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre, onOnboardingQuestions, cartVersion=0, can = () => true }) {
+function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre, onOnboardingQuestions, onOptimisation, cartVersion=0, can = () => true }) {
   const[sites,setSites]=useState(null);
   const[activeId,setActiveId]=useState(null);
   const[tariffs,setTariffs]=useState([]);
@@ -4747,6 +4747,7 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
   const[meterCandidates,setMeterCandidates]=useState(null); // [{prm,nom,adresse}] à confirmer avant extraction
   const[linkCopied,setLinkCopied]=useState(false); // feedback "lien copié" du bouton de partage consentement
   const[consentModal,setConsentModal]=useState(null); // null | 'invite' | 'iframe' — fenêtre de consentement in-app
+  const[powerModal,setPowerModal]=useState(null); // null | {kind:'waste'|'ok'|'over'} — conseil puissance souscrite
   const[autoLinkyArmed,setAutoLinkyArmed]=useState(false); // armé au retour de l'inscription pour lancer la collecte si besoin
   const[linkyLive,setLinkyLive]=useState(false); // true seulement quand le statut vient d'une réponse live de l'edge (≠ restauré du localStorage)
   const consentShownRef=useRef(null); // requestId pour lequel l'invite a déjà été ouverte automatiquement
@@ -5519,20 +5520,28 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
                     const tileStyle={display:'flex',alignItems:'center',gap:isMobile?8:10,padding:isMobile?'8px 10px':'12px 16px',background:'rgba(255,255,255,.03)',border:'1px solid rgba(255,255,255,.08)',borderRadius:12,whiteSpace:'nowrap'};
                     const tileLbl={fontSize:isMobile?8:10,fontWeight:800,letterSpacing:.6,textTransform:'uppercase',color:'rgba(255,255,255,.4)',whiteSpace:'nowrap'};
                     const tileVal={fontSize:isMobile?16:22,fontWeight:800,color:'white',whiteSpace:'nowrap',lineHeight:1.15};
+                    const psKva=site.puissance_souscrite_kva!=null?Number(site.puissance_souscrite_kva):null;
+                    const pMaxKw=powerStats?Math.round(powerStats.maxKw):null;
+                    const hasSub=psKva!=null&&pMaxKw!=null;
+                    const veilleLow=powerStats&&powerStats.minKw<1; // <1 kW → afficher en W
                     const powerTiles=powerStats?(
                       <div style={{display:'flex',flexDirection:'column',justifyContent:'center',gap:isMobile?8:12,flexShrink:0}}>
-                        <div style={tileStyle}>
+                        <div style={{...tileStyle,cursor:hasSub?'pointer':'default'}} onClick={hasSub?()=>{
+                          const diff=psKva-powerStats.maxKw;
+                          const kind=powerStats.maxKw>psKva?'over':(diff>1?'waste':'ok');
+                          setPowerModal({kind});
+                        }:undefined}>
                           <IconZap/>
                           <div style={{minWidth:0}}>
-                            <div style={tileLbl}>Puissance max</div>
-                            <div style={tileVal}>{Math.round(powerStats.maxKw)}<U c="kW" em={0.45}/></div>
+                            <div style={tileLbl}>{hasSub?'Puis max / souscrite':'Puissance max'}</div>
+                            <div style={tileVal}>{pMaxKw}{hasSub&&<span style={{fontWeight:400,opacity:.6}}> / {Math.round(psKva)}</span>}<U c="kW" em={0.45}/></div>
                           </div>
                         </div>
                         <div style={tileStyle}>
                           <IconStandby/>
                           <div style={{minWidth:0}}>
                             <div style={tileLbl}>Conso veille</div>
-                            <div style={tileVal}>{Math.round(powerStats.minKw)}<U c="kW" em={0.45}/></div>
+                            <div style={tileVal}>{veilleLow?Math.round(powerStats.minKw*1000):Math.round(powerStats.minKw)}<U c={veilleLow?'W':'kW'} em={0.45}/></div>
                           </div>
                         </div>
                       </div>
@@ -6167,6 +6176,36 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
               </div>
             </div>
           )}
+        </div>
+      )}
+      {powerModal&&(
+        <div onClick={()=>setPowerModal(null)} style={{position:'fixed',inset:0,zIndex:9000,background:'rgba(3,12,18,.82)',backdropFilter:'blur(4px)',WebkitBackdropFilter:'blur(4px)',display:'flex',alignItems:'center',justifyContent:'center',padding:16}}>
+          <div className="card" onClick={e=>e.stopPropagation()} style={{maxWidth:400,width:'100%',padding:'26px 22px'}}>
+            {(()=>{
+              const M={
+                waste:{icon:'⚡',title:'Puissance souscrite trop élevée',color:'#f7c948',body:"Votre abonnement a souscrit une puissance trop importante et vous n'utilisez jamais cette puissance. On vous conseille de changer d'abonnement pour faire des économies.",cta:true},
+                ok:{icon:'✓',title:'Puissance bien dimensionnée',color:'#7dd940',body:"La puissance souscrite dans votre contrat actuel est parfaitement adaptée à votre consommation en pointe.",cta:false},
+                over:{icon:'⚠️',title:'Dépassement de puissance',color:'#f0674a',body:"Attention ! Parfois votre consommation est trop importante et dépasse le maximum autorisé par votre abonnement actuel. On vous invite à le changer afin de ne pas avoir de coupures.",cta:true},
+              }[powerModal.kind];
+              if(!M)return null;
+              const showCta=M.cta&&can('offers','comparaison_fournisseur')&&typeof onOptimisation==='function';
+              return(<>
+                <div style={{fontSize:34,marginBottom:8,textAlign:'center'}}>{M.icon}</div>
+                <div style={{fontSize:17,fontWeight:900,color:M.color,marginBottom:10,lineHeight:1.25,textAlign:'center'}}>{M.title}</div>
+                <div style={{color:'rgba(255,255,255,.8)',fontSize:13.5,lineHeight:1.6,marginBottom:18,textAlign:'center'}}>{M.body}</div>
+                {showCta&&(
+                  <button onClick={()=>{setPowerModal(null);onOptimisation();}}
+                    style={{width:'100%',background:'#7dd940',color:'#061e2a',fontWeight:800,fontSize:14,borderRadius:10,padding:'12px',border:'none',cursor:'pointer'}}>
+                    Comparer les fournisseurs →
+                  </button>
+                )}
+                <button onClick={()=>setPowerModal(null)}
+                  style={{marginTop:showCta?10:0,width:'100%',background:'none',border:'none',color:'rgba(255,255,255,.5)',fontSize:12.5,cursor:'pointer',padding:'8px'}}>
+                  {showCta?'Plus tard':'OK, compris'}
+                </button>
+              </>);
+            })()}
+          </div>
         </div>
       )}
     </>
@@ -14815,7 +14854,7 @@ function App() {
           onBack={goBack}/>;
 
       case 'MA_CONSO':
-        return <MonSiteScreen user={user} userProfile={profile} onBack={goBack} onSimulations={()=>goTo('SIMULATIONS')} onComprendre={()=>goTo('COMPRENDRE_HOME')} onOnboardingQuestions={(sid)=>goTo('ONBOARDING_QUESTIONS',{onbSiteId:sid})} cartVersion={cartVersion} can={can}/>;
+        return <MonSiteScreen user={user} userProfile={profile} onBack={goBack} onSimulations={()=>goTo('SIMULATIONS')} onComprendre={()=>goTo('COMPRENDRE_HOME')} onOnboardingQuestions={(sid)=>goTo('ONBOARDING_QUESTIONS',{onbSiteId:sid})} onOptimisation={()=>goTo('OPTIMISATION')} cartVersion={cartVersion} can={can}/>;
       case 'ONBOARDING_QUESTIONS':
         return <OnboardingTypeform siteId={state.onbSiteId} onDone={()=>{
           // Arme le watcher global : il surveillera la collecte ENEDIS + le bilan en fond
