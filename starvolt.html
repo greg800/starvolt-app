@@ -11400,6 +11400,18 @@ function AdminBilanDataScreen({ onBack }) {
       ['Niveau quizz', f.quiz_niveau_etoiles != null ? (f.quiz_niveau_etoiles > 0 ? '⭐'.repeat(f.quiz_niveau_etoiles) : '🐻 (0 étoile)') : '—'],
       ['Quizz — taux d’erreur (1er coup)', f.quiz_taux_erreur_pct != null ? f.quiz_taux_erreur_pct + ' %' : '—'],
       ['Leviers classés (du + au - prometteur)', (f.leviers_classement || []).length ? f.leviers_classement.join(' › ') : '—'],
+      ['Puissance max (courbe)', f.puissance_max_kw != null ? f.puissance_max_kw + ' kW' + (f.puissance_max_survenue ? ` (${f.puissance_max_survenue.mois}, ${f.puissance_max_survenue.heure}h)` : '') : '—'],
+      ['Puissance min / veille', f.puissance_min_kw != null ? f.puissance_min_kw + ' kW' : '—'],
+      ['Puissance souscrite', f.puissance_souscrite_kva != null ? f.puissance_souscrite_kva + ' kVA' : '—'],
+      ['Écart souscrite − max', f.ecart_puissance_kw != null ? f.ecart_puissance_kw + ' kW' : '—'],
+      ['Souscription surdimensionnée', f.souscription_surdimensionnee ? 'oui' : 'non'],
+      ['Veille — énergie annuelle', f.veille_kwh_annuel != null ? f.veille_kwh_annuel + ' kWh/an' : '—'],
+      ['Veille — coût annuel', f.veille_cout_annuel_eur != null ? f.veille_cout_annuel_eur + ' €/an' : '—'],
+      ['Veille élevée', f.veille_elevee ? 'oui' : 'non'],
+      ['Veille — économie potentielle', f.economie_potentielle_veille_eur != null ? f.economie_potentielle_veille_eur + ' €/an' : '—'],
+      ['Jours d’inoccupation', f.jours_inoccupation ? `${f.jours_inoccupation.nb_jours} j (${f.jours_inoccupation.pct_annee} %)` : '—'],
+      ['Conso moy. jour inoccupé', f.jours_inoccupation?.conso_moy_kwh_jour_inoccupe != null ? f.jours_inoccupation.conso_moy_kwh_jour_inoccupe + ' kWh' : '—'],
+      ['Conso moy. jour occupé', f.jours_inoccupation?.conso_moy_kwh_jour_occupe != null ? f.jours_inoccupation.conso_moy_kwh_jour_occupe + ' kWh' : '—'],
     ];
   };
 
