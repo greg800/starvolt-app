@@ -3942,7 +3942,6 @@ async function findBestPvBat({ site, prodProfil, tariffs, spotMap, globalVars, t
 
 // 4) Construit les CHIFFRES déjà calculés envoyés à l'IA pour "Ton bilan en clair".
 //    L'IA ne calcule RIEN : on lui livre des faits déterministes issus du moteur.
-//    leviers_classement = ordre qualitatif des leviers (sans euros, pour ne pas contredire le simulateur).
 const FLEX_CHAUFFAGE_LBL = { elec:'électrique', pac:'pompe à chaleur', autre:'autre' };
 const FLEX_ECS_LBL       = { elec:'électrique', autre:'autre' };
 const FLEX_SURFACE_LBL   = { small:'moins de 70 m²', medium:'70 à 150 m²', large:'plus de 150 m²' };
@@ -4046,49 +4045,6 @@ function buildBilanFacts({ site, tariffs, globalVars, prodProfil, quiz }) {
     ? Math.max(0, Math.round((veilleKwhAnnuel - Math.round(BOX_INTERNET_W*8760/1000)) * prixKwhEur))
     : null;
 
-  // ── Leviers (€/an, ordres de grandeur indicatifs) ──
-  const leviers = {};
-  if (factureActuelle!=null) {
-    // 1) Meilleur tarif statique vs actuel
-    let best=null;
-    (tariffs||[]).forEach(t=>{
-      if(t.tarif_dynamique||t.type_tarif==='dynamique'||t.type_tarif==='multi') return;
-      const c=calcTariffCost(t,kwh_hc,kwh_hp);
-      if(c?.total!=null && (best===null||c.total<best)) best=c.total;
-    });
-    if(best!=null) leviers.changer_de_tarif = Math.max(0, Math.round(factureActuelle-best));
-    // 2) ACC — kWh consommés en heures solaires × écart de prix
-    let kwhSolaire=0;
-    for (let m=1;m<=12;m++) for(let d=1;d<=PROF_DAYS[m-1];d++) for(let h=0;h<24;h++){
-      const isSolar = prodProfil ? prodProfil[profIdx(m,d,h)]>0 : (h>=9&&h<18);
-      if(isSolar) kwhSolaire += (cp[profIdx(m,d,h)]||0)/1000;
-    }
-    const prixHp = curT?.prix_hp || (prixMoyen?prixMoyen/100:0.20);
-    leviers.rejoindre_acc = Math.max(0, Math.round(kwhSolaire*Math.max(0, prixHp-0.09)));
-    // 3) Box flexibilité — seulement si un usage électrique est pilotable
-    //    (chauffage élec/PAC ou eau chaude électrique). Sinon rien à piloter.
-    const flexPossible = site.flex_chauffage==='elec' || site.flex_chauffage==='pac' || site.flex_ecs==='elec';
-    if (flexPossible) leviers.box_flexibilite = Math.round(140 + factureActuelle*(typeTarif==='dynamique'?0.20:0.10));
-    // 4) Panneaux solaires — seulement si l'utilisateur peut en installer
-    //    (propriétaire ET maison individuelle). Locataire ou collectif → impossible.
-    const pvPossible = site.flex_statut!=='locataire' && site.flex_type_logement!=='collectif';
-    if (pvPossible) leviers.panneaux_solaires = Math.round(factureActuelle*0.5);
-  }
-
-  // ── Classement qualitatif des leviers (du plus au moins rentable) ──
-  //    On NE transmet PAS les euros à l'IA (ils sont indicatifs et risqueraient
-  //    de contredire le simulateur précis) : seul l'ordre est envoyé.
-  const LEVIER_LABEL = {
-    changer_de_tarif: 'changer de tarif',
-    rejoindre_acc: 'rejoindre une communauté solaire (autoconsommation collective)',
-    box_flexibilite: 'installer la box de flexibilité',
-    panneaux_solaires: 'installer des panneaux solaires',
-  };
-  const leviersClassement = Object.entries(leviers)
-    .filter(([, v]) => v > 0)
-    .sort((a, b) => b[1] - a[1])
-    .map(([k]) => LEVIER_LABEL[k] || k);
-
   return {
     conso_annuelle_kwh: consoAnnuelle,
     facture_actuelle_eur: factureActuelle,
@@ -4097,7 +4053,6 @@ function buildBilanFacts({ site, tariffs, globalVars, prodProfil, quiz }) {
     pct_heures_creuses: hasHC ? pctHC : null,
     repartition_horaire_pct: repartition,
     saisonnalite_pct: saisonnalite,
-    leviers_classement: leviersClassement,
     chauffage: site.flex_chauffage ? (FLEX_CHAUFFAGE_LBL[site.flex_chauffage] || site.flex_chauffage) : null,
     eau_chaude: site.flex_ecs ? (FLEX_ECS_LBL[site.flex_ecs] || site.flex_ecs) : null,
     surface_logement: site.flex_surface ? (FLEX_SURFACE_LBL[site.flex_surface] || site.flex_surface) : null,
@@ -11399,7 +11354,6 @@ function AdminBilanDataScreen({ onBack }) {
       ['Statut d’occupation', f.statut_occupation || '—'],
       ['Niveau quizz', f.quiz_niveau_etoiles != null ? (f.quiz_niveau_etoiles > 0 ? '⭐'.repeat(f.quiz_niveau_etoiles) : '🐻 (0 étoile)') : '—'],
       ['Quizz — taux d’erreur (1er coup)', f.quiz_taux_erreur_pct != null ? f.quiz_taux_erreur_pct + ' %' : '—'],
-      ['Leviers classés (du + au - prometteur)', (f.leviers_classement || []).length ? f.leviers_classement.join(' › ') : '—'],
       ['Puissance max (courbe)', f.puissance_max_kw != null ? f.puissance_max_kw + ' kW' + (f.puissance_max_survenue ? ` (${f.puissance_max_survenue.mois}, ${f.puissance_max_survenue.heure}h)` : '') : '—'],
       ['Puissance min / veille', f.puissance_min_kw != null ? f.puissance_min_kw + ' kW' : '—'],
       ['Puissance souscrite', f.puissance_souscrite_kva != null ? f.puissance_souscrite_kva + ' kVA' : '—'],
