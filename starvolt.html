@@ -5427,7 +5427,7 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
                     );
                     const dash=<span style={{color:'rgba(255,255,255,.2)'}}>—</span>;
                     const aCol=hasModifs?'rgba(125,217,64,.7)':'rgba(255,255,255,.2)';
-                    const tbl={width:'100%',borderCollapse:'collapse',marginBottom:12,fontSize:12};
+                    const tbl={width:'100%',borderCollapse:'collapse',marginBottom:0,fontSize:12};
                     const tblD={...tbl,width:'auto',maxWidth:400,fontSize:22};
                     const th={padding:'4px 8px',fontWeight:800,fontSize:9,letterSpacing:1,textTransform:'uppercase',textAlign:'right',border:'none'};
                     const td={padding:'6px 8px',border:'none',textAlign:'right'};
@@ -5457,10 +5457,10 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
                               <td style={{...td,color:'#f0a050',fontWeight:700}}>{billAvant!=null?<>{billAvant.toLocaleString('fr-FR')}<U c="€/an" em={0.4}/></>:dash}</td>
                               <td style={{...td,color:hasModifs?'#7dd940':'rgba(255,255,255,.18)',fontWeight:700}}>{hasModifs?<>{billApresNet.toLocaleString('fr-FR')}<U c="€/an" em={0.4}/></>:dash}</td>
                             </tr>
-                            {hasSaving&&<tr><td></td><td></td><td style={{...td,borderTop:'1px solid rgba(125,217,64,.2)',paddingTop:6,whiteSpace:'nowrap'}}>
-                              <span style={{fontSize:20,fontWeight:900,color:'#7dd940'}}>-{Math.round(totalSaving).toLocaleString('fr-FR')}<U c="€/an" em={0.4}/></span>
-                              {totalReductionPct>0&&<span style={{fontSize:15,color:'rgba(125,217,64,.6)',marginLeft:3}}>({totalReductionPct}%)</span>}
-                              {flexRev>0&&<span style={{fontSize:11,color:'rgba(125,217,64,.5)',marginLeft:5}}>dont {flexRev}€ Flex</span>}{accRev>0&&<span style={{fontSize:11,color:'rgba(125,217,64,.5)',marginLeft:5}}>dont {accRev}€ ACC</span>}
+                            {hasSaving&&<tr><td></td><td></td><td style={{...td,borderTop:'1px solid rgba(125,217,64,.2)',paddingTop:6}}>
+                              <div style={{whiteSpace:'nowrap'}}><span style={{fontSize:20,fontWeight:900,color:'#7dd940'}}>-{Math.round(totalSaving).toLocaleString('fr-FR')}<U c="€/an" em={0.4}/></span>
+                              {totalReductionPct>0&&<span style={{fontSize:15,color:'rgba(125,217,64,.6)',marginLeft:3}}>({totalReductionPct}%)</span>}</div>
+                              {(flexRev>0||accRev>0)&&<div style={{marginTop:2,fontSize:11,color:'rgba(125,217,64,.5)',lineHeight:1.3}}>{flexRev>0&&<span>dont {flexRev}€ Flex</span>}{accRev>0&&<span style={{marginLeft:flexRev>0?5:0}}>dont {accRev}€ ACC</span>}</div>}
                             </td></tr>}
                             {!hasModifs&&<tr><td colSpan={3} style={{...td,textAlign:'center',color:'rgba(255,255,255,.2)',fontSize:10,paddingTop:5,paddingBottom:2}}>Ajoutez des équipements dans votre panier pour voir l'impact</td></tr>}
                           </tbody>
@@ -5503,24 +5503,24 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
                         </table>
                       );
                     }
-                    // ── Tuiles Puissance max / Conso veille — pictos épurés (style Starck), alignées sous le tableau ──
-                    const tileW=isMobile?'100%':400;
+                    // ── Tuiles Puissance max / Conso veille — pictos épurés (style Starck), à droite du tableau ──
+                    const iconSz=isMobile?18:22;
                     const IconZap=()=>(
-                      <svg viewBox="0 0 24 24" width={20} height={20} fill="none" stroke="white" strokeWidth="1.4" strokeLinejoin="round" strokeLinecap="round" style={{opacity:.85,flexShrink:0}}>
+                      <svg viewBox="0 0 24 24" width={iconSz} height={iconSz} fill="none" stroke="white" strokeWidth="1.4" strokeLinejoin="round" strokeLinecap="round" style={{opacity:.85,flexShrink:0}}>
                         <path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z"/>
                       </svg>
                     );
                     const IconStandby=()=>(
-                      <svg viewBox="0 0 24 24" width={20} height={20} fill="none" stroke="white" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" style={{opacity:.85,flexShrink:0}}>
+                      <svg viewBox="0 0 24 24" width={iconSz} height={iconSz} fill="none" stroke="white" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" style={{opacity:.85,flexShrink:0}}>
                         <path d="M12 2v10"/>
                         <path d="M18.4 6.6a9 9 0 1 1-12.77.04"/>
                       </svg>
                     );
-                    const tileStyle={flex:'1 1 0',minWidth:0,display:'flex',alignItems:'center',gap:10,padding:isMobile?'10px 12px':'11px 14px',background:'rgba(255,255,255,.03)',border:'1px solid rgba(255,255,255,.08)',borderRadius:12};
-                    const tileLbl={fontSize:9,fontWeight:800,letterSpacing:.6,textTransform:'uppercase',color:'rgba(255,255,255,.4)',whiteSpace:'nowrap'};
-                    const tileVal={fontSize:isMobile?18:20,fontWeight:800,color:'white',whiteSpace:'nowrap',lineHeight:1.15};
-                    const powerTiles=powerStats&&(
-                      <div style={{display:'flex',gap:isMobile?8:12,width:tileW,marginTop:2,marginBottom:12}}>
+                    const tileStyle={display:'flex',alignItems:'center',gap:isMobile?8:10,padding:isMobile?'8px 10px':'12px 16px',background:'rgba(255,255,255,.03)',border:'1px solid rgba(255,255,255,.08)',borderRadius:12,whiteSpace:'nowrap'};
+                    const tileLbl={fontSize:isMobile?8:10,fontWeight:800,letterSpacing:.6,textTransform:'uppercase',color:'rgba(255,255,255,.4)',whiteSpace:'nowrap'};
+                    const tileVal={fontSize:isMobile?16:22,fontWeight:800,color:'white',whiteSpace:'nowrap',lineHeight:1.15};
+                    const powerTiles=powerStats?(
+                      <div style={{display:'flex',flexDirection:'column',justifyContent:'center',gap:isMobile?8:12,flexShrink:0}}>
                         <div style={tileStyle}>
                           <IconZap/>
                           <div style={{minWidth:0}}>
@@ -5536,10 +5536,10 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
                           </div>
                         </div>
                       </div>
-                    );
+                    ):null;
                     return(
-                      <div style={{display:'flex',flexDirection:'column',alignItems:isMobile?'stretch':'flex-start'}}>
-                        {tableEl}
+                      <div style={{display:'flex',alignItems:'center',gap:isMobile?10:28,marginBottom:12}}>
+                        <div style={{flex:isMobile?'1 1 auto':'0 0 auto',minWidth:0}}>{tableEl}</div>
                         {powerTiles}
                       </div>
                     );
