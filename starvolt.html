@@ -2852,6 +2852,26 @@ const PROF_DAYS=[31,29,31,30,31,30,31,31,30,31,30,31];
 const MOIS_ABBR=['Jan','Fév','Mar','Avr','Mai','Jun','Jul','Aoû','Sep','Oct','Nov','Déc'];
 const MOIS_FULL=['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
 function profIdx(m,d,h){let o=0;for(let i=1;i<m;i++)o+=PROF_DAYS[i-1]*24;return o+(d-1)*24+h;}
+// Puissance max/min (kW) sur le profil horaire (Wh/h ≡ W moyen sur l'heure), filtrable par mois/jour.
+// Ignore les lectures ≤0 (trous de données), même convention que le reste du code.
+function powerRangeStats(profile,mFilter,dFilter){
+  if(!profile||!profile.length)return null;
+  let maxWh=-Infinity,minWh=Infinity,maxAt=null,minAt=null;
+  const months=mFilter?[mFilter]:Array.from({length:12},(_,i)=>i+1);
+  months.forEach(m=>{
+    const days=dFilter?[dFilter]:Array.from({length:PROF_DAYS[m-1]},(_,i)=>i+1);
+    days.forEach(d=>{
+      for(let h=0;h<24;h++){
+        const wh=profile[profIdx(m,d,h)]||0;
+        if(wh<=0)continue;
+        if(wh>maxWh){maxWh=wh;maxAt={m,d,h};}
+        if(wh<minWh){minWh=wh;minAt={m,d,h};}
+      }
+    });
+  });
+  if(maxWh===-Infinity)return null;
+  return{maxKw:maxWh/1000,minKw:minWh/1000,maxAt,minAt};
+}
 // Interpolation linéaire dans une table de prix [[val, prix], ...]
 function interpPrix(val, table) {
   if (!table || table.length === 0 || !(val > 0)) return 0;
@@ -3948,18 +3968,29 @@ function buildBilanFacts({ site, tariffs, globalVars, prodProfil, quiz }) {
   const cp = site.conso_profil;
   const consoAnnuelle = Math.round(site.conso_annuelle_kwh);
 
-  // ── Répartition horaire (% de la conso annuelle) + saisonnalité ──
+  // ── Répartition horaire (% de la conso annuelle) + saisonnalité + puissance (max/min) ──
   const b = { nuit_0h_6h:0, matin_6h_9h:0, journee_9h_18h:0, pointe_18h_22h:0, soir_22h_24h:0 };
   let ete=0, hiver=0, total=0;
-  for (let m=1;m<=12;m++) for(let d=1;d<=PROF_DAYS[m-1];d++) for(let h=0;h<24;h++){
-    const wh = cp[profIdx(m,d,h)]||0; if(wh<=0) continue;
-    total+=wh;
-    if(h<6) b.nuit_0h_6h+=wh;
-    else if(h<9) b.matin_6h_9h+=wh;
-    else if(h<18) b.journee_9h_18h+=wh;
-    else if(h<22) b.pointe_18h_22h+=wh;
-    else b.soir_22h_24h+=wh;
-    if(m>=4&&m<=10) ete+=wh; else hiver+=wh;
+  let maxWh=-Infinity, maxAt=null, minWh=Infinity, minAt=null;
+  const dailyStats = []; // { m, d, maxWh, totalWh } — un par jour de l'année, pour la détection des jours d'inoccupation
+  for (let m=1;m<=12;m++) for(let d=1;d<=PROF_DAYS[m-1];d++){
+    let dMaxWh=0, dTotalWh=0;
+    for(let h=0;h<24;h++){
+      const wh = cp[profIdx(m,d,h)]||0;
+      dTotalWh += wh;
+      if(wh<=0) continue;
+      total+=wh;
+      if(h<6) b.nuit_0h_6h+=wh;
+      else if(h<9) b.matin_6h_9h+=wh;
+      else if(h<18) b.journee_9h_18h+=wh;
+      else if(h<22) b.pointe_18h_22h+=wh;
+      else b.soir_22h_24h+=wh;
+      if(m>=4&&m<=10) ete+=wh; else hiver+=wh;
+      if(wh>maxWh){maxWh=wh;maxAt={m,d,h};}
+      if(wh<minWh){minWh=wh;minAt={m,d,h};}
+      if(wh>dMaxWh)dMaxWh=wh;
+    }
+    dailyStats.push({m,d,maxWh:dMaxWh,totalWh:dTotalWh});
   }
   const pct = v => total>0 ? Math.round(v/total*100) : 0;
   const repartition = {
@@ -3968,6 +3999,21 @@ function buildBilanFacts({ site, tariffs, globalVars, prodProfil, quiz }) {
     soir_22h_24h: pct(b.soir_22h_24h),
   };
   const saisonnalite = { ete: pct(ete), hiver: pct(hiver) };
+  const saisonOf = m => (m>=4&&m<=10) ? 'été' : 'hiver';
+  const puissanceMaxKw = maxWh>-Infinity ? Math.round(maxWh/100)/10 : null;
+  const puissanceMinKw = minWh<Infinity ? Math.round(minWh/100)/10 : null;
+  const puissanceMaxSurvenue = maxAt ? { mois: MOIS_FULL[maxAt.m-1], jour: maxAt.d, heure: maxAt.h, saison: saisonOf(maxAt.m) } : null;
+  const puissanceMinSurvenue = minAt ? { mois: MOIS_FULL[minAt.m-1], jour: minAt.d, heure: minAt.h, saison: saisonOf(minAt.m) } : null;
+
+  // ── Jours d'inoccupation : pas de pic notable dans la journée, seulement la conso de veille ──
+  //    Seuil = 1,6× la veille annuelle (mini +400 Wh de marge pour absorber les cycles frigo).
+  let vacantDays=0, vacantTotalWh=0, occupiedDays=0, occupiedTotalWh=0;
+  const veilleThresholdWh = minWh<Infinity ? Math.max(minWh*1.6, minWh+400) : null;
+  if (veilleThresholdWh!=null) dailyStats.forEach(ds=>{
+    if (ds.maxWh>0 && ds.maxWh<=veilleThresholdWh) { vacantDays++; vacantTotalWh+=ds.totalWh; }
+    else { occupiedDays++; occupiedTotalWh+=ds.totalWh; }
+  });
+  const nbJoursAnnee = dailyStats.length;
 
   // ── Tarif courant + facture actuelle (déterministe) ──
   const curT = (tariffs||[]).find(t=>t.id===site.tarif_id) || null;
@@ -3982,6 +4028,23 @@ function buildBilanFacts({ site, tariffs, globalVars, prodProfil, quiz }) {
   const pctHC = (kwh_hc+kwh_hp)>0 ? Math.round(kwh_hc/(kwh_hc+kwh_hp)*100) : 0;
   const prixMoyen = (factureActuelle!=null && consoAnnuelle>0)
     ? Math.round(factureActuelle/consoAnnuelle*100) : null; // c€/kWh
+  const prixKwhEur = prixMoyen!=null ? prixMoyen/100 : (curT?.prix_hp || 0.20);
+
+  // ── Puissance souscrite vs puissance max observée ──
+  const puissanceSouscriteKva = site.puissance_souscrite_kva!=null ? Number(site.puissance_souscrite_kva) : null;
+  const ecartPuissanceKw = (puissanceSouscriteKva!=null && puissanceMaxKw!=null)
+    ? Math.round((puissanceSouscriteKva-puissanceMaxKw)*10)/10 : null;
+  const souscriptionSurdimensionnee = ecartPuissanceKw!=null && ecartPuissanceKw>1;
+
+  // ── Coût de la veille (puissance mini annuelle extrapolée sur l'année) ──
+  //    Référence de comparaison : une box internet + décodeur consomme en continu ~10-20W.
+  const BOX_INTERNET_W = 15;
+  const veilleKwhAnnuel = minWh<Infinity ? Math.round(minWh*8760/1000) : null;
+  const veilleCoutAnnuelEur = veilleKwhAnnuel!=null ? Math.round(veilleKwhAnnuel*prixKwhEur) : null;
+  const veilleElevee = minWh<Infinity && minWh > BOX_INTERNET_W*3;
+  const economiePotentielleVeilleEur = veilleElevee
+    ? Math.max(0, Math.round((veilleKwhAnnuel - Math.round(BOX_INTERNET_W*8760/1000)) * prixKwhEur))
+    : null;
 
   // ── Leviers (€/an, ordres de grandeur indicatifs) ──
   const leviers = {};
@@ -4042,6 +4105,23 @@ function buildBilanFacts({ site, tariffs, globalVars, prodProfil, quiz }) {
     statut_occupation: site.flex_statut ? (FLEX_STATUT_LBL[site.flex_statut] || site.flex_statut) : null,
     quiz_niveau_etoiles: quiz?.stars ?? null,
     quiz_taux_erreur_pct: quiz?.errorPct ?? null,
+    puissance_max_kw: puissanceMaxKw,
+    puissance_max_survenue: puissanceMaxSurvenue,
+    puissance_min_kw: puissanceMinKw,
+    puissance_min_survenue: puissanceMinSurvenue,
+    puissance_souscrite_kva: puissanceSouscriteKva,
+    ecart_puissance_kw: ecartPuissanceKw,
+    souscription_surdimensionnee: souscriptionSurdimensionnee,
+    veille_kwh_annuel: veilleKwhAnnuel,
+    veille_cout_annuel_eur: veilleCoutAnnuelEur,
+    veille_elevee: veilleElevee,
+    economie_potentielle_veille_eur: economiePotentielleVeilleEur,
+    jours_inoccupation: {
+      nb_jours: vacantDays,
+      pct_annee: nbJoursAnnee>0 ? Math.round(vacantDays/nbJoursAnnee*100) : 0,
+      conso_moy_kwh_jour_inoccupe: vacantDays>0 ? Math.round(vacantTotalWh/vacantDays/100)/10 : null,
+      conso_moy_kwh_jour_occupe: occupiedDays>0 ? Math.round(occupiedTotalWh/occupiedDays/100)/10 : null,
+    },
   };
 }
 
@@ -4903,6 +4983,22 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
 
   const site=sites?.find(s=>s.id===activeId)||null;
 
+  // Puissance max/min affichée à côté du tableau avant/après : suit le zoom du graphique
+  // (année entière / mois sélectionné / jour sélectionné) pour n'afficher que le strict nécessaire.
+  const powerStats=useMemo(()=>{
+    if(!site?.conso_profil)return null;
+    if(chartLevel==='hour'&&chartMonth&&chartDay){
+      const s=powerRangeStats(site.conso_profil,chartMonth,chartDay);
+      return s&&{...s,label:`${chartDay} ${MOIS_FULL[chartMonth-1]}`};
+    }
+    if(chartLevel==='day'&&chartMonth){
+      const s=powerRangeStats(site.conso_profil,chartMonth,null);
+      return s&&{...s,label:MOIS_FULL[chartMonth-1]};
+    }
+    const s=powerRangeStats(site.conso_profil,null,null);
+    return s&&{...s,label:'Année'};
+  },[site?.conso_profil,chartLevel,chartMonth,chartDay]);
+
   // Site déjà importé avec la totalité des données heure par heure (courbe de
   // charge complète : 8784 valeurs ET source non journalière). Dans ce cas, on
   // masque le bouton de collecte et on affiche les 4 étapes au vert.
@@ -5332,15 +5428,32 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
                     const dash=<span style={{color:'rgba(255,255,255,.2)'}}>—</span>;
                     const aCol=hasModifs?'rgba(125,217,64,.7)':'rgba(255,255,255,.2)';
                     const tbl={width:'100%',borderCollapse:'collapse',marginBottom:12,fontSize:12};
-                    const tblD={...tbl,width:'auto',maxWidth:560,fontSize:22};
+                    const tblD={...tbl,width:'auto',maxWidth:400,fontSize:22};
                     const th={padding:'4px 8px',fontWeight:800,fontSize:9,letterSpacing:1,textTransform:'uppercase',textAlign:'right',border:'none'};
                     const td={padding:'6px 8px',border:'none',textAlign:'right'};
                     const sep={borderTop:'1px solid rgba(255,255,255,.07)'};
                     const U=({c,em=0.5})=><span style={{fontSize:em+'em',fontWeight:400,marginLeft:3,verticalAlign:'middle',opacity:.75}}>{c}</span>;
+                    // Bloc puissance max/min — suit le zoom du graphique (année / mois / jour sélectionné).
+                    const powerBox=powerStats&&(
+                      <div style={{flex:isMobile?'1 1 100%':'0 0 auto',minWidth:isMobile?0:130,padding:isMobile?'8px 10px':'8px 14px',background:'rgba(255,255,255,.03)',border:'1px solid rgba(255,255,255,.08)',borderRadius:10,marginBottom:12}}>
+                        <div style={{fontSize:9,fontWeight:800,letterSpacing:1,textTransform:'uppercase',color:'rgba(255,255,255,.4)',marginBottom:6}}>Puissance · {powerStats.label}</div>
+                        <div style={{display:'flex',gap:isMobile?28:16}}>
+                          <div>
+                            <div style={{fontSize:9,fontWeight:700,color:'rgba(255,255,255,.4)'}}>MAX</div>
+                            <div style={{fontSize:isMobile?20:22,fontWeight:800,color:'white',whiteSpace:'nowrap'}}>{Math.round(powerStats.maxKw)}<U c="kW"/></div>
+                          </div>
+                          <div>
+                            <div style={{fontSize:9,fontWeight:700,color:'rgba(255,255,255,.4)'}}>MIN</div>
+                            <div style={{fontSize:isMobile?20:22,fontWeight:800,color:'rgba(255,255,255,.65)',whiteSpace:'nowrap'}}>{Math.round(powerStats.minKw)}<U c="kW"/></div>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                    let tableEl;
                     if(isMobile){
                       // Mobile : lignes = métriques, colonnes = Avant | Après
                       const tblM={...tbl,fontSize:18};
-                      return(
+                      tableEl=(
                         <table style={tblM}>
                           <thead>
                             <tr style={{borderBottom:'1px solid rgba(255,255,255,.1)'}}>
@@ -5360,11 +5473,6 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
                               <td style={{...td,color:'#f0a050',fontWeight:700}}>{billAvant!=null?<>{billAvant.toLocaleString('fr-FR')}<U c="€/an" em={0.4}/></>:dash}</td>
                               <td style={{...td,color:hasModifs?'#7dd940':'rgba(255,255,255,.18)',fontWeight:700}}>{hasModifs?<>{billApresNet.toLocaleString('fr-FR')}<U c="€/an" em={0.4}/></>:dash}</td>
                             </tr>
-                            <tr style={sep}>
-                              <td style={{...td,textAlign:'left',color:'rgba(255,255,255,.5)',fontSize:11}}>Prix / kWh</td>
-                              <td style={{...td,color:'rgba(255,255,255,.5)',fontWeight:600}}>{prixAvant!=null?<>{(prixAvant*100).toFixed(1)}<U c="c€" em={0.4}/></>:dash}</td>
-                              <td style={{...td,color:hasModifs?'rgba(125,217,64,.75)':'rgba(255,255,255,.18)',fontWeight:600}}>{hasModifs&&prixApres!=null?<>{(prixApres*100).toFixed(1)}<U c="c€" em={0.4}/></>:dash}</td>
-                            </tr>
                             {hasSaving&&<tr><td></td><td></td><td style={{...td,borderTop:'1px solid rgba(125,217,64,.2)',paddingTop:6,whiteSpace:'nowrap'}}>
                               <span style={{fontSize:20,fontWeight:900,color:'#7dd940'}}>-{Math.round(totalSaving).toLocaleString('fr-FR')}<U c="€/an" em={0.4}/></span>
                               {totalReductionPct>0&&<span style={{fontSize:15,color:'rgba(125,217,64,.6)',marginLeft:3}}>({totalReductionPct}%)</span>}
@@ -5374,46 +5482,48 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
                           </tbody>
                         </table>
                       );
+                    } else {
+                      // Desktop : colonnes = métriques, lignes = Avant | Après
+                      const thD={...th,fontSize:16,padding:'6px 14px'};
+                      const tdD={...td,padding:'10px 14px'};
+                      tableEl=(
+                        <table style={tblD}>
+                          <thead>
+                            <tr style={{borderBottom:'1px solid rgba(255,255,255,.1)'}}>
+                              <th style={{...thD,textAlign:'left',width:'10%'}}></th>
+                              <th style={{...thD,color:'rgba(255,255,255,.38)'}}>Élec achetée</th>
+                              <th style={{...thD,color:'rgba(255,255,255,.38)'}}>Facture TTC</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            <tr style={{...sep,background:'rgba(255,255,255,.04)'}}>
+                              <td style={{...tdD,textAlign:'left',fontSize:14,fontWeight:800,letterSpacing:1,textTransform:'uppercase',color:'rgba(255,255,255,.38)'}}>Avant</td>
+                              <td style={{...tdD,color:'white',fontWeight:700}}>{Math.round(consoTot/1000)}<U c="MWh/an"/></td>
+                              <td style={{...tdD,color:'#f0a050',fontWeight:700}}>{billAvant!=null?<>{billAvant.toLocaleString('fr-FR')}<U c="€/an"/></>:dash}</td>
+                            </tr>
+                            <tr style={{...sep,background:hasModifs?'rgba(125,217,64,.05)':'rgba(255,255,255,.02)'}}>
+                              <td style={{...tdD,textAlign:'left',fontSize:14,fontWeight:800,letterSpacing:1,textTransform:'uppercase',color:aCol}}>Après</td>
+                              <td style={{...tdD,color:hasModifs?'white':'rgba(255,255,255,.18)',fontWeight:700}}>{hasModifs?<>{Math.round(consoApres/1000)}<U c="MWh/an"/></>:dash}</td>
+                              <td style={{...tdD,color:hasModifs?'#7dd940':'rgba(255,255,255,.18)',fontWeight:700}}>{hasModifs?<>{billApresNet.toLocaleString('fr-FR')}<U c="€/an"/></>:dash}</td>
+                            </tr>
+                            {hasSaving&&<tr>
+                              <td colSpan={2}></td>
+                              <td style={{...tdD,borderTop:'1px solid rgba(125,217,64,.2)',paddingTop:6,whiteSpace:'nowrap'}}>
+                                <div><span style={{fontSize:20,fontWeight:900,color:'#7dd940'}}>-{Math.round(totalSaving).toLocaleString('fr-FR')}<U c="€/an"/></span>
+                                {totalReductionPct>0&&<span style={{fontSize:13,color:'rgba(125,217,64,.6)',marginLeft:4}}>({totalReductionPct}%)</span>}</div>
+                                {(flexRev>0||accRev>0)&&<div style={{marginTop:2}}>{flexRev>0&&<span style={{fontSize:12,color:'rgba(125,217,64,.5)'}}>dont {flexRev} € Flex</span>}{accRev>0&&<span style={{fontSize:12,color:'rgba(125,217,64,.5)',marginLeft:flexRev>0?8:0}}>dont {accRev} € ACC</span>}</div>}
+                              </td>
+                            </tr>}
+                            {!hasModifs&&<tr><td colSpan={3} style={{...tdD,textAlign:'right',color:'rgba(255,255,255,.2)',fontSize:12,paddingTop:3,paddingBottom:1}}>Ajoutez des équipements dans votre panier pour voir l'impact</td></tr>}
+                          </tbody>
+                        </table>
+                      );
                     }
-                    // Desktop : colonnes = métriques, lignes = Avant | Après
-                    const thD={...th,fontSize:16,padding:'6px 14px'};
-                    const tdD={...td,padding:'10px 14px'};
                     return(
-                      <table style={tblD}>
-                        <thead>
-                          <tr style={{borderBottom:'1px solid rgba(255,255,255,.1)'}}>
-                            <th style={{...thD,textAlign:'left',width:'10%'}}></th>
-                            <th style={{...thD,color:'rgba(255,255,255,.38)'}}>Élec achetée</th>
-                            <th style={{...thD,color:'rgba(255,255,255,.38)'}}>Facture TTC</th>
-                            <th style={{...thD,color:'rgba(255,255,255,.38)'}}>Prix / kWh</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          <tr style={{...sep,background:'rgba(255,255,255,.04)'}}>
-                            <td style={{...tdD,textAlign:'left',fontSize:14,fontWeight:800,letterSpacing:1,textTransform:'uppercase',color:'rgba(255,255,255,.38)'}}>Avant</td>
-                            <td style={{...tdD,color:'white',fontWeight:700}}>{Math.round(consoTot/1000)}<U c="MWh/an"/></td>
-                            <td style={{...tdD,color:'#f0a050',fontWeight:700}}>{billAvant!=null?<>{billAvant.toLocaleString('fr-FR')}<U c="€/an"/></>:dash}</td>
-                            <td style={{...tdD,color:'rgba(255,255,255,.5)',fontWeight:600}}>{prixAvant!=null?<>{(prixAvant*100).toFixed(1)}<U c="c€/kWh"/></>:dash}</td>
-                          </tr>
-                          <tr style={{...sep,background:hasModifs?'rgba(125,217,64,.05)':'rgba(255,255,255,.02)'}}>
-                            <td style={{...tdD,textAlign:'left',fontSize:14,fontWeight:800,letterSpacing:1,textTransform:'uppercase',color:aCol}}>Après</td>
-                            <td style={{...tdD,color:hasModifs?'white':'rgba(255,255,255,.18)',fontWeight:700}}>{hasModifs?<>{Math.round(consoApres/1000)}<U c="MWh/an"/></>:dash}</td>
-                            <td style={{...tdD,color:hasModifs?'#7dd940':'rgba(255,255,255,.18)',fontWeight:700}}>{hasModifs?<>{billApresNet.toLocaleString('fr-FR')}<U c="€/an"/></>:dash}</td>
-                            <td style={{...tdD,color:hasModifs?'rgba(125,217,64,.75)':'rgba(255,255,255,.18)',fontWeight:600}}>{hasModifs&&prixApres!=null?<>{(prixApres*100).toFixed(1)}<U c="c€/kWh"/></>:dash}</td>
-                          </tr>
-                          {hasSaving&&<tr>
-                            <td colSpan={2}></td>
-                            <td style={{...tdD,borderTop:'1px solid rgba(125,217,64,.2)',paddingTop:6,whiteSpace:'nowrap'}}>
-                              <span style={{fontSize:20,fontWeight:900,color:'#7dd940'}}>-{Math.round(totalSaving).toLocaleString('fr-FR')}<U c="€/an"/></span>
-                              {totalReductionPct>0&&<span style={{fontSize:13,color:'rgba(125,217,64,.6)',marginLeft:4}}>({totalReductionPct}%)</span>}
-                            </td>
-                            <td style={{...tdD,borderTop:'1px solid rgba(125,217,64,.2)',paddingTop:6,whiteSpace:'nowrap'}}>
-                              {flexRev>0&&<span style={{fontSize:13,color:'rgba(125,217,64,.5)'}}>dont {flexRev} € Flex</span>}{accRev>0&&<span style={{fontSize:13,color:'rgba(125,217,64,.5)',marginLeft:flexRev>0?8:0}}>dont {accRev} € ACC</span>}
-                            </td>
-                          </tr>}
-                          {!hasModifs&&<tr><td colSpan={4} style={{...tdD,textAlign:'right',color:'rgba(255,255,255,.2)',fontSize:12,paddingTop:3,paddingBottom:1}}>Ajoutez des équipements dans votre panier pour voir l'impact</td></tr>}
-                        </tbody>
-                      </table>
+                      <div style={{display:'flex',flexWrap:'wrap',alignItems:'flex-start',gap:isMobile?0:16}}>
+                        <div style={{flex:'1 1 auto',minWidth:0}}>{tableEl}</div>
+                        {powerBox}
+                      </div>
                     );
                   })()}
                   {/* Graphique bilan 12 mois avec zoom */}
