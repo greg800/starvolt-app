@@ -4071,7 +4071,7 @@ function buildBilanFacts({ site, tariffs, globalVars, prodProfil, quiz }) {
     veille_cout_annuel_eur: veilleCoutAnnuelEur,
     veille_elevee: veilleElevee,
     economie_potentielle_veille_eur: economiePotentielleVeilleEur,
-    jours_inoccupation: {
+    jours_tres_faible_conso: {
       nb_jours: vacantDays,
       pct_annee: nbJoursAnnee>0 ? Math.round(vacantDays/nbJoursAnnee*100) : 0,
       conso_moy_kwh_jour_inoccupe: vacantDays>0 ? Math.round(vacantTotalWh/vacantDays/100)/10 : null,
@@ -11363,9 +11363,9 @@ function AdminBilanDataScreen({ onBack }) {
       ['Veille — coût annuel', f.veille_cout_annuel_eur != null ? f.veille_cout_annuel_eur + ' €/an' : '—'],
       ['Veille élevée', f.veille_elevee ? 'oui' : 'non'],
       ['Veille — économie potentielle', f.economie_potentielle_veille_eur != null ? f.economie_potentielle_veille_eur + ' €/an' : '—'],
-      ['Jours d’inoccupation', f.jours_inoccupation ? `${f.jours_inoccupation.nb_jours} j (${f.jours_inoccupation.pct_annee} %)` : '—'],
-      ['Conso moy. jour inoccupé', f.jours_inoccupation?.conso_moy_kwh_jour_inoccupe != null ? f.jours_inoccupation.conso_moy_kwh_jour_inoccupe + ' kWh' : '—'],
-      ['Conso moy. jour occupé', f.jours_inoccupation?.conso_moy_kwh_jour_occupe != null ? f.jours_inoccupation.conso_moy_kwh_jour_occupe + ' kWh' : '—'],
+      ['Jours avec très faible conso', f.jours_tres_faible_conso ? `${f.jours_tres_faible_conso.nb_jours} j (${f.jours_tres_faible_conso.pct_annee} %)` : '—'],
+      ['Conso moy. jour à très faible conso', f.jours_tres_faible_conso?.conso_moy_kwh_jour_inoccupe != null ? f.jours_tres_faible_conso.conso_moy_kwh_jour_inoccupe + ' kWh' : '—'],
+      ['Conso moy. jour normal', f.jours_tres_faible_conso?.conso_moy_kwh_jour_occupe != null ? f.jours_tres_faible_conso.conso_moy_kwh_jour_occupe + ' kWh' : '—'],
     ];
   };
 
