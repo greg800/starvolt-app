@@ -225,10 +225,16 @@ async function handle(req: Request): Promise<Response> {
       },
       body: JSON.stringify({
         model: MODEL,
-        max_tokens: 3000,
+        max_tokens: 8000,
+        // Opus 4.7 est "thinking-first" : forcer le tool sans le laisser
+        // raisonner produit régulièrement un report_questions VIDE
+        // (stop=tool_use · brut=0). On active le thinking adaptatif et on
+        // passe le tool en "auto" (forcer un tool est incompatible avec le
+        // thinking). Le prompt impose déjà d'appeler report_questions.
+        thinking: { type: "adaptive" },
         system: systemPrompt,
         tools: [tool],
-        tool_choice: { type: "tool", name: "report_questions" },
+        tool_choice: { type: "auto" },
         messages: [{ role: "user", content: uc }],
       }),
     });
@@ -253,10 +259,11 @@ async function handle(req: Request): Promise<Response> {
       );
     }
     aiJson = first.jsonRes;
-    // Relance : si la 1re tentative rend un tableau vide alors qu'on a des questions
-    // existantes, l'anti-doublons a probablement bloqué le modèle. On réessaie une
-    // fois sans le bloc anti-doublons pour garantir une production de questions.
-    if (extractRaw(aiJson).raw.length === 0 && existingBlock) {
+    // Relance : si la 1re tentative rend un tableau vide, on réessaie une fois
+    // avec une consigne recentrée sur "produire N questions" (sans le bloc
+    // anti-doublons, qui peut bloquer le modèle). Vaut aussi bien pour un thème
+    // neuf (0 question) que pour un thème déjà partiellement couvert.
+    if (extractRaw(aiJson).raw.length === 0) {
       const retryContent =
         baseContent +
         `\n\nGénère exactement ${count} questions de quiz d'après ce contenu. ` +
