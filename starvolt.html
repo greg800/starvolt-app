@@ -5433,25 +5433,13 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
                     const td={padding:'6px 8px',border:'none',textAlign:'right'};
                     const sep={borderTop:'1px solid rgba(255,255,255,.07)'};
                     const U=({c,em=0.5})=><span style={{fontSize:em+'em',fontWeight:400,marginLeft:3,verticalAlign:'middle',opacity:.75}}>{c}</span>;
-                    // Bloc puissance max/min — suit le zoom du graphique (année / mois / jour sélectionné).
-                    const powerBox=powerStats&&(
-                      <div style={{flex:isMobile?'1 1 100%':'0 0 auto',minWidth:isMobile?0:130,padding:isMobile?'8px 10px':'8px 14px',background:'rgba(255,255,255,.03)',border:'1px solid rgba(255,255,255,.08)',borderRadius:10,marginBottom:12}}>
-                        <div style={{fontSize:9,fontWeight:800,letterSpacing:1,textTransform:'uppercase',color:'rgba(255,255,255,.4)',marginBottom:6}}>Puissance · {powerStats.label}</div>
-                        <div style={{display:'flex',gap:isMobile?28:16}}>
-                          <div>
-                            <div style={{fontSize:9,fontWeight:700,color:'rgba(255,255,255,.4)'}}>MAX</div>
-                            <div style={{fontSize:isMobile?20:22,fontWeight:800,color:'white',whiteSpace:'nowrap'}}>{Math.round(powerStats.maxKw)}<U c="kW"/></div>
-                          </div>
-                          <div>
-                            <div style={{fontSize:9,fontWeight:700,color:'rgba(255,255,255,.4)'}}>MIN</div>
-                            <div style={{fontSize:isMobile?20:22,fontWeight:800,color:'rgba(255,255,255,.65)',whiteSpace:'nowrap'}}>{Math.round(powerStats.minKw)}<U c="kW"/></div>
-                          </div>
-                        </div>
-                      </div>
-                    );
+                    // Puissance max/min — suit le zoom du graphique (année / mois / jour sélectionné),
+                    // intégrée directement dans le tableau évolution facture (pas de bloc séparé).
+                    const hasPower=!!powerStats;
+                    const pMaxC='white', pMinC='rgba(255,255,255,.65)';
                     let tableEl;
                     if(isMobile){
-                      // Mobile : lignes = métriques, colonnes = Avant | Après
+                      // Mobile : lignes = métriques, colonnes = Avant | Après. Puissance = 2 lignes fusionnées (valeur unique, pas d'avant/après).
                       const tblM={...tbl,fontSize:18};
                       tableEl=(
                         <table style={tblM}>
@@ -5473,6 +5461,14 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
                               <td style={{...td,color:'#f0a050',fontWeight:700}}>{billAvant!=null?<>{billAvant.toLocaleString('fr-FR')}<U c="€/an" em={0.4}/></>:dash}</td>
                               <td style={{...td,color:hasModifs?'#7dd940':'rgba(255,255,255,.18)',fontWeight:700}}>{hasModifs?<>{billApresNet.toLocaleString('fr-FR')}<U c="€/an" em={0.4}/></>:dash}</td>
                             </tr>
+                            {hasPower&&<tr style={sep}>
+                              <td style={{...td,textAlign:'left',color:'rgba(255,255,255,.5)',fontSize:11}}>Puissance max<div style={{fontSize:8,fontWeight:700,letterSpacing:.5,textTransform:'uppercase',color:'rgba(255,255,255,.28)',marginTop:2}}>{powerStats.label}</div></td>
+                              <td colSpan={2} style={{...td,color:pMaxC,fontWeight:700}}>{Math.round(powerStats.maxKw)}<U c="kW" em={0.4}/></td>
+                            </tr>}
+                            {hasPower&&<tr style={sep}>
+                              <td style={{...td,textAlign:'left',color:'rgba(255,255,255,.5)',fontSize:11}}>Puissance min</td>
+                              <td colSpan={2} style={{...td,color:pMinC,fontWeight:700}}>{Math.round(powerStats.minKw)}<U c="kW" em={0.4}/></td>
+                            </tr>}
                             {hasSaving&&<tr><td></td><td></td><td style={{...td,borderTop:'1px solid rgba(125,217,64,.2)',paddingTop:6,whiteSpace:'nowrap'}}>
                               <span style={{fontSize:20,fontWeight:900,color:'#7dd940'}}>-{Math.round(totalSaving).toLocaleString('fr-FR')}<U c="€/an" em={0.4}/></span>
                               {totalReductionPct>0&&<span style={{fontSize:15,color:'rgba(125,217,64,.6)',marginLeft:3}}>({totalReductionPct}%)</span>}
@@ -5483,9 +5479,11 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
                         </table>
                       );
                     } else {
-                      // Desktop : colonnes = métriques, lignes = Avant | Après
+                      // Desktop : colonnes = métriques, lignes = Avant | Après. Puissance = 2 colonnes fusionnées verticalement (valeur unique).
                       const thD={...th,fontSize:16,padding:'6px 14px'};
                       const tdD={...td,padding:'10px 14px'};
+                      const thP={...thD,color:'rgba(255,255,255,.38)',borderLeft:'1px solid rgba(255,255,255,.06)'};
+                      const tdP={...tdD,verticalAlign:'middle',borderLeft:'1px solid rgba(255,255,255,.06)'};
                       tableEl=(
                         <table style={tblD}>
                           <thead>
@@ -5493,6 +5491,8 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
                               <th style={{...thD,textAlign:'left',width:'10%'}}></th>
                               <th style={{...thD,color:'rgba(255,255,255,.38)'}}>Élec achetée</th>
                               <th style={{...thD,color:'rgba(255,255,255,.38)'}}>Facture TTC</th>
+                              {hasPower&&<th style={thP}>Puissance max<div style={{fontSize:8,fontWeight:700,letterSpacing:.5,color:'rgba(255,255,255,.28)',marginTop:2,textTransform:'none'}}>{powerStats.label}</div></th>}
+                              {hasPower&&<th style={thP}>Puissance min</th>}
                             </tr>
                           </thead>
                           <tbody>
@@ -5500,6 +5500,8 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
                               <td style={{...tdD,textAlign:'left',fontSize:14,fontWeight:800,letterSpacing:1,textTransform:'uppercase',color:'rgba(255,255,255,.38)'}}>Avant</td>
                               <td style={{...tdD,color:'white',fontWeight:700}}>{Math.round(consoTot/1000)}<U c="MWh/an"/></td>
                               <td style={{...tdD,color:'#f0a050',fontWeight:700}}>{billAvant!=null?<>{billAvant.toLocaleString('fr-FR')}<U c="€/an"/></>:dash}</td>
+                              {hasPower&&<td rowSpan={2} style={{...tdP,color:pMaxC,fontWeight:700}}>{Math.round(powerStats.maxKw)}<U c="kW"/></td>}
+                              {hasPower&&<td rowSpan={2} style={{...tdP,color:pMinC,fontWeight:700}}>{Math.round(powerStats.minKw)}<U c="kW"/></td>}
                             </tr>
                             <tr style={{...sep,background:hasModifs?'rgba(125,217,64,.05)':'rgba(255,255,255,.02)'}}>
                               <td style={{...tdD,textAlign:'left',fontSize:14,fontWeight:800,letterSpacing:1,textTransform:'uppercase',color:aCol}}>Après</td>
@@ -5513,18 +5515,15 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
                                 {totalReductionPct>0&&<span style={{fontSize:13,color:'rgba(125,217,64,.6)',marginLeft:4}}>({totalReductionPct}%)</span>}</div>
                                 {(flexRev>0||accRev>0)&&<div style={{marginTop:2}}>{flexRev>0&&<span style={{fontSize:12,color:'rgba(125,217,64,.5)'}}>dont {flexRev} € Flex</span>}{accRev>0&&<span style={{fontSize:12,color:'rgba(125,217,64,.5)',marginLeft:flexRev>0?8:0}}>dont {accRev} € ACC</span>}</div>}
                               </td>
+                              {hasPower&&<td style={{borderTop:'1px solid rgba(125,217,64,.2)'}}></td>}
+                              {hasPower&&<td style={{borderTop:'1px solid rgba(125,217,64,.2)'}}></td>}
                             </tr>}
-                            {!hasModifs&&<tr><td colSpan={3} style={{...tdD,textAlign:'right',color:'rgba(255,255,255,.2)',fontSize:12,paddingTop:3,paddingBottom:1}}>Ajoutez des équipements dans votre panier pour voir l'impact</td></tr>}
+                            {!hasModifs&&<tr><td colSpan={hasPower?5:3} style={{...tdD,textAlign:'right',color:'rgba(255,255,255,.2)',fontSize:12,paddingTop:3,paddingBottom:1}}>Ajoutez des équipements dans votre panier pour voir l'impact</td></tr>}
                           </tbody>
                         </table>
                       );
                     }
-                    return(
-                      <div style={{display:'flex',flexWrap:'wrap',alignItems:'flex-start',gap:isMobile?0:16}}>
-                        <div style={{flex:'1 1 auto',minWidth:0}}>{tableEl}</div>
-                        {powerBox}
-                      </div>
-                    );
+                    return tableEl;
                   })()}
                   {/* Graphique bilan 12 mois avec zoom */}
                   {balance?(
