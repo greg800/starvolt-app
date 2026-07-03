@@ -5177,17 +5177,20 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
         trpArr[idx]=getTurpeRate(m,h,globalVars);
       }
     }
-    // Si ACC au panier : remplacer le prix des heures de prod ACC par (prix_vente_ACC + TURPE)×(1+TVA).
-    // L'ACC est exonérée d'accise ET l'abonnement disparaît sur ces heures : on force
-    // électron=prix_vente_ACC, abo=0, TURPE=variable seul → taxes déduites = TVA seule.
+    // Si ACC au panier : sur les heures de prod ACC, remplacer la partie ÉNERGIE par
+    // (prix_vente_ACC + TURPE)×(1+TVA). L'ACC est exonérée d'accise. En revanche
+    // l'abonnement est un coût fixe annuel payé quoi qu'il arrive : il reste présent
+    // (à l'identique) sur ces heures, il ne disparaît pas.
     if(localStorage.getItem('starvolt_acc_chosen')==='true'){
       const _accPHT=parseFloat(localStorage.getItem('starvolt_acc_price_ht')||'0.09');
       for(let m=1;m<=12;m++) for(let d=1;d<=PROF_DAYS[m-1];d++) for(let h=0;h<24;h++){
         const idx=profIdx(m,d,h);
         if(prodProfilData?!(prodProfilData[idx]>0):(h<9||h>=18)) continue;
         const turpeVar=getTurpeRate(m,h,globalVars);
-        const accTTC=(_accPHT+turpeVar)*(1+tva);
-        if(accTTC<arr[idx]){ arr[idx]=accTTC; elArr[idx]=_accPHT; aboArr[idx]=0; trpArr[idx]=turpeVar; }
+        const accTTC=(_accPHT+turpeVar)*(1+tva);      // énergie ACC + TURPE variable, sans abonnement
+        const aboTTC=aboArr[idx]*(1+tvaAbo);          // abonnement fixe conservé (TVA 5,5%)
+        // On compare l'énergie ACC à l'énergie normale (hors abonnement, identique dans les deux cas)
+        if(accTTC < arr[idx]-aboTTC){ arr[idx]=accTTC+aboTTC; elArr[idx]=_accPHT; trpArr[idx]=turpeVar; }
       }
     }
     return {total:arr, electron:elArr, abo:aboArr, turpe:trpArr};
