@@ -3839,13 +3839,16 @@ function buildSiteBalance({ site, prodProfil, tariffs, spotMap, globalVars, pvKw
   const bk = parseFloat(batKwh)||0;
   const tk = parseFloat(thermKwh)||0;
   // Équipement DÉJÀ installé : la courbe de charge Enedis (conso_profil) est le SOUTIRAGE
-  // réseau déjà NET du PV/batterie existant (Enedis mesure le solde au compteur). On ne
-  // modélise donc que le DELTA (cible − existant) — sinon on soustrairait une 2ᵉ fois
-  // l'autoconsommation de l'existant et le soutirage chuterait à tort sous la mesure réelle.
+  // réseau déjà NET de la production PV existante (Enedis mesure le solde au compteur).
+  // Pour afficher un graphe cohérent (production solaire + déplacement thermique visibles),
+  // on RECONSTRUIT la consommation BRUTE = soutirage mesuré + production PV existante, puis
+  // on modélise le système CIBLE COMPLET (kw, bk) sur cette conso brute. Ainsi, pour
+  // cible = existant, on retrouve exactement le soutirage mesuré tout en affichant le solaire ;
+  // pour cible > existant, le surplus supplémentaire fait baisser le soutirage (gain réel).
   const pvExist  = Math.max(0, parseFloat(site.pv_existant_kwc)        || 0);
-  const batExist = Math.max(0, parseFloat(site.batterie_existante_kwh) || 0);
-  const kwEff = Math.max(0, kw - pvExist);
-  const bkEff = Math.max(0, bk - batExist);
+  const consoProfile = (pvExist > 0 && prodProfil)
+    ? site.conso_profil.map((c,i)=>(c||0) + (prodProfil[i]||0)*pvExist)
+    : site.conso_profil;
   // Le stockage ne se pilote que si une box Starvolt est au panier.
   // baseTariffOnly : facture de RÉFÉRENCE (état actuel du client) → pas de pilotage, tarif courant.
   const hasBoxLS = !baseTariffOnly && (!!localStorage.getItem('starvolt_box_chosen')
@@ -3860,20 +3863,20 @@ function buildSiteBalance({ site, prodProfil, tariffs, spotMap, globalVars, pvKw
   const effId = optiId || site.tarif_id;
   const curT  = effId ? (tariffs||[]).find(t=>t.id===effId)||null : null;
   const baseT = site.tarif_id ? (tariffs||[]).find(t=>t.id===site.tarif_id)||curT : curT;
-  if (kwEff > 0 && prodProfil) {
+  if (kw > 0 && prodProfil) {
     if (curT) {
       if (curT.tarif_dynamique && !spotMap) return null;
-      return computeCombinedOptimization(site.conso_profil, prodProfil, kwEff, String(bkEff), thermKwh, eg, curT, baseT, site, spotMap);
+      return computeCombinedOptimization(consoProfile, prodProfil, kw, String(bk), thermKwh, eg, curT, baseT, site, spotMap);
     }
     const ratioBat=(globalVars?.ratio_puissance_stockage??50)/100;
     const pBat=globalVars?.pertes_batterie??10;
     const ratioTherm=(globalVars?.ratio_puissance_stockage_thermique??50)/100;
     const pTherm=globalVars?.pertes_thermique??0;
-    return computeEnergyBalance(site.conso_profil, prodProfil, kwEff, bkEff*ratioBat*1000, bkEff, pBat, tk*ratioTherm, tk, pTherm);
+    return computeEnergyBalance(consoProfile, prodProfil, kw, bk*ratioBat*1000, bk, pBat, tk*ratioTherm, tk, pTherm);
   }
   if (curT) {
     if (curT.tarif_dynamique && !spotMap) return null;
-    return computeStorageOptimization(site.conso_profil, curT, baseT, site, bkEff, tk, eg, spotMap);
+    return computeStorageOptimization(consoProfile, curT, baseT, site, bk, tk, eg, spotMap);
   }
   return null;
 }
@@ -3883,13 +3886,20 @@ function buildSiteBalance({ site, prodProfil, tariffs, spotMap, globalVars, pvKw
 //   (équipement en place), pas par rapport à zéro solaire — sinon on surestime le gain
 //   (et donc le ROI) d'un client déjà équipé. Renvoie la facture élec annuelle avec
 //   l'équipement existant, ou null si aucun existant (→ le moteur garde son billWithout).
-function computeBaseline(_args) {
-  // Obsolète depuis le modèle DELTA (voir buildSiteBalance) : la courbe Enedis (conso_profil)
-  // EST déjà le soutirage net de l'équipement existant. Le « avant » correct est donc
-  // directement billWithout (facture sur le soutirage mesuré) + consoTot (= conso_annuelle_kwh),
-  // gérés par deriveSiteImpact. On ne recalcule plus de baseline séparée (qui soustrayait à tort
-  // une 2ᵉ fois l'autoconso de l'existant). Conservé (retourne null) pour ne pas casser les appels.
-  return null;
+function computeBaseline({ site, prodProfil, tariffs, spotMap, globalVars }) {
+  // Le « avant » correct d'un client DÉJÀ équipé = sa facture ACTUELLE (avec son PV/batterie
+  // existant), pas la facture sur la conso brute reconstruite (qui serait trop haute car elle
+  // ignore l'autoconso déjà en place). On rejoue donc l'équipement EXISTANT seul sur la conso
+  // brute reconstruite : buildSiteBalance ajoute la prod PV existante à la conso, puis modélise
+  // pvExist/batExist → le soutirage retombe sur la mesure Enedis et la facture est la vraie
+  // facture actuelle. thermKwh='0' : aucun produit thermique dans l'état de référence.
+  const pvExist  = Math.max(0, parseFloat(site?.pv_existant_kwc) || 0);
+  const batExist = Math.max(0, parseFloat(site?.batterie_existante_kwh) || 0);
+  if (pvExist <= 0 && batExist <= 0) return null;
+  const bal = buildSiteBalance({ site, prodProfil, tariffs, spotMap, globalVars, pvKwc: String(pvExist), batKwh: String(batExist), thermKwh: '0', baseTariffOnly: true });
+  if (!bal || typeof bal.billWithStorage !== 'number') return null;
+  const conso = bal.monthly ? Math.round(bal.monthly.reduce((s,m)=>s+(m.grid_buy||0),0)) : null;
+  return { bill: Math.round(bal.billWithStorage), conso };
 }
 
 // 3) Dérive les chiffres affichés (facture avant/après, économie totale) depuis le balance.
