@@ -3841,13 +3841,22 @@ function buildSiteBalance({ site, prodProfil, tariffs, spotMap, globalVars, pvKw
   // Équipement DÉJÀ installé : la courbe de charge Enedis (conso_profil) est le SOUTIRAGE
   // réseau déjà NET de la production PV existante (Enedis mesure le solde au compteur).
   // Pour afficher un graphe cohérent (production solaire + déplacement thermique visibles),
-  // on RECONSTRUIT la consommation BRUTE = soutirage mesuré + production PV existante, puis
-  // on modélise le système CIBLE COMPLET (kw, bk) sur cette conso brute. Ainsi, pour
-  // cible = existant, on retrouve exactement le soutirage mesuré tout en affichant le solaire ;
-  // pour cible > existant, le surplus supplémentaire fait baisser le soutirage (gain réel).
+  // on RECONSTRUIT la consommation BRUTE = soutirage mesuré + AUTOCONSOMMATION existante,
+  // puis on modélise le système CIBLE COMPLET (kw, bk) sur cette conso brute.
+  //   autoconso[h] = production_estimée[h] − injection_réelle[h]  (Enedis, injection_profil)
+  //   conso_brute[h] = soutirage[h] + autoconso[h]
+  // L'injection réelle évite de surestimer la conso : sans elle on supposait 100 % d'autoconso
+  // (injection = 0), ce qui gonflait la conso du montant revendu au réseau. Repli injection=0
+  // si la courbe n'est pas disponible (autoconsommateur pur sans contrat producteur).
   const pvExist  = Math.max(0, parseFloat(site.pv_existant_kwc)        || 0);
+  const injProfil = Array.isArray(site.injection_profil) ? site.injection_profil : null;
   const consoProfile = (pvExist > 0 && prodProfil)
-    ? site.conso_profil.map((c,i)=>(c||0) + (prodProfil[i]||0)*pvExist)
+    ? site.conso_profil.map((c,i)=>{
+        const prod = (prodProfil[i]||0)*pvExist;
+        const inj  = injProfil ? (injProfil[i]||0) : 0;
+        const autoconso = Math.max(0, prod - inj);
+        return (c||0) + autoconso;
+      })
     : site.conso_profil;
   // Le stockage ne se pilote que si une box Starvolt est au panier.
   // baseTariffOnly : facture de RÉFÉRENCE (état actuel du client) → pas de pilotage, tarif courant.
@@ -9196,7 +9205,7 @@ function SolarSimScreen({ user, userProfile, onBack, onPanier, onMonSite, onCart
     if (!siteId) { setLoading(false); return; }
     setActiveSiteId(siteId);
     Promise.all([
-      sb.from('sites').select('id,conso_profil,conso_annuelle_kwh,tarif_id,profil_production_id,adresse_ligne1,code_postal,ville,heure_debut_hc1,heure_fin_hc1,heure_debut_hc2,heure_fin_hc2,hc_debut1,hc_fin1,hc_debut2,hc_fin2,flex_chauffage,flex_ecs,flex_surface,pv_existant_kwc,batterie_existante_kwh').eq('id', siteId).maybeSingle(),
+      sb.from('sites').select('id,conso_profil,conso_annuelle_kwh,tarif_id,profil_production_id,adresse_ligne1,code_postal,ville,heure_debut_hc1,heure_fin_hc1,heure_debut_hc2,heure_fin_hc2,hc_debut1,hc_fin1,hc_debut2,hc_fin2,flex_chauffage,flex_ecs,flex_surface,pv_existant_kwc,batterie_existante_kwh,injection_profil').eq('id', siteId).maybeSingle(),
       sb.from('tarifs_electricite').select('*'),
       sb.rpc('get_spot_json'),
       sb.from('parametres_nationaux').select('*').eq('id', 1).maybeSingle(),
@@ -9552,7 +9561,7 @@ function PanierScreen({ user, onBack, onGoTo, onMonSite }) {
     const siteId = localStorage.getItem('starvolt_active_site_id');
     if (!siteId) { setLoading(false); return; }
     Promise.all([
-      sb.from('sites').select('id,conso_profil,conso_annuelle_kwh,tarif_id,profil_production_id,adresse_ligne1,code_postal,ville,heure_debut_hc1,heure_fin_hc1,heure_debut_hc2,heure_fin_hc2,hc_debut1,hc_fin1,hc_debut2,hc_fin2,puissance_pv_kwc,batterie_capacite_kwh,pv_existant_kwc,batterie_existante_kwh').eq('id', siteId).maybeSingle(),
+      sb.from('sites').select('id,conso_profil,conso_annuelle_kwh,tarif_id,profil_production_id,adresse_ligne1,code_postal,ville,heure_debut_hc1,heure_fin_hc1,heure_debut_hc2,heure_fin_hc2,hc_debut1,hc_fin1,hc_debut2,hc_fin2,puissance_pv_kwc,batterie_capacite_kwh,pv_existant_kwc,batterie_existante_kwh,injection_profil').eq('id', siteId).maybeSingle(),
       sb.from('tarifs_electricite').select('*'),
       sb.rpc('get_spot_json'),
       sb.from('parametres_nationaux').select('*').eq('id',1).maybeSingle(),

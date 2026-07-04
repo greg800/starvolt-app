@@ -484,6 +484,27 @@ async function applyC68(c68Req, siteUpdate) {
     } catch  {}
   }
 }
+// Construit le profil d'INJECTION (surplus revendu au réseau) 8784 h, best-effort.
+// R63 (courbe de charge injection) prioritaire, repli R65 (journalier injection).
+// Renvoie { profile, coverage, source } ou null si aucune donnée exploitable
+// (client sans contrat producteur → pas d'injection mesurée, comportement normal).
+async function buildInjectionProfile(r63Inj, r65Inj, pdl) {
+  if (r63Inj?.status === "SUCCESS") {
+    const lc = await fetchR63Curve(r63Inj, pdl);
+    const built = buildProfileV0(lc);
+    if (built.hasAny && built.coverage >= 0.70) {
+      fillMissingDays(built.profile, built.dayHasData);
+      return { profile: built.profile, coverage: built.coverage, source: "loadcurve" };
+    }
+  }
+  if (r65Inj?.status === "SUCCESS") {
+    const d = await fetchDaily(r65Inj);
+    if (d.daysPresent >= MIN_DAILY_DAYS) {
+      return { profile: d.profile, coverage: d.daysPresent / 366, source: "daily" };
+    }
+  }
+  return null;
+}
 // ── Supabase REST ────────────────────────────────────────────────────────────
 function sbHeaders() {
   return {
@@ -577,7 +598,11 @@ async function findReusableConsent(site_id, fallbackPdl, wantSigner) {
   return null;
 }
 // Pose un ordre v0 : R63 (courbe de charge, réactivation auto) + R65 (journalier,
-// repli) + C68_ASYNC (technique). consentId = id de l'ask signé.
+// repli) + C68_ASYNC (technique), en SOUTIRAGE et en INJECTION. consentId = id de l'ask signé.
+// Les requêtes INJECTION servent à récupérer le surplus revendu au réseau : indispensable
+// pour reconstruire la conso brute d'un client déjà producteur (conso = soutirage + autoconso,
+// autoconso = production − injection). Best-effort : si le point n'a pas de contrat producteur,
+// ENEDIS renverra un échec pour ces requêtes, ce qui n'empêche pas la collecte du soutirage.
 async function placeSwitchgridOrder(consentId, pdl) {
   const resp = await fetch(`${SG_BASE}/integration/enedis/order`, {
     method: "POST",
@@ -596,6 +621,21 @@ async function placeSwitchgridOrder(consentId, pdl) {
         {
           type: "R65",
           direction: "SOUTIRAGE",
+          prms: [
+            pdl
+          ]
+        },
+        {
+          type: "R63",
+          direction: "INJECTION",
+          enedisRetryAfterLoadcurveActivation: true,
+          prms: [
+            pdl
+          ]
+        },
+        {
+          type: "R65",
+          direction: "INJECTION",
           prms: [
             pdl
           ]
@@ -1022,8 +1062,11 @@ Deno.serve(async (req)=>{
       });
       const order = await orderResp.json();
       const requests = order.requests ?? [];
-      const r63 = requests.find((r)=>r.type === "R63");
-      const r65 = requests.find((r)=>r.type === "R65");
+      const isSout = (r)=>(r.direction ?? "SOUTIRAGE") === "SOUTIRAGE";
+      const r63 = requests.find((r)=>r.type === "R63" && isSout(r));
+      const r65 = requests.find((r)=>r.type === "R65" && isSout(r));
+      const r63Inj = requests.find((r)=>r.type === "R63" && r.direction === "INJECTION");
+      const r65Inj = requests.find((r)=>r.type === "R65" && r.direction === "INJECTION");
       const c68 = requests.find((r)=>r.type === "C68_ASYNC");
       const isPending = (x)=>x && (x.status === "PENDING" || x.status === "QUEUED" || x.status === "NOT_STARTED");
       const anyPending = [
@@ -1082,6 +1125,14 @@ Deno.serve(async (req)=>{
           conso_imported_at: new Date().toISOString()
         };
         await applyC68(c68, su); // données contractuelles : toujours rafraîchies
+        // Injection (surplus revendu) : best-effort, indépendant du gate d'écrasement
+        // de la conso. Sert à reconstruire la conso brute d'un client déjà producteur.
+        const inj = await buildInjectionProfile(r63Inj, r65Inj, pdl);
+        if (inj) {
+          su.injection_profil = inj.profile;
+          su.injection_coverage = Math.round(inj.coverage * 1000) / 1000;
+          su.injection_annuelle_kwh = Math.round(inj.profile.reduce((a, b)=>a + b, 0) / 100) / 10;
+        }
         if (overwrite) {
           su.conso_source = candidate.source;
           su.conso_profil = candidate.profile;
