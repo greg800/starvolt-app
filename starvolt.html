@@ -3783,9 +3783,14 @@ function resolveCartEquipment(site) {
   // Équipement déjà installé / cible enregistrée en base (source de vérité par site).
   const sitePv  = site?.puissance_pv_kwc      > 0 ? String(site.puissance_pv_kwc)      : (site?.pv_existant_kwc        > 0 ? String(site.pv_existant_kwc)        : null);
   const siteBat = site?.batterie_capacite_kwh > 0 ? String(site.batterie_capacite_kwh) : (site?.batterie_existante_kwh > 0 ? String(site.batterie_existante_kwh) : null);
+  // Site ayant explicitement déclaré « pas de PV / pas de batterie » (parcours) → 0 imposé,
+  // même si un panier solaire global traîne d'un AUTRE site (évite la fuite inter-sites).
+  const siteNoSolar = site && site.flex_has_solar   === false && !sitePv;
+  const siteNoBat   = site && site.flex_has_battery === false && !siteBat;
   if (hasSolar) return {
-    pvKwc:    parseFloat(solarDef.pvKwc)  > 0 ? String(solarDef.pvKwc)  : (sitePv  || '6'),
-    batKwh:   parseFloat(solarDef.batKwh) > 0 ? String(solarDef.batKwh) : (siteBat || '10'),
+    // La fiche site prime toujours ; solar_defaults n'est qu'un défaut global de secours.
+    pvKwc:    sitePv  || (siteNoSolar ? '0' : (parseFloat(solarDef.pvKwc)  > 0 ? String(solarDef.pvKwc)  : '6')),
+    batKwh:   siteBat || (siteNoBat   ? '0' : (parseFloat(solarDef.batKwh) > 0 ? String(solarDef.batKwh) : '10')),
     thermKwh: parseFloat(solarDef.thermKwh) > 0 ? String(solarDef.thermKwh) : '10',
   };
   // Panier sans solaire : on reflète l'équipement réellement installé de LA fiche site.
@@ -8450,12 +8455,12 @@ function OnboardingTypeform({ siteId, onDone, onBack, initial=null, extended=fal
       if (pv_kwc && pv_kwc !== '__unknown__' && parseFloat(pv_kwc) > 0) pvKwc = Math.round(parseFloat(pv_kwc) * 10) / 10;
       else if (pvTxt) pvKwc = parsePvComment(pvTxt);
       else pvKwc = 3;
-    }
+    } else if (has_solar != null) pvKwc = 0; // « non » explicite → réinitialise (pas de PV existant ni cible)
     let batKwh = null;
     if (hasBattery) {
       if (battery_kwh && battery_kwh !== '__unknown__' && parseFloat(battery_kwh) > 0) batKwh = Math.round(parseFloat(battery_kwh) * 10) / 10;
       else batKwh = 5;
-    }
+    } else if (has_battery != null) batKwh = 0; // « non » explicite → réinitialise
     const otherTxt = (other_equip || '').trim();
 
     try {
