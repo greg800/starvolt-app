@@ -3823,20 +3823,21 @@ async function loadProdProfil(site) {
 
 // 2) Bilan énergétique horaire selon le panier (sélection du moteur).
 //    Retourne l'objet balance ({billWithout, billWithStorage, saving, monthly, hourly...}) ou null.
-function buildSiteBalance({ site, prodProfil, tariffs, spotMap, globalVars, pvKwc, batKwh, thermKwh }) {
+function buildSiteBalance({ site, prodProfil, tariffs, spotMap, globalVars, pvKwc, batKwh, thermKwh, baseTariffOnly=false }) {
   if (!site?.conso_profil) return null;
   const kw = pvKwc === '' ? 6 : (parseFloat(pvKwc)||0);
   const bk = parseFloat(batKwh)||0;
   const tk = parseFloat(thermKwh)||0;
   // Le stockage ne se pilote que si une box Starvolt est au panier.
-  const hasBoxLS = !!localStorage.getItem('starvolt_box_chosen')
-                || localStorage.getItem('starvolt_solar_chosen') === 'solar_box';
+  // baseTariffOnly : facture de RÉFÉRENCE (état actuel du client) → pas de pilotage, tarif courant.
+  const hasBoxLS = !baseTariffOnly && (!!localStorage.getItem('starvolt_box_chosen')
+                || localStorage.getItem('starvolt_solar_chosen') === 'solar_box');
   const eg = globalVars ? {
     ...globalVars,
     opti_tarif:   hasBoxLS ? (globalVars.opti_tarif   ?? true) : false,
     opti_solaire: hasBoxLS ? (globalVars.opti_solaire ?? true) : false,
   } : globalVars;
-  const optiChosen = !!localStorage.getItem('starvolt_optimisation_chosen');
+  const optiChosen = !baseTariffOnly && !!localStorage.getItem('starvolt_optimisation_chosen');
   const optiId = optiChosen ? localStorage.getItem('starvolt_optimisation_tariff_id') : null;
   const effId = optiId || site.tarif_id;
   const curT  = effId ? (tariffs||[]).find(t=>t.id===effId)||null : null;
@@ -3859,9 +3860,23 @@ function buildSiteBalance({ site, prodProfil, tariffs, spotMap, globalVars, pvKw
   return null;
 }
 
+// 2bis) Facture de RÉFÉRENCE si le client a déjà du PV/batterie installé.
+//   Les économies d'un projet doivent se mesurer par rapport à l'état ACTUEL du client
+//   (équipement en place), pas par rapport à zéro solaire — sinon on surestime le gain
+//   (et donc le ROI) d'un client déjà équipé. Renvoie la facture élec annuelle avec
+//   l'équipement existant, ou null si aucun existant (→ le moteur garde son billWithout).
+function computeBaselineBill({ site, prodProfil, tariffs, spotMap, globalVars, thermKwh }) {
+  const pvExist  = Math.max(0, parseFloat(site?.pv_existant_kwc) || 0);
+  const batExist = Math.max(0, parseFloat(site?.batterie_existante_kwh) || 0);
+  if (pvExist <= 0 && batExist <= 0) return null; // pas d'existant → baseline classique (zéro)
+  // Facture réelle actuelle : tarif courant du site, aucun pilotage box (baseTariffOnly).
+  const bal = buildSiteBalance({ site, prodProfil, tariffs, spotMap, globalVars, pvKwc: String(pvExist), batKwh: String(batExist), thermKwh, baseTariffOnly: true });
+  return (bal && typeof bal.billWithStorage === 'number') ? Math.round(bal.billWithStorage) : null;
+}
+
 // 3) Dérive les chiffres affichés (facture avant/après, économie totale) depuis le balance.
 //    totalSaving = saving énergie (tarif + stockage + PV) + flex (cagnotte) + ACC.
-function deriveSiteImpact({ balance, site, prodProfil, tariffs, spotMap, globalVars, batKwh, thermKwh }) {
+function deriveSiteImpact({ balance, site, prodProfil, tariffs, spotMap, globalVars, batKwh, thermKwh, baselineBill=null }) {
   const optiChosen = !!localStorage.getItem('starvolt_optimisation_chosen');
   const optiId = optiChosen ? localStorage.getItem('starvolt_optimisation_tariff_id') : null;
   const effId = optiId || site?.tarif_id;
@@ -3869,11 +3884,15 @@ function deriveSiteImpact({ balance, site, prodProfil, tariffs, spotMap, globalV
   const baseTariff = (tariffs||[]).find(t=>t.id===site?.tarif_id);
   const consoTot = Math.round(site?.conso_annuelle_kwh||0);
 
-  let billAvant = balance?.billWithout != null
-    ? Math.round(balance.billWithout)
-    : (baseTariff && !baseTariff.tarif_dynamique
-        ? Math.round((baseTariff.abo_annuel||0) + (site?.conso_annuelle_kwh||0)*(baseTariff.prix_hp||0))
-        : null);
+  // Facture de référence "avant" : si le client a déjà du PV/batterie (baselineBill fourni),
+  // on part de sa facture ACTUELLE avec cet équipement, pas de la facture sans aucun solaire.
+  let billAvant = baselineBill != null
+    ? Math.round(baselineBill)
+    : (balance?.billWithout != null
+        ? Math.round(balance.billWithout)
+        : (baseTariff && !baseTariff.tarif_dynamique
+            ? Math.round((baseTariff.abo_annuel||0) + (site?.conso_annuelle_kwh||0)*(baseTariff.prix_hp||0))
+            : null));
 
   // Flex revenue (cagnotte flexibilité) — uniquement si box au panier + service activé
   const _boxLS = localStorage.getItem('starvolt_box_chosen');
@@ -3917,8 +3936,12 @@ function deriveSiteImpact({ balance, site, prodProfil, tariffs, spotMap, globalV
   const injApres     = hasBalance ? Math.round(balance.monthly.reduce((s,m)=>s+m.injection,0)) : 0;
   const billApresElec= hasBalance ? Math.round(balance.billWithStorage) : null;
   const billApresNet = billApresElec!=null ? billApresElec-flexRev-accRev : null;
-  const energySaving = hasBalance ? balance.saving : 0;
-  const totalSaving  = hasBalance ? (balance.saving+flexRev+accRev) : accRev;
+  // Économie énergie = référence "avant" − facture après projet. Si baselineBill fourni
+  // (client déjà équipé), on mesure l'ajout INCRÉMENTAL (existant → cible), jamais depuis zéro.
+  const energySaving = hasBalance
+    ? (baselineBill != null ? Math.max(0, Math.round(baselineBill) - billApresElec) : balance.saving)
+    : 0;
+  const totalSaving  = hasBalance ? (energySaving+flexRev+accRev) : accRev;
   const reductionPct = billAvant>0 ? Math.min(100, Math.round(totalSaving/billAvant*100)) : 0;
 
   return { billAvant, billApresNet, consoApres, injApres, consoTot, flexRev, accRev, energySaving, totalSaving, reductionPct, hasBalance, effectiveTariff };
@@ -3934,11 +3957,13 @@ async function findBestPvBat({ site, prodProfil, tariffs, spotMap, globalVars, t
   const batExist = Math.max(0, parseFloat(site.batterie_existante_kwh) || 0);
   const pvStart = Math.max(2, Math.ceil(pvExist));
   const batStart = Math.max(2, Math.ceil(batExist));
+  // Facture de référence avec l'équipement existant → économies mesurées en incrémental.
+  const baselineBill = computeBaselineBill({ site, prodProfil, tariffs, spotMap, globalVars, thermKwh });
   let best = null;
   for (let pv = pvStart; pv <= 9; pv++) {
     for (let bat = batStart; bat <= 15; bat++) {
       const bal = buildSiteBalance({ site, prodProfil, tariffs, spotMap, globalVars, pvKwc: String(pv), batKwh: String(bat), thermKwh });
-      const imp = deriveSiteImpact({ balance: bal, site, prodProfil, tariffs, spotMap, globalVars, batKwh: String(bat), thermKwh });
+      const imp = deriveSiteImpact({ balance: bal, site, prodProfil, tariffs, spotMap, globalVars, batKwh: String(bat), thermKwh, baselineBill });
       const saving = imp?.totalSaving || 0;
       // Facturation = surplus au-delà de l'existant (matériel déjà en place non refacturé).
       const invest = interpPrix(billableDelta(pv, pvExist), pvPrices) + interpPrix(billableDelta(bat, batExist), batPrices);
@@ -5388,8 +5413,10 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
                     const baseTariff=tariffs.find(t=>t.id===site.tarif_id);
                     const consoTot=Math.round(site.conso_annuelle_kwh);
                     const fmtE=v=>Math.round(v/1000)+' MWh/an';
-                    // Impact — moteur partagé (identique au Panier)
-                    const _imp=deriveSiteImpact({balance,site,prodProfil:prodProfilData,tariffs,spotMap,globalVars,batKwh,thermKwh});
+                    // Impact — moteur partagé (identique au Panier). baselineBill = facture
+                    // actuelle avec l'équipement déjà installé → économies mesurées en incrémental.
+                    const _baseBill=computeBaselineBill({site,prodProfil:prodProfilData,tariffs,spotMap,globalVars,thermKwh});
+                    const _imp=deriveSiteImpact({balance,site,prodProfil:prodProfilData,tariffs,spotMap,globalVars,batKwh,thermKwh,baselineBill:_baseBill});
                     const billAvant=_imp.billAvant;
                     const prixAvant=(billAvant&&consoTot)?billAvant/consoTot:null;
                     const flexRev=_imp.flexRev, accRev=_imp.accRev;
@@ -5848,7 +5875,8 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
                     fmt=v=>(v*scale).toFixed(unit==='MWh'?1:0)+' '+unit;
                   }
                   // Impact — moteur partagé (identique à la table Avant/Après et au Panier)
-                  const _impT=deriveSiteImpact({balance,site,prodProfil:prodProfilData,tariffs,spotMap,globalVars,batKwh,thermKwh});
+                  const _baseBillT=computeBaselineBill({site,prodProfil:prodProfilData,tariffs,spotMap,globalVars,thermKwh});
+                  const _impT=deriveSiteImpact({balance,site,prodProfil:prodProfilData,tariffs,spotMap,globalVars,batKwh,thermKwh,baselineBill:_baseBillT});
                   const _boxLS=localStorage.getItem('starvolt_box_chosen');
                   // hasBox : box choisie seule OU incluse dans solar_box (DIY exclu — son investissement est géré séparément)
                   const hasBox=(_boxLS&&_boxLS!=='diy')||localStorage.getItem('starvolt_solar_chosen')==='solar_box';
@@ -9512,7 +9540,9 @@ function PanierScreen({ user, onBack, onGoTo, onMonSite }) {
       const spotMap = spotRows ? buildSpotMap(spotRows) : null;
       const eq = resolveCartEquipment(site);
       const balance = buildSiteBalance({ site, prodProfil:_prodProfil, tariffs, spotMap, globalVars:gv, pvKwc:eq.pvKwc, batKwh:eq.batKwh, thermKwh:eq.thermKwh });
-      const imp = deriveSiteImpact({ balance, site, prodProfil:_prodProfil, tariffs, spotMap, globalVars:gv, batKwh:eq.batKwh, thermKwh:eq.thermKwh });
+      // baselineBill = facture actuelle avec l'équipement déjà installé → ROI incrémental correct.
+      const _baseBill = computeBaselineBill({ site, prodProfil:_prodProfil, tariffs, spotMap, globalVars:gv, thermKwh:eq.thermKwh });
+      const imp = deriveSiteImpact({ balance, site, prodProfil:_prodProfil, tariffs, spotMap, globalVars:gv, batKwh:eq.batKwh, thermKwh:eq.thermKwh, baselineBill:_baseBill });
       setCurrentBill(imp.billAvant != null ? Math.round(imp.billAvant) : bill);
       setImpact(imp);
       // Info solaire pour la tuile panier : existant / cible / surplus facturé (delta).
