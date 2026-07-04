@@ -5846,8 +5846,8 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
             </div>}
 
             {/* ── Tuile Ma production, mon stockage et ma box ── */}
-            {/* Masquée tant que le panier est vide */}
-            {can('submenus','production_stockage_box')&&(!!localStorage.getItem('starvolt_box_chosen')||!!localStorage.getItem('starvolt_solar_chosen')||!!localStorage.getItem('starvolt_optimisation_chosen')||localStorage.getItem('starvolt_acc_chosen')==='true'||!!localStorage.getItem('starvolt_diy_box_chosen'))&&<div className="card" style={{padding:0,marginBottom:8,overflow:'hidden'}}>
+            {/* Toujours visible (permet de vérifier la puissance PV / capacité batterie dès le départ) */}
+            {can('submenus','production_stockage_box')&&<div className="card" style={{padding:0,marginBottom:8,overflow:'hidden'}}>
               <div
                 style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'10px 14px 8px',borderBottom: prodOpen ? '1px solid rgba(255,255,255,.07)' : 'none',cursor:'pointer',userSelect:'none'}}
                 onClick={()=>setProdOpen(v=>!v)}
