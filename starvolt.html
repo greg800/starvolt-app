@@ -2884,6 +2884,12 @@ function interpPrix(val, table) {
   }
   return sorted[sorted.length-1][1];
 }
+// Puissance/capacité FACTURABLE = surplus ajouté au-delà de l'existant déjà installé (jamais négatif).
+// Évite de facturer deux fois le matériel que le client possède déjà.
+function billableDelta(target, existing) {
+  const t = parseFloat(target) || 0, e = parseFloat(existing) || 0;
+  return Math.max(0, t - e);
+}
 // Vide toutes les clés panier du localStorage
 // Met à jour le cache local + Supabase pour cocher les services au moment d'ajouter un article au panier
 function setPanierServicesChecked(flags){
@@ -3923,13 +3929,19 @@ function deriveSiteImpact({ balance, site, prodProfil, tariffs, spotMap, globalV
 async function findBestPvBat({ site, prodProfil, tariffs, spotMap, globalVars, thermKwh, prixMat }) {
   if (!site?.conso_profil || !prodProfil) return null;
   const pvPrices = prixMat?.pv_prices || [], batPrices = prixMat?.bat_prices || [];
+  // Existant déjà installé : on ne propose jamais MOINS, et on ne facture que le surplus.
+  const pvExist = Math.max(0, parseFloat(site.pv_existant_kwc) || 0);
+  const batExist = Math.max(0, parseFloat(site.batterie_existante_kwh) || 0);
+  const pvStart = Math.max(2, Math.ceil(pvExist));
+  const batStart = Math.max(2, Math.ceil(batExist));
   let best = null;
-  for (let pv = 2; pv <= 9; pv++) {
-    for (let bat = 2; bat <= 15; bat++) {
+  for (let pv = pvStart; pv <= 9; pv++) {
+    for (let bat = batStart; bat <= 15; bat++) {
       const bal = buildSiteBalance({ site, prodProfil, tariffs, spotMap, globalVars, pvKwc: String(pv), batKwh: String(bat), thermKwh });
       const imp = deriveSiteImpact({ balance: bal, site, prodProfil, tariffs, spotMap, globalVars, batKwh: String(bat), thermKwh });
       const saving = imp?.totalSaving || 0;
-      const invest = interpPrix(pv, pvPrices) + interpPrix(bat, batPrices);
+      // Facturation = surplus au-delà de l'existant (matériel déjà en place non refacturé).
+      const invest = interpPrix(billableDelta(pv, pvExist), pvPrices) + interpPrix(billableDelta(bat, batExist), batPrices);
       if (saving > 0 && invest > 0) {
         const payback = invest / saving;
         if (!best || payback < best.payback) best = { pv, bat, saving: Math.round(saving), invest, payback };
@@ -4058,9 +4070,9 @@ function buildBilanFacts({ site, tariffs, globalVars, prodProfil, quiz }) {
     surface_logement: site.flex_surface ? (FLEX_SURFACE_LBL[site.flex_surface] || site.flex_surface) : null,
     type_habitat: site.flex_type_logement ? (FLEX_TYPELOG_LBL[site.flex_type_logement] || site.flex_type_logement) : null,
     statut_occupation: site.flex_statut ? (FLEX_STATUT_LBL[site.flex_statut] || site.flex_statut) : null,
-    pv_existant_kwc: site.flex_has_solar ? (site.puissance_pv_kwc != null ? Number(site.puissance_pv_kwc) : null) : (site.flex_has_solar === false ? 0 : null),
+    pv_existant_kwc: site.flex_has_solar ? (site.pv_existant_kwc != null ? Number(site.pv_existant_kwc) : null) : (site.flex_has_solar === false ? 0 : null),
     pv_declaration_client: site.flex_has_solar ? (site.flex_pv_comment || null) : null,
-    batterie_existante_kwh: site.flex_has_battery ? (site.batterie_capacite_kwh != null ? Number(site.batterie_capacite_kwh) : null) : (site.flex_has_battery === false ? 0 : null),
+    batterie_existante_kwh: site.flex_has_battery ? (site.batterie_existante_kwh != null ? Number(site.batterie_existante_kwh) : null) : (site.flex_has_battery === false ? 0 : null),
     equipements_energivores_autres: site.flex_other_equipment || null,
     quiz_niveau_etoiles: quiz?.stars ?? null,
     quiz_taux_erreur_pct: quiz?.errorPct ?? null,
@@ -5862,9 +5874,10 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
                   // Baisse totale : énergie + flex + acc — cache pour SimulationsScreen / SolarSim
                   const baisseTotale=(baisseFacture||0)+flexRevenue+accSavings;
                   if(baisseTotale>0) localStorage.setItem('starvolt_baisse_facture',String(baisseTotale));
-                  // Investissement global (PV + batterie + box) depuis les tarifs admin
-                  const _pvInv = interpPrix(parseFloat(pvKwc)||0, prixMat?.pv_prices||[]);
-                  const _batInv = interpPrix(parseFloat(batKwh)||0, prixMat?.bat_prices||[]);
+                  // Investissement global (PV + batterie + box) depuis les tarifs admin.
+                  // On ne facture QUE le surplus au-delà de l'équipement déjà installé (baseline).
+                  const _pvInv = interpPrix(billableDelta(pvKwc, site?.pv_existant_kwc), prixMat?.pv_prices||[]);
+                  const _batInv = interpPrix(billableDelta(batKwh, site?.batterie_existante_kwh), prixMat?.bat_prices||[]);
                   const _boxInv = hasBox ? ((prixMat?.box_prix||500)+(prixMat?.box_installation||100)) : 0;
                   const totalInvestissement = _pvInv + _batInv + _boxInv;
                   // Toujours écrire (même 0) pour éviter que l'ancienne valeur persiste
@@ -8407,8 +8420,9 @@ function OnboardingTypeform({ siteId, onDone, onBack, initial=null, extended=fal
     try {
       const d = JSON.parse(localStorage.getItem('starvolt_solar_defaults') || '{}');
       d.thermKwh = String(kw);
-      if (pvKwc != null) d.pvKwc = String(pvKwc);
-      if (batKwh != null) d.batKwh = String(batKwh);
+      // Baseline (existant déclaré) + cible projet initialisée à l'existant (delta 0 au départ).
+      if (pvKwc != null)  { d.pvExist = String(pvKwc); d.pvKwc = String(pvKwc); }
+      if (batKwh != null) { d.batExist = String(batKwh); d.batKwh = String(batKwh); }
       localStorage.setItem('starvolt_solar_defaults', JSON.stringify(d));
     } catch {}
     if (siteId) {
@@ -8420,8 +8434,10 @@ function OnboardingTypeform({ siteId, onDone, onBack, initial=null, extended=fal
           upd.flex_pv_comment = hasSolar && pvTxt ? pvTxt : null;
           upd.flex_other_equipment = otherTxt || null;
         }
-        if (pvKwc != null)  upd.puissance_pv_kwc = pvKwc;           // met à jour le projet PV
-        if (batKwh != null) upd.batterie_capacite_kwh = batKwh;     // met à jour le projet batterie
+        // Équipement DÉJÀ installé → colonnes baseline (pour ne pas le facturer),
+        // et on initialise la cible projet = existant (delta = 0 tant que rien n'est ajouté).
+        if (has_solar != null)   { upd.pv_existant_kwc = pvKwc; upd.puissance_pv_kwc = pvKwc; }
+        if (has_battery != null) { upd.batterie_existante_kwh = batKwh; upd.batterie_capacite_kwh = batKwh; }
         await sb.from('sites').update(upd).eq('id', siteId);
         localStorage.setItem('starvolt_flex_'+siteId, JSON.stringify({ chauffage, ecs, surface, type_logement, statut }));
       } catch {}
@@ -9105,7 +9121,7 @@ function SolarSimScreen({ user, userProfile, onBack, onPanier, onMonSite, onCart
     if (!siteId) { setLoading(false); return; }
     setActiveSiteId(siteId);
     Promise.all([
-      sb.from('sites').select('id,conso_profil,conso_annuelle_kwh,tarif_id,profil_production_id,adresse_ligne1,code_postal,ville,heure_debut_hc1,heure_fin_hc1,heure_debut_hc2,heure_fin_hc2,hc_debut1,hc_fin1,hc_debut2,hc_fin2,flex_chauffage,flex_ecs,flex_surface').eq('id', siteId).maybeSingle(),
+      sb.from('sites').select('id,conso_profil,conso_annuelle_kwh,tarif_id,profil_production_id,adresse_ligne1,code_postal,ville,heure_debut_hc1,heure_fin_hc1,heure_debut_hc2,heure_fin_hc2,hc_debut1,hc_fin1,hc_debut2,hc_fin2,flex_chauffage,flex_ecs,flex_surface,pv_existant_kwc,batterie_existante_kwh').eq('id', siteId).maybeSingle(),
       sb.from('tarifs_electricite').select('*'),
       sb.rpc('get_spot_json'),
       sb.from('parametres_nationaux').select('*').eq('id', 1).maybeSingle(),
@@ -9441,6 +9457,7 @@ function PanierScreen({ user, onBack, onGoTo, onMonSite }) {
   const [taux,        setTaux]        = useState(4);
   const [taux2,       setTaux2]       = useState(0);
   const [impact,      setImpact]      = useState(null);
+  const [solarInfo,   setSolarInfo]   = useState(null); // {pvExist,pvTarget,pvDelta,batExist,batTarget,batDelta,invest}
   const [validated,   setValidated]   = useState(false);
   const [items,       setItems]       = useState(() => ({
     optimisation: !!localStorage.getItem('starvolt_optimisation_chosen'),
@@ -9460,11 +9477,12 @@ function PanierScreen({ user, onBack, onGoTo, onMonSite }) {
     const siteId = localStorage.getItem('starvolt_active_site_id');
     if (!siteId) { setLoading(false); return; }
     Promise.all([
-      sb.from('sites').select('id,conso_profil,conso_annuelle_kwh,tarif_id,profil_production_id,adresse_ligne1,code_postal,ville,heure_debut_hc1,heure_fin_hc1,heure_debut_hc2,heure_fin_hc2,hc_debut1,hc_fin1,hc_debut2,hc_fin2').eq('id', siteId).maybeSingle(),
+      sb.from('sites').select('id,conso_profil,conso_annuelle_kwh,tarif_id,profil_production_id,adresse_ligne1,code_postal,ville,heure_debut_hc1,heure_fin_hc1,heure_debut_hc2,heure_fin_hc2,hc_debut1,hc_fin1,hc_debut2,hc_fin2,puissance_pv_kwc,batterie_capacite_kwh,pv_existant_kwc,batterie_existante_kwh').eq('id', siteId).maybeSingle(),
       sb.from('tarifs_electricite').select('*'),
       sb.rpc('get_spot_json'),
       sb.from('parametres_nationaux').select('*').eq('id',1).maybeSingle(),
-    ]).then(async ([{ data:site }, { data:tariffs }, { data:spotRows }, { data:nat }]) => {
+      sb.from('prix_materiaux').select('*').eq('id',1).maybeSingle(),
+    ]).then(async ([{ data:site }, { data:tariffs }, { data:spotRows }, { data:nat }, { data:prixMat }]) => {
       if (!site?.conso_profil) { setLoading(false); return; }
       if (nat?.taux_inflation_electricite)   setTaux(Number(nat.taux_inflation_electricite));
       if (nat?.taux_inflation_electricite_2 != null) setTaux2(Number(nat.taux_inflation_electricite_2));
@@ -9497,6 +9515,15 @@ function PanierScreen({ user, onBack, onGoTo, onMonSite }) {
       const imp = deriveSiteImpact({ balance, site, prodProfil:_prodProfil, tariffs, spotMap, globalVars:gv, batKwh:eq.batKwh, thermKwh:eq.thermKwh });
       setCurrentBill(imp.billAvant != null ? Math.round(imp.billAvant) : bill);
       setImpact(imp);
+      // Info solaire pour la tuile panier : existant / cible / surplus facturé (delta).
+      {
+        const pvTarget = parseFloat(eq.pvKwc) || 0, batTarget = parseFloat(eq.batKwh) || 0;
+        const pvExist = Math.max(0, parseFloat(site.pv_existant_kwc) || 0);
+        const batExist = Math.max(0, parseFloat(site.batterie_existante_kwh) || 0);
+        const pvDelta = billableDelta(pvTarget, pvExist), batDelta = billableDelta(batTarget, batExist);
+        const invest = interpPrix(pvDelta, prixMat?.pv_prices||[]) + interpPrix(batDelta, prixMat?.bat_prices||[]);
+        setSolarInfo({ pvExist, pvTarget, pvDelta, batExist, batTarget, batDelta, invest });
+      }
       setLoading(false);
     });
   }, []);
@@ -9708,8 +9735,23 @@ function PanierScreen({ user, onBack, onGoTo, onMonSite }) {
       )}
       {items.solar && (
         <CartItemCard imgSrc="/maison.png" title="Installation solaire"
-          subtitle={solarChoice==='solar_box'?'Panneaux + batterie + Box Comwatt':'Panneaux solaires + batterie'}
-          investment={13000}
+          subtitle={(() => {
+            const base = solarChoice==='solar_box' ? 'Panneaux + batterie + Box Comwatt' : 'Panneaux solaires + batterie';
+            if (!solarInfo) return base;
+            const fmt = v => (Math.round((v||0)*10)/10).toString().replace('.', ',');
+            const pvLine = solarInfo.pvExist > 0
+              ? `☀️ PV : ${fmt(solarInfo.pvExist)} kWc déjà installés → +${fmt(solarInfo.pvDelta)} kWc à ajouter (cible ${fmt(solarInfo.pvTarget)} kWc)`
+              : `☀️ PV : ${fmt(solarInfo.pvTarget)} kWc`;
+            const batLine = solarInfo.batExist > 0
+              ? `🔋 Batterie : ${fmt(solarInfo.batExist)} kWh déjà installés → +${fmt(solarInfo.batDelta)} kWh à ajouter (cible ${fmt(solarInfo.batTarget)} kWh)`
+              : `🔋 Batterie : ${fmt(solarInfo.batTarget)} kWh`;
+            return (<>
+              <div>{base}</div>
+              <div style={{marginTop:5,fontSize:14,lineHeight:1.5}}>{pvLine}</div>
+              <div style={{fontSize:14,lineHeight:1.5}}>{batLine}</div>
+            </>);
+          })()}
+          investment={solarInfo ? solarInfo.invest : 13000}
           color="#fbbf24" onRemove={()=>removeItem('solar')}
           onClick={()=>onGoTo&&onGoTo('SOLAR_SIM')}/>
       )}
