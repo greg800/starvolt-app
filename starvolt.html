@@ -3780,13 +3780,18 @@ function resolveCartEquipment(site) {
   const solarDef = (()=>{ try { return JSON.parse(localStorage.getItem('starvolt_solar_defaults'))||{}; } catch { return {}; } })();
   const hasSolar   = !!localStorage.getItem('starvolt_solar_chosen');
   const hasBoxOnly = !!localStorage.getItem('starvolt_box_chosen') && !hasSolar;
+  // Équipement déjà installé / cible enregistrée en base (source de vérité par site).
+  const sitePv  = site?.puissance_pv_kwc      > 0 ? String(site.puissance_pv_kwc)      : (site?.pv_existant_kwc        > 0 ? String(site.pv_existant_kwc)        : null);
+  const siteBat = site?.batterie_capacite_kwh > 0 ? String(site.batterie_capacite_kwh) : (site?.batterie_existante_kwh > 0 ? String(site.batterie_existante_kwh) : null);
   if (hasSolar) return {
-    pvKwc:    parseFloat(solarDef.pvKwc)  > 0 ? String(solarDef.pvKwc)  : (site?.puissance_pv_kwc      > 0 ? String(site.puissance_pv_kwc)      : '6'),
-    batKwh:   parseFloat(solarDef.batKwh) > 0 ? String(solarDef.batKwh) : (site?.batterie_capacite_kwh > 0 ? String(site.batterie_capacite_kwh) : '10'),
+    pvKwc:    parseFloat(solarDef.pvKwc)  > 0 ? String(solarDef.pvKwc)  : (sitePv  || '6'),
+    batKwh:   parseFloat(solarDef.batKwh) > 0 ? String(solarDef.batKwh) : (siteBat || '10'),
     thermKwh: parseFloat(solarDef.thermKwh) > 0 ? String(solarDef.thermKwh) : '10',
   };
-  if (hasBoxOnly) return { pvKwc: solarDef.pvKwc||'0', batKwh: solarDef.batKwh||'0', thermKwh: solarDef.thermKwh||'10' };
-  return { pvKwc: solarDef.pvKwc||'0', batKwh: solarDef.batKwh||'0', thermKwh: solarDef.thermKwh||'0' };
+  // Panier sans solaire : on reflète l'équipement réellement installé de LA fiche site.
+  // (On n'utilise pas solar_defaults ici : global, il pourrait provenir d'un autre site.)
+  if (hasBoxOnly) return { pvKwc: sitePv || '0', batKwh: siteBat || '0', thermKwh: solarDef.thermKwh||'10' };
+  return { pvKwc: sitePv || '0', batKwh: siteBat || '0', thermKwh: solarDef.thermKwh||'0' };
 }
 
 // 1bis) Profil de production solaire d'un site — SOURCE UNIQUE.
