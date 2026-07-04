@@ -1141,17 +1141,21 @@ Deno.serve(async (req)=>{
           su.conso_gaps = null;
         }
         await sbUpdate("sites", `id=eq.${rec.site_id}`, su);
-        // Le C68_ASYNC est plus lent que R63/R65 : ne PAS figer "done" tant qu'il est
-        // en attente (sinon on ne collecte jamais puissance/HP-HC/option). On écrit
-        // déjà la conso (l'utilisateur la voit tout de suite) mais on continue à sonder
-        // le C68, avec un plafond de 30 min pour ne pas rester bloqué s'il ne vient pas.
+        // Le C68_ASYNC ET la courbe d'INJECTION sont plus lents que le soutirage (souvent
+        // servi instantanément via consentement réutilisé + cache). Ne PAS figer "done" tant
+        // qu'ils sont en attente, sinon on les rate définitivement. On écrit déjà la conso
+        // (l'utilisateur la voit tout de suite) mais on continue à sonder — l'injection est
+        // ré-écrite à chaque sondage dès qu'elle arrive (best-effort). Plafond 30 min pour ne
+        // pas rester bloqué si l'un ne vient jamais (ex. compteur sans contrat producteur →
+        // injection FAILED, donc plus "pending", on ne l'attend pas inutilement).
         const reqAgeMs = Date.now() - new Date(rec.created_at).getTime();
-        const C68_WAIT_MS = 30 * 60 * 1000;
-        if (isPending(c68) && reqAgeMs < C68_WAIT_MS) {
+        const WAIT_MS = 30 * 60 * 1000;
+        const awaitingInj = (isPending(r63Inj) || isPending(r65Inj)) && !inj;
+        if ((isPending(c68) || awaitingInj) && reqAgeMs < WAIT_MS) {
           return jsonResp({
             status: "ordering",
             conso_source: overwrite ? candidate.source : oldSite?.conso_source ?? candidate.source,
-            awaiting: "C68"
+            awaiting: isPending(c68) ? "C68" : "INJECTION"
           });
         }
         await sbUpdate("switchgrid_requests", `id=eq.${requestId}`, {
