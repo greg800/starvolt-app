@@ -5341,7 +5341,20 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
         other_equip: site.flex_other_equipment||undefined,
       }:null}
       onBack={()=>setShowFlexForm(false)}
-      onDone={(kw)=>{setThermKwh(String(kw));setShowFlexForm(false);load();}}
+      onDone={(kw)=>{
+        setThermKwh(String(kw));
+        // Re-synchronise immédiatement les champs PV/batterie de la tuile depuis les
+        // valeurs fraîchement saisies (le parcours vient d'écrire starvolt_solar_defaults) —
+        // sinon l'effet de sync, calé sur [activeId,cartVersion], ne se redéclenche pas et
+        // il faut rafraîchir la page pour voir apparaître les valeurs.
+        try{const d=JSON.parse(localStorage.getItem('starvolt_solar_defaults')||'{}');
+          if(d.pvKwc!=null)setPvKwc(String(d.pvKwc));
+          if(d.batKwh!=null)setBatKwh(String(d.batKwh));
+        }catch{}
+        setBalance(null);
+        setShowFlexForm(false);
+        load();
+      }}
     />;
   }
   if(showEnedis&&site){
