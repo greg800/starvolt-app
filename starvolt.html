@@ -3831,6 +3831,34 @@ async function loadProdProfil(site) {
   return data?.profil || null;
 }
 
+// 1ter) Capacité de stockage thermique pilotable du logement (kWh), estimée depuis les
+//    équipements déclarés au parcours (chauffage / ECS électriques × surface). Sert de proxy
+//    de la « capacité de stockage thermique » quand le client possède déjà une box Comwatt.
+function thermalPotentialKwh(site) {
+  const idx = site?.flex_surface === 'small' ? 0 : site?.flex_surface === 'medium' ? 1 : 2;
+  let kw = 0;
+  if (site?.flex_chauffage === 'elec' || site?.flex_chauffage === 'pac') kw += [3, 7, 12][idx];
+  if (site?.flex_ecs === 'elec') kw += [2, 3, 4][idx];
+  return kw;
+}
+
+// 1quater) Ratio d'autoconsommation ESTIMÉ pour l'équipement PV EXISTANT, utilisé UNIQUEMENT
+//    quand Enedis ne remonte pas la courbe d'injection (injection_profil absent). Il évite de
+//    supposer 100 % d'autoconso (injection = 0), ce qui gonflait la conso reconstruite.
+//      • Sans box Comwatt : ratio global `autoconso_sans_box` (ex. 70 %).
+//      • Avec box Comwatt existante : la box pilote le stockage thermique et déplace la conso
+//        vers les heures solaires → autoconso plus élevée. On interpole entre le ratio de base
+//        (0 kWh thermique) et `autoconso_avec_box` (capacité thermique ≥ 10 kWh).
+function estimateAutoconsoRatio(globalVars, site) {
+  const clamp = v => Math.min(1, Math.max(0, v));
+  const base = clamp((globalVars?.autoconso_sans_box ?? 70) / 100);
+  if (!site?.box_comwatt_existante) return base;
+  const maxAc = clamp((globalVars?.autoconso_avec_box ?? 90) / 100);
+  const tk = thermalPotentialKwh(site);
+  const f = Math.min(1, tk / 10);
+  return base + (maxAc - base) * f;
+}
+
 // 2) Bilan énergétique horaire selon le panier (sélection du moteur).
 //    Retourne l'objet balance ({billWithout, billWithStorage, saving, monthly, hourly...}) ou null.
 function buildSiteBalance({ site, prodProfil, tariffs, spotMap, globalVars, pvKwc, batKwh, thermKwh, baseTariffOnly=false }) {
@@ -3845,16 +3873,20 @@ function buildSiteBalance({ site, prodProfil, tariffs, spotMap, globalVars, pvKw
   // puis on modélise le système CIBLE COMPLET (kw, bk) sur cette conso brute.
   //   autoconso[h] = production_estimée[h] − injection_réelle[h]  (Enedis, injection_profil)
   //   conso_brute[h] = soutirage[h] + autoconso[h]
-  // L'injection réelle évite de surestimer la conso : sans elle on supposait 100 % d'autoconso
-  // (injection = 0), ce qui gonflait la conso du montant revendu au réseau. Repli injection=0
-  // si la courbe n'est pas disponible (autoconsommateur pur sans contrat producteur).
+  // Deux sources pour l'autoconso existante :
+  //   • injection RÉELLE Enedis (injection_profil) → autoconso = prod − injection, précis.
+  //   • à défaut (Enedis ne remonte rien) → estimation par RATIO d'autoconsommation
+  //     (estimateAutoconsoRatio : `autoconso_sans_box`, ou plus élevé si box Comwatt existante).
+  //     Auparavant on supposait 100 % d'autoconso (injection = 0), ce qui gonflait la conso.
   const pvExist  = Math.max(0, parseFloat(site.pv_existant_kwc)        || 0);
   const injProfil = Array.isArray(site.injection_profil) ? site.injection_profil : null;
+  const acRatio  = estimateAutoconsoRatio(globalVars, site);
   const consoProfile = (pvExist > 0 && prodProfil)
     ? site.conso_profil.map((c,i)=>{
         const prod = (prodProfil[i]||0)*pvExist;
-        const inj  = injProfil ? (injProfil[i]||0) : 0;
-        const autoconso = Math.max(0, prod - inj);
+        const autoconso = injProfil
+          ? Math.max(0, prod - (injProfil[i]||0))   // injection réelle mesurée
+          : prod * acRatio;                          // estimation par ratio d'autoconso
         return (c||0) + autoconso;
       })
     : site.conso_profil;
@@ -3981,10 +4013,10 @@ function deriveSiteImpact({ balance, site, prodProfil, tariffs, spotMap, globalV
   const totalSaving  = hasBalance ? (energySaving+flexRev+accRev) : accRev;
   const reductionPct = billAvant>0 ? Math.min(100, Math.round(totalSaving/billAvant*100)) : 0;
   // Soutirage "avant" = consommation annuelle mesurée (conso_annuelle_kwh) : c'est déjà le
-  // soutirage réseau relevé par Enedis, net de l'équipement PV/batterie existant. Il reste
-  // identique que le client soit déjà équipé ou non — le modèle DELTA (buildSiteBalance)
-  // ne fait baisser le soutirage que pour l'équipement AJOUTÉ par le projet.
-  const consoAvant = baselineConso != null ? Math.round(baselineConso) : consoTot;
+  // soutirage réseau relevé par Enedis, net de l'équipement PV/batterie existant. On l'affiche
+  // TEL QUEL (la mesure), sans le rejouer par simulation — sinon une batterie existante serait
+  // comptée deux fois et le soutirage affiché divergerait de la mesure réelle.
+  const consoAvant = consoTot;
 
   return { billAvant, billApresNet, consoAvant, consoApres, injApres, consoTot, flexRev, accRev, energySaving, totalSaving, reductionPct, hasBalance, effectiveTariff };
 }
@@ -4140,6 +4172,7 @@ function buildBilanFacts({ site, tariffs, globalVars, prodProfil, quiz }) {
     pv_existant_kwc: site.flex_has_solar ? (site.pv_existant_kwc != null ? Number(site.pv_existant_kwc) : null) : (site.flex_has_solar === false ? 0 : null),
     pv_declaration_client: site.flex_has_solar ? (site.flex_pv_comment || null) : null,
     batterie_existante_kwh: site.flex_has_battery ? (site.batterie_existante_kwh != null ? Number(site.batterie_existante_kwh) : null) : (site.flex_has_battery === false ? 0 : null),
+    box_comwatt_existante: site.box_comwatt_existante == null ? null : (site.box_comwatt_existante ? 'oui' : 'non'),
     equipements_energivores_autres: site.flex_other_equipment || null,
     quiz_niveau_etoiles: quiz?.stars ?? null,
     quiz_taux_erreur_pct: quiz?.errorPct ?? null,
@@ -5357,6 +5390,7 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
         pv_comment: site.flex_pv_comment||undefined,
         has_battery: site.flex_has_battery==null?undefined:(site.flex_has_battery?'oui':'non'),
         battery_kwh: site.flex_has_battery && site.batterie_capacite_kwh>0 ? String(site.batterie_capacite_kwh) : undefined,
+        has_comwatt: site.box_comwatt_existante==null?undefined:(site.box_comwatt_existante?'oui':'non'),
         other_equip: site.flex_other_equipment||undefined,
       }:null}
       onBack={()=>setShowFlexForm(false)}
@@ -5967,6 +6001,24 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
                   // Toujours écrire (même 0) pour éviter que l'ancienne valeur persiste
                   localStorage.setItem('starvolt_investissement_total',String(Math.round(totalInvestissement)));
                   return(<>
+                    {/* ── Équipement DÉJÀ installé (déclaré au parcours) — base de référence ── */}
+                    {(()=>{
+                      const _pvEx=Math.max(0,parseFloat(site?.pv_existant_kwc)||0);
+                      const _batEx=Math.max(0,parseFloat(site?.batterie_existante_kwh)||0);
+                      const _boxEx=site?.box_comwatt_existante===true;
+                      if(_pvEx<=0&&_batEx<=0&&!_boxEx) return null;
+                      const chip={display:'flex',alignItems:'center',gap:6,background:'rgba(255,255,255,.05)',border:'1px solid rgba(255,255,255,.12)',borderRadius:8,padding:'5px 10px',fontSize:12,color:'white',fontWeight:700};
+                      return(
+                        <div style={{background:'rgba(255,180,64,.06)',border:'1px solid rgba(255,180,64,.25)',borderRadius:10,padding:'8px 12px',display:'flex',flexDirection:'column',gap:6}}>
+                          <div style={{fontSize:10,fontWeight:800,letterSpacing:'.06em',textTransform:'uppercase',color:'rgba(255,180,64,.85)'}}>Déjà installé chez le client</div>
+                          <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
+                            {_pvEx>0 && <div style={chip}>☀️ PV {(_pvEx).toLocaleString('fr-FR')} kWc</div>}
+                            {_batEx>0 && <div style={chip}>🔋 Batterie {(_batEx).toLocaleString('fr-FR')} kWh</div>}
+                            {_boxEx && <div style={chip}><img src="/comwatt-box.png" style={{width:14,height:14,objectFit:'contain'}} onError={e=>e.target.style.display='none'}/>Box Comwatt</div>}
+                          </div>
+                        </div>
+                      );
+                    })()}
                     {/* ── Rangée 1 : PROFIL · kWc · Autoconso · Autoprod (si solaire au panier) ── */}
                     <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
                       {/* ACHATS */}
@@ -7556,6 +7608,8 @@ function GlobalVarsScreen({ onBack }) {
           taux_inflation_electricite:   n.taux_inflation_electricite   ?? 4,
           taux_inflation_electricite_2: n.taux_inflation_electricite_2 ?? 0,
           prix_rachat_injection:        n.prix_rachat_injection        ?? 0.04,
+          autoconso_sans_box:           n.autoconso_sans_box           ?? 70,
+          autoconso_avec_box:           n.autoconso_avec_box           ?? 90,
           opti_solaire:                 n.opti_solaire                 ?? true,
           opti_tarif:                   n.opti_tarif                   ?? true,
         });
@@ -7576,6 +7630,8 @@ function GlobalVarsScreen({ onBack }) {
       taux_inflation_electricite:   num(globalForm.taux_inflation_electricite),
       taux_inflation_electricite_2: num(globalForm.taux_inflation_electricite_2),
       prix_rachat_injection:        num(globalForm.prix_rachat_injection),
+      autoconso_sans_box:           num(globalForm.autoconso_sans_box),
+      autoconso_avec_box:           num(globalForm.autoconso_avec_box),
       opti_solaire:                 !!globalForm.opti_solaire,
       opti_tarif:                   !!globalForm.opti_tarif,
       updated_at: new Date().toISOString(),
@@ -7690,6 +7746,31 @@ function GlobalVarsScreen({ onBack }) {
               onChange={e=>setGlobalForm(p=>({...p,prix_rachat_injection:e.target.value}))}
               style={F}/>
             <div style={{fontSize:9,color:'rgba(255,255,255,.3)',marginTop:2}}>Tarif OA EDF par défaut : 0,04 €/kWh</div>
+          </div>
+        </div>
+
+        {/* ── Autoconsommation PV existant (estimation injection) ── */}
+        <div style={{...SL,marginTop:4}}>Autoconsommation PV existant</div>
+        <div style={{fontSize:9,color:'rgba(255,255,255,.35)',marginBottom:6,marginTop:-2}}>
+          Part de la production solaire consommée sur place. Sert à estimer l'injection réseau
+          d'un PV déjà installé quand Enedis ne remonte pas la courbe d'injection.
+        </div>
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:6,marginBottom:10}}>
+          <div>
+            <div style={FL}>Sans box Comwatt (%)</div>
+            <input className="inp" type="number" step="1" min="0" max="100" placeholder="70"
+              value={String(globalForm.autoconso_sans_box)}
+              onChange={e=>setGlobalForm(p=>({...p,autoconso_sans_box:e.target.value}))}
+              style={F}/>
+            <div style={{fontSize:9,color:'rgba(255,255,255,.3)',marginTop:2}}>Ex : 70 % → prod 10 kWh = 7 sur place, 3 injectés</div>
+          </div>
+          <div>
+            <div style={FL}>Avec box Comwatt (%)</div>
+            <input className="inp" type="number" step="1" min="0" max="100" placeholder="90"
+              value={String(globalForm.autoconso_avec_box)}
+              onChange={e=>setGlobalForm(p=>({...p,autoconso_avec_box:e.target.value}))}
+              style={F}/>
+            <div style={{fontSize:9,color:'rgba(255,255,255,.3)',marginTop:2}}>Cible selon la capacité de pilotage thermique</div>
           </div>
         </div>
 
@@ -8444,6 +8525,11 @@ const ONBOARDING_EXTRA_QUESTIONS = [
   { key:'battery_kwh', type:'number', unit:'kWh', placeholder:'ex : 5', dontKnow:true,
     title:'Quelle est la capacité de stockage de cette batterie ?',
     when: a => ownerHouse(a) && a.has_battery === 'oui' },
+  { key:'has_comwatt', title:'Avez-vous déjà une box Comwatt qui pilote vos consommations ?', cols:2,
+    when: a => ownerHouse(a) && a.has_solar === 'oui', options:[
+    { value:'oui', emoji:'📦', label:'Oui' },
+    { value:'non', emoji:'🚫', label:'Non' },
+  ]},
   { key:'other_equip', type:'text', optional:true,
     title:"Avez-vous d'autres équipements énergivores que nous n'avons pas listés ensemble ici ?",
     placeholder:'ex : piscine, spa, borne de recharge, climatisation…',
@@ -8457,7 +8543,7 @@ function OnboardingTypeform({ siteId, onDone, onBack, initial=null, extended=fal
     if (!initial) return {};
     const a = {};
     ['chauffage','ecs','surface','type_logement','statut',
-     'has_solar','pv_kwc','pv_comment','has_battery','battery_kwh','other_equip']
+     'has_solar','pv_kwc','pv_comment','has_battery','battery_kwh','has_comwatt','other_equip']
       .forEach(k => { if (initial[k] != null && initial[k] !== '') a[k] = initial[k]; });
     return a;
   });
@@ -8479,7 +8565,7 @@ function OnboardingTypeform({ siteId, onDone, onBack, initial=null, extended=fal
 
   const finish = async (allAnswers) => {
     const { chauffage=null, ecs=null, surface=null, type_logement=null, statut=null,
-            has_solar=null, pv_kwc=null, pv_comment=null, has_battery=null, battery_kwh=null, other_equip=null } = allAnswers;
+            has_solar=null, pv_kwc=null, pv_comment=null, has_battery=null, battery_kwh=null, has_comwatt=null, other_equip=null } = allAnswers;
     const idx = surface === 'small' ? 0 : surface === 'medium' ? 1 : 2;
     let kw = 0;
     if (chauffage === 'elec' || chauffage === 'pac') kw += [3, 7, 12][idx];
@@ -8522,6 +8608,10 @@ function OnboardingTypeform({ siteId, onDone, onBack, initial=null, extended=fal
         // et on initialise la cible projet = existant (delta = 0 tant que rien n'est ajouté).
         if (has_solar != null)   { upd.pv_existant_kwc = pvKwc; upd.puissance_pv_kwc = pvKwc; }
         if (has_battery != null) { upd.batterie_existante_kwh = batKwh; upd.batterie_capacite_kwh = batKwh; }
+        // Box Comwatt déjà installée (déclarée seulement si PV existant) → autoconso pilotée.
+        // « non » explicite au solaire ⇒ pas de box existante.
+        if (has_comwatt != null)      upd.box_comwatt_existante = has_comwatt === 'oui';
+        else if (has_solar === 'non') upd.box_comwatt_existante = false;
         await sb.from('sites').update(upd).eq('id', siteId);
         localStorage.setItem('starvolt_flex_'+siteId, JSON.stringify({ chauffage, ecs, surface, type_logement, statut }));
       } catch {}
@@ -9205,7 +9295,7 @@ function SolarSimScreen({ user, userProfile, onBack, onPanier, onMonSite, onCart
     if (!siteId) { setLoading(false); return; }
     setActiveSiteId(siteId);
     Promise.all([
-      sb.from('sites').select('id,conso_profil,conso_annuelle_kwh,tarif_id,profil_production_id,adresse_ligne1,code_postal,ville,heure_debut_hc1,heure_fin_hc1,heure_debut_hc2,heure_fin_hc2,hc_debut1,hc_fin1,hc_debut2,hc_fin2,flex_chauffage,flex_ecs,flex_surface,pv_existant_kwc,batterie_existante_kwh,injection_profil').eq('id', siteId).maybeSingle(),
+      sb.from('sites').select('id,conso_profil,conso_annuelle_kwh,tarif_id,profil_production_id,adresse_ligne1,code_postal,ville,heure_debut_hc1,heure_fin_hc1,heure_debut_hc2,heure_fin_hc2,hc_debut1,hc_fin1,hc_debut2,hc_fin2,flex_chauffage,flex_ecs,flex_surface,pv_existant_kwc,batterie_existante_kwh,box_comwatt_existante,injection_profil').eq('id', siteId).maybeSingle(),
       sb.from('tarifs_electricite').select('*'),
       sb.rpc('get_spot_json'),
       sb.from('parametres_nationaux').select('*').eq('id', 1).maybeSingle(),
@@ -9561,7 +9651,7 @@ function PanierScreen({ user, onBack, onGoTo, onMonSite }) {
     const siteId = localStorage.getItem('starvolt_active_site_id');
     if (!siteId) { setLoading(false); return; }
     Promise.all([
-      sb.from('sites').select('id,conso_profil,conso_annuelle_kwh,tarif_id,profil_production_id,adresse_ligne1,code_postal,ville,heure_debut_hc1,heure_fin_hc1,heure_debut_hc2,heure_fin_hc2,hc_debut1,hc_fin1,hc_debut2,hc_fin2,puissance_pv_kwc,batterie_capacite_kwh,pv_existant_kwc,batterie_existante_kwh,injection_profil').eq('id', siteId).maybeSingle(),
+      sb.from('sites').select('id,conso_profil,conso_annuelle_kwh,tarif_id,profil_production_id,adresse_ligne1,code_postal,ville,heure_debut_hc1,heure_fin_hc1,heure_debut_hc2,heure_fin_hc2,hc_debut1,hc_fin1,hc_debut2,hc_fin2,flex_chauffage,flex_ecs,flex_surface,puissance_pv_kwc,batterie_capacite_kwh,pv_existant_kwc,batterie_existante_kwh,box_comwatt_existante,injection_profil').eq('id', siteId).maybeSingle(),
       sb.from('tarifs_electricite').select('*'),
       sb.rpc('get_spot_json'),
       sb.from('parametres_nationaux').select('*').eq('id',1).maybeSingle(),
@@ -11657,6 +11747,7 @@ function AdminBilanDataScreen({ onBack }) {
       ['Panneaux solaires existants', f.pv_existant_kwc != null ? (f.pv_existant_kwc > 0 ? f.pv_existant_kwc + ' kWc' : 'non') : '—'],
       ['Déclaration installation PV (client)', f.pv_declaration_client || '—'],
       ['Batterie existante', f.batterie_existante_kwh != null ? (f.batterie_existante_kwh > 0 ? f.batterie_existante_kwh + ' kWh' : 'non') : '—'],
+      ['Box Comwatt existante', f.box_comwatt_existante || '—'],
       ['Autres équipements énergivores', f.equipements_energivores_autres || '—'],
       ['Niveau quizz', f.quiz_niveau_etoiles != null ? (f.quiz_niveau_etoiles > 0 ? '⭐'.repeat(f.quiz_niveau_etoiles) : '🐻 (0 étoile)') : '—'],
       ['Quizz — taux d’erreur (1er coup)', f.quiz_taux_erreur_pct != null ? f.quiz_taux_erreur_pct + ' %' : '—'],
