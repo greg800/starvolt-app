@@ -3846,21 +3846,32 @@ function thermalPotentialKwh(site) {
 //    quand Enedis ne remonte pas la courbe d'injection (injection_profil absent). Il évite de
 //    supposer 100 % d'autoconso (injection = 0), ce qui gonflait la conso reconstruite.
 //      • Sans box Comwatt : ratio global `autoconso_sans_box` (ex. 70 %).
-//      • Avec box Comwatt existante : PAS de ratio fixé a priori — on le CALCULE. La box pilote
-//        le stockage thermique qui absorbe une partie du surplus solaire. On ajoute donc au
-//        ratio de base la fraction de surplus journalier que la capacité thermique peut stocker :
-//          autoconso = base + min(1−base, capacité_thermique_kWh / production_journalière_kWh)
-//        → sature naturellement (jamais > 100 %), sans plafond arbitraire.
+//      • Avec box Comwatt existante : PAS de ratio fixé a priori — on le CALCULE par SIMULATION
+//        HORAIRE. Heure par heure, le surplus solaire (part non autoconsommée directement) est
+//        stocké dans le stockage thermique dans la limite de sa capacité ; il est réutilisé plus
+//        tard (évite de soutirer quand l'élec est chère). Le stockage se recycle une fois par
+//        jour → sur une journée, le surplus au-delà de la capacité thermique est INJECTÉ. En fin
+//        d'année : taux réel = (production − injection annuelle) / production.
 function estimateAutoconsoRatio(globalVars, site, prodProfil, pvExist) {
   const clamp = v => Math.min(1, Math.max(0, v));
   const base = clamp((globalVars?.autoconso_sans_box ?? 70) / 100);
   if (!site?.box_comwatt_existante) return base;
-  const tk = thermalPotentialKwh(site); // kWh thermique pilotable / jour
-  if (tk <= 0 || !Array.isArray(prodProfil) || !(pvExist > 0)) return base;
-  const dailyProdWh = (prodProfil.reduce((s,v)=>s+(v||0),0) * pvExist) / 366;
-  if (dailyProdWh <= 0) return base;
-  const absorbedFrac = Math.min(1 - base, (tk * 1000) / dailyProdWh);
-  return clamp(base + absorbedFrac);
+  const tkKwh = thermalPotentialKwh(site); // capacité thermique pilotable (kWh / cycle jour)
+  if (tkKwh <= 0 || !Array.isArray(prodProfil) || !(pvExist > 0)) return base;
+  const capWh = tkKwh * 1000;
+  let totalProd = 0, totalInj = 0, daySurplus = 0, dayHour = 0;
+  for (let h = 0; h < prodProfil.length; h++) {
+    const P = (prodProfil[h] || 0) * pvExist;
+    totalProd += P;
+    daySurplus += P * (1 - base);               // surplus solaire de l'heure (candidat au stockage)
+    if (++dayHour === 24) {                       // fin de journée : un cycle de stockage thermique
+      totalInj += Math.max(0, daySurplus - capWh);// débordement au-delà de la capacité = injection
+      daySurplus = 0; dayHour = 0;
+    }
+  }
+  if (dayHour > 0) totalInj += Math.max(0, daySurplus - capWh); // dernière journée partielle
+  if (totalProd <= 0) return base;
+  return clamp(1 - totalInj / totalProd);
 }
 
 // 2) Bilan énergétique horaire selon le panier (sélection du moteur).
