@@ -1062,11 +1062,18 @@ Deno.serve(async (req)=>{
       });
       const order = await orderResp.json();
       const requests = order.requests ?? [];
-      const isSout = (r)=>(r.direction ?? "SOUTIRAGE") === "SOUTIRAGE";
-      const r63 = requests.find((r)=>r.type === "R63" && isSout(r));
-      const r65 = requests.find((r)=>r.type === "R65" && isSout(r));
-      const r63Inj = requests.find((r)=>r.type === "R63" && r.direction === "INJECTION");
-      const r65Inj = requests.find((r)=>r.type === "R65" && r.direction === "INJECTION");
+      // ⚠️ Switchgrid NE renvoie PAS le champ `direction` dans la réponse d'ordre (vérifié en
+      // prod : direction=undefined sur toutes les requêtes). On ne peut donc pas filtrer dessus.
+      // On s'appuie sur l'ORDRE DE SOUMISSION (cf. placeSwitchgridOrder : SOUTIRAGE d'abord,
+      // INJECTION ensuite) → 1er R63/R65 = soutirage, 2e = injection. Fallback sur `direction`
+      // au cas où l'API se mettrait à le renvoyer un jour.
+      const r63all = requests.filter((r)=>r.type === "R63");
+      const r65all = requests.filter((r)=>r.type === "R65");
+      const byDir = (arr, dir, idx)=> arr.find((r)=>r.direction === dir) ?? arr[idx] ?? null;
+      const r63 = byDir(r63all, "SOUTIRAGE", 0);
+      const r65 = byDir(r65all, "SOUTIRAGE", 0);
+      const r63Inj = byDir(r63all, "INJECTION", 1);
+      const r65Inj = byDir(r65all, "INJECTION", 1);
       const c68 = requests.find((r)=>r.type === "C68_ASYNC");
       const isPending = (x)=>x && (x.status === "PENDING" || x.status === "QUEUED" || x.status === "NOT_STARTED");
       const anyPending = [
