@@ -3846,17 +3846,21 @@ function thermalPotentialKwh(site) {
 //    quand Enedis ne remonte pas la courbe d'injection (injection_profil absent). Il évite de
 //    supposer 100 % d'autoconso (injection = 0), ce qui gonflait la conso reconstruite.
 //      • Sans box Comwatt : ratio global `autoconso_sans_box` (ex. 70 %).
-//      • Avec box Comwatt existante : la box pilote le stockage thermique et déplace la conso
-//        vers les heures solaires → autoconso plus élevée. On interpole entre le ratio de base
-//        (0 kWh thermique) et `autoconso_avec_box` (capacité thermique ≥ 10 kWh).
-function estimateAutoconsoRatio(globalVars, site) {
+//      • Avec box Comwatt existante : PAS de ratio fixé a priori — on le CALCULE. La box pilote
+//        le stockage thermique qui absorbe une partie du surplus solaire. On ajoute donc au
+//        ratio de base la fraction de surplus journalier que la capacité thermique peut stocker :
+//          autoconso = base + min(1−base, capacité_thermique_kWh / production_journalière_kWh)
+//        → sature naturellement (jamais > 100 %), sans plafond arbitraire.
+function estimateAutoconsoRatio(globalVars, site, prodProfil, pvExist) {
   const clamp = v => Math.min(1, Math.max(0, v));
   const base = clamp((globalVars?.autoconso_sans_box ?? 70) / 100);
   if (!site?.box_comwatt_existante) return base;
-  const maxAc = clamp((globalVars?.autoconso_avec_box ?? 90) / 100);
-  const tk = thermalPotentialKwh(site);
-  const f = Math.min(1, tk / 10);
-  return base + (maxAc - base) * f;
+  const tk = thermalPotentialKwh(site); // kWh thermique pilotable / jour
+  if (tk <= 0 || !Array.isArray(prodProfil) || !(pvExist > 0)) return base;
+  const dailyProdWh = (prodProfil.reduce((s,v)=>s+(v||0),0) * pvExist) / 366;
+  if (dailyProdWh <= 0) return base;
+  const absorbedFrac = Math.min(1 - base, (tk * 1000) / dailyProdWh);
+  return clamp(base + absorbedFrac);
 }
 
 // 2) Bilan énergétique horaire selon le panier (sélection du moteur).
@@ -3880,7 +3884,7 @@ function buildSiteBalance({ site, prodProfil, tariffs, spotMap, globalVars, pvKw
   //     Auparavant on supposait 100 % d'autoconso (injection = 0), ce qui gonflait la conso.
   const pvExist  = Math.max(0, parseFloat(site.pv_existant_kwc)        || 0);
   const injProfil = Array.isArray(site.injection_profil) ? site.injection_profil : null;
-  const acRatio  = estimateAutoconsoRatio(globalVars, site);
+  const acRatio  = estimateAutoconsoRatio(globalVars, site, prodProfil, pvExist);
   const consoProfile = (pvExist > 0 && prodProfil)
     ? site.conso_profil.map((c,i)=>{
         const prod = (prodProfil[i]||0)*pvExist;
@@ -6055,6 +6059,22 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
                           </div>}
                         </div>
                       }
+                      {/* Taux d'autoconsommation (après travaux) — évolue avec le PV / la batterie ajoutés */}
+                      {(()=>{
+                        if(!balance) return null;
+                        const _acY=balance.monthly.reduce((s,m)=>s+(m.on_site||0),0);
+                        const _injY=balance.monthly.reduce((s,m)=>s+(m.injection||0),0);
+                        const _prodY=_acY+_injY;
+                        if(_prodY<=0) return null;
+                        const _tac=Math.round(_acY/_prodY*100);
+                        return(
+                          <div style={{...T,alignItems:'center',justifyContent:'center',textAlign:'center',background:'rgba(240,160,80,.08)',border:'1px solid rgba(240,160,80,.28)'}}>
+                            <div style={LBL}>AUTOCONSO</div>
+                            <div style={{fontSize:isMobile?19:26,fontWeight:900,color:'#f0a050',lineHeight:1.1}}>{_tac}<span style={{fontSize:isMobile?11:15}}> %</span></div>
+                            <div style={{fontSize:10,color:'rgba(255,255,255,.45)'}}>part de la prod consommée sur place</div>
+                          </div>
+                        );
+                      })()}
                       {/* Activation des services — affiché dès que box ou ACC en panier, sans attendre le bilan */}
                       {(hasBox||hasAcc)&&<div style={{...T,flexDirection:'column',gap:5,justifyContent:'center',minWidth:155}}>
                           <div style={{fontSize:9,color:'rgba(255,255,255,.4)',fontWeight:700,letterSpacing:'0.08em',textTransform:'uppercase'}}>Activation des services</div>
@@ -7609,7 +7629,6 @@ function GlobalVarsScreen({ onBack }) {
           taux_inflation_electricite_2: n.taux_inflation_electricite_2 ?? 0,
           prix_rachat_injection:        n.prix_rachat_injection        ?? 0.04,
           autoconso_sans_box:           n.autoconso_sans_box           ?? 70,
-          autoconso_avec_box:           n.autoconso_avec_box           ?? 90,
           opti_solaire:                 n.opti_solaire                 ?? true,
           opti_tarif:                   n.opti_tarif                   ?? true,
         });
@@ -7631,7 +7650,6 @@ function GlobalVarsScreen({ onBack }) {
       taux_inflation_electricite_2: num(globalForm.taux_inflation_electricite_2),
       prix_rachat_injection:        num(globalForm.prix_rachat_injection),
       autoconso_sans_box:           num(globalForm.autoconso_sans_box),
-      autoconso_avec_box:           num(globalForm.autoconso_avec_box),
       opti_solaire:                 !!globalForm.opti_solaire,
       opti_tarif:                   !!globalForm.opti_tarif,
       updated_at: new Date().toISOString(),
@@ -7753,7 +7771,9 @@ function GlobalVarsScreen({ onBack }) {
         <div style={{...SL,marginTop:4}}>Autoconsommation PV existant</div>
         <div style={{fontSize:9,color:'rgba(255,255,255,.35)',marginBottom:6,marginTop:-2}}>
           Part de la production solaire consommée sur place. Sert à estimer l'injection réseau
-          d'un PV déjà installé quand Enedis ne remonte pas la courbe d'injection.
+          d'un PV déjà installé quand Enedis ne remonte pas la courbe d'injection. Avec une box
+          Comwatt existante, ce taux est CALCULÉ à partir de la capacité de stockage thermique
+          (pas de valeur fixe à saisir).
         </div>
         <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:6,marginBottom:10}}>
           <div>
@@ -7763,14 +7783,6 @@ function GlobalVarsScreen({ onBack }) {
               onChange={e=>setGlobalForm(p=>({...p,autoconso_sans_box:e.target.value}))}
               style={F}/>
             <div style={{fontSize:9,color:'rgba(255,255,255,.3)',marginTop:2}}>Ex : 70 % → prod 10 kWh = 7 sur place, 3 injectés</div>
-          </div>
-          <div>
-            <div style={FL}>Avec box Comwatt (%)</div>
-            <input className="inp" type="number" step="1" min="0" max="100" placeholder="90"
-              value={String(globalForm.autoconso_avec_box)}
-              onChange={e=>setGlobalForm(p=>({...p,autoconso_avec_box:e.target.value}))}
-              style={F}/>
-            <div style={{fontSize:9,color:'rgba(255,255,255,.3)',marginTop:2}}>Cible selon la capacité de pilotage thermique</div>
           </div>
         </div>
 
