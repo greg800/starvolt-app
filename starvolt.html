@@ -3905,6 +3905,17 @@ function buildSiteBalance({ site, prodProfil, tariffs, spotMap, globalVars, pvKw
         return (c||0) + autoconso;
       })
     : site.conso_profil;
+  // Stockage INCRÉMENTAL : quand on a reconstruit la conso (client déjà équipé), les données
+  // Enedis (soutirage + injection mesurés) reflètent DÉJÀ l'effet du stockage existant
+  // (batterie chimique + pilotage thermique de la box). Ré-appliquer le stockage CIBLE complet
+  // le compterait deux fois (l'injection mesurée serait ré-absorbée → chute artificielle).
+  // On ne simule donc que le stockage AJOUTÉ (cible − existant). Pour cible = existant,
+  // l'incrément est nul → simulation PV seul → on retombe exactement sur la mesure.
+  const reconstructed = pvExist > 0 && Array.isArray(prodProfil);
+  const batExist   = Math.max(0, parseFloat(site.batterie_existante_kwh) || 0);
+  const thermExist = site.box_comwatt_existante ? thermalPotentialKwh(site) : 0;
+  const bkEff = reconstructed ? Math.max(0, bk - batExist)   : bk;
+  const tkEff = reconstructed ? Math.max(0, tk - thermExist) : tk;
   // Le stockage ne se pilote que si une box Starvolt est au panier.
   // baseTariffOnly : facture de RÉFÉRENCE (état actuel du client) → pas de pilotage, tarif courant.
   const hasBoxLS = !baseTariffOnly && (!!localStorage.getItem('starvolt_box_chosen')
@@ -3922,17 +3933,17 @@ function buildSiteBalance({ site, prodProfil, tariffs, spotMap, globalVars, pvKw
   if (kw > 0 && prodProfil) {
     if (curT) {
       if (curT.tarif_dynamique && !spotMap) return null;
-      return computeCombinedOptimization(consoProfile, prodProfil, kw, String(bk), thermKwh, eg, curT, baseT, site, spotMap);
+      return computeCombinedOptimization(consoProfile, prodProfil, kw, String(bkEff), String(tkEff), eg, curT, baseT, site, spotMap);
     }
     const ratioBat=(globalVars?.ratio_puissance_stockage??50)/100;
     const pBat=globalVars?.pertes_batterie??10;
     const ratioTherm=(globalVars?.ratio_puissance_stockage_thermique??50)/100;
     const pTherm=globalVars?.pertes_thermique??0;
-    return computeEnergyBalance(consoProfile, prodProfil, kw, bk*ratioBat*1000, bk, pBat, tk*ratioTherm, tk, pTherm);
+    return computeEnergyBalance(consoProfile, prodProfil, kw, bkEff*ratioBat*1000, bkEff, pBat, tkEff*ratioTherm, tkEff, pTherm);
   }
   if (curT) {
     if (curT.tarif_dynamique && !spotMap) return null;
-    return computeStorageOptimization(consoProfile, curT, baseT, site, bk, tk, eg, spotMap);
+    return computeStorageOptimization(consoProfile, curT, baseT, site, bkEff, tkEff, eg, spotMap);
   }
   return null;
 }
