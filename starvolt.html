@@ -3876,6 +3876,129 @@ function estimateAutoconsoRatio(globalVars, site, prodProfil, pvExist) {
 
 // 2) Bilan énergétique horaire selon le panier (sélection du moteur).
 //    Retourne l'objet balance ({billWithout, billWithStorage, saving, monthly, hourly...}) ou null.
+// ─── Bilan d'un client DÉJÀ ÉQUIPÉ (reconstruit) ───────────────────────────
+// Le moteur classique (computeCombinedOptimization) NETTE la production contre une
+// seule courbe de charge. Or pour un client déjà équipé, Enedis fournit DEUX séries
+// mesurées INDÉPENDANTES : le soutirage (conso_profil) ET l'injection (injection_profil).
+// Elles sont non nulles SIMULTANÉMENT une grande partie de l'année → aucun couple
+// (charge, production) ne peut les reproduire par simple nettage. De plus la courbe
+// d'injection remontée est souvent PLATE (même moyenne à chaque heure du jour, y compris
+// la nuit) : seul son TOTAL ANNUEL est fiable.
+// On construit donc le bilan directement sur la MESURE :
+//   • soutirage affiché = conso_profil (mesuré) — inchangé à cible = existant.
+//   • injection affichée = total annuel mesuré (injection_annuelle_kwh), REFORMÉ sur la
+//     courbe solaire (prodProfil) pour un graphe physique, en conservant le total exact.
+//   • on n'ajoute que l'équipement INCRÉMENTAL (cible − existant) par-dessus la mesure.
+// À cible = existant (Δpv = 0, Δstockage = 0) → on retombe EXACTEMENT sur la mesure
+// Enedis (soutirage 17,3 MWh / injection 4,2 MWh pour Nicolas).
+function buildReconstructedBalance({ site, prodProfil, tariff, baseTariff, globalVars, spotMap, pvExist, kw, bkEff, tkEff }) {
+  const conso = site.conso_profil;
+  const N = conso.length;
+  const TVA        = (globalVars?.tva ?? 20) / 100;
+  const tvaAbo     = (globalVars?.tva_abo ?? 5.5) / 100;
+  const prixRachat = (globalVars?.prix_rachat_injection ?? 0.04);
+  const ratioBat   = (globalVars?.ratio_puissance_stockage ?? 50) / 100;
+  const ratioTherm = (globalVars?.ratio_puissance_stockage_thermique ?? 50) / 100;
+  const pBat       = (globalVars?.pertes_batterie ?? 10) / 100;
+  const batEff     = 1 - Math.min(Math.max(pBat, 0), 1);
+  const hcWinArr   = getHcWindows(site, globalVars);
+
+  const makePriceFn = t => {
+    if (!t) return () => 0;
+    if (t.tarif_dynamique && spotMap) {
+      const marge  = (t.marge_fournisseur_ceur_kwh || 0) / 100;
+      const accise = (globalVars?.accise || 0) / 100;
+      return (m, d, h) => (spotMap[`${m}_${d}_${h}`] || 0) + getTurpeRate(m, h, globalVars, hcWinArr) + accise + marge;
+    }
+    if (t.type_tarif === 'multi' && t.periodes?.length > 0) return (m, d, h) => getPrixMulti(m, d, h, t.periodes);
+    if (t.prix_hc != null && t.prix_hc !== t.prix_hp && hcWinArr.length > 0) return (m, d, h) => isHcHour(h, hcWinArr) ? t.prix_hc : t.prix_hp;
+    const flat = t.prix_hp || 0;
+    return () => flat;
+  };
+  const priceEff  = makePriceFn(tariff);
+  const priceBase = makePriceFn(baseTariff || tariff);
+
+  // Total annuel d'injection MESURÉ (source de vérité) et production existante estimée.
+  const injAnnualWh = (site.injection_annuelle_kwh != null)
+    ? site.injection_annuelle_kwh * 1000
+    : (Array.isArray(site.injection_profil) ? site.injection_profil.reduce((s, x) => s + (x || 0), 0) : 0);
+  let prodExistAnnualWh = 0;
+  for (let i = 0; i < N; i++) prodExistAnnualWh += (prodProfil[i] || 0) * pvExist;
+  // La production doit couvrir l'injection (autoconso ≥ 0). Si l'estimation générique est
+  // plus basse que l'injection mesurée, on remonte l'échelle de production.
+  const effProdAnnualWh = Math.max(prodExistAnnualWh, injAnnualWh);
+  const prodScale = prodExistAnnualWh > 0 ? effProdAnnualWh / prodExistAnnualWh : 1;
+  const injRatio  = effProdAnnualWh > 0 ? injAnnualWh / effProdAnnualWh : 0; // ≤ 1 → part injectée
+
+  const dKw        = Math.max(0, kw - pvExist);
+  const batCapWh   = bkEff * 1000, thermCapWh = tkEff * 1000;
+  const batPowWh   = batCapWh * ratioBat, thermPowWh = thermCapWh * ratioTherm;
+  let   batSOC     = batCapWh * 0.5, thermSOC = thermCapWh * 0.5;
+
+  const monthly = Array.from({ length: 12 }, () => ({ on_site: 0, grid_buy: 0, injection: 0, via_bat: 0, via_therm: 0 }));
+  const hourly  = new Array(N);
+  let varCostHT = 0, varCostBaseHT = 0, annInjKwh = 0;
+
+  for (let m = 1; m <= 12; m++) {
+    for (let d = 1; d <= PROF_DAYS[m-1]; d++) {
+      for (let h = 0; h < 24; h++) {
+        const idx        = profIdx(m, d, h);
+        const importMeas = conso[idx] || 0;                       // soutirage mesuré (Wh)
+        const prodExist  = (prodProfil[idx] || 0) * pvExist * prodScale; // prod existante (Wh)
+        const injExist   = prodExist * injRatio;                  // injection existante (reformée)
+        const onSiteExist= prodExist - injExist;                  // autoconso existante
+        const dProd      = (prodProfil[idx] || 0) * dKw;          // production AJOUTÉE (Wh)
+
+        // La production ajoutée efface d'abord le soutirage restant (autoconso du neuf).
+        let gridBuy      = importMeas;
+        const newAutoconso = Math.min(dProd, gridBuy);
+        gridBuy         -= newAutoconso;
+        let surplus      = injExist + (dProd - newAutoconso);     // dispo à stocker/injecter
+
+        // Stockage INCRÉMENTAL : on charge le surplus, puis on décharge pour couvrir le soutirage.
+        let viaBat = 0, viaTherm = 0;
+        if (thermCapWh > 0 && surplus > 0) { const ci = Math.min(thermPowWh, thermCapWh - thermSOC, surplus); if (ci > 0) { thermSOC += ci; surplus -= ci; } }
+        if (batCapWh > 0 && batEff > 0 && surplus > 0) { const room = batCapWh - batSOC; const ci = Math.min(batPowWh, room > 0 ? Math.min(room / batEff, surplus) : 0); if (ci > 0) { batSOC += ci * batEff; surplus -= ci; } }
+        let injection = surplus;
+        if (thermSOC > 0 && gridBuy > 0) { const dt = Math.min(thermPowWh, thermSOC, gridBuy); thermSOC -= dt; gridBuy -= dt; viaTherm = dt; }
+        if (batSOC  > 0 && gridBuy > 0) { const db = Math.min(batPowWh, batSOC, gridBuy);     batSOC  -= db; gridBuy -= db; viaBat   = db; }
+
+        const onSite = onSiteExist + newAutoconso + viaBat + viaTherm;
+        varCostHT     += (gridBuy / 1000) * priceEff(m, d, h);
+        varCostBaseHT += (importMeas / 1000) * priceBase(m, d, h);
+        annInjKwh     += injection / 1000;
+
+        const gb = gridBuy/1000, inj = injection/1000, vb = viaBat/1000, vt = viaTherm/1000, os = onSite/1000;
+        hourly[idx] = { on_site: os, grid_buy: gb, injection: inj, via_bat: vb, via_therm: vt, m, d, h };
+        monthly[m-1].on_site   += os;
+        monthly[m-1].grid_buy  += gb;
+        monthly[m-1].injection += inj;
+        monthly[m-1].via_bat   += vb;
+        monthly[m-1].via_therm += vt;
+      }
+    }
+  }
+
+  const injCredit = annInjKwh * prixRachat;
+  const bt = baseTariff || tariff;
+  let billWithStorage, billWithout;
+  if (tariff.tarif_dynamique && spotMap) {
+    const fixedHT = (tariff.abo_annuel||0) + (tariff.turpe_fixe||0) + (tariff.cta_fixe||0);
+    billWithStorage = Math.round(Math.max(0, varCostHT * (1 + TVA) + fixedHT * (1 + tvaAbo) - injCredit));
+  } else {
+    billWithStorage = Math.round(Math.max(0, varCostHT + (tariff.abo_annuel||0) - injCredit));
+  }
+  if (bt.tarif_dynamique && spotMap) {
+    const fixedHT = (bt.abo_annuel||0) + (bt.turpe_fixe||0) + (bt.cta_fixe||0);
+    billWithout = Math.round(varCostBaseHT * (1 + TVA) + fixedHT * (1 + tvaAbo));
+  } else {
+    billWithout = Math.round(varCostBaseHT + (bt.abo_annuel||0));
+  }
+  const saving       = Math.max(0, billWithout - billWithStorage);
+  const reductionPct = billWithout > 0 ? Math.min(100, Math.round((saving / billWithout) * 100)) : 0;
+  return { monthly, hourly, billWithout, billWithStorage, saving, reductionPct, _reconstructed: true };
+}
+
 function buildSiteBalance({ site, prodProfil, tariffs, spotMap, globalVars, pvKwc, batKwh, thermKwh, baseTariffOnly=false }) {
   if (!site?.conso_profil) return null;
   const kw = pvKwc === '' ? 6 : (parseFloat(pvKwc)||0);
@@ -3894,26 +4017,11 @@ function buildSiteBalance({ site, prodProfil, tariffs, spotMap, globalVars, pvKw
   //     (estimateAutoconsoRatio : `autoconso_sans_box`, ou plus élevé si box Comwatt existante).
   //     Auparavant on supposait 100 % d'autoconso (injection = 0), ce qui gonflait la conso.
   const pvExist  = Math.max(0, parseFloat(site.pv_existant_kwc)        || 0);
-  const injProfil = Array.isArray(site.injection_profil) ? site.injection_profil : null;
-  const acRatio  = estimateAutoconsoRatio(globalVars, site, prodProfil, pvExist);
-  const consoProfile = (pvExist > 0 && prodProfil)
-    ? site.conso_profil.map((c,i)=>{
-        const prod = (prodProfil[i]||0)*pvExist;
-        const autoconso = injProfil
-          ? Math.max(0, prod - (injProfil[i]||0))   // injection réelle mesurée
-          : prod * acRatio;                          // estimation par ratio d'autoconso
-        return (c||0) + autoconso;
-      })
-    : site.conso_profil;
-  // Stockage INCRÉMENTAL : quand on a reconstruit la conso (client déjà équipé), les données
-  // Enedis (soutirage + injection mesurés) reflètent DÉJÀ l'effet du stockage existant
-  // (batterie chimique + pilotage thermique de la box). Ré-appliquer le stockage CIBLE complet
-  // le compterait deux fois (l'injection mesurée serait ré-absorbée → chute artificielle).
-  // On ne simule donc que le stockage AJOUTÉ (cible − existant). Pour cible = existant,
-  // l'incrément est nul → simulation PV seul → on retombe exactement sur la mesure.
-  const reconstructed = pvExist > 0 && Array.isArray(prodProfil);
   const batExist   = Math.max(0, parseFloat(site.batterie_existante_kwh) || 0);
   const thermExist = site.box_comwatt_existante ? thermalPotentialKwh(site) : 0;
+  const reconstructed = pvExist > 0 && Array.isArray(prodProfil);
+  // Stockage INCRÉMENTAL : on ne simule que l'AJOUT (cible − existant), l'existant étant
+  // déjà reflété dans la mesure Enedis. À cible = existant → incrément nul → mesure pure.
   const bkEff = reconstructed ? Math.max(0, bk - batExist)   : bk;
   const tkEff = reconstructed ? Math.max(0, tk - thermExist) : tk;
   // Le stockage ne se pilote que si une box Starvolt est au panier.
@@ -3930,6 +4038,14 @@ function buildSiteBalance({ site, prodProfil, tariffs, spotMap, globalVars, pvKw
   const effId = optiId || site.tarif_id;
   const curT  = effId ? (tariffs||[]).find(t=>t.id===effId)||null : null;
   const baseT = site.tarif_id ? (tariffs||[]).find(t=>t.id===site.tarif_id)||curT : curT;
+  // Client DÉJÀ ÉQUIPÉ : bilan bâti sur la MESURE (soutirage + injection annuelle réelle),
+  // équipement ajouté en incrémental. Voir buildReconstructedBalance.
+  if (reconstructed && curT) {
+    if (curT.tarif_dynamique && !spotMap) return null;
+    return buildReconstructedBalance({ site, prodProfil, tariff: curT, baseTariff: baseT, globalVars: eg, spotMap, pvExist, kw, bkEff, tkEff });
+  }
+  // Client NON équipé : moteur classique (nettage prod ↔ conso).
+  const consoProfile = site.conso_profil;
   if (kw > 0 && prodProfil) {
     if (curT) {
       if (curT.tarif_dynamique && !spotMap) return null;
