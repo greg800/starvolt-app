@@ -3783,6 +3783,11 @@ function resolveCartEquipment(site) {
   // Équipement déjà installé / cible enregistrée en base (source de vérité par site).
   const sitePv  = site?.puissance_pv_kwc      > 0 ? String(site.puissance_pv_kwc)      : (site?.pv_existant_kwc        > 0 ? String(site.pv_existant_kwc)        : null);
   const siteBat = site?.batterie_capacite_kwh > 0 ? String(site.batterie_capacite_kwh) : (site?.batterie_existante_kwh > 0 ? String(site.batterie_existante_kwh) : null);
+  // Stockage thermique déjà « installé » = capacité pilotable estimée quand le site possède
+  // une box Comwatt. Symétrique de la batterie : le slider doit démarrer sur l'existant (0€
+  // d'investissement au départ), pas sur 0.
+  const siteTherm = site?.box_comwatt_existante ? thermalPotentialKwh(site) : 0;
+  const thermExistStr = siteTherm > 0 ? String(siteTherm) : null;
   // Site ayant explicitement déclaré « pas de PV / pas de batterie » (parcours) → 0 imposé,
   // même si un panier solaire global traîne d'un AUTRE site (évite la fuite inter-sites).
   const siteNoSolar = site && site.flex_has_solar   === false && !sitePv;
@@ -3791,12 +3796,12 @@ function resolveCartEquipment(site) {
     // La fiche site prime toujours ; solar_defaults n'est qu'un défaut global de secours.
     pvKwc:    sitePv  || (siteNoSolar ? '0' : (parseFloat(solarDef.pvKwc)  > 0 ? String(solarDef.pvKwc)  : '6')),
     batKwh:   siteBat || (siteNoBat   ? '0' : (parseFloat(solarDef.batKwh) > 0 ? String(solarDef.batKwh) : '10')),
-    thermKwh: parseFloat(solarDef.thermKwh) > 0 ? String(solarDef.thermKwh) : '10',
+    thermKwh: thermExistStr || (parseFloat(solarDef.thermKwh) > 0 ? String(solarDef.thermKwh) : '10'),
   };
   // Panier sans solaire : on reflète l'équipement réellement installé de LA fiche site.
   // (On n'utilise pas solar_defaults ici : global, il pourrait provenir d'un autre site.)
-  if (hasBoxOnly) return { pvKwc: sitePv || '0', batKwh: siteBat || '0', thermKwh: solarDef.thermKwh||'10' };
-  return { pvKwc: sitePv || '0', batKwh: siteBat || '0', thermKwh: solarDef.thermKwh||'0' };
+  if (hasBoxOnly) return { pvKwc: sitePv || '0', batKwh: siteBat || '0', thermKwh: thermExistStr || solarDef.thermKwh || '10' };
+  return { pvKwc: sitePv || '0', batKwh: siteBat || '0', thermKwh: thermExistStr || solarDef.thermKwh || '0' };
 }
 
 // 1bis) Profil de production solaire d'un site — SOURCE UNIQUE.
@@ -3901,6 +3906,9 @@ function buildReconstructedBalance({ site, prodProfil, tariff, baseTariff, globa
   const ratioTherm = (globalVars?.ratio_puissance_stockage_thermique ?? 50) / 100;
   const pBat       = (globalVars?.pertes_batterie ?? 10) / 100;
   const batEff     = 1 - Math.min(Math.max(pBat, 0), 1);
+  // Cycles/an estimés d'un stockage existant (proxy pour valoriser un RETRAIT de capacité —
+  // l'existant n'étant pas mesuré séparément). ~260 j/an avec surplus exploitable.
+  const CYCLES_STOCKAGE_AN = 260;
   const hcWinArr   = getHcWindows(site, globalVars);
 
   const makePriceFn = t => {
@@ -3922,18 +3930,31 @@ function buildReconstructedBalance({ site, prodProfil, tariff, baseTariff, globa
   const injAnnualWh = (site.injection_annuelle_kwh != null)
     ? site.injection_annuelle_kwh * 1000
     : (Array.isArray(site.injection_profil) ? site.injection_profil.reduce((s, x) => s + (x || 0), 0) : 0);
-  let prodExistAnnualWh = 0;
-  for (let i = 0; i < N; i++) prodExistAnnualWh += (prodProfil[i] || 0) * pvExist;
+  let prodExistAnnualWh = 0, importAnnualWh = 0;
+  for (let i = 0; i < N; i++) { prodExistAnnualWh += (prodProfil[i] || 0) * pvExist; importAnnualWh += conso[i] || 0; }
   // La production doit couvrir l'injection (autoconso ≥ 0). Si l'estimation générique est
   // plus basse que l'injection mesurée, on remonte l'échelle de production.
   const effProdAnnualWh = Math.max(prodExistAnnualWh, injAnnualWh);
   const prodScale = prodExistAnnualWh > 0 ? effProdAnnualWh / prodExistAnnualWh : 1;
   const injRatio  = effProdAnnualWh > 0 ? injAnnualWh / effProdAnnualWh : 0; // ≤ 1 → part injectée
 
-  const dKw        = Math.max(0, kw - pvExist);
-  const batCapWh   = bkEff * 1000, thermCapWh = tkEff * 1000;
-  const batPowWh   = batCapWh * ratioBat, thermPowWh = thermCapWh * ratioTherm;
-  let   batSOC     = batCapWh * 0.5, thermSOC = thermCapWh * 0.5;
+  const dKw        = kw - pvExist;                 // Δ puissance PV (négatif = réduction)
+  // Stockage AJOUTÉ (cible > existant) : simulé en charge/décharge du surplus, heure par heure.
+  const batAdd     = Math.max(0,  bkEff) * 1000, thermAdd = Math.max(0,  tkEff) * 1000;
+  const batAddPow  = batAdd * ratioBat, thermAddPow = thermAdd * ratioTherm;
+  let   batSOC     = batAdd * 0.5, thermSOC = thermAdd * 0.5;
+  // Stockage RETIRÉ (cible < existant) : l'existant est fondu dans la mesure Enedis (injection
+  // basse car il chargeait, soutirage bas car il déchargeait). On ne peut pas le « dé-simuler »
+  // heure par heure (les courbes de charge/décharge ne sont pas mesurées). APPROXIMATION LINÉAIRE :
+  // l'énergie annuelle qu'il déplaçait ≈ capacité retirée × cycles/an. La supprimer renvoie cette
+  // énergie en injection (charge non faite) ET en soutirage (décharge non faite). Bornée par la
+  // marge de production (injection ≤ production) ; répartie sur les profils mesurés (timing réel).
+  const batRemKwh  = Math.max(0, -bkEff), thermRemKwh = Math.max(0, -tkEff);
+  const remShiftWh = (batRemKwh + thermRemKwh) * CYCLES_STOCKAGE_AN * 1000;
+  const injHeadroomWh = Math.max(0, effProdAnnualWh - injAnnualWh);
+  const remEnergyWh = Math.min(remShiftWh, injHeadroomWh);   // énergie déplacée en moins (Wh/an)
+  const injShareDen = injAnnualWh > 0 ? injAnnualWh : 1;
+  const impShareDen = importAnnualWh > 0 ? importAnnualWh : 1;
 
   const monthly = Array.from({ length: 12 }, () => ({ on_site: 0, grid_buy: 0, injection: 0, via_bat: 0, via_therm: 0 }));
   const hourly  = new Array(N);
@@ -3947,23 +3968,46 @@ function buildReconstructedBalance({ site, prodProfil, tariff, baseTariff, globa
         const prodExist  = (prodProfil[idx] || 0) * pvExist * prodScale; // prod existante (Wh)
         const injExist   = prodExist * injRatio;                  // injection existante (reformée)
         const onSiteExist= prodExist - injExist;                  // autoconso existante
-        const dProd      = (prodProfil[idx] || 0) * dKw;          // production AJOUTÉE (Wh)
+        const dProd      = (prodProfil[idx] || 0) * dKw;          // production Δ (Wh, ±)
 
-        // La production ajoutée efface d'abord le soutirage restant (autoconso du neuf).
-        let gridBuy      = importMeas;
-        const newAutoconso = Math.min(dProd, gridBuy);
-        gridBuy         -= newAutoconso;
-        let surplus      = injExist + (dProd - newAutoconso);     // dispo à stocker/injecter
+        // Δ PV appliqué à la mesure. Ajout → efface d'abord le soutirage restant (autoconso du
+        // neuf), le reste alimente le surplus. Retrait → ampute d'abord l'injection existante,
+        // puis, une fois l'injection épuisée, augmente le soutirage.
+        let gridBuy = importMeas, surplus, newAutoconso;
+        if (dProd >= 0) {
+          newAutoconso = Math.min(dProd, gridBuy);
+          gridBuy     -= newAutoconso;
+          surplus      = injExist + (dProd - newAutoconso);
+        } else {
+          const loss   = -dProd;
+          const cutInj = Math.min(loss, injExist);
+          const addImp = loss - cutInj;
+          gridBuy     += addImp;
+          surplus      = injExist - cutInj;
+          newAutoconso = -addImp;                                 // autoconso perdue
+        }
 
-        // Stockage INCRÉMENTAL : on charge le surplus, puis on décharge pour couvrir le soutirage.
+        // Stockage AJOUTÉ : on charge le surplus, puis on décharge pour couvrir le soutirage.
         let viaBat = 0, viaTherm = 0;
-        if (thermCapWh > 0 && surplus > 0) { const ci = Math.min(thermPowWh, thermCapWh - thermSOC, surplus); if (ci > 0) { thermSOC += ci; surplus -= ci; } }
-        if (batCapWh > 0 && batEff > 0 && surplus > 0) { const room = batCapWh - batSOC; const ci = Math.min(batPowWh, room > 0 ? Math.min(room / batEff, surplus) : 0); if (ci > 0) { batSOC += ci * batEff; surplus -= ci; } }
+        if (thermAdd > 0 && surplus > 0) { const ci = Math.min(thermAddPow, thermAdd - thermSOC, surplus); if (ci > 0) { thermSOC += ci; surplus -= ci; } }
+        if (batAdd > 0 && batEff > 0 && surplus > 0) { const room = batAdd - batSOC; const ci = Math.min(batAddPow, room > 0 ? Math.min(room / batEff, surplus) : 0); if (ci > 0) { batSOC += ci * batEff; surplus -= ci; } }
         let injection = surplus;
-        if (thermSOC > 0 && gridBuy > 0) { const dt = Math.min(thermPowWh, thermSOC, gridBuy); thermSOC -= dt; gridBuy -= dt; viaTherm = dt; }
-        if (batSOC  > 0 && gridBuy > 0) { const db = Math.min(batPowWh, batSOC, gridBuy);     batSOC  -= db; gridBuy -= db; viaBat   = db; }
+        if (thermSOC > 0 && gridBuy > 0) { const dt = Math.min(thermAddPow, thermSOC, gridBuy); thermSOC -= dt; gridBuy -= dt; viaTherm = dt; }
+        if (batSOC  > 0 && gridBuy > 0) { const db = Math.min(batAddPow, batSOC, gridBuy);     batSOC  -= db; gridBuy -= db; viaBat   = db; }
 
-        const onSite = onSiteExist + newAutoconso + viaBat + viaTherm;
+        // Stockage RETIRÉ : on répartit l'énergie annuelle « non déplacée » (remEnergyWh) au
+        // prorata des profils mesurés — injection en plus là où il y avait du surplus, soutirage
+        // en plus là où il y avait du déficit. La décharge non restituée était de l'autoconso.
+        let remDischarge = 0;
+        if (remEnergyWh > 0) {
+          const addInj = remEnergyWh * (injExist / injShareDen);
+          const addImp = remEnergyWh * (importMeas / impShareDen);
+          injection += addInj;
+          gridBuy   += addImp;
+          remDischarge = addImp;
+        }
+
+        const onSite = Math.max(0, onSiteExist + newAutoconso + viaBat + viaTherm - remDischarge);
         varCostHT     += (gridBuy / 1000) * priceEff(m, d, h);
         varCostBaseHT += (importMeas / 1000) * priceBase(m, d, h);
         annInjKwh     += injection / 1000;
@@ -3994,8 +4038,8 @@ function buildReconstructedBalance({ site, prodProfil, tariff, baseTariff, globa
   } else {
     billWithout = Math.round(varCostBaseHT + (bt.abo_annuel||0));
   }
-  const saving       = Math.max(0, billWithout - billWithStorage);
-  const reductionPct = billWithout > 0 ? Math.min(100, Math.round((saving / billWithout) * 100)) : 0;
+  const saving       = billWithout - billWithStorage;   // peut être négatif si l'on RÉDUIT l'équipement
+  const reductionPct = billWithout > 0 ? Math.max(-100, Math.min(100, Math.round((saving / billWithout) * 100))) : 0;
   return { monthly, hourly, billWithout, billWithStorage, saving, reductionPct, _reconstructed: true };
 }
 
@@ -4020,10 +4064,13 @@ function buildSiteBalance({ site, prodProfil, tariffs, spotMap, globalVars, pvKw
   const batExist   = Math.max(0, parseFloat(site.batterie_existante_kwh) || 0);
   const thermExist = site.box_comwatt_existante ? thermalPotentialKwh(site) : 0;
   const reconstructed = pvExist > 0 && Array.isArray(prodProfil);
-  // Stockage INCRÉMENTAL : on ne simule que l'AJOUT (cible − existant), l'existant étant
-  // déjà reflété dans la mesure Enedis. À cible = existant → incrément nul → mesure pure.
-  const bkEff = reconstructed ? Math.max(0, bk - batExist)   : bk;
-  const tkEff = reconstructed ? Math.max(0, tk - thermExist) : tk;
+  // Stockage INCRÉMENTAL SIGNÉ (client reconstruit) : cible − existant. Positif = capacité
+  // AJOUTÉE (simulée en charge/décharge du surplus) ; négatif = capacité RETIRÉE en-deçà de
+  // l'existant (on estime la suppression du déplacement d'énergie). L'existant est déjà reflété
+  // dans la mesure Enedis → à cible = existant → delta nul → mesure pure. Pour un client NON
+  // reconstruit, pas d'existant à déduire (bk/tk directs, moteur classique).
+  const bkEff = reconstructed ? (bk - batExist)   : bk;
+  const tkEff = reconstructed ? (tk - thermExist) : tk;
   // Le stockage ne se pilote que si une box Starvolt est au panier.
   // baseTariffOnly : facture de RÉFÉRENCE (état actuel du client) → pas de pilotage, tarif courant.
   const hasBoxLS = !baseTariffOnly && (!!localStorage.getItem('starvolt_box_chosen')
@@ -4078,8 +4125,12 @@ function computeBaseline({ site, prodProfil, tariffs, spotMap, globalVars }) {
   // facture actuelle. thermKwh='0' : aucun produit thermique dans l'état de référence.
   const pvExist  = Math.max(0, parseFloat(site?.pv_existant_kwc) || 0);
   const batExist = Math.max(0, parseFloat(site?.batterie_existante_kwh) || 0);
+  const thermExist = site?.box_comwatt_existante ? thermalPotentialKwh(site) : 0;
   if (pvExist <= 0 && batExist <= 0) return null;
-  const bal = buildSiteBalance({ site, prodProfil, tariffs, spotMap, globalVars, pvKwc: String(pvExist), batKwh: String(batExist), thermKwh: '0', baseTariffOnly: true });
+  // On rejoue l'équipement EXISTANT (PV + batterie + thermique de la box) → deltas nuls →
+  // le bilan retombe EXACTEMENT sur la mesure Enedis (facture actuelle réelle). Passer '0' en
+  // thermique donnerait désormais un delta négatif (retrait fictif) et fausserait la référence.
+  const bal = buildSiteBalance({ site, prodProfil, tariffs, spotMap, globalVars, pvKwc: String(pvExist), batKwh: String(batExist), thermKwh: String(thermExist), baseTariffOnly: true });
   if (!bal || typeof bal.billWithStorage !== 'number') return null;
   const conso = bal.monthly ? Math.round(bal.monthly.reduce((s,m)=>s+(m.grid_buy||0),0)) : null;
   return { bill: Math.round(bal.billWithStorage), conso };
@@ -4149,8 +4200,10 @@ function deriveSiteImpact({ balance, site, prodProfil, tariffs, spotMap, globalV
   const billApresNet = billApresElec!=null ? billApresElec-flexRev-accRev : null;
   // Économie énergie = référence "avant" − facture après projet. Si baselineBill fourni
   // (client déjà équipé), on mesure l'ajout INCRÉMENTAL (existant → cible), jamais depuis zéro.
+  // Peut être NÉGATIF : réduire l'équipement en-deçà de l'existant dégrade la facture
+  // (facture après > facture avant) → économie négative, reflétée telle quelle.
   const energySaving = hasBalance
-    ? (baselineBill != null ? Math.max(0, Math.round(baselineBill) - billApresElec) : balance.saving)
+    ? (baselineBill != null ? Math.round(baselineBill) - billApresElec : balance.saving)
     : 0;
   const totalSaving  = hasBalance ? (energySaving+flexRev+accRev) : accRev;
   const reductionPct = billAvant>0 ? Math.min(100, Math.round(totalSaving/billAvant*100)) : 0;
@@ -5251,6 +5304,26 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
   useEffect(()=>{
     localStorage.setItem('starvolt_solar_defaults',JSON.stringify({pvKwc,batKwh,thermKwh}));
   },[pvKwc,batKwh,thermKwh]);
+
+  // Point 2 : dès que la cible dépasse l'existant (investissement incrémental PV/batterie > 0),
+  // on ajoute AUTOMATIQUEMENT la tuile solaire au panier (elle affiche déjà la précision
+  // avant/après : « X kWc déjà installés → +Δ à ajouter »). Inversement, si l'on repasse au
+  // niveau de l'existant (ou en-dessous → réduction), l'investissement retombe à 0 : on retire
+  // la tuile AUTO. On ne touche jamais un choix explicite ('solar'/'solar_box' via SolarSim) —
+  // marqueur dédié 'auto' pour ne retirer que ce que cet effet a posé.
+  useEffect(()=>{
+    if(!site||!prixMat) return;
+    const pvInv  = interpPrix(billableDelta(pvKwc,  site?.pv_existant_kwc),        prixMat?.pv_prices ||[]);
+    const batInv = interpPrix(billableDelta(batKwh, site?.batterie_existante_kwh), prixMat?.bat_prices||[]);
+    const wantSolar = (pvInv + batInv) > 0;
+    const cur = localStorage.getItem('starvolt_solar_chosen');
+    if(wantSolar && !cur){
+      localStorage.setItem('starvolt_solar_chosen','auto');
+    } else if(!wantSolar && cur==='auto'){
+      localStorage.removeItem('starvolt_solar_chosen');
+      localStorage.removeItem('starvolt_solar_saving');
+    }
+  },[pvKwc,batKwh,site,prixMat]);
 
   // Auto-sélection du profil de production le plus proche par GPS
   useEffect(()=>{
