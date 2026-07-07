@@ -5301,18 +5301,27 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
   // Sync champs locaux quand on change de site
   // Règle : si solar au panier → valeurs de la page solaire (panier) ; sinon → valeurs DB ou défauts
   useEffect(()=>{
+    // GARDE : ne JAMAIS resynchroniser tant que le site n'est pas chargé. Au montage,
+    // activeId=null et sites=[] → site=undefined → resolveCartEquipment(undefined) renverrait
+    // l'existant (6) et écraserait la cible fraîche (9) déjà présente dans solar_defaults, avant
+    // même que load() ait fini. Quand load() peuple activeId (null→id), cet effet se rejoue avec
+    // le vrai site → cible correctement appliquée. (bug « PV remis à 6 » au retour du panier)
+    if(!site) return;
     // Source unique partagée avec le Panier : resolveCartEquipment
     const eq=resolveCartEquipment(site);
     setPvKwc(eq.pvKwc); setBatKwh(eq.batKwh); setThermKwh(eq.thermKwh);
     setProdProfilId(site?.profil_production_id||'');
     setProdProfilData(null); setBalance(null);
-  },[activeId,cartVersion]);
+  },[activeId,cartVersion,site?.id]);
 
   // Sync bidirectionnelle : écriture vers starvolt_solar_defaults partagé avec SolarSim.
   // On tague la CIBLE avec l'id du site (siteId) : source de vérité SYNCHRONE et fiable pour
   // le Panier (pas de course avec l'écriture DB débouncée). resolveCartEquipment ne fait
   // confiance à ces valeurs que si siteId === site courant → aucune fuite inter-sites.
   useEffect(()=>{
+    // GARDE : ne pas écrire tant qu'activeId est null (montage avant load) — sinon on taguerait
+    // la cible avec siteId:null, ce qui casse le match dans resolveCartEquipment.
+    if(!activeId) return;
     localStorage.setItem('starvolt_solar_defaults',JSON.stringify({pvKwc,batKwh,thermKwh,siteId:activeId}));
   },[pvKwc,batKwh,thermKwh,activeId]);
 
