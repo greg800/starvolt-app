@@ -3788,20 +3788,28 @@ function resolveCartEquipment(site) {
   // d'investissement au départ), pas sur 0.
   const siteTherm = site?.box_comwatt_existante ? thermalPotentialKwh(site) : 0;
   const thermExistStr = siteTherm > 0 ? String(siteTherm) : null;
+  // CIBLE fraîche éditée sur CE site (tag siteId) : source SYNCHRONE et prioritaire. Évite la
+  // course avec l'écriture DB débouncée de puissance_pv_kwc (bug « panier à 0 » / « PV remis à
+  // 6 »). On n'y fait confiance que si le tag correspond au site courant → pas de fuite d'un
+  // autre site. '0' est une cible valide (l'utilisateur a tout retiré) → test sur null/'' seul.
+  const defForSite = !!site?.id && solarDef.siteId === site.id;
+  const hasStr = v => v != null && v !== '';
+  const defPv    = defForSite && hasStr(solarDef.pvKwc)    ? String(solarDef.pvKwc)    : null;
+  const defBat   = defForSite && hasStr(solarDef.batKwh)   ? String(solarDef.batKwh)   : null;
+  const defTherm = defForSite && hasStr(solarDef.thermKwh) ? String(solarDef.thermKwh) : null;
   // Site ayant explicitement déclaré « pas de PV / pas de batterie » (parcours) → 0 imposé,
   // même si un panier solaire global traîne d'un AUTRE site (évite la fuite inter-sites).
   const siteNoSolar = site && site.flex_has_solar   === false && !sitePv;
   const siteNoBat   = site && site.flex_has_battery === false && !siteBat;
   if (hasSolar) return {
-    // La fiche site prime toujours ; solar_defaults n'est qu'un défaut global de secours.
-    pvKwc:    sitePv  || (siteNoSolar ? '0' : (parseFloat(solarDef.pvKwc)  > 0 ? String(solarDef.pvKwc)  : '6')),
-    batKwh:   siteBat || (siteNoBat   ? '0' : (parseFloat(solarDef.batKwh) > 0 ? String(solarDef.batKwh) : '10')),
-    thermKwh: thermExistStr || (parseFloat(solarDef.thermKwh) > 0 ? String(solarDef.thermKwh) : '10'),
+    // Cible du site (défForSite) prioritaire ; sinon fiche site ; solar_defaults = repli global.
+    pvKwc:    defPv    ?? (sitePv  || (siteNoSolar ? '0' : (parseFloat(solarDef.pvKwc)  > 0 ? String(solarDef.pvKwc)  : '6'))),
+    batKwh:   defBat   ?? (siteBat || (siteNoBat   ? '0' : (parseFloat(solarDef.batKwh) > 0 ? String(solarDef.batKwh) : '10'))),
+    thermKwh: defTherm ?? (thermExistStr || (parseFloat(solarDef.thermKwh) > 0 ? String(solarDef.thermKwh) : '10')),
   };
-  // Panier sans solaire : on reflète l'équipement réellement installé de LA fiche site.
-  // (On n'utilise pas solar_defaults ici : global, il pourrait provenir d'un autre site.)
-  if (hasBoxOnly) return { pvKwc: sitePv || '0', batKwh: siteBat || '0', thermKwh: thermExistStr || solarDef.thermKwh || '10' };
-  return { pvKwc: sitePv || '0', batKwh: siteBat || '0', thermKwh: thermExistStr || solarDef.thermKwh || '0' };
+  // Panier sans solaire : on reflète la cible du site si elle existe, sinon l'équipement installé.
+  if (hasBoxOnly) return { pvKwc: defPv ?? (sitePv || '0'), batKwh: defBat ?? (siteBat || '0'), thermKwh: defTherm ?? (thermExistStr || solarDef.thermKwh || '10') };
+  return { pvKwc: defPv ?? (sitePv || '0'), batKwh: defBat ?? (siteBat || '0'), thermKwh: defTherm ?? (thermExistStr || solarDef.thermKwh || '0') };
 }
 
 // 1bis) Profil de production solaire d'un site — SOURCE UNIQUE.
@@ -5300,10 +5308,13 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
     setProdProfilData(null); setBalance(null);
   },[activeId,cartVersion]);
 
-  // Sync bidirectionnelle : écriture vers starvolt_solar_defaults partagé avec SolarSim
+  // Sync bidirectionnelle : écriture vers starvolt_solar_defaults partagé avec SolarSim.
+  // On tague la CIBLE avec l'id du site (siteId) : source de vérité SYNCHRONE et fiable pour
+  // le Panier (pas de course avec l'écriture DB débouncée). resolveCartEquipment ne fait
+  // confiance à ces valeurs que si siteId === site courant → aucune fuite inter-sites.
   useEffect(()=>{
-    localStorage.setItem('starvolt_solar_defaults',JSON.stringify({pvKwc,batKwh,thermKwh}));
-  },[pvKwc,batKwh,thermKwh]);
+    localStorage.setItem('starvolt_solar_defaults',JSON.stringify({pvKwc,batKwh,thermKwh,siteId:activeId}));
+  },[pvKwc,batKwh,thermKwh,activeId]);
 
   // Point 2 : dès que la cible dépasse l'existant (investissement incrémental PV/batterie > 0),
   // on ajoute AUTOMATIQUEMENT la tuile solaire au panier (elle affiche déjà la précision
