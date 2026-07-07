@@ -5325,6 +5325,21 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
     }
   },[pvKwc,batKwh,site,prixMat]);
 
+  // Persiste la CIBLE PV/batterie éditée sur Mon site. Les boutons +/- du StepInput ne
+  // déclenchent PAS onBlur → sans ça, puissance_pv_kwc n'est jamais enregistrée : le panier
+  // et le retour sur la page repartiraient de l'existant (bug « PV remis à 6 »). Débounce léger.
+  useEffect(()=>{
+    if(!site||!activeId) return;
+    const pv=parseFloat(pvKwc), bat=parseFloat(batKwh);
+    const pvVal=isNaN(pv)?null:pv, batVal=isNaN(bat)?null:bat;
+    if((site.puissance_pv_kwc??null)===pvVal && (site.batterie_capacite_kwh??null)===batVal) return;
+    const t=setTimeout(()=>{
+      sb.from('sites').update({puissance_pv_kwc:pvVal,batterie_capacite_kwh:batVal}).eq('id',activeId);
+      setSites(prev=>prev.map(s=>s.id===activeId?{...s,puissance_pv_kwc:pvVal,batterie_capacite_kwh:batVal}:s));
+    },600);
+    return()=>clearTimeout(t);
+  },[pvKwc,batKwh,activeId]);
+
   // Auto-sélection du profil de production le plus proche par GPS
   useEffect(()=>{
     if(!site||prodProfils.length===0)return;
@@ -6256,20 +6271,23 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
                           onBlur={()=>{const v=parseFloat(pvKwc);updateSite({puissance_pv_kwc:isNaN(v)?null:v});}}
                           step={0.5} min={0} placeholder="6"/>
                       </div>
-                      {/* Baisse facture €TTC */}
-                      {balance&&
+                      {/* Baisse / Augmentation facture €TTC — négatif si l'on réduit l'équipement */}
+                      {balance&&(()=>{
+                        const isHausse=baisseTotale<0;
+                        const absTot=Math.abs(baisseTotale);
+                        return(
                         <div style={{...T,alignItems:'center',justifyContent:'center',textAlign:'center'}}>
-                          <div style={LBL}>BAISSE FACTURE</div>
-                          <div style={{fontSize:isMobile?19:26,fontWeight:900,color:'#7dd940',lineHeight:1.1}}>
-                            {baisseTotale>0?baisseTotale.toLocaleString('fr-FR'):'—'}<span style={{fontSize:isMobile?10:13}}> €TTC</span>
+                          <div style={LBL}>{isHausse?'AUGMENTATION FACTURE':'BAISSE FACTURE'}</div>
+                          <div style={{fontSize:isMobile?19:26,fontWeight:900,color:isHausse?'#ff6b5e':'#7dd940',lineHeight:1.1}}>
+                            {baisseTotale!==0?absTot.toLocaleString('fr-FR'):'—'}<span style={{fontSize:isMobile?10:13}}> €TTC</span>
                           </div>
-                          {!isMobile&&(baisseFacture>0||flexRevenue>0||accSavings>0)&&<div style={{fontSize:11,color:'rgba(255,255,255,.45)'}}>
-                            {baisseFacture>0?`Énergie ${baisseFacture.toLocaleString('fr-FR')} €`:''}
+                          {!isMobile&&(baisseFacture!==0||flexRevenue>0||accSavings>0)&&<div style={{fontSize:11,color:'rgba(255,255,255,.45)'}}>
+                            {baisseFacture!==0?`Énergie ${baisseFacture.toLocaleString('fr-FR')} €`:''}
                             {flexRevenue>0?` · Flex ${flexRevenue} €`:''}
                             {accSavings>0?` · ACC ${accSavings} €`:''}
                           </div>}
-                        </div>
-                      }
+                        </div>);
+                      })()}
                       {/* Taux d'autoconsommation (après travaux) — évolue avec le PV / la batterie ajoutés */}
                       {(()=>{
                         if(!balance) return null;
@@ -9936,6 +9954,14 @@ function PanierScreen({ user, onBack, onGoTo, onMonSite }) {
       solar:        ['starvolt_solar_chosen','starvolt_solar_saving','starvolt_investissement_total'],
     };
     removes[key].forEach(k => localStorage.removeItem(k));
+    if(key==='solar'){
+      // Retirer le solaire = revenir à l'équipement EXISTANT : on efface la cible enregistrée
+      // (puissance_pv_kwc / batterie_capacite_kwh → null) et le cache slider, sinon Mon site
+      // resterait sur la puissance augmentée. null → repli sur pv_existant / batterie_existante.
+      const sid=localStorage.getItem('starvolt_active_site_id');
+      if(sid) sb.from('sites').update({puissance_pv_kwc:null,batterie_capacite_kwh:null}).eq('id',sid);
+      localStorage.removeItem('starvolt_solar_defaults');
+    }
     setItems(s => ({...s, [key]: false}));
   };
 
