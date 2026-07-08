@@ -5021,6 +5021,18 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
   const ANON_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhreGtod2VncWthcGRic2lzeHd2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc0MjY4NjksImV4cCI6MjA5MzAwMjg2OX0.9-_oHRJfwXZkl3bRYDMb5K56UzB8O1NOfa5QfrXFfkQ';
   const EDGE_URL='https://hkxkhwegqkapdbsisxwv.supabase.co/functions/v1/switchgrid-v0';
 
+  // Offres « Optimisation fournisseur » : le CTA « Comparer les fournisseurs »
+  // de la modale Puissance n'est proposé que si au moins une de ces offres est
+  // accessible au rôle courant. Aucune offre de ce type en base → fail-open.
+  const[offresOpti,setOffresOpti]=useState(null);
+  React.useEffect(()=>{
+    sb.from('offres').select('id,types_offre')
+      .then(({data})=>setOffresOpti((data||[]).filter(o=>(o.types_offre||[]).includes('optimisation_fournisseur'))));
+  },[]);
+  const optiOfferAllowed = offresOpti===null ? false
+    : offresOpti.length===0 ? true
+    : offresOpti.some(o=>can('offer_ids',o.id));
+
   // ── Restaurer l'état linky depuis localStorage quand le site actif change ──
   React.useEffect(()=>{
     clearInterval(linkyPollRef.current);
@@ -6560,7 +6572,7 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
                 over:{icon:'⚠️',title:'Dépassement de puissance',color:'#f0674a',body:"Attention ! Parfois votre consommation est trop importante et dépasse le maximum autorisé par votre abonnement actuel. On vous invite à le changer afin de ne pas avoir de coupures.",cta:true},
               }[powerModal.kind];
               if(!M)return null;
-              const showCta=M.cta&&can('offers','comparaison_fournisseur')&&typeof onOptimisation==='function';
+              const showCta=M.cta&&optiOfferAllowed&&typeof onOptimisation==='function';
               return(<>
                 <div style={{fontSize:34,marginBottom:8,textAlign:'center'}}>{M.icon}</div>
                 <div style={{fontSize:17,fontWeight:900,color:M.color,marginBottom:10,lineHeight:1.25,textAlign:'center'}}>{M.title}</div>
