@@ -1590,7 +1590,7 @@ const PERMISSION_ZONES = [
   { key: 'access',   title: "Autorisations d'accès", items: [
     ['user', 'Utilisateur'], ['admin', 'Admin'], ['superadmin', 'Super Admin'],
   ]},
-  { key: 'offers',   title: 'Offres accessibles', items: [
+  { key: 'offers',   title: "Types d'offres accessibles", items: [
     ['comparaison_fournisseur', 'Comparaison fournisseur'],
     ['acc', 'Autoconso collective'],
     ['box_comwatt', 'Installer une box énergie Comwatt'],
@@ -6699,9 +6699,14 @@ const PICTOS_DEFAUT = {
 };
 
 function SimulationsScreen({ onACC, onBox, onSolar, onOptimisation, onDiyBox, onBack, onMonSite, onComprendre, user, userProfile, can = () => true }) {
-  // Une offre est visible si au moins un de ses types mappés est autorisé pour
-  // le rôle courant. Sans type mappé → visible (fail-open).
+  // Une offre est visible si :
+  //   1. l'offre individuelle est autorisée pour le rôle (zone "offer_ids",
+  //      clé = id de l'offre). Non définie → visible (fail-open) : toute
+  //      nouvelle offre est accessible par défaut, décochable par rôle ;
+  //   2. ET au moins un de ses types mappés est autorisé (zone "offers").
+  //      Sans type mappé → visible (fail-open).
   const offerAllowed = (o) => {
+    if (!can('offer_ids', o.id)) return false;
     const keys = (o.types_offre || []).map(t => OFFER_TYPE_TO_PERM[t]).filter(Boolean);
     if (keys.length === 0) return true;
     return keys.some(k => can('offers', k));
@@ -12378,7 +12383,20 @@ function AdminOffreEditScreen({ offre, onSave, onDelete, onBack }) {
   };
 
   const handleDelete = async () => {
-    setSaving(true);
+    setSaving(true); setErr('');
+    // Garde-fou : refuser la suppression tant qu'au moins une catégorie
+    // d'utilisateur (rôle) a explicitement rendu cette offre accessible
+    // (zone "offer_ids" cochée). L'admin doit d'abord la retirer côté rôles.
+    const { data: rolesData } = await sb.rpc('get_roles');
+    const usedBy = (rolesData || [])
+      .filter(r => r.permissions && r.permissions.offer_ids && r.permissions.offer_ids[offre.id])
+      .map(r => r.label);
+    if (usedBy.length > 0) {
+      setSaving(false);
+      setConfirmDel(false);
+      setErr('Impossible de supprimer cette offre car au moins une catégorie d\'utilisateur l\'utilise encore (' + usedBy.join(', ') + '). Décochez cette offre pour ces rôles dans « Gestion des rôles », puis réessayez.');
+      return;
+    }
     await sb.from('offres').delete().eq('id', offre.id);
     setSaving(false);
     onDelete();
@@ -13342,6 +13360,14 @@ function AdminRolesScreen({ onBack, isSuperadmin = false }) {
   const [editB2c,    setEditB2c]    = useState(false);
   const [editB2b,    setEditB2b]    = useState(false);
   const [msg,        setMsg]        = useState(null);
+  const [offersList, setOffersList] = useState([]);
+
+  // Offres réelles (base) → zone dynamique "Offres accessibles". Toute nouvelle
+  // offre ajoutée dans « Gestion des offres » apparaît ici automatiquement.
+  useEffect(() => {
+    sb.from('offres').select('id,titre').order('created_at')
+      .then(({ data }) => setOffersList(data || []));
+  }, []);
 
   const load = (keepKey) => {
     sb.rpc('get_roles').then(({ data }) => {
@@ -13576,12 +13602,24 @@ function AdminRolesScreen({ onBack, isSuperadmin = false }) {
 
           {/* Zones de permissions */}
           {PERMISSION_ZONES.map(zone => (
-            <div key={zone.key} style={{marginBottom:18}}>
-              <div style={{fontSize:12,fontWeight:700,letterSpacing:'.6px',textTransform:'uppercase',color:'rgba(255,255,255,.5)',marginBottom:8}}>{zone.title}</div>
-              <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(220px,1fr))',gap:8}}>
-                {zone.items.map(([item, label]) => checkbox(zone.key, item, label))}
+            <React.Fragment key={zone.key}>
+              <div style={{marginBottom:18}}>
+                <div style={{fontSize:12,fontWeight:700,letterSpacing:'.6px',textTransform:'uppercase',color:'rgba(255,255,255,.5)',marginBottom:8}}>{zone.title}</div>
+                <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(220px,1fr))',gap:8}}>
+                  {zone.items.map(([item, label]) => checkbox(zone.key, item, label))}
+                </div>
               </div>
-            </div>
+              {/* Zone dynamique : une case par offre réelle (clé = id de l'offre).
+                  Rendue juste après les types d'offres. */}
+              {zone.key === 'offers' && offersList.length > 0 && (
+                <div style={{marginBottom:18}}>
+                  <div style={{fontSize:12,fontWeight:700,letterSpacing:'.6px',textTransform:'uppercase',color:'rgba(255,255,255,.5)',marginBottom:8}}>Offres accessibles</div>
+                  <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(220px,1fr))',gap:8}}>
+                    {offersList.map(o => checkbox('offer_ids', o.id, o.titre))}
+                  </div>
+                </div>
+              )}
+            </React.Fragment>
           ))}
         </>
       )}
