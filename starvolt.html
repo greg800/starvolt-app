@@ -1590,13 +1590,8 @@ const PERMISSION_ZONES = [
   { key: 'access',   title: "Autorisations d'accès", items: [
     ['user', 'Utilisateur'], ['admin', 'Admin'], ['superadmin', 'Super Admin'],
   ]},
-  { key: 'offers',   title: "Types d'offres accessibles", items: [
-    ['comparaison_fournisseur', 'Comparaison fournisseur'],
-    ['acc', 'Autoconso collective'],
-    ['box_comwatt', 'Installer une box énergie Comwatt'],
-    ['diy', 'Installer soi-même en DIY'],
-    ['solaire_batterie', 'Solaire avec Batterie'],
-  ]},
+  // Accès aux offres : géré par offre individuelle (zone dynamique "offer_ids"
+  // rendue dans l'écran Rôles), le type étant déjà porté par chaque offre.
   { key: 'menus',    title: 'Menus accessibles', items: [
     ['admin', 'Admin'], ['passer_action', "Passer à l'action"],
     ['comprendre', 'Comprendre'], ['panier', 'Panier'],
@@ -1632,16 +1627,6 @@ function makePermChecker(role, permissions) {
     return !!z[key];
   };
 }
-
-// Mappe le type d'offre (offres.types_offre, côté DB) vers la clé de permission
-// de la zone "offers". Une offre sans type mappé reste visible (fail-open).
-const OFFER_TYPE_TO_PERM = {
-  optimisation_fournisseur: 'comparaison_fournisseur',
-  acc:                      'acc',
-  box:                      'box_comwatt',
-  solaire:                  'solaire_batterie',
-  diy_box:                  'diy',
-};
 
 function WelcomeScreen({ onCreateAccount, onLogin }) {
   return (
@@ -6699,18 +6684,10 @@ const PICTOS_DEFAUT = {
 };
 
 function SimulationsScreen({ onACC, onBox, onSolar, onOptimisation, onDiyBox, onBack, onMonSite, onComprendre, user, userProfile, can = () => true }) {
-  // Une offre est visible si :
-  //   1. l'offre individuelle est autorisée pour le rôle (zone "offer_ids",
-  //      clé = id de l'offre). Non définie → visible (fail-open) : toute
-  //      nouvelle offre est accessible par défaut, décochable par rôle ;
-  //   2. ET au moins un de ses types mappés est autorisé (zone "offers").
-  //      Sans type mappé → visible (fail-open).
-  const offerAllowed = (o) => {
-    if (!can('offer_ids', o.id)) return false;
-    const keys = (o.types_offre || []).map(t => OFFER_TYPE_TO_PERM[t]).filter(Boolean);
-    if (keys.length === 0) return true;
-    return keys.some(k => can('offers', k));
-  };
+  // Une offre est visible si elle est autorisée pour le rôle courant (zone
+  // "offer_ids", clé = id de l'offre). Non définie → visible (fail-open) :
+  // toute nouvelle offre est accessible par défaut, décochable par rôle.
+  const offerAllowed = (o) => can('offer_ids', o.id);
   const [hasConso,  setHasConso]  = useState(false);
   const [maxSaving, setMaxSaving] = useState(null);
   const [accSaving, setAccSaving] = useState(null);
@@ -13610,8 +13587,8 @@ function AdminRolesScreen({ onBack, isSuperadmin = false }) {
                 </div>
               </div>
               {/* Zone dynamique : une case par offre réelle (clé = id de l'offre).
-                  Rendue juste après les types d'offres. */}
-              {zone.key === 'offers' && offersList.length > 0 && (
+                  Rendue juste après les autorisations d'accès. */}
+              {zone.key === 'access' && offersList.length > 0 && (
                 <div style={{marginBottom:18}}>
                   <div style={{fontSize:12,fontWeight:700,letterSpacing:'.6px',textTransform:'uppercase',color:'rgba(255,255,255,.5)',marginBottom:8}}>Offres accessibles</div>
                   <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(220px,1fr))',gap:8}}>
