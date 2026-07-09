@@ -123,21 +123,25 @@ async function handle(req: Request): Promise<Response> {
 
   // 4b) Questions DÉJÀ enregistrées pour ce thème (pour ne jamais les reproduire).
   //     On les liste avec leurs réponses afin que le modèle varie les angles.
+  //     `existingQuestions` sert aussi au filtre anti-doublons DÉTERMINISTE (7c).
   let existingBlock = "";
+  const existingQuestions: string[] = [];
   try {
     const existing = await dbSelect(
       `learn_questions?subject_id=eq.${subjectId}&select=question,ordre,learn_choices(text,is_correct)&order=ordre`
     );
     if (Array.isArray(existing) && existing.length) {
       const lines = existing.map((q: any, i: number) => {
+        existingQuestions.push(String(q.question || "").trim());
         const ch = (q.learn_choices || [])
           .map((c: any) => `${c.is_correct ? "[bonne]" : "[fausse]"} ${String(c.text || "").trim()}`)
           .join(" / ");
         return `${i + 1}. ${String(q.question || "").trim()}${ch ? `  [${ch}]` : ""}`;
       });
       existingBlock =
-        `\n\nQUESTIONS DÉJÀ POSÉES SUR CE THÈME (${existing.length}) — évite de les répéter ` +
-        `et varie les angles/notions abordés (ne te contente pas de les reformuler) :\n` +
+        `\n\nQUESTIONS DÉJÀ POSÉES SUR CE THÈME (${existing.length}) — INTERDICTION d'en reproduire ` +
+        `une seule, même reformulée : chaque nouvelle question doit porter sur un angle, un chiffre ` +
+        `ou une notion DIFFÉRENTS. En cas de doute, change de sujet :\n` +
         lines.join("\n");
     }
   } catch {
@@ -165,16 +169,18 @@ async function handle(req: Request): Promise<Response> {
     `GROUPE : ${groupTitle || "—"}\n` +
     `THÈME : ${subject.title || "—"}\n\n` +
     `CONTENU DU THÈME :\n${themeText}`;
-  // Impératif : produire N questions PASSE AVANT l'anti-doublons. On ne renvoie
-  // jamais un tableau vide — s'il faut, on approfondit des aspects déjà couverts.
+  // Objectif : ${count} questions NEUVES. L'unicité prime : mieux vaut renvoyer
+  // moins de questions que reproduire une question déjà posée (le serveur filtre
+  // de toute façon les doublons — les reproduire ne sert donc à rien).
   const userContent =
     baseContent +
     existingBlock +
-    `\n\nTu DOIS générer exactement ${count} questions de quiz d'après ce contenu` +
+    `\n\nGénère ${count} questions de quiz d'après ce contenu` +
     (existingBlock
-      ? `, en variant les angles par rapport aux questions déjà posées. Même si le thème ` +
-        `est déjà partiellement couvert, il reste forcément des aspects, chiffres, conséquences ` +
-        `ou nuances à interroger : trouve ${count} questions exploitables. Ne renvoie JAMAIS de liste vide.`
+      ? `. Chacune doit être NOUVELLE : n'aborde aucune question déjà posée ci-dessus, ` +
+        `même reformulée. Explore d'autres aspects, chiffres, conséquences ou nuances du thème. ` +
+        `Si tu ne trouves pas ${count} angles réellement distincts, renvoie-en moins plutôt que ` +
+        `de répéter une question existante.`
       : `. Ne renvoie JAMAIS de liste vide.`);
 
   const tool = {
@@ -249,38 +255,6 @@ async function handle(req: Request): Promise<Response> {
     return { block: b, raw: Array.isArray(b?.input?.questions) ? b.input.questions : [] };
   };
 
-  let aiJson: any;
-  try {
-    const first = await askClaude(userContent);
-    if (!first.ok) {
-      return json(
-        { error: "ai_error", message: first.jsonRes?.error?.message || "Erreur Claude." },
-        502
-      );
-    }
-    aiJson = first.jsonRes;
-    // Relance : si la 1re tentative rend un tableau vide, on réessaie une fois
-    // avec une consigne recentrée sur "produire N questions" (sans le bloc
-    // anti-doublons, qui peut bloquer le modèle). Vaut aussi bien pour un thème
-    // neuf (0 question) que pour un thème déjà partiellement couvert.
-    if (extractRaw(aiJson).raw.length === 0) {
-      const retryContent =
-        baseContent +
-        `\n\nGénère exactement ${count} questions de quiz d'après ce contenu. ` +
-        `Priorité absolue : produire ${count} questions exploitables. Ne renvoie JAMAIS de liste vide.`;
-      const second = await askClaude(retryContent);
-      if (second.ok && extractRaw(second.jsonRes).raw.length > 0) {
-        aiJson = second.jsonRes;
-      }
-    }
-  } catch (e) {
-    return json({ error: "ai_fetch_failed", message: String(e) }, 502);
-  }
-
-  // 7) Extraire le tool_use
-  const { block, raw: rawQuestions } = extractRaw(aiJson);
-  let questions = rawQuestions;
-
   // Mélange Fisher-Yates : le modèle liste toujours les bonnes réponses en tête,
   // on répartit l'ordre aléatoirement pour ne pas trahir la solution.
   const shuffle = <T,>(arr: T[]): T[] => {
@@ -292,52 +266,118 @@ async function handle(req: Request): Promise<Response> {
     return a;
   };
 
-  // Garde-fous : 3-5 choix, au moins une bonne réponse
-  questions = (questions as any[])
-    .map((q) => ({
+  // Normalisation d'un énoncé pour comparer deux questions (casse, accents et
+  // ponctuation ignorés) — base du filtre anti-doublons déterministe.
+  const norm = (s: string) => String(s || "")
+    .toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim();
+  // Quasi-doublon : énoncé normalisé identique OU ≥ 80 % de tokens communs (Jaccard).
+  const isDup = (q: string, refs: string[]) => {
+    const a = new Set(norm(q).split(" ").filter(Boolean));
+    return refs.some((r) => {
+      if (norm(r) === norm(q)) return true;
+      const b = new Set(norm(r).split(" ").filter(Boolean));
+      if (!a.size || !b.size) return false;
+      let inter = 0; for (const t of a) if (b.has(t)) inter++;
+      return inter / (a.size + b.size - inter) >= 0.8;
+    });
+  };
+
+  // Garde-fous : 3-5 choix, au moins une bonne réponse (réponses mélangées).
+  const validate = (raw: any[]) => (raw || [])
+    .map((q: any) => ({
       question: String(q.question || "").trim(),
       choices: shuffle(
         (q.choices || [])
-          .map((c: any) => ({
-            text: String(c.text || "").trim(),
-            is_correct: !!c.is_correct,
-          }))
+          .map((c: any) => ({ text: String(c.text || "").trim(), is_correct: !!c.is_correct }))
           .filter((c: any) => c.text)
           .slice(0, 5)
       ),
     }))
-    .filter(
-      (q) =>
-        q.question &&
-        q.choices.length >= 3 &&
-        q.choices.some((c: any) => c.is_correct)
-    );
+    .filter((q: any) => q.question && q.choices.length >= 3 && q.choices.some((c: any) => c.is_correct));
 
-  // 7b) Diagnostic : si rien ne survit, expliquer pourquoi (stop_reason, brut, motifs de rejet).
+  // Génère → valide → écarte les doublons (vs questions existantes ET lot en cours).
+  // On accumule les questions NEUVES sur (au plus) deux tentatives Claude.
+  const totalUsage = { input_tokens: 0, output_tokens: 0 };
+  const accepted: any[] = [];
+  const seen: string[] = [...existingQuestions]; // énoncés interdits (existants + déjà retenus)
+  let lastRaw: any[] = [];
+  let lastJson: any = null;
+  let lastBlock: any = null;
+
+  const runAttempt = async (uc: string): Promise<{ ok: boolean; err?: string }> => {
+    const res = await askClaude(uc);
+    if (!res.ok) return { ok: false, err: res.jsonRes?.error?.message };
+    lastJson = res.jsonRes;
+    totalUsage.input_tokens += res.jsonRes?.usage?.input_tokens || 0;
+    totalUsage.output_tokens += res.jsonRes?.usage?.output_tokens || 0;
+    const { block, raw } = extractRaw(res.jsonRes);
+    lastBlock = block; lastRaw = raw;
+    for (const q of validate(raw)) {
+      if (accepted.length >= count) break;
+      if (isDup(q.question, seen)) continue; // jamais une question déjà posée/retenue
+      seen.push(q.question);
+      accepted.push(q);
+    }
+    return { ok: true };
+  };
+
+  try {
+    const first = await runAttempt(userContent);
+    if (!first.ok) {
+      return json({ error: "ai_error", message: first.err || "Erreur Claude." }, 502);
+    }
+    // Relance ciblée si on n'a pas encore `count` questions NEUVES : on rappelle
+    // explicitement TOUT ce qu'il faut éviter (existantes + déjà retenues) et on
+    // ne demande que le complément manquant, radicalement différent.
+    if (accepted.length < count) {
+      const need = count - accepted.length;
+      const avoid = seen.length
+        ? `\n\nÀ NE REPRODUIRE SOUS AUCUNE FORME (questions déjà posées ou déjà retenues) :\n` +
+          seen.map((q, i) => `${i + 1}. ${q}`).join("\n")
+        : "";
+      const retryContent =
+        baseContent + avoid +
+        `\n\nPropose ${need} question(s) de quiz SUPPLÉMENTAIRE(S), radicalement différentes de ` +
+        `toutes celles listées ci-dessus (autres angles, chiffres, notions, conséquences). ` +
+        `N'en reformule aucune. S'il ne reste pas ${need} angle(s) réellement distinct(s), renvoie-en moins.`;
+      await runAttempt(retryContent);
+    }
+  } catch (e) {
+    return json({ error: "ai_fetch_failed", message: String(e) }, 502);
+  }
+
+  let questions = accepted;
+
+  // 7b) Diagnostic : si rien de NEUF ni d'exploitable ne survit, expliquer pourquoi.
   if (!questions.length) {
     const reasons: Record<string, number> = {};
-    for (const q of rawQuestions as any[]) {
+    for (const q of lastRaw as any[]) {
       const choices = (q?.choices || []).filter((c: any) => String(c?.text || "").trim());
       let r = "ok";
       if (!String(q?.question || "").trim()) r = "enonce_vide";
       else if (choices.length < 3) r = `moins_de_3_choix(${choices.length})`;
       else if (!choices.some((c: any) => c?.is_correct)) r = "aucune_bonne_reponse";
+      else if (isDup(String(q.question), existingQuestions)) r = "doublon_existant";
       reasons[r] = (reasons[r] || 0) + 1;
     }
+    const onlyDups = existingQuestions.length > 0
+      && (reasons["doublon_existant"] || 0) > 0
+      && Object.keys(reasons).every((k) => k === "doublon_existant");
     const dbg =
-      `stop=${aiJson?.stop_reason} · block=${!!block} · brut=${rawQuestions.length} · ` +
+      `stop=${lastJson?.stop_reason} · block=${!!lastBlock} · brut=${lastRaw.length} · ` +
       `motifs=${JSON.stringify(reasons)}`;
-    console.error("generate-quiz vide:", dbg, JSON.stringify(aiJson?.content || []).slice(0, 800));
-    return json(
-      { error: "empty_result", message: `Aucune question exploitable. [diag] ${dbg}` },
-      422
-    );
+    console.error("generate-quiz vide:", dbg, JSON.stringify(lastJson?.content || []).slice(0, 800));
+    const message = onlyDups
+      ? `Toutes les questions proposées existaient déjà pour ce thème — enrichis le contenu du thème ou réessaie. [diag] ${dbg}`
+      : `Aucune question exploitable. [diag] ${dbg}`;
+    return json({ error: "empty_result", message }, 422);
   }
 
-  // 8) Coût + log
+  // 8) Coût + log (cumul des tentatives Claude)
   const usage = {
-    input_tokens: aiJson?.usage?.input_tokens || 0,
-    output_tokens: aiJson?.usage?.output_tokens || 0,
+    input_tokens: totalUsage.input_tokens,
+    output_tokens: totalUsage.output_tokens,
   };
   const price = PRICES[MODEL] || { in: 0, out: 0 };
   const costUsd =
