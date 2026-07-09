@@ -11321,7 +11321,7 @@ function AdminQuizFailsScreen({ user, onBack }) {
   );
 }
 
-function AdminScreen({ onTariffs, onUsers, onRoles, onSites, onSpot, onAcc, onProduction, onGlobalVars, onFactureVars, onPrix, onOffres, onLearn, onFeedback, onProofread, onGenQuiz, onAICosts, onAIPrompts, onViewLogs, onViewFails, onImpersonate, onBack }) {
+function AdminScreen({ onTariffs, onUsers, onRoles, onSites, onSpot, onAcc, onProduction, onGlobalVars, onFactureVars, onPrix, onOffres, onLearn, onFeedback, onProofread, onAICosts, onAIPrompts, onViewLogs, onViewFails, onImpersonate, onBack }) {
   return (
     <>
     <div className="screen screen-admin fade-in">
@@ -11453,14 +11453,6 @@ function AdminScreen({ onTariffs, onUsers, onRoles, onSites, onSpot, onAcc, onPr
 
         <div className="admin-group">
           <div className="admin-group-label"><span className="agl-ico">🤖</span>Agents IA</div>
-          <button className="sim-btn" onClick={onGenQuiz}>
-            <span className="sim-icon">🧩</span>
-            <div className="sim-text">
-              <div className="sim-title">Générer des questions de quiz</div>
-              <div className="sim-sub">Créer automatiquement des questions pour un thème</div>
-            </div>
-            <span className="sim-arrow">→</span>
-          </button>
           <button className="sim-btn" onClick={onProofread}>
             <span className="sim-icon">🔍</span>
             <div className="sim-text">
@@ -11811,7 +11803,10 @@ function AdminProofreadScreen({ onBack }) {
   );
 }
 
-// ─── AdminGenQuizScreen : génération automatique de questions de quiz par thème ─
+// ─── QuizGenPanel : génération IA de 3 questions pour un thème déjà connu ───────
+// Réutilisé dans l'écran d'édition d'un thème (Comprendre). Le thème est donné en
+// props (plus de sélecteurs groupe/thème). Le prompt commun est éditable via la
+// page « Prompts IA » (feature generate_quiz) ; on le charge ici sans l'exposer.
 const DEFAULT_QUIZ_PROMPT = `Tu es un concepteur pédagogique pour Starvolt, une application grand public sur l'énergie solaire, l'autoconsommation et la flexibilité électrique.
 
 À partir UNIQUEMENT du contenu du thème fourni, rédige des questions de quiz qui vérifient la bonne compréhension du lecteur.
@@ -11827,15 +11822,8 @@ Règles :
 
 Appelle l'outil report_questions avec exactement le nombre de questions demandé.`;
 
-function AdminGenQuizScreen({ onBack }) {
-  const [groups, setGroups] = useState(null);     // [{id,title}]
-  const [groupId, setGroupId] = useState('');
-  const [subjects, setSubjects] = useState([]);   // sujets du groupe sélectionné
-  const [subjId, setSubjId] = useState('');
+function QuizGenPanel({ subjectId, subjectTitle, onSaved }) {
   const [prompt, setPrompt] = useState(DEFAULT_QUIZ_PROMPT);
-  const [savedPrompt, setSavedPrompt] = useState(DEFAULT_QUIZ_PROMPT); // dernier prompt persisté
-  const [promptSaving, setPromptSaving] = useState(false);
-  const [promptMsg, setPromptMsg] = useState(null); // { ok, text }
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState(null);
   const [questions, setQuestions] = useState(null); // [{question, choices:[{text,is_correct}]}]
@@ -11843,63 +11831,21 @@ function AdminGenQuizScreen({ onBack }) {
   const [saving, setSaving] = useState(false);
   const [doneMsg, setDoneMsg] = useState(null);
   const [lastRun, setLastRun] = useState(null);
-  const [counts, setCounts] = useState({ subj: {}, group: {} }); // nb de questions par thème / par groupe
 
-  // Recompte le nombre de questions par thème et par groupe (menus déroulants).
-  const loadCounts = async () => {
-    const [{ data: qs }, { data: subs }] = await Promise.all([
-      sb.from('learn_questions').select('subject_id'),
-      sb.from('learn_subjects').select('id,group_id'),
-    ]);
-    const subjToGroup = {};
-    (subs || []).forEach(s => { subjToGroup[s.id] = s.group_id; });
-    const subj = {}, group = {};
-    (qs || []).forEach(q => {
-      subj[q.subject_id] = (subj[q.subject_id] || 0) + 1;
-      const g = subjToGroup[q.subject_id];
-      if (g) group[g] = (group[g] || 0) + 1;
-    });
-    setCounts({ subj, group });
-  };
-
-  // Charger les groupes + le prompt par défaut (ai_prompts feature=generate_quiz)
+  // Charger le prompt commun (éditable via la page « Prompts IA », feature generate_quiz)
   useEffect(() => {
-    sb.from('learn_groups').select('id,title,ordre').order('ordre').then(({ data }) => {
-      setGroups(data || []);
-    });
     sb.rpc('get_ai_prompts').then(({ data }) => {
       const row = (data || []).find(r => r.feature === 'generate_quiz');
-      if (row?.system_prompt) { setPrompt(row.system_prompt); setSavedPrompt(row.system_prompt); }
+      if (row?.system_prompt) setPrompt(row.system_prompt);
     });
-    loadCounts();
   }, []);
 
-  // Enregistre le prompt général (commun à tous les quiz) dans ai_prompts.
-  const savePrompt = async () => {
-    setPromptSaving(true); setPromptMsg(null);
-    const { error } = await sb.rpc('set_ai_prompt', { p_feature: 'generate_quiz', p_prompt: prompt });
-    if (error) setPromptMsg({ ok: false, text: error.message || 'Échec de l\'enregistrement.' });
-    else { setSavedPrompt(prompt); setPromptMsg({ ok: true, text: 'Prompt enregistré.' }); }
-    setPromptSaving(false);
-  };
-  const promptDirty = prompt !== savedPrompt;
-
-  // Charger les thèmes du groupe sélectionné
-  useEffect(() => {
-    setSubjId(''); setQuestions(null); setDoneMsg(null);
-    if (!groupId) { setSubjects([]); return; }
-    sb.from('learn_subjects').select('id,title,content,ordre').eq('group_id', groupId).order('ordre')
-      .then(({ data }) => setSubjects(data || []));
-  }, [groupId]);
-
-  const selSubject = subjects.find(s => s.id === subjId);
-
   const generate = async () => {
-    if (!subjId) return;
+    if (!subjectId) return;
     setGenerating(true); setError(null); setQuestions(null); setDoneMsg(null);
     try {
       const { data, error } = await sb.functions.invoke('generate-quiz', {
-        body: { subject_id: subjId, prompt, count: 3 }
+        body: { subject_id: subjectId, prompt, count: 3 }
       });
       if (error) {
         let detail = error.message || 'Erreur inconnue';
@@ -11950,7 +11896,7 @@ function AdminGenQuizScreen({ onBack }) {
   const nbValid = (questions || []).filter(q => !invalidReason(q)).length;
 
   const save = async () => {
-    if (!questions || !subjId) return;
+    if (!questions || !subjectId) return;
     if (!questions.length) { setDoneMsg('Aucune question à enregistrer.'); return; }
     // Garde-fou : toutes les questions affichées doivent être valides
     const bad = questions.map((q, i) => ({ i, r: invalidReason(q) })).filter(x => x.r);
@@ -11962,12 +11908,12 @@ function AdminGenQuizScreen({ onBack }) {
     setSaving(true); setError(null); setDoneMsg(null);
     try {
       // Ordre de départ : après les questions existantes du thème
-      const { data: existing } = await sb.from('learn_questions').select('ordre').eq('subject_id', subjId).order('ordre', { ascending: false }).limit(1);
+      const { data: existing } = await sb.from('learn_questions').select('ordre').eq('subject_id', subjectId).order('ordre', { ascending: false }).limit(1);
       let nextOrdre = (existing && existing[0] ? (existing[0].ordre || 0) + 1 : 0);
       let ok = 0;
       for (const q of toAdd) {
         const { data: ins, error: qErr } = await sb.from('learn_questions')
-          .insert({ subject_id: subjId, question: q.question.trim(), ordre: nextOrdre })
+          .insert({ subject_id: subjectId, question: q.question.trim(), ordre: nextOrdre })
           .select('id').single();
         if (qErr) throw new Error(qErr.message);
         const choices = q.choices.filter(c => c.text.trim()).map((c, k) => ({
@@ -11977,9 +11923,9 @@ function AdminGenQuizScreen({ onBack }) {
         if (cErr) throw new Error(cErr.message);
         nextOrdre++; ok++;
       }
-      setDoneMsg(`${ok} question(s) ajoutée(s) au thème « ${selSubject?.title || ''} ».`);
+      setDoneMsg(`${ok} question(s) ajoutée(s) au thème « ${subjectTitle || ''} ».`);
       setQuestions(null); setEditK(null);
-      loadCounts(); // rafraîchit les compteurs des menus déroulants
+      onSaved && onSaved(); // rafraîchit la liste des questions du thème
     } catch (e) {
       setError('Échec de l\'enregistrement : ' + String(e.message || e));
     } finally {
@@ -11987,11 +11933,6 @@ function AdminGenQuizScreen({ onBack }) {
     }
   };
 
-  const selStyle = {
-    width:'100%', boxSizing:'border-box', background:'rgba(0,0,0,.25)',
-    border:'1px solid rgba(255,255,255,.14)', borderRadius:10, color:'#fff',
-    fontSize:14, padding:'11px 12px', fontFamily:'inherit', cursor:'pointer'
-  };
   const iconBtn = {
     flexShrink:0, width:28, height:28, borderRadius:7, background:'rgba(255,255,255,.06)',
     border:'1px solid rgba(255,255,255,.14)', color:'rgba(255,255,255,.75)', fontSize:13,
@@ -12000,67 +11941,16 @@ function AdminGenQuizScreen({ onBack }) {
   const iconBtnSm = { ...iconBtn, width:24, height:24, fontSize:12 };
 
   return (
-    <>
-    <div className="screen fade-in" style={{padding:'0 0 90px', maxWidth:'100%', width:'100%'}}>
-      <div className="auth-header">
-        <div className="welcome-tag" style={{color:'#ffb340'}}>Administration</div>
-        <h1 className="welcome-title">Générer des<br/><span className="accent">questions de quiz</span></h1>
-      </div>
-
-      <div style={{padding:'0 16px'}}>
-        <p style={{color:'rgba(255,255,255,.6)', fontSize:13.5, lineHeight:1.55, margin:'0 0 16px'}}>
-          Choisis un groupe puis un thème : l'IA lit le contenu du thème et propose 3 questions
-          (3 à 5 réponses, plusieurs bonnes réponses possibles). Rien n'est ajouté tant que tu n'as pas validé.
-        </p>
-
-        {/* 1) Groupe */}
-        <label className="inp-label" style={{display:'block', marginBottom:6}}>Groupe</label>
-        <select value={groupId} onChange={e=>setGroupId(e.target.value)} style={selStyle} disabled={groups===null}>
-          <option value="">{groups===null ? 'Chargement…' : '— Choisir un groupe —'}</option>
-          {(groups||[]).map(g => <option key={g.id} value={g.id}>{g.title} ({counts.group[g.id] || 0})</option>)}
-        </select>
-
-        {/* 2) Thème */}
-        <label className="inp-label" style={{display:'block', margin:'14px 0 6px'}}>Thème</label>
-        <select value={subjId} onChange={e=>{ setSubjId(e.target.value); setQuestions(null); setDoneMsg(null); }} style={selStyle} disabled={!groupId}>
-          <option value="">{!groupId ? '— Choisis d\'abord un groupe —' : (subjects.length ? '— Choisir un thème —' : 'Aucun thème dans ce groupe')}</option>
-          {subjects.map(s => <option key={s.id} value={s.id}>{s.title} ({counts.subj[s.id] || 0})</option>)}
-        </select>
-
-        {selSubject && !((selSubject.content||'').trim()) && (
-          <div style={{marginTop:10, color:'#ffb340', fontSize:12.5}}>⚠️ Ce thème n'a pas de contenu : la génération risque d'échouer.</div>
-        )}
-
-        {/* 3) Prompt général (chargé par défaut, éditable) */}
-        <label className="inp-label" style={{display:'block', margin:'18px 0 6px'}}>Prompt de génération <span style={{fontWeight:400, color:'rgba(255,255,255,.4)'}}>(commun à tous les quiz)</span></label>
-        <textarea value={prompt} onChange={e=>setPrompt(e.target.value)} spellCheck={false}
-          style={{width:'100%', minHeight:150, resize:'vertical', boxSizing:'border-box',
-            background:'rgba(0,0,0,.25)', border:'1px solid rgba(255,255,255,.14)', borderRadius:10,
-            color:'rgba(255,255,255,.9)', fontSize:12.5, lineHeight:1.5, padding:'10px 12px', fontFamily:'inherit'}}/>
-
-        {/* Enregistrer le prompt (persiste dans ai_prompts, commun à tous les quiz) */}
-        <div style={{display:'flex', alignItems:'center', gap:12, marginTop:8, flexWrap:'wrap'}}>
-          <button onClick={savePrompt} disabled={promptSaving || !promptDirty} style={{
-            background: !promptDirty ? 'rgba(255,255,255,.08)' : 'rgba(255,179,64,.16)',
-            border:`1px solid ${!promptDirty ? 'rgba(255,255,255,.12)' : 'rgba(255,179,64,.45)'}`,
-            borderRadius:10, color: !promptDirty ? 'rgba(255,255,255,.4)' : '#ffb340',
-            fontSize:13, fontWeight:700, padding:'9px 16px', cursor: promptSaving||!promptDirty ? 'default':'pointer',
-            fontFamily:'inherit', display:'inline-flex', alignItems:'center', gap:8
-          }}>
-            {promptSaving ? (<><span className="spinner" style={{width:14,height:14}}/> Enregistrement…</>) : '💾 Enregistrer la mise à jour du prompt'}
-          </button>
-          {promptDirty && !promptSaving && <span style={{fontSize:12, color:'rgba(255,255,255,.45)'}}>Modifications non enregistrées</span>}
-          {promptMsg && <span style={{fontSize:12, color: promptMsg.ok ? '#7dd940' : '#ff8a6a'}}>{promptMsg.ok ? '✅ ' : '⚠️ '}{promptMsg.text}</span>}
-        </div>
-
-        {/* 4) CTA */}
-        <button onClick={generate} disabled={!subjId || generating || saving} style={{
-          width:'100%', marginTop:16, background: (!subjId||generating) ? 'rgba(255,255,255,.1)' : 'linear-gradient(135deg,#7dd940,#5cb82e)',
-          border:'none', borderRadius:12, color: (!subjId||generating) ? 'rgba(255,255,255,.5)' : '#0a1f0a',
-          fontSize:15, fontWeight:800, padding:'14px', cursor: (!subjId||generating||saving) ? 'default':'pointer',
+    <div style={{marginBottom:10}}>
+      <div style={{padding:0}}>
+        {/* CTA génération IA — le thème est déjà connu (contexte d'édition) */}
+        <button onClick={generate} disabled={!subjectId || generating || saving} style={{
+          width:'100%', background: (!subjectId||generating) ? 'rgba(255,255,255,.1)' : 'linear-gradient(135deg,#ffb340,#f0951f)',
+          border:'none', borderRadius:10, color: (!subjectId||generating) ? 'rgba(255,255,255,.5)' : '#1a0f00',
+          fontSize:13, fontWeight:800, padding:'11px', cursor: (!subjectId||generating||saving) ? 'default':'pointer',
           fontFamily:'inherit', display:'flex', alignItems:'center', justifyContent:'center', gap:9
         }}>
-          {generating ? (<><span className="spinner" style={{width:18,height:18}}/> Génération en cours…</>) : '🧩 Ajouter 3 questions quiz à ce thème'}
+          {generating ? (<><span className="spinner" style={{width:16,height:16}}/> Génération en cours…</>) : '🧩 Ajouter 3 questions quiz à ce thème via l\'IA'}
         </button>
         {generating && <div style={{textAlign:'center', color:'rgba(255,255,255,.45)', fontSize:12, marginTop:10}}>Cela peut prendre 10 à 30 secondes.</div>}
 
@@ -12171,8 +12061,6 @@ function AdminGenQuizScreen({ onBack }) {
         )}
       </div>
     </div>
-    <StickyFooter onBack={onBack}/>
-    </>
   );
 }
 
@@ -15155,7 +15043,7 @@ function AdminLearnGroupEditScreen({ group, onSubject, onSave, onBack }) {
   );
 }
 
-function AdminLearnSubjectEditScreen({ subjectId, groupId, onSave, onBack }) {
+function AdminLearnSubjectEditScreen({ subjectId, groupId, isAdmin, onSave, onBack }) {
   const isNew = !subjectId;
   const [title, setTitle] = useState('');
   const [content, setContent] = useState('');
@@ -15237,6 +15125,7 @@ function AdminLearnSubjectEditScreen({ subjectId, groupId, onSave, onBack }) {
           <>
           <div style={{fontWeight:700,color:'rgba(255,255,255,.7)',fontSize:13,marginTop:20,marginBottom:8,textTransform:'uppercase',letterSpacing:.5}}>Questions du quiz</div>
           <button className="btn btn-yes" style={{width:'100%',marginBottom:10,fontSize:13}} onClick={()=>setEditingQ('new')}>+ Nouvelle question</button>
+          {isAdmin && <QuizGenPanel subjectId={currentSubjectId} subjectTitle={title} onSaved={()=>loadData(currentSubjectId)} />}
           <div style={{display:'flex',flexDirection:'column',gap:6}}>
             {questions.map((q,i) => (
               <button key={q.id} onClick={()=>setEditingQ(q)} style={{background:'rgba(255,255,255,.06)',border:'1px solid rgba(255,255,255,.1)',borderRadius:10,padding:'11px 14px',textAlign:'left',cursor:'pointer',display:'flex',alignItems:'center',gap:10,width:'100%'}}>
@@ -15828,7 +15717,6 @@ function App() {
           onLearn={()=>goTo('ADMIN_LEARN')}
           onFeedback={()=>goTo('ADMIN_FEEDBACK')}
           onProofread={()=>goTo('ADMIN_PROOFREAD')}
-          onGenQuiz={()=>goTo('ADMIN_GEN_QUIZ')}
           onAICosts={()=>goTo('ADMIN_AI_COSTS')}
           onAIPrompts={()=>goTo('ADMIN_AI_PROMPTS')}
           onViewLogs={(u)=>goTo('ADMIN_USER_LOGS', { logUser: u })}
@@ -15844,9 +15732,6 @@ function App() {
 
       case 'ADMIN_PROOFREAD':
         return <AdminProofreadScreen onBack={goBack}/>;
-
-      case 'ADMIN_GEN_QUIZ':
-        return <AdminGenQuizScreen onBack={goBack}/>;
 
       case 'ADMIN_AI_COSTS':
         return <AdminAICostsScreen onBack={goBack}/>;
@@ -15874,6 +15759,7 @@ function App() {
         return <AdminLearnSubjectEditScreen
           subjectId={state.editLearnSubject?.id||null}
           groupId={state.learnGroupId}
+          isAdmin={isAdmin}
           onSave={()=>goBack()}
           onBack={goBack}/>;
 
