@@ -518,15 +518,6 @@
     .loading-card p { font-size: 14.5px; font-weight: 600; }
     .loading-card .sub { font-size: 12.5px; color: rgba(255,255,255,.55); }
 
-    .spinner {
-      width: 42px; height: 42px;
-      border: 3px solid rgba(255,255,255,.18);
-      border-top-color: var(--green);
-      border-radius: 50%;
-      animation: spin .8s linear infinite;
-    }
-    @keyframes spin { to { transform: rotate(360deg); } }
-
     .addr-found {
       display: flex; align-items: center; gap: 12px;
       background: rgba(255,255,255,.09);
@@ -1692,7 +1683,7 @@ function EligibleScreen({ state, saving, onYes, onNo, onBack }) {
 
         {!ready ? (
           <div className="loading-card fade-in">
-            <div className="spinner"/>
+            <StarSpinner size={42}/>
             <p>Vérification en cours…</p>
             <p className="sub">📍 {state.address}</p>
           </div>
@@ -2809,10 +2800,10 @@ function AuthLoginScreen({ onGoToSignup }) {
       <StickyFooter>
         {!forgot
           ? <button className="btn btn-yes" onClick={handleLogin} disabled={loading}>
-              {loading ? 'Connexion…' : 'Se connecter →'}
+              {loading ? <><StarSpinner size={16} color="#1a4500"/> Connexion…</> : 'Se connecter →'}
             </button>
           : <button className="btn btn-yes" onClick={handleReset} disabled={loading}>
-              {loading ? 'Envoi…' : 'Envoyer le lien de réinitialisation'}
+              {loading ? <><StarSpinner size={16} color="#1a4500"/> Envoi…</> : 'Envoyer le lien de réinitialisation'}
             </button>
         }
       </StickyFooter>
@@ -5721,7 +5712,7 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
     }
   },[site?.tarif_id,tariffs]);
 
-  if(sites===null)return(<><div className="screen fade-in"><div style={{textAlign:'center',padding:40,color:'rgba(255,255,255,.5)'}}>Chargement…</div></div><StickyFooter onBack={onBack}/></>);
+  if(sites===null)return(<><div className="screen fade-in"><div style={{textAlign:'center',padding:40}}><StarSpinner size={34}/></div></div><StickyFooter onBack={onBack}/></>);
   if(showFlexForm&&site){
     return <OnboardingTypeform
       siteId={activeId}
@@ -6040,12 +6031,8 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
                     </div>
                   </>
                 ) : (
-                  <div style={{display:'flex',alignItems:'center',gap:9,color:'rgba(255,255,255,.55)',fontSize:13,paddingTop:4}}>
-                    <span style={{
-                      width:15,height:15,border:'2px solid rgba(240,160,80,.3)',borderTopColor:'rgba(240,160,80,.9)',
-                      borderRadius:'50%',display:'inline-block',animation:'spin 0.8s linear infinite'
-                    }}/>
-                    Analyse de ta consommation en cours…
+                  <div style={{paddingTop:4}}>
+                    <StarSpinner size={20} color="rgba(240,160,80,.95)" label="Analyse de ta consommation en cours…" labelColor="rgba(255,255,255,.55)"/>
                   </div>
                 )}
               </div>
@@ -7544,7 +7531,7 @@ function OptimisationScreen({ user, userProfile, onBack, onPanier, onMonSite, on
         )}
       </div>
 
-      {loading && <div style={{ textAlign:'center', padding:40 }}><div className="spinner" style={{margin:'0 auto'}}/></div>}
+      {loading && <div style={{ textAlign:'center', padding:40 }}><StarSpinner size={34}/></div>}
 
       {!loading && sites?.length === 0 && (
         <div className="card" style={{ textAlign:'center', padding:'28px 20px' }}>
@@ -7830,7 +7817,7 @@ function ProfileScreen({ user, profile, onSave, onCancel, onLogout, onDeleted })
       </div>
       <StickyFooter>
         <button className="btn btn-yes" onClick={handleSave} disabled={loading}>
-          {loading ? 'Enregistrement…' : '✓ Enregistrer et quitter'}
+          {loading ? <><StarSpinner size={16} color="#1a4500"/> Enregistrement…</> : '✓ Enregistrer et quitter'}
         </button>
         <button className="btn btn-sec" onClick={onCancel}>Quitter sans enregistrer</button>
       </StickyFooter>
@@ -8019,7 +8006,7 @@ function GlobalVarsScreen({ onBack }) {
   };
 
   if (loading || !globalForm) return (
-    <><div className="screen fade-in"><div style={{textAlign:'center',padding:40}}><div className="spinner" style={{margin:'0 auto'}}/></div></div><StickyFooter onBack={onBack}/></>
+    <><div className="screen fade-in"><div style={{textAlign:'center',padding:40}}><StarSpinner size={34}/></div></div><StickyFooter onBack={onBack}/></>
   );
 
   const F = {fontSize:13,padding:'6px 8px'};
@@ -8162,7 +8149,7 @@ function GlobalVarsScreen({ onBack }) {
 
         {saveGlobalMsg && <div style={{fontSize:11,fontWeight:700,color:saveGlobalMsg.startsWith('✓')?'var(--green)':'#ff9090',marginBottom:6}}>{saveGlobalMsg}</div>}
         <button onClick={saveGlobalParams} disabled={savingGlobal} style={{width:'100%',background:'rgba(125,217,64,.2)',border:'1px solid rgba(125,217,64,.4)',color:'#7dd940',fontFamily:'var(--font)',fontSize:12,fontWeight:700,borderRadius:8,padding:'8px',cursor:'pointer'}}>
-          {savingGlobal ? 'Enregistrement…' : '✓ Enregistrer'}
+          {savingGlobal ? <><StarSpinner size={14} color="#7dd940"/> Enregistrement…</> : '✓ Enregistrer'}
         </button>
       </div>
     </div>
@@ -8228,7 +8215,7 @@ function FactureVarsScreen({ onBack }) {
   };
 
   if (loading || !form) return (
-    <><div className="screen fade-in"><div style={{textAlign:'center',padding:40}}><div className="spinner" style={{margin:'0 auto'}}/></div></div><StickyFooter onBack={onBack}/></>
+    <><div className="screen fade-in"><div style={{textAlign:'center',padding:40}}><StarSpinner size={34}/></div></div><StickyFooter onBack={onBack}/></>
   );
 
   const F  = {fontSize:13,padding:'6px 8px'};
@@ -8307,7 +8294,7 @@ function FactureVarsScreen({ onBack }) {
 
         {msg && <div style={{fontSize:11,fontWeight:700,color:msg.startsWith('✓')?'var(--green)':'#ff9090',marginBottom:6}}>{msg}</div>}
         <button onClick={save} disabled={saving} style={{width:'100%',background:'rgba(125,217,64,.2)',border:'1px solid rgba(125,217,64,.4)',color:'#7dd940',fontFamily:'var(--font)',fontSize:12,fontWeight:700,borderRadius:8,padding:'8px',cursor:'pointer'}}>
-          {saving ? 'Enregistrement…' : '✓ Enregistrer'}
+          {saving ? <><StarSpinner size={14} color="#7dd940"/> Enregistrement…</> : '✓ Enregistrer'}
         </button>
       </div>
     </div>
@@ -8443,7 +8430,7 @@ function SpotPricesScreen({ onBack }) {
 
       {/* Heatmap pleine largeur */}
       {loading ? (
-        <div style={{textAlign:'center',padding:40}}><div className="spinner" style={{margin:'0 auto'}}/></div>
+        <div style={{textAlign:'center',padding:40}}><StarSpinner size={34}/></div>
       ) : spotAll ? (
         <SpotHeatmapCanvas spotAll={spotAll} natParams={natParams} heatmapMode={heatmapMode}/>
       ) : (
@@ -8671,7 +8658,7 @@ function AccMapScreen({ user, userProfile, onBack, onJoin, onCreate, onPanier })
         {/* Résultat éligibilité */}
         {loading && (
           <div style={{ display:'flex', alignItems:'center', gap:8 }}>
-            <div className="spinner" style={{ width:14, height:14 }}/>
+            <StarSpinner size={16}/>
             <div style={{ fontSize:11, color:'rgba(255,255,255,.4)' }}>Chargement…</div>
           </div>
         )}
@@ -8712,7 +8699,7 @@ function AccMapScreen({ user, userProfile, onBack, onJoin, onCreate, onPanier })
         {/* Geocoding spinner overlay */}
         {!loading && activeSite && !siteLatLng && (
           <div style={{ position:'absolute', bottom:80, left:'50%', transform:'translateX(-50%)', zIndex:10, background:'rgba(5,65,78,.85)', borderRadius:20, padding:'6px 14px', display:'flex', alignItems:'center', gap:6 }}>
-            <div className="spinner" style={{ width:12, height:12 }}/>
+            <StarSpinner size={14}/>
             <div style={{ fontSize:11, color:'rgba(255,255,255,.6)' }}>Géolocalisation en cours…</div>
           </div>
         )}
@@ -9304,7 +9291,7 @@ function BoxSimScreen({ user, userProfile, onBack, onPanier, onMonSite, onCartUp
         </div>
 
         {loading ? (
-          <div style={{ textAlign:'center', padding:40 }}><div className="spinner" style={{ margin:'0 auto' }}/></div>
+          <div style={{ textAlign:'center', padding:40 }}><StarSpinner size={34}/></div>
         ) : (<>
 
           {/* ── 2. Box Comwatt ── */}
@@ -9735,7 +9722,7 @@ function FlexSeuleScreen({ user, userProfile, onBack, onPanier, onMonSite, onCar
         </div>
 
         {loading ? (
-          <div style={{ textAlign:'center', padding:40 }}><div className="spinner" style={{ margin:'0 auto' }}/></div>
+          <div style={{ textAlign:'center', padding:40 }}><StarSpinner size={34}/></div>
         ) : (<>
           <div className="card" style={{ padding:'18px 16px', marginBottom:12, border:'1px solid rgba(125,217,64,.3)' }}>
             <div style={{ display:'flex', alignItems:'flex-start', gap:14 }}>
@@ -9862,7 +9849,7 @@ function InstallSoiMemeScreen({ user, userProfile, onBack, onPanier, onMonSite, 
     if (onCartUpdate) onCartUpdate();
   };
 
-  if (loading) return <div className="screen fade-in"><div style={{textAlign:'center',padding:40}}><div className="spinner" style={{margin:'0 auto'}}/></div></div>;
+  if (loading) return <div className="screen fade-in"><div style={{textAlign:'center',padding:40}}><StarSpinner size={34}/></div></div>;
 
   // ── Étape 1 : formulaire équipements ──
   if (step === 'therm') {
@@ -10277,7 +10264,7 @@ function SolarSimScreen({ user, userProfile, onBack, onPanier, onMonSite, onCart
         </div>
 
         {loading ? (
-          <div style={{ textAlign:'center', padding:40 }}><div className="spinner" style={{ margin:'0 auto' }}/></div>
+          <div style={{ textAlign:'center', padding:40 }}><StarSpinner size={34}/></div>
         ) : (<>
 
           {/* ── 2. Baisse de la facture ── */}
@@ -10571,7 +10558,7 @@ function PanierScreen({ user, onBack, onGoTo, onMonSite }) {
         </div>
       </div>
 
-      {loading && <div style={{textAlign:'center',padding:40}}><div className="spinner" style={{margin:'0 auto'}}/></div>}
+      {loading && <div style={{textAlign:'center',padding:40}}><StarSpinner size={34}/></div>}
 
       {!loading && !currentBill && (
         <div className="card" style={{textAlign:'center',padding:'32px 20px',marginBottom:14}}>
@@ -10858,7 +10845,7 @@ function AdminProductionScreen({ onBack }) {
           </div>
           <div style={{display:'flex',gap:8}}>
             <button className="btn btn-primary" style={{flex:1,fontSize:13}} onClick={handleSave} disabled={saving||!nom.trim()}>
-              {saving ? '⏳ Enregistrement…' : '💾 Enregistrer'}
+              {saving ? <><StarSpinner size={16} color="#1a4500"/> Enregistrement…</> : '💾 Enregistrer'}
             </button>
             <button className="btn btn-sec" style={{fontSize:13}} onClick={()=>{setImportStep(null);setParsedData(null);}}>Annuler</button>
           </div>
@@ -10866,7 +10853,7 @@ function AdminProductionScreen({ onBack }) {
       )}
 
       {profils === null ? (
-        <div style={{textAlign:'center',padding:40}}><div className="spinner" style={{margin:'0 auto'}}/></div>
+        <div style={{textAlign:'center',padding:40}}><StarSpinner size={34}/></div>
       ) : profils.length === 0 && !importStep ? (
         <div className="card" style={{textAlign:'center',padding:'24px 20px'}}>
           <div style={{fontSize:32,marginBottom:10}}>☀️</div>
@@ -11108,7 +11095,7 @@ function AdminPrixMateriauxScreen({ onBack }) {
   const TH = {fontSize:11,color:'rgba(255,255,255,.45)',fontWeight:700,textTransform:'uppercase',letterSpacing:'.4px',padding:'4px 6px',textAlign:'left'};
   const TD = {padding:'3px 4px',verticalAlign:'middle'};
 
-  if (!data) return <div className="screen fade-in"><div style={{textAlign:'center',padding:40}}><div className="spinner" style={{margin:'0 auto'}}/></div></div>;
+  if (!data) return <div className="screen fade-in"><div style={{textAlign:'center',padding:40}}><StarSpinner size={34}/></div></div>;
 
   const tableStyle = {width:'100%',borderCollapse:'collapse'};
 
@@ -11269,7 +11256,7 @@ function AdminDashboard({ onViewLogs, onImpersonate, onViewFails }) {
       </button>
 
       {!collapsed && (loading ? (
-        <div style={{textAlign:'center', padding:30}}><div className="spinner" style={{margin:'0 auto'}}/></div>
+        <div style={{textAlign:'center', padding:30}}><StarSpinner size={34}/></div>
       ) : rows.length === 0 ? (
         <div style={{textAlign:'center', padding:'22px', color:'rgba(255,255,255,.4)', fontSize:13}}>Aucune donnée</div>
       ) : (
@@ -11389,7 +11376,7 @@ function AdminQuizFailsScreen({ user, onBack }) {
       </div>
 
       {loading ? (
-        <div style={{textAlign:'center',padding:40}}><div className="spinner" style={{margin:'0 auto'}}/></div>
+        <div style={{textAlign:'center',padding:40}}><StarSpinner size={34}/></div>
       ) : rows.length === 0 ? (
         <div className="card" style={{textAlign:'center',padding:'28px 20px',color:'rgba(255,255,255,.5)',fontSize:14}}>
           Aucune erreur au premier coup 🎉
@@ -11645,7 +11632,7 @@ function AdminFeedbackScreen({ onBack }) {
         <FilterBtn val="down" label={`👎 Négatifs (${nbDown})`}/>
       </div>
 
-      {loading ? <div style={{textAlign:'center',padding:40}}><div className="spinner" style={{margin:'0 auto'}}/></div> : (
+      {loading ? <div style={{textAlign:'center',padding:40}}><StarSpinner size={34}/></div> : (
         shown.length === 0 ? (
           <div style={{textAlign:'center',color:'rgba(255,255,255,.4)',padding:40,fontSize:14}}>Aucun retour pour le moment.</div>
         ) : (
@@ -11806,7 +11793,7 @@ function AdminProofreadScreen({ onBack }) {
           fontSize:15, fontWeight:800, padding:'14px', cursor: loading||applying ? 'default':'pointer',
           fontFamily:'inherit', display:'flex', alignItems:'center', justifyContent:'center', gap:9
         }}>
-          {loading ? (<><span className="spinner" style={{width:18,height:18}}/> Analyse en cours…</>) : '🔍 Lancer la correction'}
+          {loading ? (<><StarSpinner size={18} color="rgba(255,255,255,.85)"/> Analyse en cours…</>) : '🔍 Lancer la correction'}
         </button>
 
         {loading && <div style={{textAlign:'center', color:'rgba(255,255,255,.45)', fontSize:12, marginTop:10}}>Cela peut prendre 20 à 60 secondes selon la quantité de texte.</div>}
@@ -11887,7 +11874,7 @@ function AdminProofreadScreen({ onBack }) {
                 fontSize:15, fontWeight:800, padding:'14px', cursor: applying||nbSel===0 ? 'default':'pointer',
                 fontFamily:'inherit', display:'flex', alignItems:'center', justifyContent:'center', gap:9
               }}>
-                {applying ? (<><span className="spinner" style={{width:18,height:18}}/> Application…</>) : `✓ Appliquer la sélection (${nbSel})`}
+                {applying ? (<><StarSpinner size={18} color="rgba(255,255,255,.85)"/> Application…</>) : `✓ Appliquer la sélection (${nbSel})`}
               </button>
             </>
           )
@@ -12046,7 +12033,7 @@ function QuizGenPanel({ subjectId, subjectTitle, onSaved }) {
           fontSize:13, fontWeight:800, padding:'11px', cursor: (!subjectId||generating||saving) ? 'default':'pointer',
           fontFamily:'inherit', display:'flex', alignItems:'center', justifyContent:'center', gap:9
         }}>
-          {generating ? (<><span className="spinner" style={{width:16,height:16}}/> Génération en cours…</>) : '🧩 Ajouter 3 questions quiz à ce thème via l\'IA'}
+          {generating ? (<><StarSpinner size={16} color="rgba(255,255,255,.85)"/> Génération en cours…</>) : '🧩 Ajouter 3 questions quiz à ce thème via l\'IA'}
         </button>
         {generating && <div style={{textAlign:'center', color:'rgba(255,255,255,.45)', fontSize:12, marginTop:10}}>Cela peut prendre 10 à 30 secondes.</div>}
 
@@ -12151,7 +12138,7 @@ function QuizGenPanel({ subjectId, subjectTitle, onSaved }) {
               fontSize:15, fontWeight:800, padding:'14px', cursor: saving||questions.length===0 ? 'default':'pointer',
               fontFamily:'inherit', display:'flex', alignItems:'center', justifyContent:'center', gap:9
             }}>
-              {saving ? (<><span className="spinner" style={{width:18,height:18}}/> Ajout…</>) : `✓ Ajouter au thème (${questions.length})`}
+              {saving ? (<><StarSpinner size={18} color="rgba(255,255,255,.85)"/> Ajout…</>) : `✓ Ajouter au thème (${questions.length})`}
             </button>
           </>
         )}
@@ -12198,7 +12185,7 @@ function AdminAICostsScreen({ onBack }) {
           (1 € ≈ {USD_PER_EUR.toFixed(2)} $).
         </p>
 
-        {loading ? <div style={{textAlign:'center',padding:40}}><div className="spinner" style={{margin:'0 auto'}}/></div> : (
+        {loading ? <div style={{textAlign:'center',padding:40}}><StarSpinner size={34}/></div> : (
           <>
             {/* Carte total */}
             <div style={{background:'linear-gradient(135deg,rgba(255,179,64,.15),rgba(255,179,64,.05))', border:'1px solid rgba(255,179,64,.35)', borderRadius:14, padding:'18px 18px', marginBottom:18}}>
@@ -12287,7 +12274,7 @@ function AdminAIPromptsScreen({ onBack, onBilanData }) {
         </p>
 
         {rows === null ? (
-          <div style={{textAlign:'center',padding:40}}><div className="spinner" style={{margin:'0 auto'}}/></div>
+          <div style={{textAlign:'center',padding:40}}><StarSpinner size={34}/></div>
         ) : rows.length === 0 ? (
           <div style={{textAlign:'center', color:'rgba(255,255,255,.4)', fontSize:14, padding:'24px 0'}}>Aucun service IA configuré.</div>
         ) : rows.map(r => {
@@ -12322,7 +12309,7 @@ function AdminAIPromptsScreen({ onBack, onBilanData }) {
                     style={{background: dirty ? '#ffb340' : 'rgba(255,255,255,.1)', border:'none', borderRadius:9,
                       color: dirty ? '#1a1208' : 'rgba(255,255,255,.4)', fontSize:12.5, fontWeight:800,
                       padding:'8px 16px', cursor: dirty ? 'pointer' : 'default', fontFamily:'inherit', opacity: savingFeat===r.feature?.6:1}}>
-                    {savingFeat===r.feature ? 'Enregistrement…' : 'Enregistrer'}
+                    {savingFeat===r.feature ? <><StarSpinner size={14} color="#1a1208"/> Enregistrement…</> : 'Enregistrer'}
                   </button>
                 </div>
               </div>
@@ -12482,7 +12469,7 @@ function AdminBilanDataScreen({ onBack }) {
             </select>
 
             {loading ? (
-              <div style={{textAlign:'center', padding:40}}><div className="spinner" style={{margin:'0 auto'}}/></div>
+              <div style={{textAlign:'center', padding:40}}><StarSpinner size={34}/></div>
             ) : facts === undefined ? null
               : facts === null ? (
               <div style={{textAlign:'center', color:'rgba(255,255,255,.4)', fontSize:14, padding:'24px 0'}}>
@@ -12512,7 +12499,7 @@ function AdminBilanDataScreen({ onBack }) {
                     style={{background: (!facts||generating||loading) ? 'rgba(255,255,255,.1)' : '#ffb340', border:'none', borderRadius:9,
                       color: (!facts||generating||loading) ? 'rgba(255,255,255,.4)' : '#1a1208', fontSize:12.5, fontWeight:800,
                       padding:'8px 14px', cursor:(!facts||generating||loading)?'default':'pointer', fontFamily:'inherit'}}>
-                    {generating ? 'Génération…' : (bilanText ? '↻ Régénérer le conseil' : 'Générer un conseil')}
+                    {generating ? <><StarSpinner size={14} color="rgba(255,255,255,.6)"/> Génération…</> : (bilanText ? '↻ Régénérer le conseil' : 'Générer un conseil')}
                   </button>
                 </div>
                 {genErr && (
@@ -12521,9 +12508,9 @@ function AdminBilanDataScreen({ onBack }) {
                 {!selId ? (
                   <div style={{color:'rgba(255,255,255,.4)', fontSize:13.5}}>Sélectionnez un site pour voir le texte généré.</div>
                 ) : loading ? (
-                  <div style={{textAlign:'center', padding:40}}><div className="spinner" style={{margin:'0 auto'}}/></div>
+                  <div style={{textAlign:'center', padding:40}}><StarSpinner size={34}/></div>
                 ) : generating ? (
-                  <div style={{textAlign:'center', padding:40}}><div className="spinner" style={{margin:'0 auto'}}/></div>
+                  <div style={{textAlign:'center', padding:40}}><StarSpinner size={34}/></div>
                 ) : bilanText ? (
                   <div style={{fontSize:14, lineHeight:1.6, color:'rgba(255,255,255,.88)', whiteSpace:'pre-wrap'}}>{bilanText}</div>
                 ) : (
@@ -12582,7 +12569,7 @@ function AdminOffresScreen({ onEdit, onNew, onFiltres, onBack }) {
         <span className="sim-arrow">→</span>
       </button>
 
-      {loading ? <div style={{textAlign:'center',padding:40}}><div className="spinner" style={{margin:'0 auto'}}/></div> : (
+      {loading ? <div style={{textAlign:'center',padding:40}}><StarSpinner size={34}/></div> : (
         <div style={{display:'flex',flexDirection:'column',gap:8,marginBottom:80}}>
           {offres.length === 0 && (
             <div style={{textAlign:'center',padding:'40px 0',color:'rgba(255,255,255,.4)',fontSize:14}}>
@@ -12669,7 +12656,7 @@ function AdminFiltresScreen({ onBack }) {
         Activez ou désactivez les curseurs de filtrage affichés dans la page Simulation.
       </p>
       {config === null ? (
-        <div style={{textAlign:'center',padding:40}}><div className="spinner" style={{margin:'0 auto'}}/></div>
+        <div style={{textAlign:'center',padding:40}}><StarSpinner size={34}/></div>
       ) : (
         <div style={{display:'flex',flexDirection:'column',gap:10}}>
           {FILTRES_DEF.map(f => {
@@ -12961,7 +12948,7 @@ function AdminOffreEditScreen({ offre, onSave, onDelete, onBack }) {
     </div>
     <StickyFooter row onBack={onBack}>
       <button className="btn btn-cta" style={{fontSize:13,flex:1}} onClick={handleSave} disabled={saving}>
-        {saving ? 'Enregistrement…' : isNew ? '+ Créer l\'offre' : 'Enregistrer'}
+        {saving ? <><StarSpinner size={16} color="#1a4500"/> Enregistrement…</> : isNew ? '+ Créer l\'offre' : 'Enregistrer'}
       </button>
     </StickyFooter>
     </>
@@ -12988,7 +12975,7 @@ function AdminTariffsScreen({ onEdit, onNew, onBack }) {
         <div className="welcome-tag" style={{color:'#ffb340'}}>Administration</div>
         <h1 className="welcome-title">Tarifs<br/><span className="accent">d'électricité</span></h1>
       </div>
-      {loading ? <div style={{textAlign:'center',padding:40}}><div className="spinner" style={{margin:'0 auto'}}/></div> : (
+      {loading ? <div style={{textAlign:'center',padding:40}}><StarSpinner size={34}/></div> : (
         <div style={{display:'flex',flexDirection:'column',gap:8,marginBottom:80}}>
           {tariffs.map(t => (
             <div key={t.id} className="tariff-row-item" onClick={()=>onEdit(t)}>
@@ -13220,7 +13207,7 @@ function AdminTariffEditScreen({ tariff, onSave, onDelete, onBack }) {
       </div>
       <StickyFooter>
         <button className="btn btn-yes" onClick={handleSave} disabled={loading||(f.type_tarif==='multi'&&remaining>0)}>
-          {loading?'Enregistrement…':'✓ Enregistrer'}
+          {loading?<><StarSpinner size={16} color="#1a4500"/> Enregistrement…</>:'✓ Enregistrer'}
         </button>
         <button className="btn btn-sec" onClick={onBack}>Annuler</button>
       </StickyFooter>
@@ -13242,7 +13229,7 @@ function AdminAccScreen({ onEdit, onNew, onBack }) {
         <div className="welcome-tag" style={{color:'#ffb340'}}>Administration</div>
         <h1 className="welcome-title">Sites <span className="accent">ACC</span></h1>
       </div>
-      {loading ? <div style={{textAlign:'center',padding:40}}><div className="spinner" style={{margin:'0 auto'}}/></div> : (
+      {loading ? <div style={{textAlign:'center',padding:40}}><StarSpinner size={34}/></div> : (
         <div style={{display:'flex',flexDirection:'column',gap:8,marginBottom:80}}>
           {sites.length === 0 && (
             <div className="card" style={{textAlign:'center',padding:'24px 16px',color:'rgba(255,255,255,.5)',fontSize:13}}>
@@ -13351,7 +13338,7 @@ function AdminAccEditScreen({ site, onSave, onDelete, onBack }) {
       </div>
       <StickyFooter>
         <button className="btn btn-yes" onClick={handleSave} disabled={loading}>
-          {loading ? 'Enregistrement…' : '✓ Enregistrer'}
+          {loading ? <><StarSpinner size={16} color="#1a4500"/> Enregistrement…</> : '✓ Enregistrer'}
         </button>
         <button className="btn btn-sec" onClick={onBack}>Annuler</button>
       </StickyFooter>
@@ -13414,7 +13401,7 @@ function AdminUserLogsScreen({ userId, userName, onBack }) {
       </div>
 
       {loading ? (
-        <div style={{textAlign:'center',padding:40}}><div className="spinner" style={{margin:'0 auto'}}/></div>
+        <div style={{textAlign:'center',padding:40}}><StarSpinner size={34}/></div>
       ) : filtered.length === 0 ? (
         <div className="card" style={{textAlign:'center',padding:'28px 20px',color:'rgba(255,255,255,.4)',fontSize:14}}>
           Aucun événement enregistré
@@ -13544,7 +13531,7 @@ function AdminUsersScreen({ onBack, onViewLogs, isSuperadmin }) {
         <h1 className="welcome-title">Utilisateurs<br/><span className="accent">({users.length})</span></h1>
       </div>
 
-      {loading ? <div style={{textAlign:'center',padding:40}}><div className="spinner" style={{margin:'0 auto'}}/></div> : (
+      {loading ? <div style={{textAlign:'center',padding:40}}><StarSpinner size={34}/></div> : (
         <div style={{overflowX:'auto', padding:'0 16px'}}>
           <table style={{width:'100%', minWidth:960, borderCollapse:'collapse', fontSize:13}}>
             <thead>
@@ -13713,7 +13700,7 @@ function AdminUsersScreen({ onBack, onViewLogs, isSuperadmin }) {
                     fontWeight:700,fontSize:14,cursor:(!copySrcSiteId||!copyTargetUserId)?'not-allowed':'pointer',
                     transition:'background .2s'
                   }}>
-                  {copying?'Copie en cours…':'Copier le site'}
+                  {copying?<span style={{display:'inline-flex',alignItems:'center',gap:7}}><StarSpinner size={15} color="#0a1a04"/> Copie en cours…</span>:'Copier le site'}
                 </button>
                 <button onClick={closeCopyDialog} style={{
                   flex:1,padding:'11px 0',borderRadius:9,
@@ -13935,7 +13922,7 @@ function AdminRolesScreen({ onBack, isSuperadmin = false }) {
       </div>
 
       {roles === null ? (
-        <div style={{textAlign:'center',padding:40}}><div className="spinner" style={{margin:'0 auto'}}/></div>
+        <div style={{textAlign:'center',padding:40}}><StarSpinner size={34}/></div>
       ) : (
         <>
           {/* Sélecteur de rôle + ajout / suppression */}
@@ -14084,7 +14071,7 @@ function AdminRolesScreen({ onBack, isSuperadmin = false }) {
 
     <StickyFooter row onBack={onBack}>
       <button className="btn btn-yes" onClick={save} disabled={!dirty || saving || !selKey || lockedRole}>
-        {saving ? 'Enregistrement…' : (lockedRole ? 'Réservé au super admin' : (dirty ? 'Enregistrer les permissions →' : 'Aucune modification'))}
+        {saving ? <><StarSpinner size={16} color="#1a4500"/> Enregistrement…</> : (lockedRole ? 'Réservé au super admin' : (dirty ? 'Enregistrer les permissions →' : 'Aucune modification'))}
       </button>
     </StickyFooter>
     </>
@@ -14120,7 +14107,7 @@ function AdminSitesScreen({ onBack, onEdit }) {
         <h1 className="welcome-title">Data<br/><span className="accent">sites {rows ? `(${rows.length})` : ''}</span></h1>
       </div>
 
-      {!rows ? <div style={{textAlign:'center',padding:40}}><div className="spinner" style={{margin:'0 auto'}}/></div> : (
+      {!rows ? <div style={{textAlign:'center',padding:40}}><StarSpinner size={34}/></div> : (
         <div style={{overflowX:'auto', padding:'0 16px'}}>
           <table style={{width:'100%', minWidth:840, borderCollapse:'collapse', fontSize:13}}>
             <thead><tr>{cols.map((c,i) => <th key={i} style={th}>{c}</th>)}</tr></thead>
@@ -14282,7 +14269,7 @@ function AdminSiteEditScreen({ site, onSave, onBack }) {
     </div>
     <StickyFooter row onBack={onBack}>
       <button className="btn btn-yes" onClick={handleSave} disabled={saving} style={{ opacity: saving?0.5:1, flex: 1 }}>
-        {saving ? 'Enregistrement…' : 'Enregistrer →'}
+        {saving ? <><StarSpinner size={16} color="#1a4500"/> Enregistrement…</> : 'Enregistrer →'}
       </button>
     </StickyFooter>
     </>
@@ -14355,7 +14342,7 @@ function ResetPasswordScreen({ onDone }) {
       </div>
       <StickyFooter>
         <button className="btn btn-yes" onClick={handle} disabled={loading}>
-          {loading ? 'Enregistrement…' : 'Enregistrer mon mot de passe →'}
+          {loading ? <><StarSpinner size={16} color="#1a4500"/> Enregistrement…</> : 'Enregistrer mon mot de passe →'}
         </button>
       </StickyFooter>
     </>
@@ -14486,7 +14473,7 @@ function FeedbackModal({ sentiment, user, screen, onClose }) {
             )}
             <div style={{display:'flex',gap:10,marginTop:14}}>
               <button onClick={onClose} style={{flex:'0 0 auto',background:'rgba(255,255,255,.07)',border:'1px solid rgba(255,255,255,.18)',borderRadius:11,color:'rgba(255,255,255,.7)',padding:'11px 16px',cursor:'pointer',fontFamily:'inherit',fontSize:13,fontWeight:700}}>Annuler</button>
-              <button onClick={submit} disabled={saving} style={{flex:1,background:accentBg,border:`1px solid ${accentBd}`,borderRadius:11,color:accent,padding:'11px',cursor:saving?'default':'pointer',fontFamily:'inherit',fontSize:14,fontWeight:800,opacity:saving?.6:1}}>{saving?'Envoi…':'Envoyer'}</button>
+              <button onClick={submit} disabled={saving} style={{flex:1,background:accentBg,border:`1px solid ${accentBd}`,borderRadius:11,color:accent,padding:'11px',cursor:saving?'default':'pointer',fontFamily:'inherit',fontSize:14,fontWeight:800,opacity:saving?.6:1}}>{saving?<span style={{display:'inline-flex',alignItems:'center',gap:7}}><StarSpinner size={15} color={accent}/> Envoi…</span>:'Envoyer'}</button>
             </div>
           </>
         )}
@@ -14704,7 +14691,7 @@ function ComprendreHomeScreen({ user, rolePerms, onGroup, onAction, onBack }) {
         <div className="welcome-tag" style={{color:'#7dd940'}}>Thèmes</div>
         <h1 className="welcome-title">L'énergie,<br/><span className="accent">enfin expliquée</span></h1>
       </div>
-      {loading ? <div style={{textAlign:'center',padding:40}}><div className="spinner" style={{margin:'0 auto'}}/></div> : (
+      {loading ? <div style={{textAlign:'center',padding:40}}><StarSpinner size={34}/></div> : (
         <>
         {totalRevisions > 0 && (
           <div className="card" style={{marginBottom:12,border:'1.5px solid rgba(255,180,60,.4)',background:'rgba(255,180,60,.08)',cursor:'pointer',padding:'14px 16px',display:'flex',alignItems:'center',gap:12}} onClick={() => onGroup({ id:'__revision__', title:'Révision', isRevision:true, revisionSubjectIds: revisions })}>
@@ -14788,7 +14775,7 @@ function ComprendreGroupScreen({ user, group, onSubject, onRevision, onAction, o
         <div className="welcome-tag" style={{color:'#7dd940'}}>Thème</div>
         <h1 className="welcome-title">{group.title}</h1>
       </div>
-      {loading ? <div style={{textAlign:'center',padding:40}}><div className="spinner" style={{margin:'0 auto'}}/></div> : (
+      {loading ? <div style={{textAlign:'center',padding:40}}><StarSpinner size={34}/></div> : (
         <div style={{display:'flex',flexDirection:'column',gap:10}}>
           {subjects.map((s,i) => {
             const p = progress[s.id];
@@ -15103,7 +15090,7 @@ function AdminLearnScreen({ onGroup, onNew, onBack }) {
         <h1 className="welcome-title">Thèmes<br/><span className="accent">à apprendre</span></h1>
       </div>
       <button className="btn btn-yes" style={{width:'100%',marginBottom:16}} onClick={onNew}>+ Nouveau thème</button>
-      {groups === null ? <div style={{textAlign:'center',padding:40}}><div className="spinner" style={{margin:'0 auto'}}/></div> : (
+      {groups === null ? <div style={{textAlign:'center',padding:40}}><StarSpinner size={34}/></div> : (
         <div style={{display:'flex',flexDirection:'column',gap:8}}>
           {groups.map(g => (
             <button key={g.id} onClick={()=>onGroup(g)} style={{background:'rgba(255,255,255,.07)',border:'1px solid rgba(255,255,255,.12)',borderRadius:12,padding:'14px 16px',textAlign:'left',cursor:'pointer',display:'flex',alignItems:'center',gap:12,width:'100%'}}>
@@ -15173,7 +15160,7 @@ function AdminLearnGroupEditScreen({ group, onSubject, onSave, onBack }) {
         <div className="inp-group"><label className="inp-label">Description</label><textarea className="inp" rows={2} value={desc} onChange={e=>setDesc(e.target.value)} placeholder="Courte description du thème" style={{resize:'vertical'}}/></div>
         <div className="inp-group"><label className="inp-label">Ordre d'affichage</label><input className="inp" type="number" value={ordre} onChange={e=>setOrdre(e.target.value)}/></div>
         {msg && <div style={{color:'#ff6060',fontSize:12,marginTop:4}}>{msg}</div>}
-        <button className="btn btn-yes" style={{width:'100%',marginTop:12}} onClick={save} disabled={saving}>{saving?'Enregistrement…':'Enregistrer'}</button>
+        <button className="btn btn-yes" style={{width:'100%',marginTop:12}} onClick={save} disabled={saving}>{saving?<><StarSpinner size={16} color="#1a4500"/> Enregistrement…</>:'Enregistrer'}</button>
         {!isNew && <button className="btn" style={{width:'100%',marginTop:8,color:'#ff6060',border:'1px solid rgba(255,96,96,.3)'}} onClick={del} disabled={deleting}>Supprimer le thème</button>}
       </div>
 
@@ -15181,7 +15168,7 @@ function AdminLearnGroupEditScreen({ group, onSubject, onSave, onBack }) {
         <>
         <div style={{fontWeight:700,color:'rgba(255,255,255,.7)',fontSize:13,marginTop:20,marginBottom:8,textTransform:'uppercase',letterSpacing:.5}}>Sujets</div>
         <button className="btn btn-yes" style={{width:'100%',marginBottom:10,fontSize:13}} onClick={()=>onSubject(null,group.id)}>+ Nouveau sujet</button>
-        {subjects===null ? <div style={{textAlign:'center',padding:20}}><div className="spinner" style={{margin:'0 auto'}}/></div> : (
+        {subjects===null ? <div style={{textAlign:'center',padding:20}}><StarSpinner size={34}/></div> : (
           <div style={{display:'flex',flexDirection:'column',gap:6}}>
             {subjects.map(s => (
               <button key={s.id} onClick={()=>onSubject(s,group.id)} style={{background:'rgba(255,255,255,.06)',border:'1px solid rgba(255,255,255,.1)',borderRadius:10,padding:'11px 14px',textAlign:'left',cursor:'pointer',display:'flex',alignItems:'center',gap:10,width:'100%'}}>
@@ -15261,7 +15248,7 @@ function AdminLearnSubjectEditScreen({ subjectId, groupId, isAdmin, onSave, onBa
         <div className="welcome-tag" style={{color:'#7dd940'}}>Admin</div>
         <h1 className="welcome-title">{isNew?'Nouveau':'Modifier'}<br/><span className="accent">sujet</span></h1>
       </div>
-      {loading ? <div style={{textAlign:'center',padding:40}}><div className="spinner" style={{margin:'0 auto'}}/></div> : (
+      {loading ? <div style={{textAlign:'center',padding:40}}><StarSpinner size={34}/></div> : (
         <>
         <div className="form-card">
           <div className="inp-group"><label className="inp-label">Titre *</label><input className="inp" value={title} onChange={e=>setTitle(e.target.value)} placeholder="ex. Comprendre le kWh"/></div>
@@ -15270,12 +15257,12 @@ function AdminLearnSubjectEditScreen({ subjectId, groupId, isAdmin, onSave, onBa
             <label className="inp-label">Image</label>
             {imageUrl && <img src={imageUrl} alt="" style={{width:'100%',maxHeight:140,objectFit:'cover',borderRadius:8,marginBottom:6}}/>}
             <input type="file" accept="image/*" onChange={uploadImage} style={{fontSize:12,color:'rgba(255,255,255,.6)'}}/>
-            {uploadingImg && <div style={{fontSize:11,color:'rgba(255,255,255,.5)',marginTop:4}}>Upload en cours…</div>}
+            {uploadingImg && <div style={{display:'flex',alignItems:'center',gap:7,fontSize:11,color:'rgba(255,255,255,.5)',marginTop:4}}><StarSpinner size={14}/> Upload en cours…</div>}
           </div>
           <div className="inp-group"><label className="inp-label">URL vidéo (YouTube ou embed)</label><input className="inp" value={videoUrl} onChange={e=>setVideoUrl(e.target.value)} placeholder="https://youtube.com/watch?v=…"/></div>
           <div className="inp-group"><label className="inp-label">Ordre</label><input className="inp" type="number" value={ordre} onChange={e=>setOrdre(e.target.value)}/></div>
           {msg && <div style={{color: msg.startsWith('✓')?'#7dd940':'#ff6060',fontSize:12,marginTop:4}}>{msg}</div>}
-          <button className="btn btn-yes" style={{width:'100%',marginTop:12}} onClick={save} disabled={saving}>{saving?'Enregistrement…':'Enregistrer le sujet'}</button>
+          <button className="btn btn-yes" style={{width:'100%',marginTop:12}} onClick={save} disabled={saving}>{saving?<><StarSpinner size={16} color="#1a4500"/> Enregistrement…</>:'Enregistrer le sujet'}</button>
           {!isNew && <button className="btn" style={{width:'100%',marginTop:8,color:'#ff6060',border:'1px solid rgba(255,96,96,.3)'}} onClick={del}>Supprimer le sujet</button>}
         </div>
 
@@ -15779,7 +15766,7 @@ function App() {
   const render = () => {
     if (authLoading) return (
       <div style={{display:'flex',alignItems:'center',justifyContent:'center',minHeight:'60vh'}}>
-        <div className="spinner"/>
+        <StarSpinner size={42}/>
       </div>
     );
 
