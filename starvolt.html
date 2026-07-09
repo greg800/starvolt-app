@@ -5091,6 +5091,7 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
   const enedisRef=useRef(null); // zone ENEDIS — cible du scroll/centre auto au retour de l'inscription
   const linkyPollRef=useRef(null);
   const[bilanGenerating,setBilanGenerating]=useState(false);
+  const[bilanUpdating,setBilanUpdating]=useState(false);
   const[bilanOpen,setBilanOpen]=useState(false);
   const[runTutorial,setRunTutorial]=useState(false); // tutoriel guidé du graphique (one-shot)
   const tutoTriggeredRef=useRef(false);
@@ -5523,6 +5524,24 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
       finally{ setBilanGenerating(false); }
     })();
   },[site?.id,site?.conso_annuelle_kwh,site?.bilan_ia,tariffs,globalVars,prodProfilData]);
+
+  // Régénère « Votre bilan en clair » à la demande (bouton). Réécrit le bilan en dur.
+  const regenBilan=async()=>{
+    if(!site||!site.id||bilanUpdating) return;
+    const sid=site.id;
+    setBilanUpdating(true);
+    try{
+      const quiz=await fetchQuizSummary(user.id);
+      const facts=buildBilanFacts({site,tariffs,globalVars,prodProfil:prodProfilData,quiz});
+      if(!facts){ return; }
+      const{data,error}=await sb.functions.invoke('bilan',{body:{facts}});
+      if(error||!data?.text){ console.warn('bilan regen error',error||data); return; }
+      await sb.from('sites').update({bilan_ia:data.text,bilan_ia_at:new Date().toISOString()}).eq('id',sid);
+      setSites(prev=>prev?prev.map(s=>s.id===sid?{...s,bilan_ia:data.text}:s):prev);
+      setBilanOpen(true);
+    }catch(e){ console.warn('bilan regen exception',e); }
+    finally{ setBilanUpdating(false); }
+  };
 
   const updateSite=async(updates)=>{ await sb.from('sites').update(updates).eq('id',activeId); await load(); };
 
@@ -5996,16 +6015,29 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
                   <>
                     <div style={{
                       fontSize:13.5,lineHeight:1.55,color:'rgba(255,255,255,.85)',whiteSpace:'pre-wrap',
+                      ...(bilanUpdating?{opacity:.4}:{}),
                       ...(bilanOpen?{}:{display:'-webkit-box',WebkitLineClamp:4,WebkitBoxOrient:'vertical',overflow:'hidden'})
                     }}>
                       {site.bilan_ia}
                     </div>
-                    <button
-                      onClick={()=>setBilanOpen(v=>!v)}
-                      style={{marginTop:8,background:'none',border:'none',color:'rgba(240,160,80,.9)',fontSize:12.5,fontWeight:700,cursor:'pointer',padding:0}}
-                    >
-                      {bilanOpen?'Réduire ▲':'… Lire la suite ▾'}
-                    </button>
+                    <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:10,marginTop:8,flexWrap:'wrap'}}>
+                      <button
+                        onClick={()=>setBilanOpen(v=>!v)}
+                        style={{background:'none',border:'none',color:'rgba(240,160,80,.9)',fontSize:12.5,fontWeight:700,cursor:'pointer',padding:0}}
+                      >
+                        {bilanOpen?'Réduire ▲':'… Lire la suite ▾'}
+                      </button>
+                      {bilanUpdating ? (
+                        <StarSpinner size={20} color="rgba(240,160,80,.95)" label="Mise à jour…" labelColor="rgba(240,160,80,.95)"/>
+                      ) : (
+                        <button
+                          onClick={regenBilan}
+                          style={{display:'inline-flex',alignItems:'center',gap:6,background:'rgba(240,160,80,.12)',border:'1px solid rgba(240,160,80,.35)',color:'rgba(240,160,80,.95)',fontSize:12,fontWeight:700,cursor:'pointer',padding:'6px 11px',borderRadius:8}}
+                        >
+                          ↻ Mettre à jour les conseils
+                        </button>
+                      )}
+                    </div>
                   </>
                 ) : (
                   <div style={{display:'flex',alignItems:'center',gap:9,color:'rgba(255,255,255,.55)',fontSize:13,paddingTop:4}}>
