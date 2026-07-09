@@ -9446,7 +9446,7 @@ function FlexSeuleScreen({ user, userProfile, onBack, onPanier, onMonSite, onCar
   const [showThermForm,setShowThermForm]= useState(false);
   const [view,         setView]         = useState('main'); // 'main' | 'cgv'
   const [scrolledEnd,  setScrolledEnd]  = useState(false);
-  const cgvRef = useRef(null);
+  const cgvEndRef = useRef(null);
 
   useEffect(() => {
     const siteId = localStorage.getItem('starvolt_active_site_id');
@@ -9479,16 +9479,21 @@ function FlexSeuleScreen({ user, userProfile, onBack, onPanier, onMonSite, onCar
   const details  = buildFlexOnlyDetails(siteFlex);
   const flexGain = details.reduce((s,d)=>s+d.gain, 0);
 
-  // Détection scroll fin de CGV (le CTA "Ok j'ai bien tout lu" n'apparaît qu'à la fin).
+  // Détection fin de CGV (le CTA "Ok j'ai bien tout lu" n'apparaît qu'à la fin).
+  // IntersectionObserver sur une sentinelle placée en bas du texte : robuste quel que
+  // soit l'élément qui défile (la page entière ici, pas un conteneur à hauteur fixe).
+  // rootMargin bas négatif → il faut vraiment scroller quasiment jusqu'au bout.
   useEffect(() => {
     if (view !== 'cgv') { setScrolledEnd(false); return; }
-    const el = cgvRef.current;
-    if (el && el.scrollHeight <= el.clientHeight + 4) setScrolledEnd(true); // texte plus court que la zone
+    const el = cgvEndRef.current;
+    if (!el) return;
+    const io = new IntersectionObserver(
+      (entries) => { if (entries.some(e => e.isIntersecting)) setScrolledEnd(true); },
+      { root: null, rootMargin: '0px 0px -80px 0px', threshold: 0 }
+    );
+    io.observe(el);
+    return () => io.disconnect();
   }, [view]);
-  const onCgvScroll = (e) => {
-    const el = e.target;
-    if (el.scrollTop + el.clientHeight >= el.scrollHeight - 24) setScrolledEnd(true);
-  };
 
   // Active la flexibilité : enregistre le panier + services, prépare l'écran de succès.
   const activate = (flex) => {
@@ -9589,10 +9594,9 @@ function FlexSeuleScreen({ user, userProfile, onBack, onPanier, onMonSite, onCar
   if (view === 'cgv') {
     return (
       <>
-        <div className="screen" style={{ display:'flex', flexDirection:'column', height:'100%' }}>
+        <div className="screen fade-in">
           <div style={{ fontSize:18, fontWeight:900, color:'white', marginBottom:10, marginTop:4 }}>Conditions générales</div>
-          <div ref={cgvRef} onScroll={onCgvScroll}
-            style={{ flex:1, overflowY:'auto', background:'rgba(255,255,255,.04)', border:'1px solid rgba(255,255,255,.1)', borderRadius:12, padding:'14px 16px', marginBottom:12 }}>
+          <div style={{ background:'rgba(255,255,255,.04)', border:'1px solid rgba(255,255,255,.1)', borderRadius:12, padding:'14px 16px' }}>
             {CGV_FLEX_TEXT.split('\n').map((line, i) => {
               if (line.trim() === '') return <div key={i} style={{ height:8 }}/>;
               const isArticle = /^Article\s/.test(line) || /^\d+\.\d+\s/.test(line);
@@ -9605,7 +9609,9 @@ function FlexSeuleScreen({ user, userProfile, onBack, onPanier, onMonSite, onCar
                 paddingLeft: line.startsWith('•') ? 6 : 0,
               }}>{line}</div>;
             })}
+            <div ref={cgvEndRef} style={{ height:1 }}/>
           </div>
+          <div style={{ height:90 }}/>
         </div>
         <div className="sticky-footer">
           <div className="sticky-footer-inner row">
