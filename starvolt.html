@@ -3056,6 +3056,36 @@ function SiteEnedisDetail({ site, tariffs=[], onBack }){
     [site.hc_debut2, site.hc_fin2],
   ].filter(([a,b])=>a&&b).map(([a,b])=>`${a} → ${b}`);
 
+  // ── Qualité & trous des données de consommation ──
+  const qual = (c)=> c==null ? null : c>=0.98?'Excellente' : c>=0.90?'Bonne' : c>=0.70?'Correcte' : 'Partielle';
+  const covPct = site.conso_coverage!=null ? Math.round(site.conso_coverage*100) : null;
+  const g = (site.conso_gaps && typeof site.conso_gaps==='object' && !Array.isArray(site.conso_gaps)) ? site.conso_gaps : null;
+  const derivedMissing = site.conso_coverage!=null ? Math.round((1-site.conso_coverage)*366) : null;
+  const missingDays = g ? g.missing_days : derivedMissing;
+  const filledDays  = g ? g.filled_days : null;
+  const unfilledDays= g ? g.unfilled_days : null;
+  const srcQualSuffix = site.conso_source==='loadcurve' ? ' — précis (pas 30 min)' : site.conso_source==='daily' ? ' — approximatif (journalier)' : '';
+
+  // ── Production (injection réseau) ──
+  const hasInjection = site.injection_annuelle_kwh!=null || site.injection_coverage!=null || (Array.isArray(site.injection_profil) && site.injection_profil.length>0);
+  const injQty = site.injection_annuelle_kwh!=null ? `${Math.round(site.injection_annuelle_kwh).toLocaleString('fr-FR')} kWh/an` : null;
+  const injCovPct = site.injection_coverage!=null ? Math.round(site.injection_coverage*100) : null;
+  const pvKwc = (site.puissance_pv_kwc!=null && Number(site.puissance_pv_kwc)>0) ? `${site.puissance_pv_kwc} kWc` : null;
+
+  // ── Décodage de l'option tarifaire ENEDIS ──
+  const TARIF_ENEDIS = {
+    BTINFCU4:'Base — BT ≤ 36 kVA (courte utilisation)',
+    BTINFCUST:'Base — BT ≤ 36 kVA',
+    BTINFMU4:'Heures pleines / heures creuses — BT ≤ 36 kVA',
+    BTINFMUDT:'Heures pleines / heures creuses — BT ≤ 36 kVA',
+    BTINFLU:'Base — BT ≤ 36 kVA (longue utilisation)',
+    BTSUPCU4:'Base — BT > 36 kVA (courte utilisation)',
+    BTSUPLU4:'BT > 36 kVA (longue utilisation)',
+  };
+  const tarifEnedisLbl = site.enedis_option_tarifaire
+    ? (TARIF_ENEDIS[site.enedis_option_tarifaire] ? `${site.enedis_option_tarifaire} — ${TARIF_ENEDIS[site.enedis_option_tarifaire]}` : site.enedis_option_tarifaire)
+    : null;
+
   const lbl = { fontSize:10, color:'rgba(255,255,255,.45)', fontWeight:700, letterSpacing:'.5px', textTransform:'uppercase' };
   const val = (v)=> v ? <span style={{fontSize:14,color:'white',fontWeight:600,wordBreak:'break-word'}}>{v}</span>
                        : <span style={{fontSize:13,color:'rgba(255,255,255,.35)',fontStyle:'italic'}}>Non collecté</span>;
@@ -3101,20 +3131,54 @@ function SiteEnedisDetail({ site, tariffs=[], onBack }){
 
         <Card title="Contrat ENEDIS" emoji="📄">
           <Row label="Puissance souscrite">{val(site.puissance_souscrite_kva ? `${site.puissance_souscrite_kva} kVA` : null)}</Row>
-          <Row label="Option tarifaire ENEDIS">{val(site.enedis_option_tarifaire)}</Row>
+          <Row label="Option tarifaire ENEDIS">{val(tarifEnedisLbl)}</Row>
           <Row label="Tarif d'électricité (dans l'app)">{val(tarif?.nom)}</Row>
           <Row label="Heures creuses">{hcWindows.length ? val(hcWindows.join('  •  ')) : val(null)}</Row>
         </Card>
 
         <Card title="Consommation collectée" emoji="📊">
           <Row label="Consommation annuelle">{val(site.conso_annuelle_kwh ? `${Math.round(site.conso_annuelle_kwh).toLocaleString('fr-FR')} kWh/an` : null)}</Row>
-          <Row label="Source des données">{val(sourceLbl)}</Row>
-          <Row label="Couverture des données">{val(site.conso_coverage!=null ? `${Math.round(site.conso_coverage*100)} %` : null)}</Row>
+          <Row label="Source des données">{val(sourceLbl ? `${sourceLbl}${srcQualSuffix}` : null)}</Row>
+          <Row label="Qualité / couverture">{val(covPct!=null ? `${qual(site.conso_coverage)} — ${covPct} % de l'année` : null)}</Row>
+          <Row label="Trous dans les données">
+            {missingDays==null ? val(null)
+              : missingDays===0
+                ? <span style={{fontSize:14,color:'#7dd940',fontWeight:600}}>Aucun — 366 jours complets</span>
+                : <span style={{fontSize:14,color:'white',fontWeight:600}}>{missingDays} jour{missingDays>1?'s':''} manquant{missingDays>1?'s':''} sur 366{g?'':' (estimé)'}</span>}
+          </Row>
+          {missingDays>0 && g && (
+            <Row label="Corrections de trous">
+              <span style={{fontSize:14,color:'white',fontWeight:600}}>
+                {filledDays} comblé{filledDays>1?'s':''} par estimation{unfilledDays>0?`, ${unfilledDays} laissé${unfilledDays>1?'s':''} vide${unfilledDays>1?'s':''}`:''}
+              </span>
+            </Row>
+          )}
+          {missingDays>0 && !g && (
+            <Row label="Corrections de trous">
+              <span style={{fontSize:13,color:'rgba(255,255,255,.5)',fontStyle:'italic'}}>Les trous d'une courbe de charge sont comblés par estimation (jours voisins de même type). Le décompte exact sera disponible aux prochaines collectes.</span>
+            </Row>
+          )}
           <Row label="Dernière collecte">{val(fmtDate(site.conso_imported_at))}</Row>
         </Card>
 
+        <Card title="Production (injection réseau)" emoji="☀️">
+          {hasInjection ? (
+            <>
+              <Row label="Surplus revendu au réseau">{val(injQty)}</Row>
+              <Row label="Qualité / couverture">{val(injCovPct!=null ? `${qual(site.injection_coverage)} — ${injCovPct} % de l'année` : null)}</Row>
+              {pvKwc && <Row label="Puissance photovoltaïque installée">{val(pvKwc)}</Row>}
+            </>
+          ) : (
+            <div style={{fontSize:13,color:'rgba(255,255,255,.5)',lineHeight:1.45,padding:'6px 0'}}>
+              Aucune production revendue détectée sur ce compteur.{pvKwc
+                ? ` Une installation de ${pvKwc} est renseignée, mais ENEDIS n'a transmis aucune courbe d'injection (autoconsommation totale, ou pas de contrat de revente du surplus).`
+                : ' Ce compteur n\'a pas de contrat producteur (pas de revente de surplus au réseau).'}
+            </div>
+          )}
+        </Card>
+
         <div style={{fontSize:11,color:'rgba(255,255,255,.35)',lineHeight:1.5,marginTop:4,marginBottom:8}}>
-          Certaines données contractuelles (puissance, option tarifaire, heures creuses) ne sont pas toujours renvoyées par ENEDIS et apparaissent alors comme « non collecté ».
+          Certaines données contractuelles (puissance, option tarifaire, heures creuses) ne sont pas toujours renvoyées par ENEDIS et apparaissent alors comme « non collecté ». La production n'est mesurée que pour les compteurs avec contrat de revente de surplus.
         </div>
       </div>
       <StickyFooter onBack={onBack}/>

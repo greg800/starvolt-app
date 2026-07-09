@@ -55,6 +55,7 @@ function isWeekendDay(dayIdx) {
 // (semaine vs week-end) les plus proches qui ont des données.
 function fillMissingDays(profile, dayHasData) {
   const MAX_SAMPLES = 3;
+  let filled = 0, unfilled = 0;
   for(let d = 0; d < 366; d++){
     if (dayHasData[d]) continue;
     const wantWeekend = isWeekendDay(d);
@@ -82,13 +83,15 @@ function fillMissingDays(profile, dayHasData) {
         }
       }
     }
-    if (samples.length === 0) continue;
+    if (samples.length === 0) { unfilled++; continue; }
     for(let h = 0; h < 24; h++){
       let sum = 0;
       for (const s of samples)sum += profile[s * 24 + h];
       profile[d * 24 + h] = Math.round(sum / samples.length);
     }
+    filled++;
   }
+  return { filled, unfilled };
 }
 // ── Construction du profil horaire à partir d'une courbe de charge v0 ────────
 // Entrée : { period, startsAt, values:[wattsMoyens|null, ...] } à pas constant.
@@ -1091,12 +1094,13 @@ Deno.serve(async (req)=>{
         const lc = await fetchR63Curve(r63, pdl);
         r63Built = buildProfileV0(lc);
         if (r63Built.hasAny && r63Built.coverage >= 0.70) {
-          fillMissingDays(r63Built.profile, r63Built.dayHasData);
+          const fillRes = fillMissingDays(r63Built.profile, r63Built.dayHasData);
           candidate = {
             source: "loadcurve",
             coverage: r63Built.coverage,
             profile: r63Built.profile,
-            note: null
+            note: null,
+            gaps: { missing_days: 366 - r63Built.daysPresent, filled_days: fillRes.filled, unfilled_days: fillRes.unfilled }
           };
         }
       }
@@ -1110,7 +1114,8 @@ Deno.serve(async (req)=>{
             source: "daily",
             coverage: d.daysPresent / 366,
             profile: d.profile,
-            note: "Courbe de charge indisponible ou partielle chez ENEDIS — données journalières (approximatives) utilisées."
+            note: "Courbe de charge indisponible ou partielle chez ENEDIS — données journalières (approximatives) utilisées.",
+            gaps: { missing_days: 366 - d.daysPresent, filled_days: 0, unfilled_days: 366 - d.daysPresent }
           };
         }
       }
@@ -1120,7 +1125,8 @@ Deno.serve(async (req)=>{
           source: "daily",
           coverage: r63Built.coverage,
           profile: r63Built.profile,
-          note: "Courbe de charge partielle chez ENEDIS — estimation approximative."
+          note: "Courbe de charge partielle chez ENEDIS — estimation approximative.",
+          gaps: { missing_days: 366 - r63Built.daysPresent, filled_days: 0, unfilled_days: 366 - r63Built.daysPresent }
         };
       }
       if (candidate) {
@@ -1145,7 +1151,7 @@ Deno.serve(async (req)=>{
           su.conso_profil = candidate.profile;
           su.conso_coverage = Math.round(candidate.coverage * 1000) / 1000;
           su.conso_annuelle_kwh = Math.round(total / 100) / 10;
-          su.conso_gaps = null;
+          su.conso_gaps = candidate.gaps ?? null;
         }
         await sbUpdate("sites", `id=eq.${rec.site_id}`, su);
         // Le C68_ASYNC ET la courbe d'INJECTION sont plus lents que le soutirage (souvent
