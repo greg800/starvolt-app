@@ -11445,7 +11445,7 @@ function AdminScreen({ onTariffs, onUsers, onRoles, onSites, onSpot, onAcc, onPr
             <span className="sim-icon">💡</span>
             <div className="sim-text">
               <div className="sim-title">Paramétrer le module Comprendre</div>
-              <div className="sim-sub">Groupes, sujets, quiz et questions</div>
+              <div className="sim-sub">Thèmes, sujets, contenus et quiz</div>
             </div>
             <span className="sim-arrow">→</span>
           </button>
@@ -11626,7 +11626,7 @@ function AdminProofreadScreen({ onBack }) {
   const [doneMsg, setDoneMsg] = useState(null);
   const [lastRun, setLastRun] = useState(null); // { usage, cost }
 
-  const TBL_LABEL = { learn_groups:'Groupe', learn_subjects:'Sujet', learn_questions:'Question', learn_choices:'Réponse' };
+  const TBL_LABEL = { learn_groups:'Thème', learn_subjects:'Sujet', learn_questions:'Question', learn_choices:'Réponse' };
   const FLD_LABEL = { title:'titre', description:'description', content:'contenu', question:'question', text:'texte' };
 
   const run = async () => {
@@ -13672,12 +13672,20 @@ function AdminRolesScreen({ onBack, isSuperadmin = false }) {
   const [editB2b,    setEditB2b]    = useState(false);
   const [msg,        setMsg]        = useState(null);
   const [offersList, setOffersList] = useState([]);
+  const [themesList, setThemesList] = useState([]);
 
   // Offres réelles (base) → zone dynamique "Offres accessibles". Toute nouvelle
   // offre ajoutée dans « Gestion des offres » apparaît ici automatiquement.
   useEffect(() => {
     sb.from('offres').select('id,titre').order('created_at')
       .then(({ data }) => setOffersList(data || []));
+  }, []);
+
+  // Thèmes du module Comprendre (learn_groups) → zone dynamique "Thèmes mis en
+  // avant". Tout nouveau thème apparaît ici automatiquement, coché par défaut.
+  useEffect(() => {
+    sb.from('learn_groups').select('id,title').order('ordre')
+      .then(({ data }) => setThemesList(data || []));
   }, []);
 
   const load = (keepKey) => {
@@ -13787,6 +13795,35 @@ function AdminRolesScreen({ onBack, isSuperadmin = false }) {
         borderRadius:9, fontSize:13, color: on ? '#cdeeb0' : 'rgba(255,255,255,.7)', opacity: lockedRole ? .55 : 1,
       }}>
         <input type="checkbox" checked={on} disabled={lockedRole} onChange={() => toggle(zone, item)}
+          style={{ width:16, height:16, accentColor:'#7dd940', cursor: lockedRole ? 'not-allowed' : 'pointer' }}/>
+        {label}
+      </label>
+    );
+  };
+
+  // Bascule pour une zone "cochée par défaut" : l'absence de valeur (ou true) = coché.
+  // Décocher stocke un false explicite ; recocher repasse à true.
+  const toggleDefaultOn = (zone, item) => {
+    setPerms(p => {
+      const next = { ...(p || {}) };
+      next[zone] = { ...(next[zone] || {}) };
+      next[zone][item] = next[zone][item] === false; // was off(false)→true, was on→false
+      return next;
+    });
+    setDirty(true);
+  };
+
+  // Case cochée par défaut (utilisée pour les thèmes mis en avant).
+  const checkboxDefaultOn = (zone, item, label) => {
+    const on = perms?.[zone]?.[item] !== false;
+    return (
+      <label key={zone + '.' + item} style={{
+        display:'flex', alignItems:'center', gap:10, padding:'9px 12px', cursor: lockedRole ? 'not-allowed' : 'pointer',
+        background: on ? 'rgba(125,217,64,.10)' : 'rgba(255,255,255,.03)',
+        border:'1px solid ' + (on ? 'rgba(125,217,64,.35)' : 'rgba(255,255,255,.10)'),
+        borderRadius:9, fontSize:13, color: on ? '#cdeeb0' : 'rgba(255,255,255,.7)', opacity: lockedRole ? .55 : 1,
+      }}>
+        <input type="checkbox" checked={on} disabled={lockedRole} onChange={() => toggleDefaultOn(zone, item)}
           style={{ width:16, height:16, accentColor:'#7dd940', cursor: lockedRole ? 'not-allowed' : 'pointer' }}/>
         {label}
       </label>
@@ -13932,6 +13969,19 @@ function AdminRolesScreen({ onBack, isSuperadmin = false }) {
               )}
             </React.Fragment>
           ))}
+
+          {/* Zone dynamique : thèmes mis en avant sur la page Comprendre.
+              Cochés par défaut (tous mis en avant). Décocher un thème le
+              rétrograde derrière le bouton « Voir tous les autres thèmes ». */}
+          {themesList.length > 0 && (
+            <div style={{marginBottom:18}}>
+              <div style={{fontSize:12,fontWeight:700,letterSpacing:'.6px',textTransform:'uppercase',color:'rgba(255,255,255,.5)',marginBottom:6}}>Thèmes mis en avant (page Comprendre)</div>
+              <div style={{fontSize:11,color:'rgba(255,255,255,.4)',marginBottom:8,lineHeight:1.5}}>Les thèmes cochés sont affichés en premier. Décochez ceux à masquer derrière « Voir tous les autres thèmes » pour focaliser l'attention.</div>
+              <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(220px,1fr))',gap:8}}>
+                {themesList.map(t => checkboxDefaultOn('highlight_themes', t.id, t.title))}
+              </div>
+            </div>
+          )}
         </>
       )}
     </div>
@@ -14235,7 +14285,7 @@ const SCREEN_LABELS = {
   WELCOME:'Accueil', AUTH_SIGNUP:'Inscription', AUTH_LOGIN:'Connexion',
   RESET_PASSWORD:'Réinitialisation mot de passe',
   HOME_CHOICE:'Accueil', HOME_LOGGED_IN:'Accueil',
-  COMPRENDRE_HOME:'Comprendre — accueil', COMPRENDRE_GROUP:'Comprendre — groupe',
+  COMPRENDRE_HOME:'Comprendre — accueil', COMPRENDRE_GROUP:'Comprendre — thème',
   COMPRENDRE_SUBJECT:'Comprendre — sujet', COMPRENDRE_QUIZ:'Comprendre — quiz',
   COMPRENDRE_SCORE:'Comprendre — score',
   MA_CONSO:'Mon site', SIMULATIONS:'Simulations d’économie',
@@ -14490,11 +14540,12 @@ function GroupDescription({ text }) {
 }
 
 // ─── ComprendreHomeScreen ─────────────────────────────────────────────────────
-function ComprendreHomeScreen({ user, onGroup, onAction, onBack }) {
+function ComprendreHomeScreen({ user, rolePerms, onGroup, onAction, onBack }) {
   const [groups, setGroups] = useState([]);
   const [progress, setProgress] = useState({});
   const [revisions, setRevisions] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [showOthers, setShowOthers] = useState(false);
 
   useEffect(() => {
     async function load() {
@@ -14526,11 +14577,35 @@ function ComprendreHomeScreen({ user, onGroup, onAction, onBack }) {
 
   const totalRevisions = revisions.length;
 
+  // Mise en avant par rôle : un thème est masqué (rétrogradé) uniquement si son id
+  // est explicitement à false dans permissions.highlight_themes. Absent/true = mis
+  // en avant → par défaut, tous les thèmes sont affichés.
+  const hlMap = rolePerms?.highlight_themes || {};
+  const highlighted = groups.filter(g => hlMap[g.id] !== false);
+  const others      = groups.filter(g => hlMap[g.id] === false);
+
+  const renderTheme = (g) => (
+    <button key={g.id} onClick={() => onGroup(g)} style={{background:'rgba(255,255,255,.07)',border:'1px solid rgba(255,255,255,.12)',borderRadius:14,padding:'16px 18px',textAlign:'left',cursor:'pointer',display:'flex',alignItems:'center',gap:14,width:'100%'}}>
+      <div style={{flex:1}}>
+        <div style={{fontWeight:700,color:'white',fontSize:21,marginBottom:4}}>{g.title}</div>
+        {g.description && <GroupDescription text={g.description} />}
+        <div style={{marginTop:8,display:'flex',alignItems:'center',gap:8}}>
+          <div style={{flex:1,height:4,background:'rgba(255,255,255,.12)',borderRadius:4,overflow:'hidden'}}>
+            <div style={{width:`${g.total>0?Math.round(g.done/g.total*100):0}%`,height:'100%',background:'#7dd940',borderRadius:4,transition:'width .3s'}}/>
+          </div>
+          <span style={{fontSize:11,color:'rgba(255,255,255,.5)',whiteSpace:'nowrap'}}>{g.done}/{g.total}</span>
+          {g.hasRev && <span style={{fontSize:10,color:'#ffb340',fontWeight:700}}>🔁 révision</span>}
+        </div>
+      </div>
+      <span style={{color:'rgba(255,255,255,.35)',fontSize:20}}>→</span>
+    </button>
+  );
+
   return (
     <>
     <div className="screen fade-in">
       <div className="auth-header">
-        <div className="welcome-tag" style={{color:'#7dd940'}}>Module</div>
+        <div className="welcome-tag" style={{color:'#7dd940'}}>Thèmes</div>
         <h1 className="welcome-title">L'énergie,<br/><span className="accent">enfin expliquée</span></h1>
       </div>
       <div style={{marginBottom:16,padding:'14px 16px',borderRadius:14,background:'rgba(255,180,0,.10)',border:'1.5px solid rgba(255,180,0,.3)',display:'flex',alignItems:'flex-start',gap:12}}>
@@ -14550,22 +14625,13 @@ function ComprendreHomeScreen({ user, onGroup, onAction, onBack }) {
           </div>
         )}
         <div style={{display:'flex',flexDirection:'column',gap:10}}>
-          {groups.map(g => (
-            <button key={g.id} onClick={() => onGroup(g)} style={{background:'rgba(255,255,255,.07)',border:'1px solid rgba(255,255,255,.12)',borderRadius:14,padding:'16px 18px',textAlign:'left',cursor:'pointer',display:'flex',alignItems:'center',gap:14,width:'100%'}}>
-              <div style={{flex:1}}>
-                <div style={{fontWeight:700,color:'white',fontSize:21,marginBottom:4}}>{g.title}</div>
-                {g.description && <GroupDescription text={g.description} />}
-                <div style={{marginTop:8,display:'flex',alignItems:'center',gap:8}}>
-                  <div style={{flex:1,height:4,background:'rgba(255,255,255,.12)',borderRadius:4,overflow:'hidden'}}>
-                    <div style={{width:`${g.total>0?Math.round(g.done/g.total*100):0}%`,height:'100%',background:'#7dd940',borderRadius:4,transition:'width .3s'}}/>
-                  </div>
-                  <span style={{fontSize:11,color:'rgba(255,255,255,.5)',whiteSpace:'nowrap'}}>{g.done}/{g.total}</span>
-                  {g.hasRev && <span style={{fontSize:10,color:'#ffb340',fontWeight:700}}>🔁 révision</span>}
-                </div>
-              </div>
-              <span style={{color:'rgba(255,255,255,.35)',fontSize:20}}>→</span>
+          {highlighted.map(renderTheme)}
+          {others.length > 0 && !showOthers && (
+            <button onClick={() => setShowOthers(true)} style={{background:'rgba(255,255,255,.04)',border:'1px dashed rgba(255,255,255,.22)',borderRadius:14,padding:'14px 18px',textAlign:'center',cursor:'pointer',color:'rgba(255,255,255,.7)',fontSize:14,fontWeight:700,width:'100%',fontFamily:'inherit'}}>
+              Voir tous les autres thèmes ({others.length}) ▾
             </button>
-          ))}
+          )}
+          {others.length > 0 && showOthers && others.map(renderTheme)}
           {groups.length === 0 && <div style={{textAlign:'center',color:'rgba(255,255,255,.35)',padding:40,fontSize:14}}>Aucun contenu disponible pour le moment.</div>}
         </div>
         </>
@@ -14627,7 +14693,7 @@ function ComprendreGroupScreen({ user, group, onSubject, onRevision, onAction, o
     <>
     <div className="screen fade-in">
       <div className="auth-header">
-        <div className="welcome-tag" style={{color:'#7dd940'}}>Groupe</div>
+        <div className="welcome-tag" style={{color:'#7dd940'}}>Thème</div>
         <h1 className="welcome-title">{group.title}</h1>
       </div>
       {loading ? <div style={{textAlign:'center',padding:40}}><div className="spinner" style={{margin:'0 auto'}}/></div> : (
@@ -14926,7 +14992,7 @@ function ComprendreScoreScreen({ user, subject, score, total, results, isRevisio
     <StickyFooter row>
       {!mastered && <button className="btn" style={{flex:1,fontSize:13}} onClick={onRetry}>Réessayer</button>}
       {mastered && onNext && <button className="btn btn-yes" style={{flex:1,fontSize:13}} onClick={onNext}>Sujet suivant →</button>}
-      <button className="btn btn-primary" style={{flex:1,fontSize:13}} onClick={onHome}>Retour aux groupes</button>
+      <button className="btn btn-primary" style={{flex:1,fontSize:13}} onClick={onHome}>Retour aux thèmes</button>
     </StickyFooter>
     </>
   );
@@ -14942,9 +15008,9 @@ function AdminLearnScreen({ onGroup, onNew, onBack }) {
     <div className="screen fade-in">
       <div className="auth-header">
         <div className="welcome-tag" style={{color:'#7dd940'}}>Admin · Comprendre</div>
-        <h1 className="welcome-title">Groupes<br/><span className="accent">de sujets</span></h1>
+        <h1 className="welcome-title">Thèmes<br/><span className="accent">à apprendre</span></h1>
       </div>
-      <button className="btn btn-yes" style={{width:'100%',marginBottom:16}} onClick={onNew}>+ Nouveau groupe</button>
+      <button className="btn btn-yes" style={{width:'100%',marginBottom:16}} onClick={onNew}>+ Nouveau thème</button>
       {groups === null ? <div style={{textAlign:'center',padding:40}}><div className="spinner" style={{margin:'0 auto'}}/></div> : (
         <div style={{display:'flex',flexDirection:'column',gap:8}}>
           {groups.map(g => (
@@ -14956,7 +15022,7 @@ function AdminLearnScreen({ onGroup, onNew, onBack }) {
               <span style={{color:'rgba(255,255,255,.35)',fontSize:16}}>→</span>
             </button>
           ))}
-          {groups.length===0 && <div style={{textAlign:'center',color:'rgba(255,255,255,.35)',padding:30,fontSize:13}}>Aucun groupe. Créez-en un.</div>}
+          {groups.length===0 && <div style={{textAlign:'center',color:'rgba(255,255,255,.35)',padding:30,fontSize:13}}>Aucun thème. Créez-en un.</div>}
         </div>
       )}
     </div>
@@ -14997,7 +15063,7 @@ function AdminLearnGroupEditScreen({ group, onSubject, onSave, onBack }) {
   };
 
   const del = async () => {
-    if (!window.confirm('Supprimer ce groupe et tous ses sujets ?')) return;
+    if (!window.confirm('Supprimer ce thème et tous ses sujets ?')) return;
     setDeleting(true);
     await sb.from('learn_groups').delete().eq('id',group.id);
     onSave();
@@ -15008,15 +15074,15 @@ function AdminLearnGroupEditScreen({ group, onSubject, onSave, onBack }) {
     <div className="screen fade-in">
       <div className="auth-header">
         <div className="welcome-tag" style={{color:'#7dd940'}}>Admin</div>
-        <h1 className="welcome-title">{isNew?'Nouveau':'Modifier'}<br/><span className="accent">groupe</span></h1>
+        <h1 className="welcome-title">{isNew?'Nouveau':'Modifier'}<br/><span className="accent">thème</span></h1>
       </div>
       <div className="form-card">
         <div className="inp-group"><label className="inp-label">Titre *</label><input className="inp" value={title} onChange={e=>setTitle(e.target.value)} placeholder="ex. Les bases de l'électricité"/></div>
-        <div className="inp-group"><label className="inp-label">Description</label><textarea className="inp" rows={2} value={desc} onChange={e=>setDesc(e.target.value)} placeholder="Courte description du groupe" style={{resize:'vertical'}}/></div>
+        <div className="inp-group"><label className="inp-label">Description</label><textarea className="inp" rows={2} value={desc} onChange={e=>setDesc(e.target.value)} placeholder="Courte description du thème" style={{resize:'vertical'}}/></div>
         <div className="inp-group"><label className="inp-label">Ordre d'affichage</label><input className="inp" type="number" value={ordre} onChange={e=>setOrdre(e.target.value)}/></div>
         {msg && <div style={{color:'#ff6060',fontSize:12,marginTop:4}}>{msg}</div>}
         <button className="btn btn-yes" style={{width:'100%',marginTop:12}} onClick={save} disabled={saving}>{saving?'Enregistrement…':'Enregistrer'}</button>
-        {!isNew && <button className="btn" style={{width:'100%',marginTop:8,color:'#ff6060',border:'1px solid rgba(255,96,96,.3)'}} onClick={del} disabled={deleting}>Supprimer le groupe</button>}
+        {!isNew && <button className="btn" style={{width:'100%',marginTop:8,color:'#ff6060',border:'1px solid rgba(255,96,96,.3)'}} onClick={del} disabled={deleting}>Supprimer le thème</button>}
       </div>
 
       {!isNew && (
@@ -15631,7 +15697,7 @@ function App() {
         return <HomeChoiceScreen profile={profile} user={user} onComprendre={()=>goTo('COMPRENDRE_HOME')} onAction={()=>goTo('MA_CONSO')} can={can}/>;
 
       case 'COMPRENDRE_HOME':
-        return <ComprendreHomeScreen user={user} onGroup={(g)=>goTo('COMPRENDRE_GROUP',{learnGroup:g})} onAction={()=>goTo('MA_CONSO')} onBack={()=>goTo('HOME_CHOICE')}/>;
+        return <ComprendreHomeScreen user={user} rolePerms={rolePerms} onGroup={(g)=>goTo('COMPRENDRE_GROUP',{learnGroup:g})} onAction={()=>goTo('MA_CONSO')} onBack={()=>goTo('HOME_CHOICE')}/>;
 
       case 'COMPRENDRE_GROUP': {
         const g = state.learnGroup;
