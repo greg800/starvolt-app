@@ -2886,6 +2886,7 @@ function clearPanierLS(){
    'starvolt_optimisation_chosen','starvolt_optimisation_tariff_id','starvolt_optimisation_saving',
    'starvolt_optimisation_tariff_nom','starvolt_acc_chosen','starvolt_acc_saving',
    'starvolt_baisse_facture','starvolt_acc_price_ht','starvolt_solar_defaults','starvolt_diy_box_chosen',
+   'starvolt_flex_only_chosen','starvolt_flex_only_saving','starvolt_flex_only_details',
    'starvolt_investissement_total'].forEach(k=>localStorage.removeItem(k));
   // Réinitialise les flags services à leurs valeurs par défaut (pas de suppression du cache)
   try{
@@ -4149,13 +4150,16 @@ function deriveSiteImpact({ balance, site, prodProfil, tariffs, spotMap, globalV
             ? Math.round((baseTariff.abo_annuel||0) + (site?.conso_annuelle_kwh||0)*(baseTariff.prix_hp||0))
             : null));
 
-  // Flex revenue (cagnotte flexibilité) — uniquement si box au panier + service activé
+  // Flex revenue (cagnotte flexibilité) — si box au panier OU flexibilité seule activée, + service activé.
+  // La cagnotte n'est comptée qu'une seule fois (box et flex-seule ne se cumulent pas).
   const _boxLS = localStorage.getItem('starvolt_box_chosen');
   const _hasBox = (_boxLS && _boxLS!=='diy') || localStorage.getItem('starvolt_solar_chosen')==='solar_box';
-  const _optiFlex = !!(globalVars?.opti_flex) && _hasBox;
+  const _flexOnly = !!localStorage.getItem('starvolt_flex_only_chosen');
+  const _optiFlex = !!(globalVars?.opti_flex) && (_hasBox || _flexOnly);
   const _ratio = (globalVars?.ratio_puissance_stockage??50)/100;
   const _batPow = (parseFloat(batKwh)||0)*_ratio;
-  const flexRev = _optiFlex ? Math.round((parseFloat(thermKwh)||0)*14 + _batPow*27) : 0;
+  // Flex-seule = pilotage thermique uniquement (pas de batterie). La box ajoute la valorisation stockage.
+  const flexRev = _optiFlex ? Math.round((parseFloat(thermKwh)||0)*14 + (_hasBox ? _batPow*27 : 0)) : 0;
 
   // ACC savings — heures de prod solaire, accTTC < tarif normal TTC
   const _hasAcc = localStorage.getItem('starvolt_acc_chosen')==='true';
@@ -6693,9 +6697,10 @@ const PICTOS_DEFAUT = {
   acc:                      '/acc.png',
   box:                      '/comwatt-box.png',
   solaire:                  '/maison.png',
+  flex_seule:               '/flex.png',
 };
 
-function SimulationsScreen({ onACC, onBox, onSolar, onOptimisation, onDiyBox, onBack, onMonSite, onComprendre, user, userProfile, can = () => true }) {
+function SimulationsScreen({ onACC, onBox, onSolar, onOptimisation, onDiyBox, onFlexSeule, onBack, onMonSite, onComprendre, user, userProfile, can = () => true }) {
   // Une offre est visible si elle est autorisée pour le rôle courant (zone
   // "offer_ids", clé = id de l'offre). Non définie → visible (fail-open) :
   // toute nouvelle offre est accessible par défaut, décochable par rôle.
@@ -6728,9 +6733,9 @@ function SimulationsScreen({ onACC, onBox, onSolar, onOptimisation, onDiyBox, on
     if (user?.id) {
       const activeId = localStorage.getItem('starvolt_active_site_id');
       const q = activeId
-        ? sb.from('sites').select('flex_type_logement,flex_statut').eq('id', activeId).maybeSingle()
-        : sb.from('sites').select('flex_type_logement,flex_statut').eq('user_id', user.id).order('created_at').limit(1).maybeSingle();
-      q.then(({ data }) => { if (data) setSiteProfile({ type_logement: data.flex_type_logement, statut: data.flex_statut }); });
+        ? sb.from('sites').select('flex_type_logement,flex_statut,box_comwatt_existante').eq('id', activeId).maybeSingle()
+        : sb.from('sites').select('flex_type_logement,flex_statut,box_comwatt_existante').eq('user_id', user.id).order('created_at').limit(1).maybeSingle();
+      q.then(({ data }) => { if (data) setSiteProfile({ type_logement: data.flex_type_logement, statut: data.flex_statut, hasBox: !!data.box_comwatt_existante }); });
     }
   }, []);
 
@@ -6757,7 +6762,7 @@ function SimulationsScreen({ onACC, onBox, onSolar, onOptimisation, onDiyBox, on
   const fmtReduct = v => `${v}%`;
 
   // ── Mapping type → handler ─────────────────────
-  const typeHandler = { optimisation_fournisseur: onOptimisation, acc: onACC, box: onBox, solaire: onSolar, diy_box: onDiyBox };
+  const typeHandler = { optimisation_fournisseur: onOptimisation, acc: onACC, box: onBox, solaire: onSolar, diy_box: onDiyBox, flex_seule: onFlexSeule };
   const typeSaving  = React.useMemo(() => ({
     optimisation_fournisseur: maxSaving,
     acc:    accSaving,
@@ -6768,6 +6773,10 @@ function SimulationsScreen({ onACC, onBox, onSolar, onOptimisation, onDiyBox, on
   // ── Filtrage des offres ───────────────────────
   const offresFiltrees = React.useMemo(() => offres.filter(o => {
     if (!offerAllowed(o)) return false; // permission de rôle (zone "offers")
+    // Flexibilité seule : réservée aux clients déjà équipés d'une box Comwatt.
+    // Auto-masquée si le site n'a pas de box. Tant que le profil du site n'est pas
+    // chargé (siteProfile null) on ne masque pas (évite un flash / masquage à tort).
+    if ((o.types_offre || []).includes('flex_seule') && siteProfile && !siteProfile.hasBox) return false;
     if (delaiFilter  != null && o.delai_min_jours    != null && o.delai_min_jours    > delaiFilter)  return false;
     if (investFilter != null && o.investissement_min != null && o.investissement_min > investFilter) return false;
     if (reductFilter != null && o.reduction_pct      != null && o.reduction_pct      < reductFilter) return false;
@@ -9265,6 +9274,395 @@ function BoxSimScreen({ user, userProfile, onBack, onPanier, onMonSite, onCartUp
   );
 }
 
+// ─── CGV Flexibilité (verbatim — offre « Mon Énergie by CA », non validée compliance) ──
+const CGV_FLEX_TEXT = `Conditions spécifiques du programme
+Flexibilité de Mon Energie by CA
+(non encore validée par compliance)
+
+Conditions Générales de l'offre « Mon Énergie by CA »
+
+Article 1 – Objet
+L'offre Mon Énergie by CA est un service optionnel de pilotage intelligent des équipements électriques proposé à ses clients. Ce service est distinct du contrat de fourniture d'électricité et des autres services éventuellement proposés au Client.
+Les présentes Conditions Générales (les « Conditions Mon Énergie by CA ») définissent les modalités de fonctionnement du service de pilotage intelligent des équipements électriques du Client.
+Le service Mon Énergie by CA permet d'optimiser automatiquement le fonctionnement des équipements électriques du logement afin de :
+• contribuer à l'équilibre du réseau électrique français ;
+• favoriser l'utilisation de l'électricité produite à partir de sources renouvelables ;
+• limiter le recours aux moyens de production les plus émetteurs de CO₂ ;
+• optimiser les coûts d'approvisionnement en électricité ;
+• rémunérer le Client en contrepartie de la flexibilité apportée au réseau.
+Le service peut piloter un ou plusieurs des équipements suivants :
+• ballon d'eau chaude électrique à accumulation ;
+• tout système de production d'eau chaude sanitaire électrique ;
+• chauffage électrique (radiateurs, plancher chauffant, etc.) ;
+• pompe à chaleur air/air ou air/eau ;
+• batterie résidentielle ;
+• borne de recharge de véhicule électrique ;
+• climatisation réversible ;
+• ainsi que tout autre équipement électrique compatible pouvant être piloté à distance.
+
+Article 2 – Conditions d'éligibilité
+Pour bénéficier du service Mon Énergie by CA, le Client doit :
+• être une personne physique majeure ;
+• disposer d'un contrat d'électricité compatible avec le service ;
+• être équipé d'un compteur communicant Linky permettant l'accès aux données de consommation ;
+• autoriser Mon Énergie by CA à accéder, en son nom, aux données de consommation nécessaires au fonctionnement du service ;
+• disposer d'au moins un équipement compatible avec le pilotage intelligent ;
+• maintenir ses équipements en état de fonctionnement.
+Mon Énergie by CA pourra demander toute information permettant de vérifier l'éligibilité technique des équipements.
+
+Article 3 – Souscription et activation
+La souscription s'effectue depuis le site internet ou tout autre canal proposé par Mon Énergie by CA.
+L'activation intervient après validation de l'éligibilité technique et administrative.
+Mon Énergie by CA pourra réaliser les opérations techniques nécessaires à la mise en service du pilotage.
+
+Article 4 – Fonctionnement du service
+Le service pilote automatiquement les équipements raccordés afin de déplacer leur consommation électrique pendant les périodes les plus favorables au système électrique.
+Le pilotage est conçu pour préserver autant que possible le confort du Client.
+Le Client conserve à tout moment la possibilité de reprendre la main sur ses équipements ou de désactiver ponctuellement le pilotage.
+Si Mon Énergie by CA constate qu'un équipement ne peut plus être piloté (déconnexion, modification de l'installation, dysfonctionnement, impossibilité technique, etc.), cet équipement pourra être retiré du service.
+
+Article 5 – Engagements du Client
+En adhérant au service, le Client :
+• autorise Mon Énergie by CA à piloter les équipements déclarés compatibles ;
+• s'engage à fournir des informations exactes concernant ses équipements ;
+• s'engage à ne pas faire fonctionner simultanément un autre service de pilotage susceptible d'interférer avec Mon Énergie by CA sur les mêmes équipements ;
+• informe Mon Énergie by CA de toute modification importante de son installation.
+
+Article 6 – Rémunération
+L'inscription au service est entièrement gratuite.
+Aucun frais d'activation, d'abonnement ou de résiliation n'est facturé.
+En contrepartie de la mise à disposition de la flexibilité de ses équipements électriques, le Client bénéficie d'une rémunération versée sur une cagnotte personnelle.
+Le montant de cette rémunération est estimé à :
+14 € TTC par kilowatt (kW) de puissance pilotable et par an.
+La puissance retenue correspond à la puissance totale des équipements effectivement intégrés au service et pilotables.
+À titre d'exemple :
+• un ballon d'eau chaude de 3 kW génère environ 42 € par an ;
+• une pompe à chaleur de 4 kW génère environ 56 € par an ;
+• un chauffage électrique de 6 kW génère environ 84 € par an.
+Ainsi, un Client mettant à disposition :
+• un chauffe-eau de 3 kW ;
+• un chauffage électrique de 7 kW,
+soit 10 kW de puissance pilotée, pourra percevoir une rémunération estimée d'environ :
+140 € par an.
+Les sommes sont créditées régulièrement sur la cagnotte du Client.
+Cette cagnotte peut être utilisée pour réduire les prochaines factures d'électricité ou selon les modalités proposées par Mon Énergie by CA.
+Les montants indiqués constituent une estimation basée sur les conditions actuelles des marchés de la flexibilité. Ils pourront évoluer en fonction :
+• des revenus réellement générés ;
+• des évolutions réglementaires ;
+• des conditions de marché.
+Toute modification importante sera communiquée au Client avec un préavis raisonnable.
+
+Article 7 – Durée et résiliation
+L'adhésion prend effet lors de l'activation du service.
+Elle est conclue pour une durée indéterminée.
+Le Client peut résilier gratuitement à tout moment.
+La résiliation prend effet dans un délai maximal de quinze jours.
+Les sommes déjà acquises sur la cagnotte restent définitivement acquises au Client.
+Mon Énergie by CA peut suspendre ou résilier la participation du Client notamment en cas :
+• de perte des conditions d'éligibilité ;
+• d'impossibilité technique de pilotage ;
+• de fraude ;
+• de non-respect des présentes Conditions ;
+• d'utilisation simultanée d'un dispositif concurrent incompatible.
+
+Article 8 – Protection des données personnelles
+Pour assurer le fonctionnement du service, Mon Énergie by CA collecte et traite notamment :
+• les données de consommation électrique issues du compteur Linky ;
+• les informations relatives aux équipements pilotés ;
+• les données nécessaires au fonctionnement des algorithmes de pilotage.
+Ces traitements sont réalisés :
+• avec le consentement du Client lorsque celui-ci est requis ;
+• ou lorsqu'ils sont nécessaires à l'exécution du contrat.
+Les données sont utilisées uniquement pour :
+• assurer le pilotage des équipements ;
+• calculer les rémunérations ;
+• améliorer le service ;
+• satisfaire aux obligations réglementaires.
+Le Client peut retirer son consentement à tout moment. Ce retrait entraîne la désactivation du service lorsque celui-ci nécessite l'accès aux données concernées.
+
+Article 9 – Responsabilité
+Mon Énergie by CA met en œuvre tous les moyens raisonnables afin d'assurer le bon fonctionnement du service.
+Toutefois, Mon Énergie by CA ne garantit pas :
+• la compatibilité de tous les équipements ;
+• l'absence totale d'interruption ;
+• l'atteinte d'un niveau précis d'économies ou de rémunération.
+Mon Énergie by CA ne pourra être tenue responsable des dommages résultant notamment :
+• d'une installation non conforme ;
+• d'un défaut des équipements ;
+• d'une mauvaise utilisation par le Client ;
+• d'une interruption des réseaux de communication ;
+• d'un événement de force majeure ;
+• d'une défaillance d'un gestionnaire de réseau ou d'un tiers.
+La responsabilité de Mon Énergie by CA est limitée aux dommages directs prévisibles.
+
+Article 10 – Évolution du service
+Mon Énergie by CA peut faire évoluer les fonctionnalités du service afin d'améliorer ses performances ou de répondre aux évolutions réglementaires.
+Toute modification substantielle sera communiquée au Client avant son entrée en vigueur.
+Le Client pourra résilier gratuitement s'il refuse ces modifications.
+
+Article 11 – Service Client
+Pour toute question relative au fonctionnement de Mon Énergie by CA, le Client peut contacter le Service Client selon les coordonnées figurant sur le site internet ou dans son espace personnel.
+
+Article 12 – Dispositions générales
+12.1 Droit applicable
+Les présentes Conditions sont régies par le droit français.
+Tout litige relève de la compétence des juridictions françaises compétentes.
+12.2 Divisibilité
+Si une disposition est déclarée nulle ou inapplicable, les autres dispositions demeurent pleinement applicables.
+12.3 Langue
+Les présentes Conditions sont rédigées en langue française.
+En cas de traduction, seule la version française fait foi.`;
+
+// Construit la liste des équipements pilotés + gain individuel depuis les données flex du site.
+function buildFlexOnlyDetails(flex) {
+  if (!flex) return [];
+  const idx = flex.surface === 'small' ? 0 : flex.surface === 'medium' ? 1 : 2;
+  const d = [];
+  if (flex.chauffage === 'pac')       { const kw = [3,7,12][idx]; d.push({ name:'Pompe à chaleur',      kw, gain: kw*14 }); }
+  else if (flex.chauffage === 'elec') { const kw = [3,7,12][idx]; d.push({ name:'Chauffage électrique', kw, gain: kw*14 }); }
+  if (flex.ecs === 'elec')            { const kw = [2,3,4][idx];  d.push({ name:'Chauffe-eau',           kw, gain: kw*14 }); }
+  return d;
+}
+
+// ─── FlexSeuleScreen ── Flexibilité sans ajout d'objets connectés (client déjà équipé d'une box)
+function FlexSeuleScreen({ user, userProfile, onBack, onPanier, onMonSite, onCartUpdate }) {
+  const [loading,      setLoading]      = useState(true);
+  const [currentBill,  setCurrentBill]  = useState(null);
+  const [activeSiteId, setActiveSiteId] = useState(null);
+  const [siteFlex,     setSiteFlex]     = useState(null); // {chauffage,ecs,surface}
+  const [chosen,       setChosen]       = useState(() => !!localStorage.getItem('starvolt_flex_only_chosen'));
+  const [justConfirmed,setJustConfirmed]= useState(false);
+  const [showThermForm,setShowThermForm]= useState(false);
+  const [view,         setView]         = useState('main'); // 'main' | 'cgv'
+  const [scrolledEnd,  setScrolledEnd]  = useState(false);
+  const cgvRef = useRef(null);
+
+  useEffect(() => {
+    const siteId = localStorage.getItem('starvolt_active_site_id');
+    if (!siteId) { setLoading(false); return; }
+    Promise.all([
+      sb.from('sites').select('id,conso_profil,tarif_id,heure_debut_hc1,heure_fin_hc1,heure_debut_hc2,heure_fin_hc2,hc_debut1,hc_fin1,hc_debut2,hc_fin2,flex_chauffage,flex_ecs,flex_surface').eq('id', siteId).maybeSingle(),
+      sb.from('tarifs_electricite').select('*'),
+      sb.rpc('get_spot_json'),
+      sb.from('parametres_nationaux').select('*').eq('id', 1).maybeSingle(),
+    ]).then(([{ data: site }, { data: tariffs }, { data: spotRows }, { data: nat }]) => {
+      setActiveSiteId(siteId);
+      const _lsFlex=(()=>{try{const v=localStorage.getItem('starvolt_flex_'+siteId);const p=v?JSON.parse(v):null;return(p?.chauffage&&p?.ecs&&p?.surface)?p:null;}catch{return null;}})();
+      const _flex=_lsFlex||(site?.flex_chauffage&&site?.flex_ecs&&site?.flex_surface?{chauffage:site.flex_chauffage,ecs:site.flex_ecs,surface:site.flex_surface}:null);
+      if(_flex) setSiteFlex(_flex);
+      if (site?.conso_profil) {
+        const curTariff = site.tarif_id ? (tariffs || []).find(t => t.id === site.tarif_id) : null;
+        const { kwh_hc, kwh_hp } = calcHcHp(site.conso_profil, site, nat);
+        const kwh_total = kwh_hc + kwh_hp;
+        let bill = null;
+        if (curTariff?.tarif_dynamique) {
+          if (spotRows && nat) { const r = calcDynamicCost(curTariff, site.conso_profil, buildSpotMap(spotRows), nat, site); bill = r?.total || null; }
+        } else if (curTariff) { bill = calcTariffCost(curTariff, kwh_hc, kwh_hp)?.total || null; }
+        if (!bill && kwh_total > 0) bill = Math.round(kwh_total * 0.18);
+        setCurrentBill(bill ? Math.round(bill) : null);
+      }
+      setLoading(false);
+    });
+  }, []);
+
+  const details  = buildFlexOnlyDetails(siteFlex);
+  const flexGain = details.reduce((s,d)=>s+d.gain, 0);
+
+  // Détection scroll fin de CGV (le CTA "Ok j'ai bien tout lu" n'apparaît qu'à la fin).
+  useEffect(() => {
+    if (view !== 'cgv') { setScrolledEnd(false); return; }
+    const el = cgvRef.current;
+    if (el && el.scrollHeight <= el.clientHeight + 4) setScrolledEnd(true); // texte plus court que la zone
+  }, [view]);
+  const onCgvScroll = (e) => {
+    const el = e.target;
+    if (el.scrollTop + el.clientHeight >= el.scrollHeight - 24) setScrolledEnd(true);
+  };
+
+  // Active la flexibilité : enregistre le panier + services, prépare l'écran de succès.
+  const activate = (flex) => {
+    const dets = buildFlexOnlyDetails(flex);
+    const gain = dets.reduce((s,d)=>s+d.gain, 0);
+    localStorage.setItem('starvolt_flex_only_chosen','true');
+    localStorage.setItem('starvolt_flex_only_saving', String(gain));
+    try { localStorage.setItem('starvolt_flex_only_details', JSON.stringify(dets)); } catch {}
+    // thermKwh nécessaire au calcul avant/après (deriveSiteImpact) — pilotage thermique uniquement.
+    try { const d=JSON.parse(localStorage.getItem('starvolt_solar_defaults')||'{}'); d.thermKwh=String(dets.reduce((s,x)=>s+x.kw,0)); localStorage.setItem('starvolt_solar_defaults',JSON.stringify(d)); } catch {}
+    setPanierServicesChecked({ opti_flex:true });
+    setChosen(true);
+    setJustConfirmed(true);
+    if (onCartUpdate) onCartUpdate();
+  };
+
+  // Formulaire équipements manquant → on le présente avant l'activation.
+  if (showThermForm) {
+    return <OnboardingTypeform
+      siteId={activeSiteId}
+      initial={siteFlex}
+      onBack={() => setShowThermForm(false)}
+      onDone={() => {
+        const sid = activeSiteId;
+        const _flex=(()=>{try{const v=localStorage.getItem('starvolt_flex_'+sid);const p=v?JSON.parse(v):null;return(p?.chauffage&&p?.ecs&&p?.surface)?p:null;}catch{return null;}})();
+        setSiteFlex(_flex);
+        setShowThermForm(false);
+        activate(_flex);
+      }}
+    />;
+  }
+
+  // ── Écran de succès ──
+  if (justConfirmed) {
+    return (
+      <>
+      <div className="screen fade-in">
+        <Fireworks final/>
+        <div style={{ textAlign:'center', marginBottom:16 }}>
+          <div style={{ fontSize:38, marginBottom:4 }}>✨</div>
+          <div style={{ fontSize:22, fontWeight:900, color:'white', lineHeight:1.2 }}>
+            Bravo, la flexibilité est activée chez vous
+          </div>
+          <div style={{ fontSize:13, color:'rgba(255,255,255,.5)', marginTop:6 }}>
+            Votre box pilote désormais vos équipements pour aider le réseau — et vous êtes rémunéré.
+          </div>
+        </div>
+
+        <div className="card" style={{ padding:'16px', marginBottom:10 }}>
+          <div style={{ fontSize:11, color:'rgba(255,255,255,.4)', marginBottom:12, textTransform:'uppercase', letterSpacing:'.5px', textAlign:'center' }}>
+            Vos équipements pilotés
+          </div>
+          {details.length > 0 ? details.map((d,i) => (
+            <div key={i} style={{ display:'flex', justifyContent:'space-between', alignItems:'center', padding:'9px 0', borderBottom: i<details.length-1?'1px solid rgba(255,255,255,.07)':'none' }}>
+              <div>
+                <div style={{ fontSize:14, fontWeight:700, color:'white' }}>{d.name}</div>
+                <div style={{ fontSize:11, color:'rgba(255,255,255,.4)' }}>{d.kw} kW pilotables</div>
+              </div>
+              <div style={{ fontSize:16, fontWeight:900, color:'#7dd940' }}>+{d.gain} €/an</div>
+            </div>
+          )) : (
+            <div style={{ fontSize:13, color:'rgba(255,255,255,.5)', textAlign:'center' }}>Cagnotte flexibilité activée.</div>
+          )}
+          <div style={{ marginTop:12, background:'rgba(125,217,64,.1)', borderRadius:8, padding:'10px 12px', textAlign:'center', border:'1px solid rgba(125,217,64,.25)' }}>
+            <div style={{ fontSize:11, color:'rgba(255,255,255,.55)', marginBottom:2 }}>Total cagnotte flexibilité</div>
+            <div style={{ fontSize:26, fontWeight:900, color:'#7dd940' }}>+{flexGain.toLocaleString('fr-FR')} €/an</div>
+          </div>
+        </div>
+
+        {currentBill && (
+          <div className="card" style={{ padding:'16px', marginBottom:10, textAlign:'center' }}>
+            <div style={{ fontSize:11, color:'rgba(255,255,255,.4)', marginBottom:8, textTransform:'uppercase', letterSpacing:'.5px' }}>Votre facture évolue</div>
+            <div style={{ display:'flex', alignItems:'center', justifyContent:'center', gap:18 }}>
+              <div>
+                <div style={{ fontSize:28, fontWeight:900, color:'rgba(255,100,100,.7)', textDecoration:'line-through', lineHeight:1 }}>{currentBill.toLocaleString('fr-FR')} €</div>
+                <div style={{ fontSize:10, color:'rgba(255,255,255,.35)', marginTop:3 }}>AVANT</div>
+              </div>
+              <div style={{ fontSize:22, color:'#7dd940' }}>→</div>
+              <div>
+                <div style={{ fontSize:36, fontWeight:900, color:'#7dd940', lineHeight:1 }}>{Math.max(0, currentBill - flexGain).toLocaleString('fr-FR')} €</div>
+                <div style={{ fontSize:10, color:'rgba(255,255,255,.35)', marginTop:3 }}>APRÈS FLEX</div>
+              </div>
+            </div>
+            <div style={{ marginTop:12, fontSize:11, color:'rgba(255,255,255,.4)' }}>
+              La cagnotte de <strong style={{color:'#7dd940'}}>{flexGain} €/an</strong> vient en déduction de vos factures.
+            </div>
+          </div>
+        )}
+      </div>
+      <StickyFooter row onBack={onBack}>
+        <button className="btn btn-yes" onClick={onMonSite||onPanier}>Mon site →</button>
+      </StickyFooter>
+      </>
+    );
+  }
+
+  // ── Vue lecture des CGV ──
+  if (view === 'cgv') {
+    return (
+      <>
+        <div className="screen" style={{ display:'flex', flexDirection:'column', height:'100%' }}>
+          <div style={{ fontSize:18, fontWeight:900, color:'white', marginBottom:10, marginTop:4 }}>Conditions générales</div>
+          <div ref={cgvRef} onScroll={onCgvScroll}
+            style={{ flex:1, overflowY:'auto', background:'rgba(255,255,255,.04)', border:'1px solid rgba(255,255,255,.1)', borderRadius:12, padding:'14px 16px', marginBottom:12 }}>
+            {CGV_FLEX_TEXT.split('\n').map((line, i) => {
+              if (line.trim() === '') return <div key={i} style={{ height:8 }}/>;
+              const isArticle = /^Article\s/.test(line) || /^\d+\.\d+\s/.test(line);
+              const isTitle = /^Conditions Générales/.test(line);
+              return <div key={i} style={{
+                fontSize: isTitle ? 15 : isArticle ? 14 : 13,
+                fontWeight: (isArticle || isTitle) ? 800 : 400,
+                color: isArticle ? '#7dd940' : isTitle ? 'white' : 'rgba(255,255,255,.75)',
+                lineHeight: 1.55, marginTop: (isArticle||isTitle) ? 10 : 0,
+                paddingLeft: line.startsWith('•') ? 6 : 0,
+              }}>{line}</div>;
+            })}
+          </div>
+        </div>
+        <div className="sticky-footer">
+          <div className="sticky-footer-inner row">
+            <button onClick={() => setView('main')} style={{ flexGrow:0, flexShrink:0, background:'rgba(255,255,255,.06)', border:'1px solid rgba(255,255,255,.12)', borderRadius:10, color:'rgba(255,255,255,.6)', fontSize:12, fontWeight:600, fontFamily:'inherit', padding:'12px 14px', cursor:'pointer', whiteSpace:'nowrap' }}>← Retour</button>
+            {scrolledEnd ? (
+              <button className="btn btn-yes" style={{ flex:1 }} onClick={() => setView('main')}>Ok j'ai bien tout lu</button>
+            ) : (
+              <div style={{ flex:1, textAlign:'center', fontSize:12, color:'rgba(255,255,255,.4)', padding:'12px 8px' }}>Faites défiler jusqu'en bas pour continuer…</div>
+            )}
+          </div>
+        </div>
+      </>
+    );
+  }
+
+  // ── Vue principale ──
+  return (
+    <>
+      <div className="screen fade-in">
+        <div style={{ marginBottom:20, marginTop:4 }}>
+          <div style={{ fontSize:9, letterSpacing:'.8px', color:'rgba(125,217,64,.85)', fontWeight:700, textTransform:'uppercase', marginBottom:6 }}>Flexibilité</div>
+          <div style={{ fontSize:20, fontWeight:900, color:'white', lineHeight:1.2 }}>
+            Gagnez de l'argent en aidant le réseau électrique
+          </div>
+        </div>
+
+        {loading ? (
+          <div style={{ textAlign:'center', padding:40 }}><div className="spinner" style={{ margin:'0 auto' }}/></div>
+        ) : (<>
+          <div className="card" style={{ padding:'18px 16px', marginBottom:12, border:'1px solid rgba(125,217,64,.3)' }}>
+            <div style={{ display:'flex', alignItems:'flex-start', gap:14 }}>
+              <img src="/flex.png" alt="Flexibilité" style={{ width:52, height:52, flexShrink:0, filter:'brightness(0) invert(1)', objectFit:'contain' }}/>
+              <div>
+                <div style={{ fontWeight:900, fontSize:17, color:'white', marginBottom:6 }}>
+                  Gagnez <span style={{color:'#7dd940'}}>{flexGain > 0 ? flexGain + ' €' : "jusqu'à 140 €"}</span> grâce à la flexibilité
+                </div>
+                <div style={{ fontSize:14, color:'rgba(255,255,255,.65)', lineHeight:1.55 }}>
+                  Votre box Comwatt adapte automatiquement votre consommation aux besoins du réseau électrique national.
+                  Aucun nouvel équipement à installer. En contrepartie, <strong style={{color:'white'}}>Starvolt vous crédite {flexGain > 0 ? flexGain + ' €/an' : 'une cagnotte'}</strong> sur votre cagnotte flexibilité.
+                </div>
+              </div>
+            </div>
+          </div>
+        </>)}
+      </div>
+
+      {!loading && (chosen ? (
+        <StickyFooter row onBack={onBack}>
+          <button className="btn btn-yes" onClick={onMonSite||onPanier}>Mon site →</button>
+        </StickyFooter>
+      ) : (
+        <div className="sticky-footer">
+          <div className="sticky-footer-inner" style={{ display:'flex', flexDirection:'column', gap:8 }}>
+            <button onClick={() => { if (siteFlex) activate(siteFlex); else setShowThermForm(true); }}
+              style={{ width:'100%', background:'rgba(255,255,255,.07)', border:'2px solid rgba(125,217,64,.55)', borderRadius:14, color:'white', padding:'13px 8px', cursor:'pointer', fontFamily:'inherit', textAlign:'center' }}>
+              <div style={{ fontSize:16, fontWeight:900, color:'#7dd940' }}>Je valide les CGV et j'active la flexibilité chez moi</div>
+            </button>
+            <div className="row" style={{ display:'flex', gap:8 }}>
+              <button onClick={onBack} style={{ flex:1, background:'rgba(255,255,255,.06)', border:'1px solid rgba(255,255,255,.12)', borderRadius:10, color:'rgba(255,255,255,.6)', fontSize:12, fontWeight:600, fontFamily:'inherit', padding:'11px 8px', cursor:'pointer' }}>← Retour</button>
+              <button onClick={() => setView('cgv')} style={{ flex:1, background:'rgba(255,255,255,.06)', border:'1px solid rgba(255,255,255,.18)', borderRadius:10, color:'rgba(255,255,255,.8)', fontSize:12, fontWeight:600, fontFamily:'inherit', padding:'11px 8px', cursor:'pointer' }}>Lire les conditions (CGV)</button>
+            </div>
+          </div>
+        </div>
+      ))}
+    </>
+  );
+}
+
 // ─── InstallSoiMemeScreen ──────────────────────
 function InstallSoiMemeScreen({ user, userProfile, onBack, onPanier, onMonSite, onCartUpdate }) {
   const [loading,     setLoading]   = useState(true);
@@ -9894,12 +10292,13 @@ function PanierScreen({ user, onBack, onGoTo, onMonSite }) {
     box:          !!localStorage.getItem('starvolt_box_chosen') && localStorage.getItem('starvolt_box_chosen') !== 'diy',
     diy:          !!localStorage.getItem('starvolt_diy_box_chosen'),
     solar:        !!localStorage.getItem('starvolt_solar_chosen'),
+    flexOnly:     !!localStorage.getItem('starvolt_flex_only_chosen'),
   }));
 
   const boxChoice   = localStorage.getItem('starvolt_box_chosen');
   const solarChoice = localStorage.getItem('starvolt_solar_chosen');
   const diyTotal    = (() => { try { return JSON.parse(localStorage.getItem('starvolt_diy_box_chosen')||'{}').total || 0; } catch { return 0; } })();
-  const investments = { optimisation:0, acc:0, box: boxChoice==='buy' ? 600 : 0, diy: diyTotal, solar:13000 };
+  const investments = { optimisation:0, acc:0, box: boxChoice==='buy' ? 600 : 0, diy: diyTotal, solar:13000, flexOnly:0 };
   const investLS = parseInt(localStorage.getItem('starvolt_investissement_total')||'0') || 0;
 
   useEffect(() => {
@@ -9966,6 +10365,7 @@ function PanierScreen({ user, onBack, onGoTo, onMonSite }) {
       box:          ['starvolt_box_chosen','starvolt_box_saving','starvolt_investissement_total'],
       diy:          ['starvolt_diy_box_chosen','starvolt_box_chosen','starvolt_investissement_total'],
       solar:        ['starvolt_solar_chosen','starvolt_solar_saving','starvolt_investissement_total'],
+      flexOnly:     ['starvolt_flex_only_chosen','starvolt_flex_only_saving','starvolt_flex_only_details'],
     };
     removes[key].forEach(k => localStorage.removeItem(k));
     if(key==='solar'){
@@ -9981,7 +10381,7 @@ function PanierScreen({ user, onBack, onGoTo, onMonSite }) {
 
   const clearPanier = () => {
     clearPanierLS(); // vide LS + solar_defaults + dispatch starvolt_panier_cleared
-    setItems({ optimisation:false, acc:false, box:false, diy:false, solar:false });
+    setItems({ optimisation:false, acc:false, box:false, diy:false, solar:false, flexOnly:false });
     // Réinitialise les services cochés quand on vide le panier
     sb.from('parametres_nationaux').upsert({id:1,opti_solaire:true,opti_tarif:true,opti_flex:false,opti_acc:false},{onConflict:'id'});
   };
@@ -10171,6 +10571,22 @@ function PanierScreen({ user, onBack, onGoTo, onMonSite }) {
           investment={(() => { try { return JSON.parse(localStorage.getItem('starvolt_diy_box_chosen')||'{}').total || 0; } catch { return 0; } })()}
           color="#c084fc" onRemove={()=>removeItem('diy')}
           onClick={()=>onGoTo&&onGoTo('DIY_BOX_SIM')}/>
+      )}
+      {items.flexOnly && (
+        <CartItemCard imgSrc="/flex.png" title="Flexibilité activée"
+          subtitle={(() => {
+            const g = parseInt(localStorage.getItem('starvolt_flex_only_saving')||'0') || 0;
+            let names = [];
+            try { names = JSON.parse(localStorage.getItem('starvolt_flex_only_details')||'[]').map(d=>d.name); } catch {}
+            const base = g > 0 ? `Cagnotte flexibilité — +${g.toLocaleString('fr-FR')} €/an` : 'Cagnotte flexibilité activée';
+            if (!names.length) return base;
+            return (<>
+              <div>{base}</div>
+              <div style={{marginTop:5,fontSize:14,lineHeight:1.5}}>Équipements pilotés : {names.join(', ')}</div>
+            </>);
+          })()}
+          investment={0} color="#7dd940" onRemove={()=>removeItem('flexOnly')}
+          onClick={()=>onGoTo&&onGoTo('FLEX_SIM')}/>
       )}
       {items.solar && (
         <CartItemCard imgSrc="/maison.png" title="Installation solaire"
@@ -12131,6 +12547,7 @@ const TYPES_OFFRE = [
   { value: 'box',                      label: 'Économiser plus avec la Box' },
   { value: 'diy_box',                  label: 'Installer soi-même Comwatt' },
   { value: 'solaire',                  label: 'Économiser avec le solaire' },
+  { value: 'flex_seule',               label: 'Flexibilité sans ajout d\'objets connectés' },
 ];
 
 // ─── AdminOffresScreen ────────────────────────────────────────────────────────
@@ -15534,6 +15951,7 @@ function App() {
           onSolar={()=>goTo('SOLAR_SIM')}
           onOptimisation={()=>goTo('OPTIMISATION')}
           onDiyBox={()=>goTo('DIY_BOX_SIM')}
+          onFlexSeule={()=>goTo('FLEX_SIM')}
           onBack={goBack}
           onMonSite={()=>goTo('MA_CONSO')}
           onComprendre={()=>goTo('COMPRENDRE_HOME')}
@@ -15545,6 +15963,9 @@ function App() {
 
       case 'BOX_SIM':
         return <BoxSimScreen user={user} userProfile={profile} onBack={goBack} onPanier={()=>goTo('PANIER')} onMonSite={()=>goTo('MA_CONSO')} onCartUpdate={updateCart}/>;
+
+      case 'FLEX_SIM':
+        return <FlexSeuleScreen user={user} userProfile={profile} onBack={goBack} onPanier={()=>goTo('PANIER')} onMonSite={()=>goTo('MA_CONSO')} onCartUpdate={updateCart}/>;
 
       case 'DIY_BOX_SIM':
         return <InstallSoiMemeScreen user={user} userProfile={profile} onBack={goBack} onPanier={()=>goTo('PANIER')} onMonSite={()=>goTo('MA_CONSO')} onCartUpdate={updateCart}/>;
