@@ -1623,7 +1623,17 @@ function makePermChecker(role, permissions) {
     // Garde anti-verrouillage : ne protège QUE l'accès admin lui-même.
     if (isAdminRole && (zone === 'access' || (zone === 'menus' && key === 'admin'))) return true;
     const z = permissions && permissions[zone];
-    if (!z || z[key] === undefined) return true; // fail-open
+    // Zone "offer_ids" : logique liste blanche.
+    //  - aucune offre cochée (objet vide / que des false) → aucune restriction : tout est visible
+    //    (les nouvelles offres restent accessibles par défaut pour les rôles non restreints) ;
+    //  - au moins une offre cochée → mode restrictif : SEULES les offres cochées sont visibles
+    //    (les non cochées, y compris non définies, sont masquées).
+    if (zone === 'offer_ids') {
+      const hasWhitelist = z && Object.values(z).some(v => v === true);
+      if (!hasWhitelist) return true;
+      return z[key] === true;
+    }
+    if (!z || z[key] === undefined) return true; // fail-open (autres zones)
     return !!z[key];
   };
 }
@@ -6773,9 +6783,10 @@ function SimulationsScreen({ onACC, onBox, onSolar, onOptimisation, onDiyBox, on
   // ── Filtrage des offres ───────────────────────
   const offresFiltrees = React.useMemo(() => offres.filter(o => {
     if (!offerAllowed(o)) return false; // permission de rôle (zone "offers")
-    // Flexibilité seule : réservée aux clients déjà équipés d'une box Comwatt.
-    // Auto-masquée si le site n'a pas de box. Tant que le profil du site n'est pas
-    // chargé (siteProfile null) on ne masque pas (évite un flash / masquage à tort).
+    // Flexibilité seule : réservée aux clients ayant DÉCLARÉ une box Comwatt
+    // (box_comwatt_existante === true). Masquée sinon (y compris si non renseigné).
+    // Tant que le profil du site n'est pas chargé (siteProfile null) on ne masque pas
+    // (évite un flash / masquage à tort au chargement).
     if ((o.types_offre || []).includes('flex_seule') && siteProfile && !siteProfile.hasBox) return false;
     if (delaiFilter  != null && o.delai_min_jours    != null && o.delai_min_jours    > delaiFilter)  return false;
     if (investFilter != null && o.investissement_min != null && o.investissement_min > investFilter) return false;
