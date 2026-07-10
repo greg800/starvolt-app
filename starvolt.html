@@ -12381,6 +12381,10 @@ function SecSeverityChip({ severity }) {
   return <span style={{background:s.bg, color:s.color, border:`1px solid ${s.color}55`, borderRadius:20, padding:'3px 10px', fontSize:11.5, fontWeight:800, whiteSpace:'nowrap'}}>{s.label}</span>;
 }
 const fmtSecDate = (d) => d ? new Date(d).toLocaleString('fr-FR', { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit' }) : '—';
+const secTriggerInfo = (c) =>
+  c?.trigger_type === 'cron' ? { icon:'🔁', label:'Automatique (base)' }
+  : c?.trigger_type === 'code' ? { icon:'💻', label:'Audit code (Claude Code)' }
+  : { icon:'👤', label:'Manuel (base)' };
 
 // Popup rapport complet (réutilisé par l'écran admin ET par le login admin)
 function SecReportPopup({ check, title, onClose }) {
@@ -12393,7 +12397,7 @@ function SecReportPopup({ check, title, onClose }) {
           <SecSeverityChip severity={check.severity}/>
         </div>
         <div style={{fontSize:11.5, color:'rgba(255,255,255,.45)', marginBottom:12}}>
-          {fmtSecDate(check.created_at)} · {check.trigger_type === 'cron' ? 'Automatique (mensuel)' : 'Manuel'}{check.triggered_by && check.triggered_by !== 'cron' ? ' · '+check.triggered_by : ''}
+          {fmtSecDate(check.created_at)} · {secTriggerInfo(check).icon} {secTriggerInfo(check).label}{check.triggered_by && check.triggered_by !== 'cron' ? ' · '+check.triggered_by : ''}{check.agent ? ' · '+check.agent : ''}
         </div>
         {check.report_md
           ? <SecReportMarkdown text={check.report_md}/>
@@ -12457,13 +12461,22 @@ function AdminCyberSecurityScreen({ onBack }) {
   const [phaseIdx, setPhaseIdx] = useState(0);
   const [runErr, setRunErr] = useState(null);
   const [popup, setPopup] = useState(null);
+  const [codeRow, setCodeRow] = useState(null);       // prompt copiable Claude Code
+  const [codeDraft, setCodeDraft] = useState('');
+  const [codeOpen, setCodeOpen] = useState(false);
+  const [savingCode, setSavingCode] = useState(false);
+  const [codeMsg, setCodeMsg] = useState(null);
+  const [copied, setCopied] = useState(false);
   const phaseTimer = useRef(null);
 
   const loadChecks = () => sb.rpc('get_security_checks').then(({ data }) => setChecks(data || []));
   useEffect(() => {
     sb.rpc('get_ai_prompts').then(({ data }) => {
-      const r = (data || []).find(x => x.feature === 'cyber_security');
+      const list = data || [];
+      const r = list.find(x => x.feature === 'cyber_security');
       if (r) { setPromptRow(r); setPromptDraft(r.system_prompt || ''); }
+      const rc = list.find(x => x.feature === 'cyber_security_code');
+      if (rc) { setCodeRow(rc); setCodeDraft(rc.system_prompt || ''); }
     });
     loadChecks();
     return () => { if (phaseTimer.current) clearInterval(phaseTimer.current); };
@@ -12498,7 +12511,21 @@ function AdminCyberSecurityScreen({ onBack }) {
     if (data?.check) setPopup(data.check);
   };
 
+  const saveCodePrompt = async () => {
+    setSavingCode(true); setCodeMsg(null);
+    const { error } = await sb.rpc('set_ai_prompt', { p_feature: 'cyber_security_code', p_prompt: codeDraft });
+    setSavingCode(false);
+    if (error) { setCodeMsg({ type:'err', text:'Échec : '+(error.message||'erreur') }); return; }
+    setCodeMsg({ type:'ok', text:'Prompt enregistré.' });
+    setCodeRow(r => ({ ...r, system_prompt: codeDraft, updated_at: new Date().toISOString() }));
+  };
+  const copyCodePrompt = async () => {
+    try { await navigator.clipboard.writeText(codeDraft); setCopied(true); setTimeout(()=>setCopied(false), 2000); }
+    catch { setCodeMsg({ type:'err', text:'Copie impossible — sélectionne le texte manuellement.' }); }
+  };
+
   const promptDirty = promptRow && promptDraft !== promptRow.system_prompt;
+  const codeDirty = codeRow && codeDraft !== codeRow.system_prompt;
 
   return (
     <>
@@ -12548,6 +12575,58 @@ function AdminCyberSecurityScreen({ onBack }) {
           {promptMsg && <div style={{marginTop:8, fontSize:12.5, fontWeight:600, color: promptMsg.type==='ok' ? '#5fd38a' : '#ff8080'}}>{promptMsg.text}</div>}
         </div>
 
+        {/* Audit du CODE (hors base) — piloté par Claude Code, 1×/mois */}
+        <div className="card" style={{padding:14, marginBottom:16, border:'1px solid rgba(255,179,64,.28)'}}>
+          <div style={{fontWeight:800, fontSize:14, color:'#fff', marginBottom:6}}>💻 Audit du code (hors base) — 1× par mois</div>
+          <div style={{fontSize:12.5, color:'rgba(255,255,255,.6)', lineHeight:1.55, marginBottom:10}}>
+            Le check automatique n'inspecte que la <strong style={{color:'#fff'}}>base de données</strong>. Le code (client, serveur Node, edge functions, dépendances) n'est pas accessible depuis le cron : il s'audite <strong style={{color:'#fff'}}>manuellement dans Claude Code</strong>.
+          </div>
+          <div style={{fontSize:12.5, color:'rgba(255,255,255,.72)', lineHeight:1.7, marginBottom:12, background:'rgba(0,0,0,.2)', border:'1px solid rgba(255,255,255,.1)', borderRadius:10, padding:'10px 12px'}}>
+            <div style={{fontWeight:800, color:'#ffb340', marginBottom:4}}>Procédure (une fois par mois)</div>
+            1. Ouvrir Claude Code dans le dépôt Starvolt.<br/>
+            2. Copier le prompt ci-dessous et le coller à Claude.<br/>
+            3. Claude audite le code, corrige et pousse ce qui doit l'être.<br/>
+            4. Claude enregistre le rapport ici (une ligne « 💻 Audit code » apparaît dans l'historique, et le popup remonte aux admins à leur connexion).
+          </div>
+          <div style={{display:'flex', alignItems:'center', justifyContent:'space-between', gap:8, marginBottom:8}}>
+            <div style={{fontSize:12.5, fontWeight:700, color:'rgba(255,255,255,.8)'}}>Prompt à copier-coller dans Claude Code</div>
+            <button onClick={()=>setCodeOpen(o=>!o)} style={{background:'rgba(255,255,255,.06)', border:'1px solid rgba(255,255,255,.16)', borderRadius:8, color:'rgba(255,255,255,.7)', fontSize:12, fontWeight:700, padding:'5px 10px', cursor:'pointer', fontFamily:'inherit'}}>
+              {codeOpen ? 'Replier ▲' : 'Éditer ▾'}
+            </button>
+          </div>
+          <textarea
+            value={codeDraft}
+            onChange={e => setCodeDraft(e.target.value)}
+            readOnly={!codeOpen}
+            spellCheck={false}
+            style={{width:'100%', height: codeOpen ? 380 : 150, resize: codeOpen ? 'vertical' : 'none', boxSizing:'border-box',
+              background:'rgba(0,0,0,.25)', border:'1px solid rgba(255,255,255,.14)', borderRadius:10,
+              color:'rgba(255,255,255,.9)', fontSize:12, lineHeight:1.5, padding:'10px 12px', fontFamily:'inherit'}}
+          />
+          {!codeOpen && <div style={{fontSize:11, color:'rgba(255,255,255,.4)', marginTop:6}}>Aperçu. « Éditer » pour modifier le prompt.</div>}
+          <div style={{display:'flex', alignItems:'center', justifyContent:'space-between', gap:10, marginTop:8, flexWrap:'wrap'}}>
+            <span style={{fontSize:11.5, color:'rgba(255,255,255,.4)'}}>
+              {codeRow ? <>Modifié le {fmtSecDate(codeRow.updated_at)}{codeRow.updated_by ? ' · '+codeRow.updated_by : ''}</> : '—'}
+            </span>
+            <div style={{display:'flex', gap:8}}>
+              {codeDirty && (
+                <button onClick={()=>setCodeDraft(codeRow.system_prompt)} style={{background:'rgba(255,255,255,.06)', border:'1px solid rgba(255,255,255,.16)', borderRadius:9, color:'rgba(255,255,255,.65)', fontSize:12.5, fontWeight:700, padding:'8px 14px', cursor:'pointer', fontFamily:'inherit'}}>Annuler</button>
+              )}
+              {codeDirty && (
+                <button onClick={saveCodePrompt} disabled={savingCode}
+                  style={{background:'#ffb340', border:'none', borderRadius:9, color:'#1a1208', fontSize:12.5, fontWeight:800, padding:'8px 16px', cursor:'pointer', fontFamily:'inherit'}}>
+                  {savingCode ? <><StarSpinner size={14} color="#1a1208"/> …</> : 'Enregistrer'}
+                </button>
+              )}
+              <button onClick={copyCodePrompt}
+                style={{background: copied ? '#5fd38a' : 'linear-gradient(135deg,#ff6b6b,#ffb340)', border:'none', borderRadius:9, color:'#1a1208', fontSize:12.5, fontWeight:800, padding:'8px 16px', cursor:'pointer', fontFamily:'inherit'}}>
+                {copied ? '✓ Copié' : '📋 Copier le prompt'}
+              </button>
+            </div>
+          </div>
+          {codeMsg && <div style={{marginTop:8, fontSize:12.5, fontWeight:600, color: codeMsg.type==='ok' ? '#5fd38a' : '#ff8080'}}>{codeMsg.text}</div>}
+        </div>
+
         {/* Bouton lancer */}
         <button onClick={runCheck} disabled={running}
           style={{width:'100%', background:'linear-gradient(135deg,#ff6b6b,#ffb340)', border:'none', borderRadius:12, color:'#1a1208', fontSize:14.5, fontWeight:800, padding:'14px', cursor: running?'default':'pointer', fontFamily:'inherit', marginBottom:8, opacity: running?.7:1}}>
@@ -12565,7 +12644,7 @@ function AdminCyberSecurityScreen({ onBack }) {
           <button key={c.id} onClick={()=>setPopup(c)} className="card" style={{display:'block', width:'100%', textAlign:'left', padding:12, marginBottom:10, cursor:'pointer', border:'1px solid rgba(255,255,255,.08)'}}>
             <div style={{display:'flex', alignItems:'center', justifyContent:'space-between', gap:8, marginBottom:6}}>
               <span style={{fontSize:11.5, color:'rgba(255,255,255,.5)', fontWeight:700}}>
-                {c.trigger_type === 'cron' ? '🔁 Automatique' : '👤 Manuel'} · {fmtSecDate(c.created_at)}
+                {secTriggerInfo(c).icon} {secTriggerInfo(c).label} · {fmtSecDate(c.created_at)}{c.agent ? ' · '+c.agent : ''}
               </span>
               <SecSeverityChip severity={c.severity}/>
             </div>
