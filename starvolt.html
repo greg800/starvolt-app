@@ -12416,6 +12416,30 @@ function SecReportPopup({ check, title, onClose }) {
   );
 }
 
+// Rappel au login : l'audit du CODE (Claude Code) n'a pas tourné depuis > 1 mois.
+function SecCodeReminderPopup({ lastAt, onClose }) {
+  return (
+    <div onClick={onClose} style={{position:'fixed',inset:0,zIndex:9500,background:'rgba(3,12,18,.82)',backdropFilter:'blur(4px)',WebkitBackdropFilter:'blur(4px)',display:'flex',alignItems:'center',justifyContent:'center',padding:16}}>
+      <div onClick={e=>e.stopPropagation()} className="card" style={{maxWidth:480, width:'100%', padding:20, border:'1px solid rgba(255,179,64,.35)'}}>
+        <div style={{fontWeight:800, fontSize:17, color:'#fff', marginBottom:8}}>⏰ Audit du code à lancer</div>
+        <div style={{fontSize:13.5, lineHeight:1.6, color:'rgba(255,255,255,.82)'}}>
+          L'audit de sécurité du <strong style={{color:'#fff'}}>code</strong> (client, serveur, edge functions, dépendances) n'a pas été fait depuis {lastAt ? <>plus d'un mois (dernier : <strong style={{color:'#fff'}}>{fmtSecDate(lastAt)}</strong>)</> : <>le début — <strong style={{color:'#fff'}}>jamais encore réalisé</strong></>}.
+          <div style={{marginTop:10, background:'rgba(0,0,0,.22)', border:'1px solid rgba(255,255,255,.1)', borderRadius:10, padding:'10px 12px'}}>
+            <div style={{fontWeight:800, color:'#ffb340', marginBottom:4}}>Comment le lancer</div>
+            Page <strong style={{color:'#fff'}}>Cyber-sécurité</strong> → carte « 💻 Audit du code » → bouton « Copier le prompt », puis colle-le dans <strong style={{color:'#fff'}}>Claude Code</strong>. Le rapport reviendra ici automatiquement.
+          </div>
+          <div style={{marginTop:10, fontSize:12, color:'rgba(255,255,255,.5)'}}>
+            (Le check automatique mensuel ne couvre que la base de données ; ce volet-là est manuel.)
+          </div>
+        </div>
+        <button onClick={onClose} style={{marginTop:16, width:'100%', background:'#ffb340', border:'none', borderRadius:10, color:'#1a1208', fontSize:13.5, fontWeight:800, padding:'11px 14px', cursor:'pointer', fontFamily:'inherit'}}>
+          J'ai compris
+        </button>
+      </div>
+    </div>
+  );
+}
+
 const SEC_PHASES = [
   'Connexion à la base de données',
   'Vérification des RLS (Row Level Security)',
@@ -15889,6 +15913,7 @@ function App() {
   const [feedbackSentiment, setFeedbackSentiment] = useState(null); // null | 'up' | 'down'
   const [bilanPopup, setBilanPopup]  = useState(null); // {collected,errored,errorMsg,bilanText,consoKwh} | null — popup « bilan prêt »
   const [secReport, setSecReport]    = useState(null); // dernier rapport de sécurité non vu (popup au login admin)
+  const [codeAuditDue, setCodeAuditDue] = useState(null); // {lastAt} si l'audit code n'a pas tourné depuis > 1 mois
   const pendingProfileRef            = useRef(null);
   const justSignedUpRef              = useRef(false); // empêche la nav auto pendant l'écran de succès signup
   const inRecoveryRef                = useRef(false); // empêche la nav auto pendant la réinitialisation de mot de passe
@@ -16103,6 +16128,10 @@ function App() {
     secCheckedRef.current = user.id;
     sb.rpc('get_unseen_security_check').then(({ data }) => {
       if (data && data.id) setSecReport(data);
+    });
+    // Rappel : l'audit du CODE (Claude Code) n'a pas tourné depuis > 1 mois ?
+    sb.rpc('get_code_audit_status').then(({ data }) => {
+      if (data && data.overdue) setCodeAuditDue({ lastAt: data.last_code_audit || null });
     });
   }, [isAdmin, user?.id, imperso]);
 
@@ -16511,6 +16540,7 @@ function App() {
       {user && <GlobalBilanWatcher onReady={handleBilanReady}/>}
       {bilanPopup && <BilanReadyPopup data={bilanPopup} onUnderstood={handleBilanUnderstood}/>}
       {secReport && <SecReportPopup check={secReport} title="🛡️ Sécurité — dernier rapport" onClose={dismissSecReport}/>}
+      {!secReport && codeAuditDue && <SecCodeReminderPopup lastAt={codeAuditDue.lastAt} onClose={()=>setCodeAuditDue(null)}/>}
       {user && !isAuthScreen && <ApproxConsoBanner screen={state.screen} userId={user.id}/>}
       <div className="chevrons-deco" aria-hidden="true">
         {['»','»','»','»'].map((c,i)=><span key={i}>{c}</span>)}
