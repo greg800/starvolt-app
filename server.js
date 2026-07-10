@@ -17,6 +17,17 @@ const mime = {
   '.webmanifest': 'application/manifest+json',
 };
 
+// En-têtes de sécurité appliqués à toutes les réponses (défense en profondeur).
+// Pas de CSP ici : l'app transpile le JSX dans le navigateur (Babel standalone),
+// ce qui impose 'unsafe-eval' et 'unsafe-inline' → une CSP en aurait la valeur
+// fortement réduite ; à traiter séparément si on retire Babel du runtime.
+const SECURITY_HEADERS = {
+  'X-Content-Type-Options': 'nosniff',
+  'X-Frame-Options': 'SAMEORIGIN',
+  'Referrer-Policy': 'strict-origin-when-cross-origin',
+  'Strict-Transport-Security': 'max-age=15552000',
+};
+
 http.createServer((req, res) => {
   const reqPath = req.url.split('?')[0];
 
@@ -24,7 +35,7 @@ http.createServer((req, res) => {
   if (reqPath === '/' || reqPath === '/app' || reqPath === '/app/') {
     fs.readFile(path.join(__dirname, 'starvolt.html'), (err, data) => {
       if (err) { res.writeHead(404); return res.end('Not found'); }
-      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+      res.writeHead(200, { ...SECURITY_HEADERS, 'Content-Type': 'text/html; charset=utf-8' });
       res.end(data);
     });
     return;
@@ -45,7 +56,7 @@ http.createServer((req, res) => {
   fs.readFile(file, (err, data) => {
     if (err) { res.writeHead(404); return res.end('Not found'); }
     const ext = path.extname(file);
-    res.writeHead(200, { 'Content-Type': mime[ext] || 'text/plain' });
+    res.writeHead(200, { ...SECURITY_HEADERS, 'Content-Type': mime[ext] || 'text/plain' });
     res.end(data);
   });
 }).listen(PORT, () => console.log(`Listening on ${PORT}`));

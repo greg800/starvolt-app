@@ -732,6 +732,16 @@ Deno.serve(async (req)=>{
   if (req.method === "POST") {
     const body = await req.json();
     const { site_id, pdl, firstName, lastName, address, codePostal, commune, account_type, raison_sociale, signer_prenom, signer_nom, signer_email } = body;
+    // Sécurité (autorisation objet) : si un site_id est fourni, il DOIT appartenir
+    // à l'appelant. Les écritures ci-dessous passent par service_role (hors RLS) :
+    // sans ce contrôle, un utilisateur authentifié pourrait écraser le PDL / les
+    // données du site d'un autre en passant un site_id arbitraire.
+    if (site_id) {
+      const owned = await sbGet("sites", `id=eq.${encodeURIComponent(site_id)}&user_id=eq.${user.id}&select=id`);
+      if (!Array.isArray(owned) || owned.length === 0) {
+        return jsonResp({ error: "forbidden" }, 403);
+      }
+    }
     const inputPdl = (pdl ?? "").trim();
     const isEntreprise = account_type === "entreprise";
     const testEnv = isTestPdl(inputPdl);
