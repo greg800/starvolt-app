@@ -31,7 +31,17 @@ http.createServer((req, res) => {
   }
 
   // Tous les autres chemins → fichiers statiques (sw.js, manifest, images…)
-  const file = path.join(__dirname, reqPath);
+  // On décode puis on vérifie que le chemin résolu reste dans __dirname
+  // (protection path traversal : GET /../../etc/passwd doit être refusé).
+  let decoded;
+  try { decoded = decodeURIComponent(reqPath); }
+  catch { res.writeHead(400); return res.end('Bad request'); }
+
+  const file = path.resolve(__dirname, '.' + decoded);
+  if (file !== __dirname && !file.startsWith(__dirname + path.sep)) {
+    res.writeHead(403); return res.end('Forbidden');
+  }
+
   fs.readFile(file, (err, data) => {
     if (err) { res.writeHead(404); return res.end('Not found'); }
     const ext = path.extname(file);

@@ -11404,7 +11404,7 @@ function AdminQuizFailsScreen({ user, onBack }) {
   );
 }
 
-function AdminScreen({ onTariffs, onUsers, onRoles, onSites, onSpot, onAcc, onProduction, onGlobalVars, onFactureVars, onPrix, onOffres, onLearn, onFeedback, onProofread, onAICosts, onAIPrompts, onViewLogs, onViewFails, onImpersonate, onBack }) {
+function AdminScreen({ onTariffs, onUsers, onRoles, onSites, onSpot, onAcc, onProduction, onGlobalVars, onFactureVars, onPrix, onOffres, onLearn, onFeedback, onProofread, onAICosts, onAIPrompts, onCyberSecurity, onViewLogs, onViewFails, onImpersonate, onBack }) {
   return (
     <>
     <div className="screen screen-admin fade-in">
@@ -11557,6 +11557,14 @@ function AdminScreen({ onTariffs, onUsers, onRoles, onSites, onSpot, onAcc, onPr
             <div className="sim-text">
               <div className="sim-title">Prompts IA</div>
               <div className="sim-sub">Cadrer chaque service IA (correction, bilan…)</div>
+            </div>
+            <span className="sim-arrow">→</span>
+          </button>
+          <button className="sim-btn" onClick={onCyberSecurity}>
+            <span className="sim-icon">🛡️</span>
+            <div className="sim-text">
+              <div className="sim-title">Cyber-sécurité</div>
+              <div className="sim-sub">Audit sécurité de la base, surveillance mensuelle</div>
             </div>
             <span className="sim-arrow">→</span>
           </button>
@@ -12329,6 +12337,248 @@ function AdminAIPromptsScreen({ onBack, onBilanData }) {
         })}
       </div>
     </div>
+    <StickyFooter onBack={onBack}/>
+    </>
+  );
+}
+
+// ─── Cyber-sécurité : rendu markdown léger + popup rapport + écran admin ──────
+
+// Rendu markdown minimal et SANS dangerouslySetInnerHTML (échappé par React).
+function renderInlineBold(text) {
+  const parts = String(text).split(/(\*\*[^*]+\*\*)/g);
+  return parts.map((p, i) =>
+    /^\*\*[^*]+\*\*$/.test(p)
+      ? <strong key={i} style={{color:'#fff'}}>{p.slice(2, -2)}</strong>
+      : <React.Fragment key={i}>{p}</React.Fragment>
+  );
+}
+function SecReportMarkdown({ text }) {
+  const lines = String(text || '').split(/\r?\n/);
+  const out = [];
+  lines.forEach((raw, i) => {
+    const l = raw.trimEnd();
+    if (!l.trim()) { out.push(<div key={i} style={{height:8}}/>); return; }
+    if (/^#{1,6}\s/.test(l)) {
+      out.push(<div key={i} style={{fontWeight:800, color:'#fff', fontSize:14, margin:'10px 0 4px'}}>{renderInlineBold(l.replace(/^#{1,6}\s/, ''))}</div>);
+    } else if (/^[-•*]\s/.test(l)) {
+      out.push(<div key={i} style={{display:'flex', gap:8, margin:'2px 0'}}><span style={{color:'#ffb340'}}>•</span><span>{renderInlineBold(l.replace(/^[-•*]\s/, ''))}</span></div>);
+    } else {
+      out.push(<div key={i} style={{margin:'2px 0'}}>{renderInlineBold(l)}</div>);
+    }
+  });
+  return <div style={{fontSize:13, lineHeight:1.6, color:'rgba(255,255,255,.82)'}}>{out}</div>;
+}
+
+const SEC_SEV = {
+  ok:       { label: 'Aucun problème', color: '#5fd38a', bg: 'rgba(95,211,138,.14)' },
+  info:     { label: 'Info',           color: '#8fb7ff', bg: 'rgba(143,183,255,.14)' },
+  warn:     { label: 'À surveiller',   color: '#ffb340', bg: 'rgba(255,179,64,.14)' },
+  critical: { label: 'Critique',       color: '#ff6b6b', bg: 'rgba(255,107,107,.16)' },
+};
+function SecSeverityChip({ severity }) {
+  const s = SEC_SEV[severity] || SEC_SEV.info;
+  return <span style={{background:s.bg, color:s.color, border:`1px solid ${s.color}55`, borderRadius:20, padding:'3px 10px', fontSize:11.5, fontWeight:800, whiteSpace:'nowrap'}}>{s.label}</span>;
+}
+const fmtSecDate = (d) => d ? new Date(d).toLocaleString('fr-FR', { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit' }) : '—';
+
+// Popup rapport complet (réutilisé par l'écran admin ET par le login admin)
+function SecReportPopup({ check, title, onClose }) {
+  if (!check) return null;
+  return (
+    <div onClick={onClose} style={{position:'fixed',inset:0,zIndex:9500,background:'rgba(3,12,18,.82)',backdropFilter:'blur(4px)',WebkitBackdropFilter:'blur(4px)',display:'flex',alignItems:'center',justifyContent:'center',padding:16}}>
+      <div onClick={e=>e.stopPropagation()} className="card" style={{maxWidth:560, width:'100%', maxHeight:'85vh', overflowY:'auto', padding:18}}>
+        <div style={{display:'flex', alignItems:'center', justifyContent:'space-between', gap:10, marginBottom:6}}>
+          <div style={{fontWeight:800, fontSize:16, color:'#fff'}}>{title || '🛡️ Rapport de sécurité'}</div>
+          <SecSeverityChip severity={check.severity}/>
+        </div>
+        <div style={{fontSize:11.5, color:'rgba(255,255,255,.45)', marginBottom:12}}>
+          {fmtSecDate(check.created_at)} · {check.trigger_type === 'cron' ? 'Automatique (mensuel)' : 'Manuel'}{check.triggered_by && check.triggered_by !== 'cron' ? ' · '+check.triggered_by : ''}
+        </div>
+        {check.report_md
+          ? <SecReportMarkdown text={check.report_md}/>
+          : (
+            <div style={{fontSize:13, lineHeight:1.6, color:'rgba(255,255,255,.82)'}}>
+              <div style={{fontWeight:800, color:'#fff', margin:'8px 0 2px'}}>Trouvé</div><div>{check.found || '—'}</div>
+              <div style={{fontWeight:800, color:'#fff', margin:'10px 0 2px'}}>Corrigé</div><div>{check.fixed || '—'}</div>
+              <div style={{fontWeight:800, color:'#fff', margin:'10px 0 2px'}}>À surveiller</div><div>{check.watch_next || '—'}</div>
+            </div>
+          )}
+        <button onClick={onClose} style={{marginTop:16, width:'100%', background:'#ffb340', border:'none', borderRadius:10, color:'#1a1208', fontSize:13.5, fontWeight:800, padding:'11px 14px', cursor:'pointer', fontFamily:'inherit'}}>
+          J'ai compris
+        </button>
+      </div>
+    </div>
+  );
+}
+
+const SEC_PHASES = [
+  'Connexion à la base de données',
+  'Vérification des RLS (Row Level Security)',
+  "Analyse des policies d'accès",
+  'Contrôle des fonctions à privilège',
+  'Revue des comptes administrateurs',
+  "Synthèse par l'IA",
+];
+
+// Modale d'avancement : montre successivement chaque phase du check
+function SecProgressModal({ phaseIdx, done }) {
+  return (
+    <div style={{position:'fixed',inset:0,zIndex:9400,background:'rgba(3,12,18,.86)',backdropFilter:'blur(4px)',WebkitBackdropFilter:'blur(4px)',display:'flex',alignItems:'center',justifyContent:'center',padding:16}}>
+      <div className="card" style={{maxWidth:420, width:'100%', padding:20}}>
+        <div style={{fontWeight:800, fontSize:16, color:'#fff', marginBottom:4}}>🛡️ Audit de sécurité en cours…</div>
+        <div style={{fontSize:12, color:'rgba(255,255,255,.45)', marginBottom:16}}>Analyse de la base de données, puis synthèse par l'IA.</div>
+        {SEC_PHASES.map((p, i) => {
+          const state = done || i < phaseIdx ? 'done' : (i === phaseIdx ? 'run' : 'wait');
+          return (
+            <div key={i} style={{display:'flex', alignItems:'center', gap:10, padding:'6px 0', opacity: state==='wait'?.4:1}}>
+              <span style={{width:20, display:'flex', justifyContent:'center'}}>
+                {state==='done' ? <span style={{color:'#5fd38a', fontWeight:900}}>✓</span>
+                  : state==='run' ? <StarSpinner size={15}/>
+                  : <span style={{color:'rgba(255,255,255,.35)'}}>○</span>}
+              </span>
+              <span style={{fontSize:13.5, color: state==='done' ? 'rgba(255,255,255,.7)' : '#fff', fontWeight: state==='run'?700:500}}>{p}</span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function AdminCyberSecurityScreen({ onBack }) {
+  const [promptRow, setPromptRow] = useState(null);   // {system_prompt, updated_at, updated_by}
+  const [promptDraft, setPromptDraft] = useState('');
+  const [promptOpen, setPromptOpen] = useState(false);
+  const [savingPrompt, setSavingPrompt] = useState(false);
+  const [promptMsg, setPromptMsg] = useState(null);
+  const [checks, setChecks] = useState(null);
+  const [running, setRunning] = useState(false);
+  const [phaseIdx, setPhaseIdx] = useState(0);
+  const [runErr, setRunErr] = useState(null);
+  const [popup, setPopup] = useState(null);
+  const phaseTimer = useRef(null);
+
+  const loadChecks = () => sb.rpc('get_security_checks').then(({ data }) => setChecks(data || []));
+  useEffect(() => {
+    sb.rpc('get_ai_prompts').then(({ data }) => {
+      const r = (data || []).find(x => x.feature === 'cyber_security');
+      if (r) { setPromptRow(r); setPromptDraft(r.system_prompt || ''); }
+    });
+    loadChecks();
+    return () => { if (phaseTimer.current) clearInterval(phaseTimer.current); };
+  }, []);
+
+  const savePrompt = async () => {
+    setSavingPrompt(true); setPromptMsg(null);
+    const { error } = await sb.rpc('set_ai_prompt', { p_feature: 'cyber_security', p_prompt: promptDraft });
+    setSavingPrompt(false);
+    if (error) { setPromptMsg({ type:'err', text:'Échec : '+(error.message||'erreur') }); return; }
+    setPromptMsg({ type:'ok', text:'Prompt enregistré. Utilisé au prochain check.' });
+    setPromptRow(r => ({ ...r, system_prompt: promptDraft, updated_at: new Date().toISOString() }));
+  };
+
+  const runCheck = async () => {
+    setRunning(true); setRunErr(null); setPhaseIdx(0);
+    // Avance les phases visuellement pendant l'appel (dernière phase = synthèse IA, gardée jusqu'à la réponse)
+    phaseTimer.current = setInterval(() => {
+      setPhaseIdx(i => Math.min(i + 1, SEC_PHASES.length - 1));
+    }, 850);
+    const { data, error } = await sb.functions.invoke('security-check', { body: { trigger_type: 'manual' } });
+    if (phaseTimer.current) { clearInterval(phaseTimer.current); phaseTimer.current = null; }
+    setPhaseIdx(SEC_PHASES.length);
+    // petit délai pour laisser voir le dernier ✓
+    await new Promise(r => setTimeout(r, 400));
+    setRunning(false);
+    if (error || data?.error) {
+      setRunErr((data && data.message) || error?.message || 'Le check a échoué.');
+      return;
+    }
+    await loadChecks();
+    if (data?.check) setPopup(data.check);
+  };
+
+  const promptDirty = promptRow && promptDraft !== promptRow.system_prompt;
+
+  return (
+    <>
+    <div className="screen fade-in" style={{padding:'0 0 90px', maxWidth:'100%', width:'100%'}}>
+      <div className="auth-header">
+        <div className="welcome-tag" style={{color:'#ffb340'}}>Administration</div>
+        <h1 className="welcome-title">Cyber<br/><span className="accent">sécurité</span></h1>
+      </div>
+
+      <div style={{padding:'0 16px'}}>
+        <p style={{color:'rgba(255,255,255,.55)', fontSize:13, lineHeight:1.55, margin:'0 0 16px'}}>
+          Audit automatique de la base de données (RLS, policies, fonctions à privilège), interprété par l'IA.
+          Une surveillance se lance le 1<sup>er</sup> de chaque mois ; le rapport s'affiche à chaque admin à sa connexion.
+        </p>
+
+        {/* Prompt éditable */}
+        <div className="card" style={{padding:14, marginBottom:16}}>
+          <div style={{display:'flex', alignItems:'center', justifyContent:'space-between', gap:8, marginBottom:8}}>
+            <div style={{fontWeight:800, fontSize:14, color:'#fff'}}>Liste des vérifications (prompt)</div>
+            <button onClick={()=>setPromptOpen(o=>!o)} style={{background:'rgba(255,255,255,.06)', border:'1px solid rgba(255,255,255,.16)', borderRadius:8, color:'rgba(255,255,255,.7)', fontSize:12, fontWeight:700, padding:'5px 10px', cursor:'pointer', fontFamily:'inherit'}}>
+              {promptOpen ? 'Replier ▲' : 'Déplier ▾'}
+            </button>
+          </div>
+          <textarea
+            value={promptDraft}
+            onChange={e => setPromptDraft(e.target.value)}
+            spellCheck={false}
+            style={{width:'100%', height: promptOpen ? 420 : 210, resize: promptOpen ? 'vertical' : 'none', boxSizing:'border-box',
+              background:'rgba(0,0,0,.25)', border:'1px solid rgba(255,255,255,.14)', borderRadius:10,
+              color:'rgba(255,255,255,.9)', fontSize:12.5, lineHeight:1.5, padding:'10px 12px', fontFamily:'inherit'}}
+          />
+          {!promptOpen && <div style={{fontSize:11, color:'rgba(255,255,255,.4)', marginTop:6}}>Aperçu (10 premières lignes). « Déplier » pour tout voir et éditer.</div>}
+          <div style={{display:'flex', alignItems:'center', justifyContent:'space-between', gap:10, marginTop:8, flexWrap:'wrap'}}>
+            <span style={{fontSize:11.5, color:'rgba(255,255,255,.4)'}}>
+              {promptRow ? <>Modifié le {fmtSecDate(promptRow.updated_at)}{promptRow.updated_by ? ' · '+promptRow.updated_by : ''}</> : '—'}
+            </span>
+            <div style={{display:'flex', gap:8}}>
+              {promptDirty && (
+                <button onClick={()=>setPromptDraft(promptRow.system_prompt)} style={{background:'rgba(255,255,255,.06)', border:'1px solid rgba(255,255,255,.16)', borderRadius:9, color:'rgba(255,255,255,.65)', fontSize:12.5, fontWeight:700, padding:'8px 14px', cursor:'pointer', fontFamily:'inherit'}}>Annuler</button>
+              )}
+              <button onClick={savePrompt} disabled={!promptDirty || savingPrompt}
+                style={{background: promptDirty ? '#ffb340' : 'rgba(255,255,255,.1)', border:'none', borderRadius:9, color: promptDirty ? '#1a1208' : 'rgba(255,255,255,.4)', fontSize:12.5, fontWeight:800, padding:'8px 16px', cursor: promptDirty ? 'pointer':'default', fontFamily:'inherit'}}>
+                {savingPrompt ? <><StarSpinner size={14} color="#1a1208"/> …</> : 'Enregistrer'}
+              </button>
+            </div>
+          </div>
+          {promptMsg && <div style={{marginTop:8, fontSize:12.5, fontWeight:600, color: promptMsg.type==='ok' ? '#5fd38a' : '#ff8080'}}>{promptMsg.text}</div>}
+        </div>
+
+        {/* Bouton lancer */}
+        <button onClick={runCheck} disabled={running}
+          style={{width:'100%', background:'linear-gradient(135deg,#ff6b6b,#ffb340)', border:'none', borderRadius:12, color:'#1a1208', fontSize:14.5, fontWeight:800, padding:'14px', cursor: running?'default':'pointer', fontFamily:'inherit', marginBottom:8, opacity: running?.7:1}}>
+          🛡️ Lancer un check complet maintenant
+        </button>
+        {runErr && <div style={{fontSize:12.5, fontWeight:600, color:'#ff8080', marginBottom:8}}>{runErr}</div>}
+
+        {/* Tableau des checks */}
+        <div style={{fontWeight:800, fontSize:14, color:'#fff', margin:'18px 0 10px'}}>Historique des vérifications</div>
+        {checks === null ? (
+          <div style={{textAlign:'center', padding:30}}><StarSpinner size={30}/></div>
+        ) : checks.length === 0 ? (
+          <div style={{textAlign:'center', color:'rgba(255,255,255,.4)', fontSize:13.5, padding:'20px 0'}}>Aucune vérification pour le moment.</div>
+        ) : checks.map(c => (
+          <button key={c.id} onClick={()=>setPopup(c)} className="card" style={{display:'block', width:'100%', textAlign:'left', padding:12, marginBottom:10, cursor:'pointer', border:'1px solid rgba(255,255,255,.08)'}}>
+            <div style={{display:'flex', alignItems:'center', justifyContent:'space-between', gap:8, marginBottom:6}}>
+              <span style={{fontSize:11.5, color:'rgba(255,255,255,.5)', fontWeight:700}}>
+                {c.trigger_type === 'cron' ? '🔁 Automatique' : '👤 Manuel'} · {fmtSecDate(c.created_at)}
+              </span>
+              <SecSeverityChip severity={c.severity}/>
+            </div>
+            <div style={{fontSize:12.5, color:'rgba(255,255,255,.75)', display:'-webkit-box', WebkitLineClamp:2, WebkitBoxOrient:'vertical', overflow:'hidden'}}>
+              <strong style={{color:'#fff'}}>Trouvé : </strong>{c.found || '—'}
+            </div>
+            <div style={{fontSize:12, color:'#ffb340', fontWeight:700, marginTop:6}}>Voir le rapport →</div>
+          </button>
+        ))}
+      </div>
+    </div>
+    {running && <SecProgressModal phaseIdx={phaseIdx} done={phaseIdx >= SEC_PHASES.length}/>}
+    {popup && <SecReportPopup check={popup} onClose={()=>setPopup(null)}/>}
     <StickyFooter onBack={onBack}/>
     </>
   );
@@ -14378,6 +14628,7 @@ const SCREEN_LABELS = {
   SOLAR_SIM:'Simulation solaire', SOLAR:'Solaire', COMWATT:'Box Comwatt',
   PANIER:'Panier', PROFILE:'Mon profil', ADDRESS:'Adresse', FINAL:'Récapitulatif final',
   ADMIN:'Admin', ADMIN_FEEDBACK:'Admin — retours', ADMIN_ROLES_MGMT:'Admin — gestion des rôles',
+  ADMIN_CYBER_SECURITY:'Admin — cyber-sécurité',
 };
 const screenLabel = (s) => SCREEN_LABELS[s] || s || 'Inconnue';
 
@@ -15558,6 +15809,7 @@ function App() {
   const [cartVersion, setCartVersion]= useState(0);
   const [feedbackSentiment, setFeedbackSentiment] = useState(null); // null | 'up' | 'down'
   const [bilanPopup, setBilanPopup]  = useState(null); // {collected,errored,errorMsg,bilanText,consoKwh} | null — popup « bilan prêt »
+  const [secReport, setSecReport]    = useState(null); // dernier rapport de sécurité non vu (popup au login admin)
   const pendingProfileRef            = useRef(null);
   const justSignedUpRef              = useRef(false); // empêche la nav auto pendant l'écran de succès signup
   const inRecoveryRef                = useRef(false); // empêche la nav auto pendant la réinitialisation de mot de passe
@@ -15763,6 +16015,23 @@ function App() {
   const isAdmin = ['admin','superadmin'].includes(profile?.role) || rolePerms?.access?.admin === true;
   const isSuperadmin = profile?.role === 'superadmin' || rolePerms?.access?.superadmin === true;
 
+  // À la connexion d'un admin/superadmin (hors mode debug), afficher le dernier
+  // rapport de sécurité qu'il n'a pas encore vu (une seule fois par utilisateur).
+  const secCheckedRef = useRef(null);
+  useEffect(() => {
+    if (!isAdmin || !user?.id || imperso) return;
+    if (secCheckedRef.current === user.id) return;
+    secCheckedRef.current = user.id;
+    sb.rpc('get_unseen_security_check').then(({ data }) => {
+      if (data && data.id) setSecReport(data);
+    });
+  }, [isAdmin, user?.id, imperso]);
+
+  const dismissSecReport = useCallback(() => {
+    if (secReport?.id) sb.rpc('mark_security_check_seen', { p_id: secReport.id });
+    setSecReport(null);
+  }, [secReport]);
+
   const render = () => {
     if (authLoading) return (
       <div style={{display:'flex',alignItems:'center',justifyContent:'center',minHeight:'60vh'}}>
@@ -15864,6 +16133,7 @@ function App() {
           onProofread={()=>goTo('ADMIN_PROOFREAD')}
           onAICosts={()=>goTo('ADMIN_AI_COSTS')}
           onAIPrompts={()=>goTo('ADMIN_AI_PROMPTS')}
+          onCyberSecurity={()=>goTo('ADMIN_CYBER_SECURITY')}
           onViewLogs={(u)=>goTo('ADMIN_USER_LOGS', { logUser: u })}
           onViewFails={(u)=>goTo('ADMIN_QUIZ_FAILS', { failUser: u })}
           onImpersonate={startImpersonation}
@@ -15883,6 +16153,9 @@ function App() {
 
       case 'ADMIN_AI_PROMPTS':
         return <AdminAIPromptsScreen onBack={goBack} onBilanData={()=>goTo('ADMIN_BILAN_DATA')}/>;
+
+      case 'ADMIN_CYBER_SECURITY':
+        return <AdminCyberSecurityScreen onBack={goBack}/>;
 
       case 'ADMIN_BILAN_DATA':
         return <AdminBilanDataScreen onBack={goBack}/>;
@@ -16158,6 +16431,7 @@ function App() {
       )}
       {user && <GlobalBilanWatcher onReady={handleBilanReady}/>}
       {bilanPopup && <BilanReadyPopup data={bilanPopup} onUnderstood={handleBilanUnderstood}/>}
+      {secReport && <SecReportPopup check={secReport} title="🛡️ Sécurité — dernier rapport" onClose={dismissSecReport}/>}
       {user && !isAuthScreen && <ApproxConsoBanner screen={state.screen} userId={user.id}/>}
       <div className="chevrons-deco" aria-hidden="true">
         {['»','»','»','»'].map((c,i)=><span key={i}>{c}</span>)}
