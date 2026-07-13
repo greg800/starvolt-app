@@ -7,6 +7,7 @@ const SG_BASE = "https://api.switchgrid.tech";
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
 const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
 const SG_KEY = Deno.env.get("SWITCHGRID_API_KEY") ?? "";
+const SG_CRON_SECRET = Deno.env.get("SWITCHGRID_CRON_SECRET") ?? "";
 // Repli journalier : couverture minimale (jours) pour accepter un R65 comme
 // candidat fiable. En-dessous, on considère le R65 encore partiel et on attend.
 const MIN_DAILY_DAYS = 300;
@@ -717,10 +718,283 @@ function shouldOverwrite(oldSite, newSource, newCoverage) {
   if (newSource === "daily" && oldSrc === "loadcurve") return false;
   return newCoverage >= oldCov;
 }
+// ---------------------------------------------------------------------------
+// finalizeRec : logique de finalisation d'une demande (pending -> ordering ->
+// done/error). Extraite pour etre appelable a la fois par le GET client et par
+// le finisseur cron. Ne depend PAS de `user` (rec est passe en argument).
+// Renvoie une Response (jsonResp).
+// ---------------------------------------------------------------------------
+async function finalizeRec(rec) {
+  const requestId = rec.id;
+    if (rec.status === "done") return jsonResp({
+      status: "done"
+    });
+    if (rec.status === "error") return jsonResp({
+      status: "error",
+      error_message: rec.error_message
+    });
+  // Empreinte de sondage : le client actif la rafraichit ~toutes les 8s ; le
+  // cron ne reprend une demande que si elle n'a pas ete sondee depuis >90s.
+  await sbUpdate("switchgrid_requests", `id=eq.${requestId}`, { last_polled_at: new Date().toISOString() });
+    const pdl = String(rec.pdl ?? "");
+    const testEnv = isTestPdl(pdl);
+    // pending : vérifier si le consentement est signé.
+    if (rec.status === "pending") {
+      const askResp = await fetch(`${SG_BASE}/ask/${rec.ask_id}`, {
+        headers: sgHeaders(testEnv)
+      });
+      const askData = await askResp.json();
+      const userUrl = askData.consentCollectionDetails?.userUrl ?? null;
+      const accepted = askData.status === "ACCEPTED" || !!askData.acceptedAt;
+      const denied = askData.status === "REVOKED" || askData.status === "EXPIRED";
+      if (denied) {
+        await sbUpdate("switchgrid_requests", `id=eq.${requestId}`, {
+          status: "error",
+          error_message: "Consentement révoqué ou expiré."
+        });
+        return jsonResp({
+          status: "error",
+          error_message: "Consentement révoqué ou expiré."
+        });
+      }
+      if (!accepted) {
+        // Une autre demande sur le même compteur a peut-être déjà un consentement
+        // signé par le même signataire (askData.signer = signataire de CETTE demande) :
+        // on le réutilise au lieu de rester bloqué.
+        const reuse = await findReusableConsent(rec.site_id, pdl, askData.signer);
+        if (reuse) {
+          const reuseOrderId = await placeSwitchgridOrder(reuse.consentId, reuse.pdl);
+          if (reuseOrderId) {
+            await sbUpdate("switchgrid_requests", `id=eq.${requestId}`, {
+              order_id: reuseOrderId,
+              ask_id: reuse.ask_id,
+              status: "ordering"
+            });
+            return jsonResp({
+              status: "ordering"
+            });
+          }
+        }
+        return jsonResp({
+          status: "pending",
+          userUrl
+        });
+      }
+      // Consentement signé → poser l'ordre (consentId = id de l'ask).
+      const orderId = await placeSwitchgridOrder(rec.ask_id, pdl);
+      if (!orderId) {
+        await sbUpdate("switchgrid_requests", `id=eq.${requestId}`, {
+          status: "error",
+          error_message: "Échec de la commande Switchgrid."
+        });
+        return jsonResp({
+          status: "error",
+          error_message: "Échec de la commande Switchgrid."
+        });
+      }
+      await sbUpdate("switchgrid_requests", `id=eq.${requestId}`, {
+        order_id: orderId,
+        status: "ordering"
+      });
+      return jsonResp({
+        status: "ordering"
+      });
+    }
+    // ordering : sonder la commande.
+    if (rec.status === "ordering") {
+      const orderResp = await fetch(`${SG_BASE}/integration/enedis/order/${rec.order_id}`, {
+        headers: sgHeaders(testEnv)
+      });
+      const order = await orderResp.json();
+      const requests = order.requests ?? [];
+      // ⚠️ Switchgrid NE renvoie PAS le champ `direction` dans la réponse d'ordre (vérifié en
+      // prod : direction=undefined sur toutes les requêtes). On ne peut donc pas filtrer dessus.
+      // On s'appuie sur l'ORDRE DE SOUMISSION (cf. placeSwitchgridOrder : SOUTIRAGE d'abord,
+      // INJECTION ensuite) → 1er R63/R65 = soutirage, 2e = injection. Fallback sur `direction`
+      // au cas où l'API se mettrait à le renvoyer un jour.
+      const r63all = requests.filter((r)=>r.type === "R63");
+      const r65all = requests.filter((r)=>r.type === "R65");
+      const byDir = (arr, dir, idx)=> arr.find((r)=>r.direction === dir) ?? arr[idx] ?? null;
+      const r63 = byDir(r63all, "SOUTIRAGE", 0);
+      const r65 = byDir(r65all, "SOUTIRAGE", 0);
+      const r63Inj = byDir(r63all, "INJECTION", 1);
+      const r65Inj = byDir(r65all, "INJECTION", 1);
+      const c68 = requests.find((r)=>r.type === "C68_ASYNC");
+      const isPending = (x)=>x && (x.status === "PENDING" || x.status === "QUEUED" || x.status === "NOT_STARTED");
+      const anyPending = [
+        r63,
+        r65,
+        c68
+      ].some(isPending);
+      // Plafond global d'attente. ENEDIS laisse parfois la R63 (courbe de charge
+      // soutirage) coincée en "PENDING" sans jamais la faire ni aboutir ni échouer :
+      // sans garde-fou, on attend indéfiniment et le statut reste "ordering" pour
+      // toujours (updated_at figé), même quand le journalier R65 est DÉJÀ disponible.
+      const reqAgeMs = Date.now() - new Date(rec.created_at).getTime();
+      const WAIT_MS = 30 * 60 * 1000;
+      const r63Ok = r63?.status === "SUCCESS";
+      // R63 considérée "terminée" si SUCCESS, FAILED, ou PENDING depuis trop longtemps
+      // (coincée) → on débloque alors le repli journalier au lieu d'attendre sans fin.
+      const r63Stale = isPending(r63) && reqAgeMs > WAIT_MS;
+      const r63Done = !r63 || r63?.status === "SUCCESS" || r63?.status === "FAILED" || r63Stale;
+      const r65Ok = r65?.status === "SUCCESS";
+      // Construire le meilleur candidat disponible.
+      let candidate = null;
+      let r63Built = null;
+      if (r63Ok) {
+        const lc = await fetchR63Curve(r63, pdl);
+        r63Built = buildProfileV0(lc);
+        if (r63Built.hasAny && r63Built.coverage >= 0.70) {
+          const fillRes = fillMissingDays(r63Built.profile, r63Built.dayHasData);
+          candidate = {
+            source: "loadcurve",
+            coverage: r63Built.coverage,
+            profile: r63Built.profile,
+            note: null,
+            gaps: { missing_days: 366 - r63Built.daysPresent, filled_days: fillRes.filled, unfilled_days: fillRes.unfilled }
+          };
+        }
+      }
+      // Repli journalier R65 (si pas de courbe précise et R63 terminée).
+      // Garde-fou : exiger une couverture journalière suffisante pour écarter un
+      // R65 encore partiel (ENEDIS en cours de remplissage) qui fausserait l'annuel.
+      if (!candidate && r63Done && r65Ok) {
+        const d = await fetchDaily(r65);
+        if (d.daysPresent >= MIN_DAILY_DAYS) {
+          candidate = {
+            source: "daily",
+            coverage: d.daysPresent / 366,
+            profile: d.profile,
+            note: "Courbe de charge indisponible ou partielle chez ENEDIS — données journalières (approximatives) utilisées.",
+            gaps: { missing_days: 366 - d.daysPresent, filled_days: 0, unfilled_days: 366 - d.daysPresent }
+          };
+        }
+      }
+      // Dernier recours : courbe partielle marquée approximative (rien d'autre en attente).
+      if (!candidate && !anyPending && r63Built && r63Built.hasAny) {
+        candidate = {
+          source: "daily",
+          coverage: r63Built.coverage,
+          profile: r63Built.profile,
+          note: "Courbe de charge partielle chez ENEDIS — estimation approximative.",
+          gaps: { missing_days: 366 - r63Built.daysPresent, filled_days: 0, unfilled_days: 366 - r63Built.daysPresent }
+        };
+      }
+      if (candidate) {
+        const total = candidate.profile.reduce((a, b)=>a + b, 0);
+        const oldRows = await sbGet("sites", `id=eq.${rec.site_id}&select=conso_source,conso_coverage`);
+        const oldSite = oldRows[0] ?? null;
+        const overwrite = shouldOverwrite(oldSite, candidate.source, candidate.coverage);
+        const su = {
+          conso_imported_at: new Date().toISOString()
+        };
+        await applyC68(c68, su); // données contractuelles : toujours rafraîchies
+        // Injection (surplus revendu) : best-effort, indépendant du gate d'écrasement
+        // de la conso. Sert à reconstruire la conso brute d'un client déjà producteur.
+        const inj = await buildInjectionProfile(r63Inj, r65Inj, pdl);
+        if (inj) {
+          su.injection_profil = inj.profile;
+          su.injection_coverage = Math.round(inj.coverage * 1000) / 1000;
+          su.injection_annuelle_kwh = Math.round(inj.profile.reduce((a, b)=>a + b, 0) / 100) / 10;
+        }
+        if (overwrite) {
+          su.conso_source = candidate.source;
+          su.conso_profil = candidate.profile;
+          su.conso_coverage = Math.round(candidate.coverage * 1000) / 1000;
+          su.conso_annuelle_kwh = Math.round(total / 100) / 10;
+          su.conso_gaps = candidate.gaps ?? null;
+        }
+        await sbUpdate("sites", `id=eq.${rec.site_id}`, su);
+        // Le C68_ASYNC ET la courbe d'INJECTION sont plus lents que le soutirage (souvent
+        // servi instantanément via consentement réutilisé + cache). Ne PAS figer "done" tant
+        // qu'ils sont en attente, sinon on les rate définitivement. On écrit déjà la conso
+        // (l'utilisateur la voit tout de suite) mais on continue à sonder — l'injection est
+        // ré-écrite à chaque sondage dès qu'elle arrive (best-effort). Plafond 30 min pour ne
+        // pas rester bloqué si l'un ne vient jamais (ex. compteur sans contrat producteur →
+        // injection FAILED, donc plus "pending", on ne l'attend pas inutilement).
+        // (reqAgeMs / WAIT_MS sont définis plus haut dans ce bloc.)
+        const awaitingInj = (isPending(r63Inj) || isPending(r65Inj)) && !inj;
+        if ((isPending(c68) || awaitingInj) && reqAgeMs < WAIT_MS) {
+          return jsonResp({
+            status: "ordering",
+            conso_source: overwrite ? candidate.source : oldSite?.conso_source ?? candidate.source,
+            awaiting: isPending(c68) ? "C68" : "INJECTION"
+          });
+        }
+        await sbUpdate("switchgrid_requests", `id=eq.${requestId}`, {
+          status: "done",
+          error_message: overwrite ? candidate.note ?? null : "Nouvelles données ignorées : les données existantes sont de meilleure qualité."
+        });
+        return jsonResp({
+          status: "done",
+          conso_source: overwrite ? candidate.source : oldSite?.conso_source ?? candidate.source,
+          kept_existing: !overwrite
+        });
+      }
+      // Encore en attente ET sous le plafond → on continue de sonder. Passé le
+      // plafond sans aucune donnée exploitable, on ne boucle pas indéfiniment : on
+      // tombe en erreur explicite plutôt que de rester "ordering" pour toujours.
+      if (anyPending && reqAgeMs < WAIT_MS) return jsonResp({
+        status: "ordering"
+      });
+      // Tout a échoué (ou plafond atteint sans donnée exploitable).
+      const errMsg = r63?.errorMessage ?? r65?.errorMessage ?? requests?.[0]?.errorMessage ?? "Aucune donnée disponible.";
+      await sbUpdate("switchgrid_requests", `id=eq.${requestId}`, {
+        status: "error",
+        error_message: errMsg
+      });
+      return jsonResp({
+        status: "error",
+        error_message: errMsg
+      });
+    }
+    return jsonResp({
+      status: rec.status
+    });
+}
 Deno.serve(async (req)=>{
   if (req.method === "OPTIONS") return new Response("ok", {
     headers: CORS
   });
+  // -------------------------------------------------------------------------
+  // CRON — finisseur serveur : finalise les demandes en cours meme si l'onglet
+  // du client est ferme. Authentifie par secret dedie (x-cron-secret), PAS de
+  // JWT utilisateur -> DOIT etre place AVANT la garde getUser ci-dessous.
+  // -------------------------------------------------------------------------
+  const cronSecret = req.headers.get("x-cron-secret");
+  if (cronSecret) {
+    if (!SG_CRON_SECRET || cronSecret !== SG_CRON_SECRET) {
+      return jsonResp({ error: "Unauthorized" }, 401);
+    }
+    const GIVE_UP_MS = 24 * 3600 * 1000;
+    const staleIso = new Date(Date.now() - 90 * 1000).toISOString();
+    // Demandes non terminees, non sondees depuis >90s (client actif = last_polled_at
+    // frais toutes les 8s). Filtre OR pour inclure celles jamais sondees (null).
+    const rows = await sbGet(
+      "switchgrid_requests",
+      `status=in.(pending,ordering)&or=(last_polled_at.is.null,last_polled_at.lt.${staleIso})&order=created_at.asc&limit=20&select=*`
+    );
+    const results = [];
+    for (const rec of rows) {
+      const ageMs = Date.now() - new Date(rec.created_at).getTime();
+      if (ageMs > GIVE_UP_MS) {
+        await sbUpdate("switchgrid_requests", `id=eq.${rec.id}`, {
+          status: "error",
+          error_message: "Abandon : la collecte n'a pas abouti dans les 24 h."
+        });
+        results.push({ id: rec.id, status: "error", reason: "gave_up" });
+        continue;
+      }
+      try {
+        const resp = await finalizeRec(rec);
+        const body = await resp.json().catch(() => ({}));
+        results.push({ id: rec.id, status: body.status ?? "?" });
+      } catch (e) {
+        results.push({ id: rec.id, error: String(e) });
+      }
+    }
+    return jsonResp({ processed: results.length, results });
+  }
   const token = (req.headers.get("Authorization") ?? "").replace("Bearer ", "");
   const user = await getUser(token);
   if (!user) return jsonResp({
@@ -997,228 +1271,7 @@ Deno.serve(async (req)=>{
     if (!rec) return jsonResp({
       error: "Not found"
     }, 404);
-    if (rec.status === "done") return jsonResp({
-      status: "done"
-    });
-    if (rec.status === "error") return jsonResp({
-      status: "error",
-      error_message: rec.error_message
-    });
-    const pdl = String(rec.pdl ?? "");
-    const testEnv = isTestPdl(pdl);
-    // pending : vérifier si le consentement est signé.
-    if (rec.status === "pending") {
-      const askResp = await fetch(`${SG_BASE}/ask/${rec.ask_id}`, {
-        headers: sgHeaders(testEnv)
-      });
-      const askData = await askResp.json();
-      const userUrl = askData.consentCollectionDetails?.userUrl ?? null;
-      const accepted = askData.status === "ACCEPTED" || !!askData.acceptedAt;
-      const denied = askData.status === "REVOKED" || askData.status === "EXPIRED";
-      if (denied) {
-        await sbUpdate("switchgrid_requests", `id=eq.${requestId}`, {
-          status: "error",
-          error_message: "Consentement révoqué ou expiré."
-        });
-        return jsonResp({
-          status: "error",
-          error_message: "Consentement révoqué ou expiré."
-        });
-      }
-      if (!accepted) {
-        // Une autre demande sur le même compteur a peut-être déjà un consentement
-        // signé par le même signataire (askData.signer = signataire de CETTE demande) :
-        // on le réutilise au lieu de rester bloqué.
-        const reuse = await findReusableConsent(rec.site_id, pdl, askData.signer);
-        if (reuse) {
-          const reuseOrderId = await placeSwitchgridOrder(reuse.consentId, reuse.pdl);
-          if (reuseOrderId) {
-            await sbUpdate("switchgrid_requests", `id=eq.${requestId}`, {
-              order_id: reuseOrderId,
-              ask_id: reuse.ask_id,
-              status: "ordering"
-            });
-            return jsonResp({
-              status: "ordering"
-            });
-          }
-        }
-        return jsonResp({
-          status: "pending",
-          userUrl
-        });
-      }
-      // Consentement signé → poser l'ordre (consentId = id de l'ask).
-      const orderId = await placeSwitchgridOrder(rec.ask_id, pdl);
-      if (!orderId) {
-        await sbUpdate("switchgrid_requests", `id=eq.${requestId}`, {
-          status: "error",
-          error_message: "Échec de la commande Switchgrid."
-        });
-        return jsonResp({
-          status: "error",
-          error_message: "Échec de la commande Switchgrid."
-        });
-      }
-      await sbUpdate("switchgrid_requests", `id=eq.${requestId}`, {
-        order_id: orderId,
-        status: "ordering"
-      });
-      return jsonResp({
-        status: "ordering"
-      });
-    }
-    // ordering : sonder la commande.
-    if (rec.status === "ordering") {
-      const orderResp = await fetch(`${SG_BASE}/integration/enedis/order/${rec.order_id}`, {
-        headers: sgHeaders(testEnv)
-      });
-      const order = await orderResp.json();
-      const requests = order.requests ?? [];
-      // ⚠️ Switchgrid NE renvoie PAS le champ `direction` dans la réponse d'ordre (vérifié en
-      // prod : direction=undefined sur toutes les requêtes). On ne peut donc pas filtrer dessus.
-      // On s'appuie sur l'ORDRE DE SOUMISSION (cf. placeSwitchgridOrder : SOUTIRAGE d'abord,
-      // INJECTION ensuite) → 1er R63/R65 = soutirage, 2e = injection. Fallback sur `direction`
-      // au cas où l'API se mettrait à le renvoyer un jour.
-      const r63all = requests.filter((r)=>r.type === "R63");
-      const r65all = requests.filter((r)=>r.type === "R65");
-      const byDir = (arr, dir, idx)=> arr.find((r)=>r.direction === dir) ?? arr[idx] ?? null;
-      const r63 = byDir(r63all, "SOUTIRAGE", 0);
-      const r65 = byDir(r65all, "SOUTIRAGE", 0);
-      const r63Inj = byDir(r63all, "INJECTION", 1);
-      const r65Inj = byDir(r65all, "INJECTION", 1);
-      const c68 = requests.find((r)=>r.type === "C68_ASYNC");
-      const isPending = (x)=>x && (x.status === "PENDING" || x.status === "QUEUED" || x.status === "NOT_STARTED");
-      const anyPending = [
-        r63,
-        r65,
-        c68
-      ].some(isPending);
-      // Plafond global d'attente. ENEDIS laisse parfois la R63 (courbe de charge
-      // soutirage) coincée en "PENDING" sans jamais la faire ni aboutir ni échouer :
-      // sans garde-fou, on attend indéfiniment et le statut reste "ordering" pour
-      // toujours (updated_at figé), même quand le journalier R65 est DÉJÀ disponible.
-      const reqAgeMs = Date.now() - new Date(rec.created_at).getTime();
-      const WAIT_MS = 30 * 60 * 1000;
-      const r63Ok = r63?.status === "SUCCESS";
-      // R63 considérée "terminée" si SUCCESS, FAILED, ou PENDING depuis trop longtemps
-      // (coincée) → on débloque alors le repli journalier au lieu d'attendre sans fin.
-      const r63Stale = isPending(r63) && reqAgeMs > WAIT_MS;
-      const r63Done = !r63 || r63?.status === "SUCCESS" || r63?.status === "FAILED" || r63Stale;
-      const r65Ok = r65?.status === "SUCCESS";
-      // Construire le meilleur candidat disponible.
-      let candidate = null;
-      let r63Built = null;
-      if (r63Ok) {
-        const lc = await fetchR63Curve(r63, pdl);
-        r63Built = buildProfileV0(lc);
-        if (r63Built.hasAny && r63Built.coverage >= 0.70) {
-          const fillRes = fillMissingDays(r63Built.profile, r63Built.dayHasData);
-          candidate = {
-            source: "loadcurve",
-            coverage: r63Built.coverage,
-            profile: r63Built.profile,
-            note: null,
-            gaps: { missing_days: 366 - r63Built.daysPresent, filled_days: fillRes.filled, unfilled_days: fillRes.unfilled }
-          };
-        }
-      }
-      // Repli journalier R65 (si pas de courbe précise et R63 terminée).
-      // Garde-fou : exiger une couverture journalière suffisante pour écarter un
-      // R65 encore partiel (ENEDIS en cours de remplissage) qui fausserait l'annuel.
-      if (!candidate && r63Done && r65Ok) {
-        const d = await fetchDaily(r65);
-        if (d.daysPresent >= MIN_DAILY_DAYS) {
-          candidate = {
-            source: "daily",
-            coverage: d.daysPresent / 366,
-            profile: d.profile,
-            note: "Courbe de charge indisponible ou partielle chez ENEDIS — données journalières (approximatives) utilisées.",
-            gaps: { missing_days: 366 - d.daysPresent, filled_days: 0, unfilled_days: 366 - d.daysPresent }
-          };
-        }
-      }
-      // Dernier recours : courbe partielle marquée approximative (rien d'autre en attente).
-      if (!candidate && !anyPending && r63Built && r63Built.hasAny) {
-        candidate = {
-          source: "daily",
-          coverage: r63Built.coverage,
-          profile: r63Built.profile,
-          note: "Courbe de charge partielle chez ENEDIS — estimation approximative.",
-          gaps: { missing_days: 366 - r63Built.daysPresent, filled_days: 0, unfilled_days: 366 - r63Built.daysPresent }
-        };
-      }
-      if (candidate) {
-        const total = candidate.profile.reduce((a, b)=>a + b, 0);
-        const oldRows = await sbGet("sites", `id=eq.${rec.site_id}&select=conso_source,conso_coverage`);
-        const oldSite = oldRows[0] ?? null;
-        const overwrite = shouldOverwrite(oldSite, candidate.source, candidate.coverage);
-        const su = {
-          conso_imported_at: new Date().toISOString()
-        };
-        await applyC68(c68, su); // données contractuelles : toujours rafraîchies
-        // Injection (surplus revendu) : best-effort, indépendant du gate d'écrasement
-        // de la conso. Sert à reconstruire la conso brute d'un client déjà producteur.
-        const inj = await buildInjectionProfile(r63Inj, r65Inj, pdl);
-        if (inj) {
-          su.injection_profil = inj.profile;
-          su.injection_coverage = Math.round(inj.coverage * 1000) / 1000;
-          su.injection_annuelle_kwh = Math.round(inj.profile.reduce((a, b)=>a + b, 0) / 100) / 10;
-        }
-        if (overwrite) {
-          su.conso_source = candidate.source;
-          su.conso_profil = candidate.profile;
-          su.conso_coverage = Math.round(candidate.coverage * 1000) / 1000;
-          su.conso_annuelle_kwh = Math.round(total / 100) / 10;
-          su.conso_gaps = candidate.gaps ?? null;
-        }
-        await sbUpdate("sites", `id=eq.${rec.site_id}`, su);
-        // Le C68_ASYNC ET la courbe d'INJECTION sont plus lents que le soutirage (souvent
-        // servi instantanément via consentement réutilisé + cache). Ne PAS figer "done" tant
-        // qu'ils sont en attente, sinon on les rate définitivement. On écrit déjà la conso
-        // (l'utilisateur la voit tout de suite) mais on continue à sonder — l'injection est
-        // ré-écrite à chaque sondage dès qu'elle arrive (best-effort). Plafond 30 min pour ne
-        // pas rester bloqué si l'un ne vient jamais (ex. compteur sans contrat producteur →
-        // injection FAILED, donc plus "pending", on ne l'attend pas inutilement).
-        // (reqAgeMs / WAIT_MS sont définis plus haut dans ce bloc.)
-        const awaitingInj = (isPending(r63Inj) || isPending(r65Inj)) && !inj;
-        if ((isPending(c68) || awaitingInj) && reqAgeMs < WAIT_MS) {
-          return jsonResp({
-            status: "ordering",
-            conso_source: overwrite ? candidate.source : oldSite?.conso_source ?? candidate.source,
-            awaiting: isPending(c68) ? "C68" : "INJECTION"
-          });
-        }
-        await sbUpdate("switchgrid_requests", `id=eq.${requestId}`, {
-          status: "done",
-          error_message: overwrite ? candidate.note ?? null : "Nouvelles données ignorées : les données existantes sont de meilleure qualité."
-        });
-        return jsonResp({
-          status: "done",
-          conso_source: overwrite ? candidate.source : oldSite?.conso_source ?? candidate.source,
-          kept_existing: !overwrite
-        });
-      }
-      // Encore en attente ET sous le plafond → on continue de sonder. Passé le
-      // plafond sans aucune donnée exploitable, on ne boucle pas indéfiniment : on
-      // tombe en erreur explicite plutôt que de rester "ordering" pour toujours.
-      if (anyPending && reqAgeMs < WAIT_MS) return jsonResp({
-        status: "ordering"
-      });
-      // Tout a échoué (ou plafond atteint sans donnée exploitable).
-      const errMsg = r63?.errorMessage ?? r65?.errorMessage ?? requests?.[0]?.errorMessage ?? "Aucune donnée disponible.";
-      await sbUpdate("switchgrid_requests", `id=eq.${requestId}`, {
-        status: "error",
-        error_message: errMsg
-      });
-      return jsonResp({
-        status: "error",
-        error_message: errMsg
-      });
-    }
-    return jsonResp({
-      status: rec.status
-    });
+    return await finalizeRec(rec);
   }
   return jsonResp({
     error: "Method not allowed"
