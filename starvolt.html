@@ -1193,6 +1193,37 @@
     /* Leaflet attribution */
     .leaflet-control-attribution { font-size: 8px !important; background: rgba(0,0,0,.35) !important; color: rgba(255,255,255,.4) !important; }
     .leaflet-control-attribution a { color: rgba(255,255,255,.5) !important; }
+
+    /* =============================================
+       TABLEAUX ADMIN — figer en-tête + 1ʳᵉ colonne
+       (comme « figer les volets » d'Excel)
+       ============================================= */
+    .adm-freeze {
+      overflow: auto;
+      max-height: 74vh;
+      border: 1px solid rgba(255,255,255,.09);
+      border-radius: 12px;
+      background: #0a3944;
+      -webkit-overflow-scrolling: touch;
+    }
+    .adm-freeze > table { border-collapse: separate !important; border-spacing: 0 !important; }
+    /* Ligne d'en-tête figée verticalement */
+    .adm-freeze thead th {
+      position: -webkit-sticky; position: sticky; top: 0; z-index: 2;
+      background: #0d4a58;
+      box-shadow: inset 0 -1px 0 rgba(255,255,255,.12);
+    }
+    /* Première colonne figée horizontalement (identifiant de l'enregistrement) */
+    .adm-freeze .frz-col {
+      position: -webkit-sticky; position: sticky; left: 0; z-index: 1;
+      background: #0a3944;
+      box-shadow: inset -1px 0 0 rgba(255,255,255,.09);
+      max-width: 160px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    /* Coin haut-gauche : au-dessus des deux axes */
+    .adm-freeze thead th.frz-col { z-index: 3; background: #0d4a58; }
   </style>
 </head>
 <body>
@@ -11297,34 +11328,26 @@ function AdminDashboard({ onViewLogs, onImpersonate, onViewFails }) {
         <div style={{textAlign:'center', padding:'22px', color:'rgba(255,255,255,.4)', fontSize:13}}>Aucune donnée</div>
       ) : (
         <div style={{padding:'0 4px 4px'}}>
-          <div style={{overflowX:'auto'}}>
+          <div className="adm-freeze">
             <table style={{width:'100%', borderCollapse:'collapse', fontSize:13}}>
               <thead>
                 <tr style={{textAlign:'left'}}>
-                  <th style={{padding:'8px 10px', fontSize:10, letterSpacing:'.5px', textTransform:'uppercase', color:'rgba(255,255,255,.4)', fontWeight:700}}>Utilisateur</th>
+                  <th className="frz-col" style={{padding:'8px 10px', fontSize:10, letterSpacing:'.5px', textTransform:'uppercase', color:'rgba(255,255,255,.4)', fontWeight:700}}>Utilisateur</th>
                   <th style={{padding:'8px 10px', fontSize:10, letterSpacing:'.5px', textTransform:'uppercase', color:'rgba(255,255,255,.4)', fontWeight:700}}>Dernier clic</th>
                   <th style={{padding:'8px 10px', fontSize:10, letterSpacing:'.5px', textTransform:'uppercase', color:'rgba(255,255,255,.4)', fontWeight:700, textAlign:'right'}}>Clics</th>
                   <th style={{padding:'8px 10px', fontSize:10, letterSpacing:'.5px', textTransform:'uppercase', color:'rgba(255,255,255,.4)', fontWeight:700, textAlign:'center', whiteSpace:'nowrap'}}>Niveau quizz</th>
                   <th style={{padding:'8px 10px', fontSize:10, letterSpacing:'.5px', textTransform:'uppercase', color:'rgba(255,255,255,.4)', fontWeight:700, textAlign:'right', whiteSpace:'nowrap'}} title="Part des questions réussies du premier coup">% 1er coup</th>
                   <th style={{padding:'8px 10px', fontSize:10, letterSpacing:'.5px', textTransform:'uppercase', color:'rgba(255,255,255,.4)', fontWeight:700, textAlign:'right'}}>Tickets</th>
+                  <th style={{padding:'8px 10px', fontSize:10, letterSpacing:'.5px', textTransform:'uppercase', color:'rgba(255,255,255,.4)', fontWeight:700, textAlign:'center', whiteSpace:'nowrap'}}>Debug</th>
                 </tr>
               </thead>
               <tbody>
                 {visible.map((u, i) => (
                   <tr key={u.id} style={{background: i%2 ? 'rgba(255,255,255,.02)' : 'transparent'}}>
-                    <td style={{padding:'9px 10px', borderTop:'1px solid rgba(255,255,255,.06)'}}>
-                      <span style={{display:'flex', alignItems:'center', gap:8}}>
-                        <span onClick={() => onViewLogs && onViewLogs(u)} style={linkCell}
-                              title="Voir les logs de cet utilisateur">
-                          {u.prenom || u.email || '—'}
-                        </span>
-                        <button onClick={(e) => { e.stopPropagation(); onImpersonate && onImpersonate(u); }}
-                                title="Se connecter en tant que cet utilisateur (mode debug)"
-                                style={{background:'none', border:'none', cursor:'pointer', padding:'2px 4px', fontSize:14, lineHeight:1, opacity:.55, filter:'grayscale(1)'}}
-                                onMouseEnter={e=>{e.currentTarget.style.opacity='1';e.currentTarget.style.filter='none';}}
-                                onMouseLeave={e=>{e.currentTarget.style.opacity='.55';e.currentTarget.style.filter='grayscale(1)';}}>
-                          👁
-                        </button>
+                    <td className="frz-col" style={{padding:'9px 10px', borderTop:'1px solid rgba(255,255,255,.06)', whiteSpace:'nowrap'}}>
+                      <span onClick={() => onViewLogs && onViewLogs(u)} style={linkCell}
+                            title="Voir les logs de cet utilisateur">
+                        {u.prenom || u.email || '—'}
                       </span>
                     </td>
                     <td style={{padding:'9px 10px', borderTop:'1px solid rgba(255,255,255,.06)', color:'rgba(255,255,255,.7)', whiteSpace:'nowrap'}}>
@@ -11353,6 +11376,15 @@ function AdminDashboard({ onViewLogs, onImpersonate, onViewFails }) {
                       ) : (
                         <span style={{color:'rgba(255,255,255,.25)'}}>0</span>
                       )}
+                    </td>
+                    <td style={{padding:'9px 10px', borderTop:'1px solid rgba(255,255,255,.06)', textAlign:'center'}}>
+                      <button onClick={(e) => { e.stopPropagation(); onImpersonate && onImpersonate(u); }}
+                              title="Se connecter en tant que cet utilisateur (mode debug)"
+                              style={{background:'none', border:'none', cursor:'pointer', padding:'2px 4px', fontSize:14, lineHeight:1, opacity:.55, filter:'grayscale(1)'}}
+                              onMouseEnter={e=>{e.currentTarget.style.opacity='1';e.currentTarget.style.filter='none';}}
+                              onMouseLeave={e=>{e.currentTarget.style.opacity='.55';e.currentTarget.style.filter='grayscale(1)';}}>
+                        👁
+                      </button>
                     </td>
                   </tr>
                 ))}
@@ -11660,7 +11692,7 @@ function AdminFeedbackScreen({ onBack }) {
     }}>{label}</button>
   );
 
-  const cols = ['', 'Date & heure', 'Utilisateur', 'Page', 'Commentaire', 'Pièce jointe'];
+  const cols = ['Utilisateur', '', 'Date & heure', 'Page', 'Commentaire', 'Pièce jointe'];
 
   return (
     <>
@@ -11680,28 +11712,29 @@ function AdminFeedbackScreen({ onBack }) {
         shown.length === 0 ? (
           <div style={{textAlign:'center',color:'rgba(255,255,255,.4)',padding:40,fontSize:14}}>Aucun retour pour le moment.</div>
         ) : (
-        <div style={{overflowX:'auto', padding:'0 16px'}}>
+        <div style={{padding:'0 16px'}}>
+        <div className="adm-freeze">
           <table style={{width:'100%', minWidth:900, borderCollapse:'collapse', fontSize:13}}>
             <thead>
               <tr>
-                {cols.map(c => (
-                  <th key={c} style={{textAlign:'left', padding:'8px 10px', color:'rgba(255,255,255,.4)', fontWeight:600, borderBottom:'1px solid rgba(255,255,255,.08)', whiteSpace:'nowrap'}}>{c}</th>
+                {cols.map((c, ci) => (
+                  <th key={ci} className={ci===0 ? 'frz-col' : undefined} style={{textAlign:'left', padding:'8px 10px', color:'rgba(255,255,255,.4)', fontWeight:600, borderBottom:'1px solid rgba(255,255,255,.08)', whiteSpace:'nowrap'}}>{c}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
               {shown.map(r => (
                 <tr key={r.id} style={{borderBottom:'1px solid rgba(255,255,255,.06)', verticalAlign:'top'}}>
+                  <td className="frz-col" style={{padding:'12px 10px', whiteSpace:'nowrap'}}>
+                    <div style={{fontWeight:600, color:'#fff'}}>{userName(r)}</div>
+                    {r.email && <div style={{color:'rgba(125,217,64,.7)', fontSize:11}}>{r.email}</div>}
+                  </td>
                   <td style={{padding:'12px 8px', width:34}}>
                     <span title={r.sentiment==='up'?'Positif':'Négatif'} style={{display:'inline-flex',width:26,height:26,borderRadius:7,alignItems:'center',justifyContent:'center',background:r.sentiment==='up'?'rgba(125,217,64,.14)':'rgba(255,138,106,.14)',border:`1px solid ${r.sentiment==='up'?'rgba(125,217,64,.4)':'rgba(255,138,106,.4)'}`}}>
                       <ThumbIcon up={r.sentiment==='up'} size={15} color={r.sentiment==='up'?'#7dd940':'#ff8a6a'}/>
                     </span>
                   </td>
                   <td style={{padding:'12px 10px', whiteSpace:'nowrap', color:'rgba(255,255,255,.6)'}}>{fmtDate(r.created_at)}</td>
-                  <td style={{padding:'12px 10px', whiteSpace:'nowrap'}}>
-                    <div style={{fontWeight:600, color:'#fff'}}>{userName(r)}</div>
-                    {r.email && <div style={{color:'rgba(125,217,64,.7)', fontSize:11}}>{r.email}</div>}
-                  </td>
                   <td style={{padding:'12px 10px', color:'rgba(255,255,255,.8)', minWidth:150, maxWidth:260}}>
                     <div style={{whiteSpace:'nowrap'}}>{r.page_label || r.screen || '—'}</div>
                     {r.context_detail && <div style={{marginTop:3,fontSize:11.5,color:'rgba(255,179,64,.85)',lineHeight:1.4}}>{r.context_detail}</div>}
@@ -11723,6 +11756,7 @@ function AdminFeedbackScreen({ onBack }) {
               ))}
             </tbody>
           </table>
+        </div>
         </div>
         )
       )}
@@ -12241,19 +12275,19 @@ function AdminAICostsScreen({ onBack }) {
             {rows.length === 0 ? (
               <div style={{textAlign:'center', color:'rgba(255,255,255,.4)', fontSize:14, padding:'24px 0'}}>Aucun appel IA enregistré pour le moment.</div>
             ) : (
-              <div style={{overflowX:'auto'}}>
+              <div className="adm-freeze">
                 <table style={{width:'100%', minWidth:560, borderCollapse:'collapse', fontSize:13}}>
                   <thead>
                     <tr>
-                      {['Fonctionnalité','Appels','Tokens','Coût €','Dernier appel'].map(c => (
-                        <th key={c} style={{textAlign:'left', padding:'8px 10px', color:'rgba(255,255,255,.4)', fontWeight:600, borderBottom:'1px solid rgba(255,255,255,.08)', whiteSpace:'nowrap'}}>{c}</th>
+                      {['Fonctionnalité','Appels','Tokens','Coût €','Dernier appel'].map((c, ci) => (
+                        <th key={c} className={ci===0 ? 'frz-col' : undefined} style={{textAlign:'left', padding:'8px 10px', color:'rgba(255,255,255,.4)', fontWeight:600, borderBottom:'1px solid rgba(255,255,255,.08)', whiteSpace:'nowrap'}}>{c}</th>
                       ))}
                     </tr>
                   </thead>
                   <tbody>
                     {rows.map(r => (
                       <tr key={r.feature} style={{borderBottom:'1px solid rgba(255,255,255,.06)'}}>
-                        <td style={{padding:'12px 10px', color:'#fff', fontWeight:600}}>{FEAT_LABEL[r.feature] || r.feature}</td>
+                        <td className="frz-col" style={{padding:'12px 10px', color:'#fff', fontWeight:600, whiteSpace:'nowrap'}}>{FEAT_LABEL[r.feature] || r.feature}</td>
                         <td style={{padding:'12px 10px', color:'rgba(255,255,255,.7)'}}>{Number(r.calls).toLocaleString('fr-FR')}</td>
                         <td style={{padding:'12px 10px', color:'rgba(255,255,255,.7)', whiteSpace:'nowrap'}}>{(Number(r.input_tokens)+Number(r.output_tokens)).toLocaleString('fr-FR')}</td>
                         <td style={{padding:'12px 10px', color:'#ffb340', fontWeight:700, whiteSpace:'nowrap'}}>{fmtEur(r.cost_usd).toFixed(4)} €</td>
@@ -13962,7 +13996,7 @@ function AdminUsersScreen({ onBack, onViewLogs, isSuperadmin }) {
 
   const fmtDate = (d) => d ? new Date(d).toLocaleDateString('fr-FR') : '—';
 
-  const cols = ['', 'Prénom Nom', 'Email', 'Inscription', 'Dernière co.', 'Connexions', 'Activité', 'Rôle', 'Site'];
+  const cols = ['Prénom Nom', 'Email', 'Inscription', 'Dernière co.', 'Connexions', 'Activité', 'Rôle', 'Site', ''];
 
   // Users sorted alphabetically for target dropdown
   const sortedUsers = [...users].sort((a,b) => {
@@ -13980,12 +14014,13 @@ function AdminUsersScreen({ onBack, onViewLogs, isSuperadmin }) {
       </div>
 
       {loading ? <div style={{textAlign:'center',padding:40}}><StarSpinner size={34}/></div> : (
-        <div style={{overflowX:'auto', padding:'0 16px'}}>
+        <div style={{padding:'0 16px'}}>
+        <div className="adm-freeze">
           <table style={{width:'100%', minWidth:960, borderCollapse:'collapse', fontSize:13}}>
             <thead>
               <tr>
-                {cols.map(c => (
-                  <th key={c} style={{
+                {cols.map((c, ci) => (
+                  <th key={ci} className={ci===0 ? 'frz-col' : undefined} style={{
                     textAlign:'left', padding:'8px 10px',
                     color:'rgba(255,255,255,.4)', fontWeight:600,
                     borderBottom:'1px solid rgba(255,255,255,.08)',
@@ -13997,30 +14032,7 @@ function AdminUsersScreen({ onBack, onViewLogs, isSuperadmin }) {
             <tbody>
               {users.map((u) => (
                 <tr key={u.id} style={{borderBottom:'1px solid rgba(255,255,255,.06)'}}>
-                  <td style={{padding:'10px 8px', width:40}}>
-                    {u.role === 'superadmin' && !isSuperadmin ? (
-                      <span title="Compte super admin protégé" style={{fontSize:14, opacity:.5}}>🔒</span>
-                    ) : confirmDel === u.id ? (
-                      <div style={{display:'flex',gap:5,alignItems:'center',whiteSpace:'nowrap'}}>
-                        <span style={{fontSize:11,color:'#fff',fontWeight:600}}>Confirmer ?</span>
-                        <button onClick={() => handleDelete(u.id)} style={{
-                          background:'#ef4444', border:'none', borderRadius:5,
-                          color:'#fff', fontSize:11, padding:'3px 8px', cursor:'pointer'
-                        }}>Oui</button>
-                        <button onClick={() => setConfirmDel(null)} style={{
-                          background:'rgba(255,255,255,.15)', border:'none', borderRadius:5,
-                          color:'#fff', fontSize:11, padding:'3px 8px', cursor:'pointer'
-                        }}>Non</button>
-                      </div>
-                    ) : (
-                      <button onClick={() => setConfirmDel(u.id)} style={{
-                        background:'transparent', border:'none',
-                        color:'#fff', fontSize:16, padding:'2px 4px',
-                        cursor:'pointer', lineHeight:1, opacity:.7
-                      }}>🗑</button>
-                    )}
-                  </td>
-                  <td style={{padding:'10px 10px', whiteSpace:'nowrap'}}>
+                  <td className="frz-col" style={{padding:'10px 10px', whiteSpace:'nowrap'}}>
                     <span style={{fontWeight:600, color:'#fff'}}>{u.prenom || '—'} {u.nom || ''}</span>
                     {u.pseudo && <span style={{color:'rgba(125,217,64,.9)', fontSize:11}}> ({u.pseudo})</span>}
                   </td>
@@ -14067,10 +14079,34 @@ function AdminUsersScreen({ onBack, onViewLogs, isSuperadmin }) {
                       whiteSpace:'nowrap'
                     }}>📋 Copier un site</button>
                   </td>
+                  <td style={{padding:'10px 8px', textAlign:'right'}}>
+                    {u.role === 'superadmin' && !isSuperadmin ? (
+                      <span title="Compte super admin protégé" style={{fontSize:14, opacity:.5}}>🔒</span>
+                    ) : confirmDel === u.id ? (
+                      <div style={{display:'flex',gap:5,alignItems:'center',whiteSpace:'nowrap',justifyContent:'flex-end'}}>
+                        <span style={{fontSize:11,color:'#fff',fontWeight:600}}>Confirmer ?</span>
+                        <button onClick={() => handleDelete(u.id)} style={{
+                          background:'#ef4444', border:'none', borderRadius:5,
+                          color:'#fff', fontSize:11, padding:'3px 8px', cursor:'pointer'
+                        }}>Oui</button>
+                        <button onClick={() => setConfirmDel(null)} style={{
+                          background:'rgba(255,255,255,.15)', border:'none', borderRadius:5,
+                          color:'#fff', fontSize:11, padding:'3px 8px', cursor:'pointer'
+                        }}>Non</button>
+                      </div>
+                    ) : (
+                      <button title="Supprimer cet utilisateur" onClick={() => setConfirmDel(u.id)} style={{
+                        background:'transparent', border:'none',
+                        color:'rgba(248,113,113,.85)', fontSize:16, padding:'2px 4px',
+                        cursor:'pointer', lineHeight:1, opacity:.85
+                      }}>🗑</button>
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
+        </div>
         </div>
       )}
     </div>
@@ -14556,16 +14592,17 @@ function AdminSitesScreen({ onBack, onEdit }) {
       </div>
 
       {!rows ? <div style={{textAlign:'center',padding:40}}><StarSpinner size={34}/></div> : (
-        <div style={{overflowX:'auto', padding:'0 16px'}}>
+        <div style={{padding:'0 16px'}}>
+        <div className="adm-freeze">
           <table style={{width:'100%', minWidth:840, borderCollapse:'collapse', fontSize:13}}>
-            <thead><tr>{cols.map((c,i) => <th key={i} style={th}>{c}</th>)}</tr></thead>
+            <thead><tr>{cols.map((c,i) => <th key={i} className={i===0 ? 'frz-col' : undefined} style={th}>{c}</th>)}</tr></thead>
             <tbody>
               {rows.map((r) => (
                 <tr key={r.site_id} onClick={()=>onEdit(r)}
                   style={{cursor:'pointer', transition:'background .12s'}}
                   onMouseEnter={e=>e.currentTarget.style.background='rgba(255,255,255,.04)'}
                   onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
-                  <td style={{...td, fontWeight:600, color:'white'}}>{`${r.owner_prenom||''} ${r.owner_nom||''}`.trim() || '—'}</td>
+                  <td className="frz-col" style={{...td, fontWeight:600, color:'white'}}>{`${r.owner_prenom||''} ${r.owner_nom||''}`.trim() || '—'}</td>
                   <td style={{...td, color:'rgba(255,255,255,.85)'}}>{r.site_nom || '—'}</td>
                   <td style={{...td, color:'rgba(255,255,255,.85)'}}>{r.conso_annuelle_kwh>0 ? `${(r.conso_annuelle_kwh/1000).toFixed(1)} MWh` : '—'}</td>
                   <td style={td}><OuiNon value={r.flex_chauffage==null?null:siteChauffageElec(r.flex_chauffage)}/></td>
@@ -14597,6 +14634,7 @@ function AdminSitesScreen({ onBack, onEdit }) {
               {rows.length===0 && <tr><td colSpan={cols.length} style={{...td, textAlign:'center', color:'rgba(255,255,255,.4)'}}>Aucun site</td></tr>}
             </tbody>
           </table>
+        </div>
         </div>
       )}
     </div>
