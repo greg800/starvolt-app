@@ -1094,8 +1094,17 @@ Deno.serve(async (req)=>{
         r65,
         c68
       ].some(isPending);
+      // Plafond global d'attente. ENEDIS laisse parfois la R63 (courbe de charge
+      // soutirage) coincée en "PENDING" sans jamais la faire ni aboutir ni échouer :
+      // sans garde-fou, on attend indéfiniment et le statut reste "ordering" pour
+      // toujours (updated_at figé), même quand le journalier R65 est DÉJÀ disponible.
+      const reqAgeMs = Date.now() - new Date(rec.created_at).getTime();
+      const WAIT_MS = 30 * 60 * 1000;
       const r63Ok = r63?.status === "SUCCESS";
-      const r63Done = !r63 || r63?.status === "SUCCESS" || r63?.status === "FAILED";
+      // R63 considérée "terminée" si SUCCESS, FAILED, ou PENDING depuis trop longtemps
+      // (coincée) → on débloque alors le repli journalier au lieu d'attendre sans fin.
+      const r63Stale = isPending(r63) && reqAgeMs > WAIT_MS;
+      const r63Done = !r63 || r63?.status === "SUCCESS" || r63?.status === "FAILED" || r63Stale;
       const r65Ok = r65?.status === "SUCCESS";
       // Construire le meilleur candidat disponible.
       let candidate = null;
@@ -1171,8 +1180,7 @@ Deno.serve(async (req)=>{
         // ré-écrite à chaque sondage dès qu'elle arrive (best-effort). Plafond 30 min pour ne
         // pas rester bloqué si l'un ne vient jamais (ex. compteur sans contrat producteur →
         // injection FAILED, donc plus "pending", on ne l'attend pas inutilement).
-        const reqAgeMs = Date.now() - new Date(rec.created_at).getTime();
-        const WAIT_MS = 30 * 60 * 1000;
+        // (reqAgeMs / WAIT_MS sont définis plus haut dans ce bloc.)
         const awaitingInj = (isPending(r63Inj) || isPending(r65Inj)) && !inj;
         if ((isPending(c68) || awaitingInj) && reqAgeMs < WAIT_MS) {
           return jsonResp({
@@ -1191,10 +1199,13 @@ Deno.serve(async (req)=>{
           kept_existing: !overwrite
         });
       }
-      if (anyPending) return jsonResp({
+      // Encore en attente ET sous le plafond → on continue de sonder. Passé le
+      // plafond sans aucune donnée exploitable, on ne boucle pas indéfiniment : on
+      // tombe en erreur explicite plutôt que de rester "ordering" pour toujours.
+      if (anyPending && reqAgeMs < WAIT_MS) return jsonResp({
         status: "ordering"
       });
-      // Tout a échoué.
+      // Tout a échoué (ou plafond atteint sans donnée exploitable).
       const errMsg = r63?.errorMessage ?? r65?.errorMessage ?? requests?.[0]?.errorMessage ?? "Aucune donnée disponible.";
       await sbUpdate("switchgrid_requests", `id=eq.${requestId}`, {
         status: "error",
