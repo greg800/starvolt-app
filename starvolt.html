@@ -6825,10 +6825,18 @@ function SimulationsScreen({ onACC, onBox, onSolar, onOptimisation, onDiyBox, on
     });
     if (user?.id) {
       const activeId = localStorage.getItem('starvolt_active_site_id');
+      const cols = 'flex_type_logement,flex_statut,box_comwatt_existante,flex_chauffage,flex_ecs,pv_existant_kwc,batterie_existante_kwh';
       const q = activeId
-        ? sb.from('sites').select('flex_type_logement,flex_statut,box_comwatt_existante').eq('id', activeId).maybeSingle()
-        : sb.from('sites').select('flex_type_logement,flex_statut,box_comwatt_existante').eq('user_id', user.id).order('created_at').limit(1).maybeSingle();
-      q.then(({ data }) => { if (data) setSiteProfile({ type_logement: data.flex_type_logement, statut: data.flex_statut, hasBox: !!data.box_comwatt_existante }); });
+        ? sb.from('sites').select(cols).eq('id', activeId).maybeSingle()
+        : sb.from('sites').select(cols).eq('user_id', user.id).order('created_at').limit(1).maybeSingle();
+      q.then(({ data }) => { if (data) setSiteProfile({
+        type_logement: data.flex_type_logement,
+        statut: data.flex_statut,
+        hasBox: !!data.box_comwatt_existante,
+        hasChauffElec: siteChauffageElec(data.flex_chauffage) || data.flex_ecs === 'elec',
+        hasSolaire: (parseFloat(data.pv_existant_kwc) || 0) > 0,
+        hasBatterie: (parseFloat(data.batterie_existante_kwh) || 0) > 0,
+      }); });
     }
   }, []);
 
@@ -6866,11 +6874,19 @@ function SimulationsScreen({ onACC, onBox, onSolar, onOptimisation, onDiyBox, on
   // ── Filtrage des offres ───────────────────────
   const offresFiltrees = React.useMemo(() => offres.filter(o => {
     if (!offerAllowed(o)) return false; // permission de rôle (zone "offers")
-    // Flexibilité seule : réservée aux clients ayant DÉCLARÉ une box Comwatt
-    // (box_comwatt_existante === true). Masquée sinon (y compris si non renseigné).
-    // Tant que le profil du site n'est pas chargé (siteProfile null) on ne masque pas
-    // (évite un flash / masquage à tort au chargement).
-    if ((o.types_offre || []).includes('flex_seule') && siteProfile && !siteProfile.hasBox) return false;
+    // Préalables techniques (paramétrés par offre) : le site doit remplir TOUTES
+    // les conditions cochées. Tant que le profil du site n'est pas chargé
+    // (siteProfile null) on ne masque pas (évite un flash / masquage à tort au chargement).
+    const prealables = o.prealables_techniques || [];
+    if (prealables.length > 0 && siteProfile) {
+      const meets = {
+        box:            siteProfile.hasBox,
+        chauffage_elec: siteProfile.hasChauffElec,
+        solaire:        siteProfile.hasSolaire,
+        batterie:       siteProfile.hasBatterie,
+      };
+      if (prealables.some(p => !meets[p])) return false;
+    }
     if (delaiFilter  != null && o.delai_min_jours    != null && o.delai_min_jours    > delaiFilter)  return false;
     if (investFilter != null && o.investissement_min != null && o.investissement_min > investFilter) return false;
     if (reductFilter != null && o.reduction_pct      != null && o.reduction_pct      < reductFilter) return false;
@@ -13079,6 +13095,7 @@ function AdminOffreEditScreen({ offre, onSave, onDelete, onBack }) {
     duree_engagement:    offre?.duree_engagement    ?? 0,
     reversibilite:       offre?.reversibilite       || 'totalement_reversible',
     public_cibles:       offre?.public_cibles       || [],
+    prealables_techniques: offre?.prealables_techniques || [],
   });
 
   const PICTOS_PRESET = [
@@ -13118,6 +13135,22 @@ function AdminOffreEditScreen({ offre, onSave, onDelete, onBack }) {
     }));
   };
 
+  const PREALABLES_OPTIONS = [
+    { value: 'box',            label: 'Avoir une box Comwatt', icon: '📦' },
+    { value: 'chauffage_elec', label: 'Avoir un chauffage électrique et/ou un chauffe-eau électrique', icon: '🔥' },
+    { value: 'solaire',        label: 'Avoir du solaire', icon: '☀️' },
+    { value: 'batterie',       label: 'Avoir une batterie', icon: '🔋' },
+  ];
+
+  const togglePrealable = (val) => {
+    setForm(f => ({
+      ...f,
+      prealables_techniques: f.prealables_techniques.includes(val)
+        ? f.prealables_techniques.filter(t => t !== val)
+        : [...f.prealables_techniques, val],
+    }));
+  };
+
   const handleSave = async () => {
     if (!form.titre.trim()) { setErr('Le titre est obligatoire.'); return; }
     setSaving(true); setErr('');
@@ -13132,6 +13165,7 @@ function AdminOffreEditScreen({ offre, onSave, onDelete, onBack }) {
       duree_engagement:   Number(form.duree_engagement),
       reversibilite:      form.reversibilite,
       public_cibles:      form.public_cibles,
+      prealables_techniques: form.prealables_techniques,
       updated_at:         new Date().toISOString(),
     };
     let error;
@@ -13240,6 +13274,30 @@ function AdminOffreEditScreen({ offre, onSave, onDelete, onBack }) {
               </div>
               <span style={{fontSize:20,lineHeight:1}}>{t.icon}</span>
               <span style={{fontSize:13,color: form.public_cibles.includes(t.value) ? 'white' : 'rgba(255,255,255,.65)'}}>{t.label}</span>
+            </div>
+          ))}
+        </div>
+
+        <div className="inp-group">
+          <label className="inp-label" style={{marginBottom:4}}>Préalable technique pour accéder à cette offre <span style={{color:'rgba(255,255,255,.4)',fontWeight:400}}>(multi-sélection)</span></label>
+          <div style={{fontSize:11,color:'rgba(255,255,255,.4)',marginBottom:10}}>Conditions techniques à remplir pour bénéficier de l'offre. Toutes les cases cochées doivent être satisfaites. Si aucune case n'est cochée, l'offre n'est soumise à aucun préalable technique.</div>
+          {PREALABLES_OPTIONS.map(t => (
+            <div key={t.value} onClick={() => togglePrealable(t.value)} style={{
+              display:'flex',alignItems:'center',gap:12,padding:'11px 14px',marginBottom:6,
+              borderRadius:10,cursor:'pointer',border:'1px solid',
+              borderColor: form.prealables_techniques.includes(t.value) ? 'var(--green)' : 'rgba(255,255,255,.12)',
+              background: form.prealables_techniques.includes(t.value) ? 'rgba(125,217,64,.1)' : 'rgba(255,255,255,.04)',
+            }}>
+              <div style={{
+                width:18,height:18,borderRadius:4,flexShrink:0,border:'1.5px solid',
+                borderColor: form.prealables_techniques.includes(t.value) ? 'var(--green)' : 'rgba(255,255,255,.3)',
+                background: form.prealables_techniques.includes(t.value) ? 'var(--green)' : 'transparent',
+                display:'flex',alignItems:'center',justifyContent:'center',
+              }}>
+                {form.prealables_techniques.includes(t.value) && <span style={{color:'#0a1a04',fontSize:11,fontWeight:900}}>✓</span>}
+              </div>
+              <span style={{fontSize:20,lineHeight:1}}>{t.icon}</span>
+              <span style={{fontSize:13,color: form.prealables_techniques.includes(t.value) ? 'white' : 'rgba(255,255,255,.65)'}}>{t.label}</span>
             </div>
           ))}
         </div>
