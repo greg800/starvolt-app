@@ -7140,9 +7140,28 @@ function SimulationsScreen({ onACC, onBox, onSolar, onOptimisation, onDiyBox, on
             );
           })}
           {offresFiltrees.length === 0 && (
-            <div style={{textAlign:'center',padding:'28px 0',color:'rgba(255,255,255,.4)',fontSize:14}}>
-              Aucune offre ne correspond à ces critères.<br/>
-              <span style={{fontSize:12,color:'rgba(255,255,255,.25)'}}>Ajustez les filtres.</span>
+            <div style={{padding:'22px 18px',background:'rgba(255,255,255,.06)',border:'1px solid rgba(255,255,255,.12)',borderRadius:16,display:'flex',flexDirection:'column',gap:14}}>
+              <div style={{display:'flex',alignItems:'flex-start',gap:12}}>
+                <span style={{flexShrink:0,color:'#7dd940',marginTop:1}}>
+                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+                </span>
+                <span style={{fontSize:14,lineHeight:1.5,color:'rgba(255,255,255,.85)'}}>Désolé, avec votre installation actuelle, <strong>Mon Énergie by CA</strong> n'a pas encore d'offre à vous proposer.</span>
+              </div>
+              <div style={{display:'flex',alignItems:'flex-start',gap:12}}>
+                <span style={{flexShrink:0,color:'#7dd940',marginTop:1}}>
+                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+                </span>
+                <span style={{fontSize:14,lineHeight:1.5,color:'rgba(255,255,255,.85)'}}>Nous vous contacterons dès qu'une offre adaptée sera disponible.</span>
+              </div>
+              <div style={{display:'flex',alignItems:'flex-start',gap:12}}>
+                <span style={{flexShrink:0,color:'#7dd940',marginTop:1}}>
+                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 18h6"/><path d="M10 22h4"/><path d="M15.09 14c.18-.98.65-1.74 1.41-2.5A4.65 4.65 0 0 0 18 8 6 6 0 0 0 6 8c0 1 .23 2.23 1.5 3.5A4.61 4.61 0 0 1 8.91 14"/></svg>
+                </span>
+                <span style={{fontSize:14,lineHeight:1.5,color:'rgba(255,255,255,.85)'}}>En attendant, on vous propose de tester vos connaissances en cliquant sur le bouton « Comprendre » ci-dessous.</span>
+              </div>
+              {onComprendre && (
+                <button className="btn btn-primary" style={{marginTop:4,fontSize:15,alignSelf:'center',padding:'11px 28px'}} onClick={onComprendre}>💡 Comprendre</button>
+              )}
             </div>
           )}
         </div>
