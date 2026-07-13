@@ -29,6 +29,13 @@ const SECURITY_HEADERS = {
 };
 
 http.createServer((req, res) => {
+  // Serveur de fichiers statiques en lecture seule : seules GET et HEAD ont un sens.
+  // Toute autre méthode (POST/PUT/DELETE…) est refusée (405) — réduction de surface.
+  if (req.method !== 'GET' && req.method !== 'HEAD') {
+    res.writeHead(405, { ...SECURITY_HEADERS, 'Allow': 'GET, HEAD' });
+    return res.end('Method Not Allowed');
+  }
+
   const reqPath = req.url.split('?')[0];
 
   // / et /app → servir starvolt.html (app.starvolt.fr est la racine)

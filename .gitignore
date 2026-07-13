@@ -3,3 +3,7 @@ dist
 .env
 .env.local
 .DS_Store
+
+# Config locale Claude Code : contient des secrets (PAT Supabase, clés API)
+# dans l'allowlist des permissions → ne JAMAIS committer.
+.claude/settings.local.json
