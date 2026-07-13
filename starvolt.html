@@ -12386,6 +12386,22 @@ const secTriggerInfo = (c) =>
   : c?.trigger_type === 'code' ? { icon:'💻', label:'Audit code (Claude Code)' }
   : { icon:'👤', label:'Manuel (base)' };
 
+// Garde-fou local : mémorise dans le navigateur les audits déjà lus (par id),
+// pour ne JAMAIS réafficher le popup une fois « J'ai compris » cliqué, même si
+// la synchro serveur (mark_security_check_seen) échoue. On borne à 50 ids.
+const SEC_SEEN_KEY = 'sv_sec_seen_ids';
+const secSeenIds = () => {
+  try { const v = JSON.parse(localStorage.getItem(SEC_SEEN_KEY) || '[]'); return Array.isArray(v) ? v : []; }
+  catch { return []; }
+};
+const secMarkSeenLocal = (id) => {
+  if (!id) return;
+  try {
+    const s = secSeenIds();
+    if (!s.includes(id)) { s.push(id); localStorage.setItem(SEC_SEEN_KEY, JSON.stringify(s.slice(-50))); }
+  } catch {}
+};
+
 // Popup rapport complet (réutilisé par l'écran admin ET par le login admin)
 function SecReportPopup({ check, title, onClose }) {
   if (!check) return null;
@@ -16127,7 +16143,8 @@ function App() {
     if (secCheckedRef.current === user.id) return;
     secCheckedRef.current = user.id;
     sb.rpc('get_unseen_security_check').then(({ data }) => {
-      if (data && data.id) setSecReport(data);
+      // Ne pas réafficher un audit déjà lu localement (garde-fou si la synchro serveur échoue).
+      if (data && data.id && !secSeenIds().includes(data.id)) setSecReport(data);
     });
     // Rappel : l'audit du CODE (Claude Code) n'a pas tourné depuis > 1 mois ?
     sb.rpc('get_code_audit_status').then(({ data }) => {
@@ -16136,7 +16153,10 @@ function App() {
   }, [isAdmin, user?.id, imperso]);
 
   const dismissSecReport = useCallback(() => {
-    if (secReport?.id) sb.rpc('mark_security_check_seen', { p_id: secReport.id });
+    if (secReport?.id) {
+      secMarkSeenLocal(secReport.id);                                   // garde-fou local immédiat
+      sb.rpc('mark_security_check_seen', { p_id: secReport.id });       // synchro serveur (best effort)
+    }
     setSecReport(null);
   }, [secReport]);
 
