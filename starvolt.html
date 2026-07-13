@@ -6881,6 +6881,7 @@ function SimulationsScreen({ onACC, onBox, onSolar, onOptimisation, onDiyBox, on
     if (prealables.length > 0 && siteProfile) {
       const meets = {
         box:            siteProfile.hasBox,
+        no_box:         !siteProfile.hasBox,
         chauffage_elec: siteProfile.hasChauffElec,
         solaire:        siteProfile.hasSolaire,
         batterie:       siteProfile.hasBatterie,
@@ -13137,6 +13138,7 @@ function AdminOffreEditScreen({ offre, onSave, onDelete, onBack }) {
 
   const PREALABLES_OPTIONS = [
     { value: 'box',            label: 'Avoir une box Comwatt', icon: '📦' },
+    { value: 'no_box',         label: 'Ne pas avoir de box Comwatt', icon: '🚫' },
     { value: 'chauffage_elec', label: 'Avoir un chauffage électrique et/ou un chauffe-eau électrique', icon: '🔥' },
     { value: 'solaire',        label: 'Avoir du solaire', icon: '☀️' },
     { value: 'batterie',       label: 'Avoir une batterie', icon: '🔋' },
