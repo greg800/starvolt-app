@@ -15066,8 +15066,8 @@ function HomeChoiceScreen({ profile, user, onComprendre, onAction, can = () => t
           </div>
         )}
       </button>}
-      {can('menus','passer_action') && <button onClick={onAction} style={{flex:1,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',background:'rgba(125,217,64,.10)',border:'none',cursor:'pointer',padding:'clamp(14px,3.2vh,40px) 24px',gap:'clamp(7px,1.3vh,14px)',textAlign:'center',width:'100%',minHeight:0,overflow:'hidden'}}>
-        <div style={{width:'clamp(40px,8vw,56px)',height:'clamp(40px,8vw,56px)',flexShrink:0}}>
+      {can('menus','passer_action') && <button onClick={onAction} style={{flex:1,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',backgroundImage:'linear-gradient(180deg, rgba(10,120,110,.42) 0%, rgba(13,112,86,.44) 48%, rgba(12,122,74,.52) 100%), url("/action-bg.jpg")',backgroundSize:'cover',backgroundPosition:'right center',backgroundRepeat:'no-repeat',border:'none',cursor:'pointer',padding:'clamp(14px,3.2vh,40px) 24px',gap:'clamp(7px,1.3vh,14px)',textAlign:'center',width:'100%',minHeight:0,overflow:'hidden'}}>
+        <div style={{width:'clamp(40px,8vw,56px)',height:'clamp(40px,8vw,56px)',flexShrink:0,filter:'drop-shadow(0 2px 14px rgba(4,32,20,.5))'}}>
           <svg viewBox="0 0 100 100" fill="none" stroke="white" strokeWidth="6" strokeLinecap="round" strokeLinejoin="round" xmlns="http://www.w3.org/2000/svg">
             {/* trait vertical */}
             <line x1="50" y1="8" x2="50" y2="42"/>
@@ -15075,8 +15075,8 @@ function HomeChoiceScreen({ profile, user, onComprendre, onAction, can = () => t
             <path d="M 28 22 A 30 30 0 1 0 72 22"/>
           </svg>
         </div>
-        <div style={{fontSize:'clamp(23px,6.2vw,32px)',fontWeight:900,color:'white',lineHeight:1.15}}>Passer à l'action<br/>dès maintenant</div>
-        <div style={{fontSize:'clamp(14px,4vw,19.5px)',color:'rgba(255,255,255,.65)',maxWidth:420,lineHeight:1.45}}>Simulez vos économies et choisissez les meilleures solutions pour votre logement</div>
+        <div style={{fontSize:'clamp(23px,6.2vw,32px)',fontWeight:900,color:'white',lineHeight:1.15,textShadow:'0 2px 18px rgba(4,32,20,.6)'}}>Passer à l'action<br/>dès maintenant</div>
+        <div style={{fontSize:'clamp(14px,4vw,19.5px)',color:'rgba(255,255,255,.82)',maxWidth:420,lineHeight:1.45,textShadow:'0 1px 12px rgba(4,32,20,.55)'}}>Simulez vos économies et choisissez les meilleures solutions pour votre logement</div>
         <div style={{marginTop:'clamp(2px,0.6vh,8px)',padding:'clamp(9px,1.5vh,13px) 32px',background:'rgba(255,255,255,.14)',borderRadius:14,fontSize:15,fontWeight:700,color:'white',border:'1.5px solid rgba(255,255,255,.25)'}}>Mon site →</div>
       </button>}
     </div>
