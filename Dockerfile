@@ -4,6 +4,7 @@ WORKDIR /app
 # Copie uniquement les fichiers nécessaires au serveur
 COPY server.js starvolt.html ./
 COPY *.png ./
+COPY *.jpg ./
 COPY *.svg ./
 COPY sw.js manifest.json ./
 
