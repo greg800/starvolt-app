@@ -94,6 +94,108 @@ function fillMissingDays(profile, dayHasData) {
   }
   return { filled, unfilled };
 }
+// ── Analyse des bascules HC/HP (détection du contacteur jour/nuit) ───────────
+// À l'instant exact où le Linky bascule HP→HC, un contacteur asservi enclenche le
+// cumulus : la puissance appelée fait un saut. À la bascule HC→HP, elle rechute.
+// Si ces sauts n'apparaissent pas, c'est que le contacteur n'est pas câblé entre
+// le Linky et l'armoire (ou que le ballon est piloté autrement).
+// On travaille sur la courbe BRUTE (pas 30 min) : le profil horaire stocké écrase
+// justement la marche qu'on cherche à mesurer.
+const PARIS_HM_FMT = new Intl.DateTimeFormat("en-GB", {
+  timeZone: "Europe/Paris",
+  hour: "numeric",
+  minute: "numeric",
+  hour12: false
+});
+function parisHM(ms) {
+  const parts = PARIS_HM_FMT.formatToParts(new Date(ms));
+  let h = 0, mi = 0;
+  for (const x of parts){
+    if (x.type === "hour") h = parseInt(x.value, 10);
+    else if (x.type === "minute") mi = parseInt(x.value, 10);
+  }
+  if (h === 24) h = 0;
+  return h * 60 + mi;
+}
+const HC_STEP_W = 1000; // seuil de variation considéré comme un enclenchement
+function hhmmToMin(s) {
+  const m = String(s ?? "").trim().match(/^(\d{1,2}):(\d{2})$/);
+  if (!m) return null;
+  const v = +m[1] * 60 + +m[2];
+  return v >= 0 && v < 1440 ? v : null;
+}
+// Moyenne des `n` pas juste avant / juste après l'index i. null si un trou.
+function meanSlots(values, from, n) {
+  if (from < 0 || from + n > values.length) return null;
+  let sum = 0;
+  for(let k = 0; k < n; k++){
+    const v = values[from + k];
+    if (v == null || !Number.isFinite(Number(v))) return null;
+    sum += Number(v);
+  }
+  return sum / n;
+}
+// windows : [{debut,fin}] en "HH:MM" (heures creuses). Renvoie null si inexploitable.
+function analyzeHcTransitions(lc, windows) {
+  if (!lc || !Array.isArray(lc.values) || !lc.values.length || !lc.startsAt) return null;
+  const wins = (windows ?? []).map((w)=>({
+      debut: hhmmToMin(w?.debut),
+      fin: hhmmToMin(w?.fin)
+    })).filter((w)=>w.debut != null && w.fin != null);
+  if (!wins.length) return null;
+  const step = periodMs(lc.period);
+  const start = new Date(lc.startsAt).getTime();
+  if (!Number.isFinite(start) || step <= 0 || step > 3600000) return null;
+  const stepMin = step / 60000;
+  // Fenêtre de comparaison : 1 h de part et d'autre de la bascule (le cumulus tire
+  // 1,5-2,5 kW pendant plusieurs heures ; 1 h lisse le bruit sans noyer la marche).
+  const n = Math.max(1, Math.round(60 / stepMin));
+  // Instants de bascule attendus, en minutes locales.
+  const starts = [ ...new Set(wins.map((w)=>w.debut)) ]; // HP→HC : hausse attendue
+  const ends = [ ...new Set(wins.map((w)=>w.fin)) ]; // HC→HP : baisse attendue
+  const acc = {
+    up: { matched: 0, detected: 0, sumDelta: 0 },
+    down: { matched: 0, detected: 0, sumDelta: 0 }
+  };
+  for(let i = 0; i < lc.values.length; i++){
+    const minLocal = parisHM(start + i * step);
+    const isUp = starts.includes(minLocal);
+    const isDown = ends.includes(minLocal);
+    if (!isUp && !isDown) continue;
+    const before = meanSlots(lc.values, i - n, n);
+    const after = meanSlots(lc.values, i, n);
+    if (before == null || after == null) continue; // journée trouée → ignorée
+    const delta = after - before;
+    if (isUp) {
+      acc.up.matched++;
+      if (delta > HC_STEP_W) { acc.up.detected++; acc.up.sumDelta += delta; }
+    }
+    if (isDown) {
+      acc.down.matched++;
+      if (delta < -HC_STEP_W) { acc.down.detected++; acc.down.sumDelta += delta; }
+    }
+  }
+  if (!acc.up.matched && !acc.down.matched) return null; // pas de pas aligné sur la bascule
+  const side = (a)=>({
+      days: a.matched,
+      detected: a.detected,
+      pct: a.matched ? Math.round(a.detected / a.matched * 1000) / 10 : null,
+      avg_delta_w: a.detected ? Math.round(a.sumDelta / a.detected) : null
+    });
+  const up = side(acc.up), down = side(acc.down);
+  const pcts = [ up.pct, down.pct ].filter((p)=>p != null);
+  const best = pcts.length ? Math.max(...pcts) : null;
+  const verdict = best == null ? "unknown" : best >= 50 ? "likely" : best >= 20 ? "partial" : "unlikely";
+  return {
+    computed_at: new Date().toISOString(),
+    step_min: stepMin,
+    threshold_w: HC_STEP_W,
+    windows: wins.map((w)=>`${String(Math.floor(w.debut / 60)).padStart(2, "0")}:${String(w.debut % 60).padStart(2, "0")}-${String(Math.floor(w.fin / 60)).padStart(2, "0")}:${String(w.fin % 60).padStart(2, "0")}`),
+    hp_to_hc: up,
+    hc_to_hp: down,
+    verdict
+  };
+}
 // ── Construction du profil horaire à partir d'une courbe de charge v0 ────────
 // Entrée : { period, startsAt, values:[wattsMoyens|null, ...] } à pas constant.
 // Les valeurs sont en WATTS moyens sur l'intervalle ; Wh = W * durée_h.
@@ -841,8 +943,10 @@ async function finalizeRec(rec) {
       // Construire le meilleur candidat disponible.
       let candidate = null;
       let r63Built = null;
+      let r63Curve = null; // courbe brute conservée pour l'analyse des bascules HC/HP
       if (r63Ok) {
         const lc = await fetchR63Curve(r63, pdl);
+        r63Curve = lc;
         r63Built = buildProfileV0(lc);
         if (r63Built.hasAny && r63Built.coverage >= 0.70) {
           const fillRes = fillMissingDays(r63Built.profile, r63Built.dayHasData);
@@ -882,13 +986,23 @@ async function finalizeRec(rec) {
       }
       if (candidate) {
         const total = candidate.profile.reduce((a, b)=>a + b, 0);
-        const oldRows = await sbGet("sites", `id=eq.${rec.site_id}&select=conso_source,conso_coverage`);
+        const oldRows = await sbGet("sites", `id=eq.${rec.site_id}&select=conso_source,conso_coverage,hc_debut1,hc_fin1,hc_debut2,hc_fin2`);
         const oldSite = oldRows[0] ?? null;
         const overwrite = shouldOverwrite(oldSite, candidate.source, candidate.coverage);
         const su = {
           conso_imported_at: new Date().toISOString()
         };
         await applyC68(c68, su); // données contractuelles : toujours rafraîchies
+        // Bascules HC/HP : recalculées à chaque collecte, sur la courbe brute (pas 30 min).
+        // Plages HC issues du C68 tout juste rafraîchi, sinon celles déjà connues du site.
+        if (r63Curve) {
+          const hcWins = [
+            { debut: su.hc_debut1 ?? oldSite?.hc_debut1, fin: su.hc_fin1 ?? oldSite?.hc_fin1 },
+            { debut: su.hc_debut2 ?? oldSite?.hc_debut2, fin: su.hc_fin2 ?? oldSite?.hc_fin2 }
+          ].filter((w)=>w.debut && w.fin);
+          const hcStats = analyzeHcTransitions(r63Curve, hcWins);
+          if (hcStats) su.hc_transition_stats = hcStats;
+        }
         // Injection (surplus revendu) : best-effort, indépendant du gate d'écrasement
         // de la conso. Sert à reconstruire la conso brute d'un client déjà producteur.
         const inj = await buildInjectionProfile(r63Inj, r65Inj, pdl);

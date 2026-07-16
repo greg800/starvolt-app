@@ -3108,6 +3108,39 @@ function SiteEnedisDetail({ site, tariffs=[], onBack }){
     ? (TARIF_ENEDIS[site.enedis_option_tarifaire] ? `${site.enedis_option_tarifaire} — ${TARIF_ENEDIS[site.enedis_option_tarifaire]}` : site.enedis_option_tarifaire)
     : null;
 
+  // ── Bascules HC/HP : le contacteur jour/nuit est-il câblé ? ──
+  // Calculé à chaque collecte ENEDIS par l'edge function, sur la courbe brute (pas 30 min).
+  const hcT = (site.hc_transition_stats && typeof site.hc_transition_stats==='object') ? site.hc_transition_stats : null;
+  const VERDICTS = {
+    likely:   { color:'#7dd940', txt:"La consommation décroche nettement à l'heure exacte des bascules : un contacteur asservi aux heures creuses est très probablement câblé entre le Linky et l'armoire. Le cumulus peut être piloté à moindres frais." },
+    partial:  { color:'#f7c948', txt:"Des sauts apparaissent à l'heure des bascules, mais seulement sur une minorité de jours. Contacteur possible mais irrégulier (ballon déjà chaud certains jours, ou autre appareil asservi)." },
+    unlikely: { color:'#f79048', txt:"Presque aucun saut de puissance à l'heure des bascules : le contacteur heures creuses n'est probablement pas câblé, ou le ballon est piloté autrement. Un pilotage du cumulus demanderait un câblage." },
+    unknown:  { color:'rgba(255,255,255,.6)', txt:"Pas assez de bascules exploitables pour conclure." },
+  };
+  const hcVerdict = hcT ? (VERDICTS[hcT.verdict] || VERDICTS.unknown) : null;
+  const TransRow = ({emoji,title,expl,d})=> (
+    <div style={{padding:'10px 0',borderBottom:'1px solid rgba(255,255,255,.06)'}}>
+      <div style={{fontSize:13,fontWeight:700,color:'white',marginBottom:2}}>{emoji} {title}</div>
+      <div style={{fontSize:11,color:'rgba(255,255,255,.45)',lineHeight:1.4,marginBottom:6}}>{expl}</div>
+      {!d || !d.days ? (
+        <span style={{fontSize:13,color:'rgba(255,255,255,.35)',fontStyle:'italic'}}>Aucune bascule exploitable</span>
+      ) : (
+        <div style={{display:'flex',gap:16,flexWrap:'wrap'}}>
+          <div>
+            <div style={{fontSize:20,fontWeight:900,color:d.pct>=50?'#7dd940':d.pct>=20?'#f7c948':'#f79048',lineHeight:1.1}}>{String(d.pct).replace('.',',')} %</div>
+            <div style={{fontSize:10,color:'rgba(255,255,255,.45)'}}>des jours ({d.detected} / {d.days})</div>
+          </div>
+          <div>
+            <div style={{fontSize:20,fontWeight:900,color:'white',lineHeight:1.1}}>
+              {d.avg_delta_w!=null ? `${d.avg_delta_w>0?'+':'−'}${Math.abs(d.avg_delta_w).toLocaleString('fr-FR')} W` : '—'}
+            </div>
+            <div style={{fontSize:10,color:'rgba(255,255,255,.45)'}}>écart moyen constaté</div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+
   const lbl = { fontSize:10, color:'rgba(255,255,255,.45)', fontWeight:700, letterSpacing:'.5px', textTransform:'uppercase' };
   const val = (v)=> v ? <span style={{fontSize:14,color:'white',fontWeight:600,wordBreak:'break-word'}}>{v}</span>
                        : <span style={{fontSize:13,color:'rgba(255,255,255,.35)',fontStyle:'italic'}}>Non collecté</span>;
@@ -3181,6 +3214,38 @@ function SiteEnedisDetail({ site, tariffs=[], onBack }){
             </Row>
           )}
           <Row label="Dernière collecte">{val(fmtDate(site.conso_imported_at))}</Row>
+        </Card>
+
+        <Card title="Fluctuations aux bascules HC / HP" emoji="🔀">
+          {!hcT ? (
+            <div style={{fontSize:13,color:'rgba(255,255,255,.5)',lineHeight:1.45,padding:'6px 0'}}>
+              {hcWindows.length===0
+                ? "Aucune plage d'heures creuses connue pour ce compteur : l'analyse des bascules n'est pas possible."
+                : site.conso_source==='daily'
+                  ? "Analyse impossible sans courbe de charge détaillée : les consommations journalières ne permettent pas de voir ce qui se passe à l'heure exacte de la bascule."
+                  : "Analyse non encore calculée pour ce site. Elle sera produite à la prochaine collecte ENEDIS (bouton « Mettre à jour les données ENEDIS »)."}
+            </div>
+          ) : (
+            <>
+              <div style={{fontSize:11,color:'rgba(255,255,255,.45)',lineHeight:1.45,padding:'4px 0 8px'}}>
+                À l'instant exact où le Linky bascule, un contacteur asservi ferait démarrer (ou stopper) le cumulus.
+                On mesure ce saut de puissance sur la courbe de charge, plage HC {hcT.windows.join(' • ')}, seuil {hcT.threshold_w.toLocaleString('fr-FR')} W.
+              </div>
+              <TransRow emoji="📈" title="Passage heures pleines → heures creuses"
+                expl="Début des heures creuses : hausse de puissance attendue si le cumulus s'enclenche."
+                d={hcT.hp_to_hc}/>
+              <TransRow emoji="📉" title="Passage heures creuses → heures pleines"
+                expl="Fin des heures creuses : baisse de puissance attendue si le cumulus se coupe."
+                d={hcT.hc_to_hp}/>
+              <div style={{marginTop:10,padding:'10px 12px',borderRadius:10,background:'rgba(255,255,255,.04)',
+                           border:`1px solid ${hcVerdict.color}55`,fontSize:12,color:hcVerdict.color,lineHeight:1.5}}>
+                <strong>Contacteur heures creuses : </strong>{hcVerdict.txt}
+              </div>
+              <div style={{fontSize:10,color:'rgba(255,255,255,.3)',marginTop:8}}>
+                Calculé le {fmtDate(hcT.computed_at)} — courbe au pas {hcT.step_min} min, comparaison de la puissance moyenne sur l'heure précédant et l'heure suivant chaque bascule.
+              </div>
+            </>
+          )}
         </Card>
 
         <Card title="Production (injection réseau)" emoji="☀️">
