@@ -3122,13 +3122,13 @@ function SiteEnedisDetail({ site, tariffs=[], onBack }){
     <div style={{padding:'10px 0',borderBottom:'1px solid rgba(255,255,255,.06)'}}>
       <div style={{fontSize:13,fontWeight:700,color:'white',marginBottom:2}}>{emoji} {title}</div>
       <div style={{fontSize:11,color:'rgba(255,255,255,.45)',lineHeight:1.4,marginBottom:6}}>{expl}</div>
-      {!d || !d.days ? (
+      {!d || !d.count ? (
         <span style={{fontSize:13,color:'rgba(255,255,255,.35)',fontStyle:'italic'}}>Aucune bascule exploitable</span>
       ) : (
         <div style={{display:'flex',gap:16,flexWrap:'wrap'}}>
           <div>
             <div style={{fontSize:20,fontWeight:900,color:d.pct>=50?'#7dd940':d.pct>=20?'#f7c948':'#f79048',lineHeight:1.1}}>{String(d.pct).replace('.',',')} %</div>
-            <div style={{fontSize:10,color:'rgba(255,255,255,.45)'}}>des jours ({d.detected} / {d.days})</div>
+            <div style={{fontSize:10,color:'rgba(255,255,255,.45)'}}>des bascules ({d.detected} / {d.count})</div>
           </div>
           <div>
             <div style={{fontSize:20,fontWeight:900,color:'white',lineHeight:1.1}}>
@@ -3241,8 +3241,9 @@ function SiteEnedisDetail({ site, tariffs=[], onBack }){
                            border:`1px solid ${hcVerdict.color}55`,fontSize:12,color:hcVerdict.color,lineHeight:1.5}}>
                 <strong>Contacteur heures creuses : </strong>{hcVerdict.txt}
               </div>
-              <div style={{fontSize:10,color:'rgba(255,255,255,.3)',marginTop:8}}>
+              <div style={{fontSize:10,color:'rgba(255,255,255,.3)',marginTop:8,lineHeight:1.45}}>
                 Calculé le {fmtDate(hcT.computed_at)} — courbe au pas {hcT.step_min} min, comparaison de la puissance moyenne sur l'heure précédant et l'heure suivant chaque bascule.
+                {hcT.straddle_min>0 && ` ENEDIS décale ici les heures creuses à la minute près (bascule ${hcT.straddle_min} min après le début d'un pas de mesure) : le pas à cheval sur la bascule est écarté de la comparaison.`}
               </div>
             </>
           )}

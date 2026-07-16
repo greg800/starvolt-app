@@ -157,27 +157,42 @@ function analyzeHcTransitions(lc, windows) {
     up: { matched: 0, detected: 0, sumDelta: 0 },
     down: { matched: 0, detected: 0, sumDelta: 0 }
   };
+  // ENEDIS décale très souvent les heures creuses à la minute près (ex. 01H36-07H36)
+  // pour étaler l'appel de puissance sur le réseau : la bascule tombe alors AU MILIEU
+  // d'un pas de 30 min. Ce pas-là est à cheval (moitié HP, moitié HC) → on l'écarte et
+  // on compare l'heure qui le précède à l'heure qui le suit. Exiger un pas aligné pile
+  // sur la bascule ne marcherait que pour les rares plages à l'heure ronde.
+  const straddleMax = { up: 0, down: 0 }; // suivi du décalage réel (diagnostic)
   for(let i = 0; i < lc.values.length; i++){
-    const minLocal = parisHM(start + i * step);
-    const isUp = starts.includes(minLocal);
-    const isDown = ends.includes(minLocal);
-    if (!isUp && !isDown) continue;
-    const before = meanSlots(lc.values, i - n, n);
-    const after = meanSlots(lc.values, i, n);
-    if (before == null || after == null) continue; // journée trouée → ignorée
-    const delta = after - before;
-    if (isUp) {
-      acc.up.matched++;
-      if (delta > HC_STEP_W) { acc.up.detected++; acc.up.sumDelta += delta; }
-    }
-    if (isDown) {
-      acc.down.matched++;
-      if (delta < -HC_STEP_W) { acc.down.detected++; acc.down.sumDelta += delta; }
+    const slotStart = parisHM(start + i * step);
+    for (const [dir, targets] of [
+      [ "up", starts ],
+      [ "down", ends ]
+    ]){
+      for (const t of targets){
+        const rel = (t - slotStart + 1440) % 1440; // position de la bascule dans le pas
+        if (rel !== 0 && rel >= stepMin) continue; // bascule hors de ce pas
+        const before = meanSlots(lc.values, i - n, n);
+        // rel===0 : le pas démarre pile sur la bascule → il est déjà « après ».
+        // rel>0   : le pas est à cheval → on démarre l'« après » au pas suivant.
+        const after = meanSlots(lc.values, rel === 0 ? i : i + 1, n);
+        if (before == null || after == null) continue; // journée trouée → ignorée
+        if (rel > straddleMax[dir]) straddleMax[dir] = rel;
+        const delta = after - before;
+        const a = acc[dir];
+        a.matched++;
+        if (dir === "up" ? delta > HC_STEP_W : delta < -HC_STEP_W) {
+          a.detected++;
+          a.sumDelta += delta;
+        }
+      }
     }
   }
-  if (!acc.up.matched && !acc.down.matched) return null; // pas de pas aligné sur la bascule
+  if (!acc.up.matched && !acc.down.matched) return null; // aucune bascule exploitable
+  // NB : `count` = nombre de BASCULES analysées, pas de jours — un compteur à deux
+  // plages HC (ex. nuit + méridienne) bascule deux fois par jour dans chaque sens.
   const side = (a)=>({
-      days: a.matched,
+      count: a.matched,
       detected: a.detected,
       pct: a.matched ? Math.round(a.detected / a.matched * 1000) / 10 : null,
       avg_delta_w: a.detected ? Math.round(a.sumDelta / a.detected) : null
@@ -190,6 +205,9 @@ function analyzeHcTransitions(lc, windows) {
     computed_at: new Date().toISOString(),
     step_min: stepMin,
     threshold_w: HC_STEP_W,
+    // Décalage (min) de la bascule à l'intérieur d'un pas : 0 = bascule à l'heure ronde,
+    // >0 = plage HC décalée par ENEDIS, le pas à cheval a été écarté de la comparaison.
+    straddle_min: Math.max(straddleMax.up, straddleMax.down),
     windows: wins.map((w)=>`${String(Math.floor(w.debut / 60)).padStart(2, "0")}:${String(w.debut % 60).padStart(2, "0")}-${String(Math.floor(w.fin / 60)).padStart(2, "0")}:${String(w.fin % 60).padStart(2, "0")}`),
     hp_to_hc: up,
     hc_to_hp: down,
