@@ -4550,6 +4550,27 @@ function buildBilanFacts({ site, tariffs, globalVars, prodProfil, quiz }) {
   };
 }
 
+// Description du foyer envoyée à l'IA pour le MESSAGE D'ACCUEIL (avant conso).
+// N'utilise QUE les champs déclarés au questionnaire d'inscription (flex_*),
+// la consommation ENEDIS n'étant pas encore disponible à ce stade.
+function buildOnboardingFacts({ site, profile }) {
+  if (!site) return null;
+  return {
+    prenom: profile?.prenom || null,
+    ville: site.ville || null,
+    chauffage: site.flex_chauffage ? (FLEX_CHAUFFAGE_LBL[site.flex_chauffage] || site.flex_chauffage) : null,
+    eau_chaude: site.flex_ecs ? (FLEX_ECS_LBL[site.flex_ecs] || site.flex_ecs) : null,
+    surface_logement: site.flex_surface ? (FLEX_SURFACE_LBL[site.flex_surface] || site.flex_surface) : null,
+    type_habitat: site.flex_type_logement ? (FLEX_TYPELOG_LBL[site.flex_type_logement] || site.flex_type_logement) : null,
+    statut_occupation: site.flex_statut ? (FLEX_STATUT_LBL[site.flex_statut] || site.flex_statut) : null,
+    a_deja_du_solaire: site.flex_has_solar == null ? null : (site.flex_has_solar ? 'oui' : 'non'),
+    pv_declaration_client: site.flex_has_solar ? (site.flex_pv_comment || null) : null,
+    a_deja_une_batterie: site.flex_has_battery == null ? null : (site.flex_has_battery ? 'oui' : 'non'),
+    box_comwatt_existante: site.box_comwatt_existante == null ? null : (site.box_comwatt_existante ? 'oui' : 'non'),
+    equipements_energivores_autres: site.flex_other_equipment || null,
+  };
+}
+
 // ─── EnergyBalanceChart ───────────────────────
 function EnergyBalanceChart({ balance, level, selMonth, selDay, setLevel, setSelMonth, setSelDay, hourlyPrices, turpeHourly, electronHourly, aboHourly, isDynamic, tutorial, onTutorialDone }) {
   const wrapperRef = useRef(null), canvasRef = useRef(null);
@@ -14920,6 +14941,7 @@ const SCREEN_LABELS = {
   WELCOME:'Accueil', AUTH_SIGNUP:'Inscription', AUTH_LOGIN:'Connexion',
   RESET_PASSWORD:'Réinitialisation mot de passe',
   HOME_CHOICE:'Accueil', HOME_LOGGED_IN:'Accueil',
+  ONBOARDING_QUESTIONS:'Inscription — questionnaire foyer', ONBOARDING_ADVICE:'Inscription — message d’accueil',
   COMPRENDRE_HOME:'Comprendre — accueil', COMPRENDRE_GROUP:'Comprendre — thème',
   COMPRENDRE_SUBJECT:'Comprendre — sujet', COMPRENDRE_QUIZ:'Comprendre — quiz',
   COMPRENDRE_SCORE:'Comprendre — score',
@@ -15146,6 +15168,78 @@ function HomeChoiceScreen({ profile, user, onComprendre, onAction, can = () => t
         <div style={{marginTop:'clamp(2px,0.6vh,8px)',padding:'clamp(9px,1.5vh,13px) 32px',background:'rgba(255,255,255,.14)',borderRadius:14,fontSize:15,fontWeight:700,color:'white',border:'1.5px solid rgba(255,255,255,.25)'}}>Mon site →</div>
       </button>}
     </div>
+  );
+}
+
+// ─── OnboardingAdviceScreen : transition douce inscription → Comprendre ────────
+// Affiché juste après le questionnaire d'inscription, pendant que la collecte
+// ENEDIS tourne en tâche de fond. Génère un message d'accueil IA à partir de la
+// SEULE description du foyer (flex_*), puis propose 2 chemins : auto-évaluation
+// (thème dédié) ou base de connaissance (accueil Comprendre).
+function OnboardingAdviceScreen({ user, profile, siteId, onAutoEval, onKnowledge }) {
+  const [text, setText] = useState(null);
+  const [failed, setFailed] = useState(false);
+  const firedRef = useRef(false);
+
+  useEffect(() => {
+    if (firedRef.current) return;
+    firedRef.current = true;
+    let alive = true;
+    (async () => {
+      try {
+        let site = null;
+        if (siteId) {
+          const { data } = await sb.from('sites')
+            .select('ville,flex_chauffage,flex_ecs,flex_surface,flex_type_logement,flex_statut,flex_has_solar,flex_pv_comment,flex_has_battery,box_comwatt_existante,flex_other_equipment')
+            .eq('id', siteId).maybeSingle();
+          site = data;
+        }
+        const facts = buildOnboardingFacts({ site: site || {}, profile });
+        const { data, error } = await sb.functions.invoke('onboarding-advice', { body: { facts } });
+        if (!alive) return;
+        if (error || !data?.text) { setFailed(true); return; }
+        setText(data.text);
+      } catch (_) {
+        if (alive) setFailed(true);
+      }
+    })();
+    return () => { alive = false; };
+  }, [siteId]);
+
+  const prenom = profile?.prenom ? `, ${profile.prenom}` : '';
+  const fallback = `Bienvenue${prenom} ! Pendant que nous récupérons ta consommation d'électricité, découvre Starvolt : l'appli qui t'aide à comprendre ta consommation et à réduire ta facture (meilleur tarif, autoconsommation entre voisins, pilotage de tes appareils, solaire). En attendant tes chiffres, tu peux déjà tester tes connaissances ou explorer notre base de connaissance.`;
+
+  return (
+    <>
+    <div className="screen fade-in">
+      <div className="auth-header">
+        <div className="welcome-tag" style={{color:'#7dd940'}}>Bienvenue</div>
+        <h1 className="welcome-title">Ravis de<br/><span className="accent">t'accueillir</span></h1>
+      </div>
+
+      <div style={{fontSize:12,color:'rgba(255,255,255,.55)',lineHeight:1.5,margin:'0 0 16px',display:'flex',alignItems:'center',gap:8}}>
+        <StarSpinner size={16} color="rgba(125,217,64,.9)"/>
+        <span>On récupère ta consommation ENEDIS en arrière-plan. Elle apparaîtra dans « Mon site » d'ici quelques minutes.</span>
+      </div>
+
+      <div className="card" style={{padding:'18px 18px',minHeight:120,display:'flex',alignItems:text?'flex-start':'center',justifyContent:'center'}}>
+        {text || failed ? (
+          <div style={{fontSize:15,lineHeight:1.6,color:'rgba(255,255,255,.92)',whiteSpace:'pre-wrap'}}>{text || fallback}</div>
+        ) : (
+          <StarSpinner size={30} label="On prépare tes premiers conseils…" labelColor="rgba(255,255,255,.7)"/>
+        )}
+      </div>
+    </div>
+
+    <StickyFooter>
+      <button className="btn btn-primary" style={{width:'100%',fontSize:15,padding:'13px'}} onClick={onAutoEval}>
+        🎯 Auto-évaluation en 10 questions
+      </button>
+      <button className="btn" style={{width:'100%',fontSize:14}} onClick={onKnowledge}>
+        📚 Lire la base de connaissance
+      </button>
+    </StickyFooter>
+    </>
   );
 }
 
@@ -16566,12 +16660,24 @@ function App() {
       case 'ONBOARDING_QUESTIONS':
         return <OnboardingTypeform siteId={state.onbSiteId} extended onDone={()=>{
           // Arme le watcher global : il surveillera la collecte ENEDIS + le bilan en fond
-          // pendant que l'utilisateur lit la page « Comprendre » (point 6).
+          // pendant que l'utilisateur lit son message d'accueil puis « Comprendre » (point 6).
           const sid = state.onbSiteId;
           try { if (sid) localStorage.setItem('starvolt_await_bilan', sid); } catch {}
           try { window.dispatchEvent(new CustomEvent('starvolt-await-bilan', { detail: sid })); } catch {}
-          goTo('COMPRENDRE_HOME');
+          goTo('ONBOARDING_ADVICE', { onbSiteId: sid });
         }}/>;
+
+      case 'ONBOARDING_ADVICE':
+        return <OnboardingAdviceScreen user={user} profile={profile} siteId={state.onbSiteId}
+          onKnowledge={()=>goTo('COMPRENDRE_HOME')}
+          onAutoEval={async ()=>{
+            // Lance directement le thème « Auto évaluation en 10 questions ».
+            // Recherche tolérante à la casse/faute de frappe (titre en base : « évalaution »).
+            const { data: grps } = await sb.from('learn_groups').select('id,title,description,ordre').order('ordre');
+            const g = (grps||[]).find(x => /10\s*questions/i.test(x.title||'') || /auto.?[eé]val/i.test(x.title||''));
+            if (g) goTo('COMPRENDRE_GROUP', { learnGroup: g });
+            else goTo('COMPRENDRE_HOME');
+          }}/>;
 
       case 'SIMULATIONS': {
         const base = { name: profile?.prenom||'', address:'Zone ACC', initialBill:2000, bill:2000, bravoItems:[], investment:0, eligible:true };
