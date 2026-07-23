@@ -16557,9 +16557,13 @@ function App() {
 
       case 'COMPRENDRE_QUIZ':
         return <ComprendreQuizScreen user={user} questions={state.learnQuestions||[]} subject={state.learnSubject} isRevision={!!state.isRevision}
-          onDone={(res)=> state.onboardingEval
-            ? goTo('ONBOARDING_EVAL_RESULT',{learnQuestions:state.learnQuestions,quizResults:res})
-            : goTo('COMPRENDRE_SCORE',{learnSubject:state.learnSubject,learnGroup:state.learnGroup,quizResults:res,isRevision:!!state.isRevision})}
+          onDone={(res)=>{
+            // L'auto-évaluation se termine TOUJOURS par le retour IA (onboarding OU
+            // lancée depuis la zone Comprendre) — détecté via le flag ou le titre du sujet.
+            const isAutoEval = state.onboardingEval || /auto.?[eé]val/i.test(state.learnSubject?.title || '');
+            if (isAutoEval && !state.isRevision) goTo('ONBOARDING_EVAL_RESULT',{learnQuestions:state.learnQuestions,quizResults:res});
+            else goTo('COMPRENDRE_SCORE',{learnSubject:state.learnSubject,learnGroup:state.learnGroup,quizResults:res,isRevision:!!state.isRevision});
+          }}
           onBack={goBack}/>;
 
       case 'COMPRENDRE_SCORE': {
