@@ -14942,6 +14942,7 @@ const SCREEN_LABELS = {
   RESET_PASSWORD:'Réinitialisation mot de passe',
   HOME_CHOICE:'Accueil', HOME_LOGGED_IN:'Accueil',
   ONBOARDING_QUESTIONS:'Inscription — questionnaire foyer', ONBOARDING_ADVICE:'Inscription — message d’accueil',
+  ONBOARDING_EVAL_RESULT:'Inscription — retour auto-évaluation',
   COMPRENDRE_HOME:'Comprendre — accueil', COMPRENDRE_GROUP:'Comprendre — thème',
   COMPRENDRE_SUBJECT:'Comprendre — sujet', COMPRENDRE_QUIZ:'Comprendre — quiz',
   COMPRENDRE_SCORE:'Comprendre — score',
@@ -15237,6 +15238,75 @@ function OnboardingAdviceScreen({ user, profile, siteId, onAutoEval, onKnowledge
       </button>
       <button className="btn" style={{width:'100%',fontSize:14}} onClick={onKnowledge}>
         📚 Lire la base de connaissance
+      </button>
+    </StickyFooter>
+    </>
+  );
+}
+
+// ─── OnboardingEvalResultScreen : retour IA après l'auto-évaluation d'accueil ──
+// À la fin des 10 questions, l'IA (edge quiz-feedback) commente les bonnes/mauvaises
+// réponses et oriente vers des sujets à creuser. CTA « Ok j'ai compris » → Comprendre.
+function OnboardingEvalResultScreen({ results, questions, onDone }) {
+  const [text, setText] = useState(null);
+  const [failed, setFailed] = useState(false);
+  const firedRef = useRef(false);
+
+  const total = questions?.length || 0;
+  const correct = (results || []).filter(r => r.correct).length;
+
+  useEffect(() => {
+    if (firedRef.current) return;
+    firedRef.current = true;
+    let alive = true;
+    (async () => {
+      try {
+        const reponses = (questions || []).map(q => {
+          const res = (results || []).find(r => r.questionId === q.id);
+          const choices = q.learn_choices || [];
+          const bonnes = choices.filter(c => c.is_correct).map(c => c.text);
+          const tes = res?.selectedIds ? choices.filter(c => res.selectedIds.includes(c.id)).map(c => c.text) : [];
+          return { question: q.question, tes_reponses: tes, bonnes_reponses: bonnes, correct: !!res?.correct };
+        });
+        const facts = { score: { correct, total }, reponses };
+        const { data, error } = await sb.functions.invoke('quiz-feedback', { body: { facts } });
+        if (!alive) return;
+        if (error || !data?.text) { setFailed(true); return; }
+        setText(data.text);
+      } catch (_) {
+        if (alive) setFailed(true);
+      }
+    })();
+    return () => { alive = false; };
+  }, []);
+
+  const fallback = `Bravo d'avoir joué le jeu de cette auto-évaluation ! Tu as répondu correctement à ${correct} question${correct>1?'s':''} sur ${total}. C'est déjà une bonne base pour comprendre l'énergie et agir sur ta facture. Explore maintenant le module Comprendre : chaque thème t'aidera à aller plus loin, à ton rythme.`;
+
+  return (
+    <>
+    <div className="screen fade-in">
+      <div className="auth-header">
+        <div className="welcome-tag" style={{color:'#7dd940'}}>Auto-évaluation</div>
+        <h1 className="welcome-title">Ton résultat,<br/><span className="accent">décrypté</span></h1>
+      </div>
+
+      <div style={{display:'flex',alignItems:'center',justifyContent:'center',gap:10,margin:'0 0 16px'}}>
+        <div style={{fontSize:34,fontWeight:900,color:'#7dd940',lineHeight:1}}>{correct}<span style={{fontSize:20,color:'rgba(255,255,255,.5)'}}>/{total}</span></div>
+        <div style={{fontSize:13,color:'rgba(255,255,255,.6)',lineHeight:1.4}}>bonne{correct>1?'s':''} réponse{correct>1?'s':''}</div>
+      </div>
+
+      <div className="card" style={{padding:'18px 18px',minHeight:140,display:'flex',alignItems:(text||failed)?'flex-start':'center',justifyContent:'center'}}>
+        {text || failed ? (
+          <div style={{fontSize:15,lineHeight:1.6,color:'rgba(255,255,255,.92)',whiteSpace:'pre-wrap'}}>{text || fallback}</div>
+        ) : (
+          <StarSpinner size={30} label="On analyse tes réponses…" labelColor="rgba(255,255,255,.7)"/>
+        )}
+      </div>
+    </div>
+
+    <StickyFooter>
+      <button className="btn btn-primary" style={{width:'100%',fontSize:15,padding:'13px'}} onClick={onDone}>
+        Ok j'ai compris →
       </button>
     </StickyFooter>
     </>
@@ -15554,7 +15624,7 @@ function ComprendreQuizScreen({ user, questions, subject, isRevision, onDone, on
     if (next.length === correctCount) {
       const ok = next.every(id => correctIds.includes(id));
       setAnswered(true);
-      setResults(r => [...r, { questionId: q.id, correct: ok }]);
+      setResults(r => [...r, { questionId: q.id, correct: ok, selectedIds: next.slice() }]);
     }
   };
 
@@ -16487,7 +16557,9 @@ function App() {
 
       case 'COMPRENDRE_QUIZ':
         return <ComprendreQuizScreen user={user} questions={state.learnQuestions||[]} subject={state.learnSubject} isRevision={!!state.isRevision}
-          onDone={(res)=>goTo('COMPRENDRE_SCORE',{learnSubject:state.learnSubject,learnGroup:state.learnGroup,quizResults:res,isRevision:!!state.isRevision})}
+          onDone={(res)=> state.onboardingEval
+            ? goTo('ONBOARDING_EVAL_RESULT',{learnQuestions:state.learnQuestions,quizResults:res})
+            : goTo('COMPRENDRE_SCORE',{learnSubject:state.learnSubject,learnGroup:state.learnGroup,quizResults:res,isRevision:!!state.isRevision})}
           onBack={goBack}/>;
 
       case 'COMPRENDRE_SCORE': {
@@ -16671,13 +16743,23 @@ function App() {
         return <OnboardingAdviceScreen user={user} profile={profile} siteId={state.onbSiteId}
           onKnowledge={()=>goTo('COMPRENDRE_HOME')}
           onAutoEval={async ()=>{
-            // Lance directement le thème « Auto évaluation en 10 questions ».
-            // Recherche tolérante à la casse/faute de frappe (titre en base : « évalaution »).
-            const { data: grps } = await sb.from('learn_groups').select('id,title,description,ordre').order('ordre');
-            const g = (grps||[]).find(x => /10\s*questions/i.test(x.title||'') || /auto.?[eé]val/i.test(x.title||''));
-            if (g) goTo('COMPRENDRE_GROUP', { learnGroup: g });
-            else goTo('COMPRENDRE_HOME');
+            // Lance IMMÉDIATEMENT le quiz du sujet « Auto évaluation en 10 questions »
+            // (thème « Energie, de quoi parlons nous ? ») — 1re question directement.
+            // Recherche du sujet tolérante à la casse/faute de frappe.
+            const { data: subs } = await sb.from('learn_subjects').select('id,title,group_id,content,image_url,video_url,ordre').order('ordre');
+            const sub = (subs||[]).find(s => /auto.?[eé]val/i.test(s.title||'') || /10\s*questions/i.test(s.title||''));
+            if (!sub) { goTo('COMPRENDRE_HOME'); return; }
+            const { data: grp } = await sb.from('learn_groups').select('id,title,description,ordre').eq('id', sub.group_id).maybeSingle();
+            const { data: qs } = await sb.from('learn_questions').select('id,question,image_url,ordre,learn_choices(id,text,is_correct,ordre)').eq('subject_id', sub.id).order('ordre');
+            // Flag onboardingEval : à la fin du quiz on affiche le retour IA (pas le score standard).
+            goTo('COMPRENDRE_QUIZ', { learnQuestions: qs||[], learnSubject: sub, learnGroup: grp||null, isRevision:false, onboardingEval:true });
           }}/>;
+
+      case 'ONBOARDING_EVAL_RESULT':
+        return <OnboardingEvalResultScreen
+          results={state.quizResults?.results || []}
+          questions={state.learnQuestions || []}
+          onDone={()=>goTo('COMPRENDRE_HOME')}/>;
 
       case 'SIMULATIONS': {
         const base = { name: profile?.prenom||'', address:'Zone ACC', initialBill:2000, bill:2000, bravoItems:[], investment:0, eligible:true };
