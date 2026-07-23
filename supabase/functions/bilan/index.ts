@@ -146,25 +146,23 @@ Deno.serve(async (req) => {
     if (pr?.system_prompt) systemPrompt = pr.system_prompt;
   } catch (_) { /* fallback sur le défaut */ }
 
-  // --- Données métier DPE : appendues au prompt système (estimation non contractuelle). ---
-  //     Source de vérité = le fichier servi par l'app (éditable + téléchargeable dans l'admin,
-  //     carte du prompt « Ton bilan en clair »). Récupéré en direct ; fallback sur DPE_REFERENCE_FALLBACK
-  //     si l'URL est injoignable. GARDER CES DEUX SOURCES SYNCHRONES.
+  // --- Données métier attachées au prompt (table ai_prompt_files, éditable dans l'admin). ---
+  //     Source de vérité en base : Greg édite les fichiers .md depuis « Prompts IA » (prise en
+  //     compte immédiate). Fallback sur DPE_REFERENCE_FALLBACK si aucun fichier n'est présent.
   try {
     let refMd = "";
     try {
-      const r = await fetch("https://app.starvolt.fr/bilan-dpe-reference.md", {
-        signal: AbortSignal.timeout(3000),
-      });
-      if (r.ok) refMd = (await r.text()).trim();
+      const { data: pfiles } = await db
+        .from("ai_prompt_files").select("content").eq("feature", "bilan");
+      refMd = (pfiles || []).map((f: { content: string }) => (f.content || "").trim()).filter(Boolean).join("\n\n");
     } catch (_) { /* on retombe sur le fallback embarqué */ }
     if (!refMd) refMd = DPE_REFERENCE_FALLBACK;
     if (refMd) {
       systemPrompt +=
-        "\n\n=== DONNÉES MÉTIER DE RÉFÉRENCE (estimation DPE non contractuelle) ===\n" +
-        "Utilise ces données pour, si la surface (ou sa tranche) et la consommation annuelle " +
-        "sont connues, ajouter au bilan une phrase d'estimation DPE non contractuelle, " +
-        "en suivant STRICTEMENT le mode d'emploi ci-dessous.\n\n" + refMd;
+        "\n\n=== DONNÉES MÉTIER DE RÉFÉRENCE (fournies par l'admin) ===\n" +
+        "Utilise ces données pour enrichir le bilan (ex. estimation DPE / part du chauffage), " +
+        "en suivant STRICTEMENT leur mode d'emploi et seulement quand les valeurs nécessaires " +
+        "sont connues.\n\n" + refMd;
     }
   } catch (_) { /* best-effort : le bilan fonctionne sans la référence */ }
 

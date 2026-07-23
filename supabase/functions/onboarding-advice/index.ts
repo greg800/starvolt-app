@@ -109,6 +109,14 @@ Deno.serve(async (req) => {
     if (pr?.system_prompt) systemPrompt = pr.system_prompt;
   } catch (_) { /* fallback sur le défaut */ }
 
+  // Données métier attachées au prompt (table ai_prompt_files, éditables dans l'admin).
+  try {
+    const { data: pfiles } = await db
+      .from("ai_prompt_files").select("content").eq("feature", "onboarding_advice");
+    const extra = (pfiles || []).map((f: { content: string }) => (f.content || "").trim()).filter(Boolean).join("\n\n");
+    if (extra) systemPrompt += "\n\n=== DONNÉES MÉTIER DE RÉFÉRENCE (fournies par l'admin) ===\n" + extra;
+  } catch (_) { /* best-effort */ }
+
   const userContent =
     "Voici la description du foyer de ce nouvel utilisateur (JSON). Rédige son message d'accueil.\n\n" +
     JSON.stringify(facts);

@@ -12397,42 +12397,21 @@ function AdminAICostsScreen({ onBack }) {
 }
 
 // ─── AdminAIPromptsScreen : éditer les prompts qui cadrent chaque service IA ───
-// Données métier attachées à un prompt (fichier .md servi par l'app, visible + téléchargeable).
-// Clé = feature ; valeur = { file, label }. Cliquer l'icône fichier ouvre l'aperçu + téléchargement.
-const PROMPT_ATTACHMENTS = {
-  bilan: { file: 'bilan-dpe-reference.md', label: 'Données métier — estimation DPE' },
-};
+// Nom de fichier lisible à partir d'un label (pour le téléchargement .md).
+function slugifyMd(label) {
+  const s = String(label || 'fichier').toLowerCase()
+    .normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'fichier';
+  return s + '.md';
+}
 
 function AdminAIPromptsScreen({ onBack, onBilanData }) {
   const [rows, setRows] = useState(null);       // [{feature,label,system_prompt,updated_at,updated_by}]
   const [drafts, setDrafts] = useState({});     // {feature: texte en cours d'édition}
   const [savingFeat, setSavingFeat] = useState(null);
   const [msg, setMsg] = useState(null);         // {feature, type:'ok'|'err', text}
-  const [attach, setAttach] = useState(null);   // {feature, file, label, content|null, loading, error} — aperçu fichier métier
-
-  const openAttachment = async (feature) => {
-    const a = PROMPT_ATTACHMENTS[feature];
-    if (!a) return;
-    setAttach({ feature, file: a.file, label: a.label, content: null, loading: true, error: false });
-    try {
-      const res = await fetch('/' + a.file, { cache: 'no-store' });
-      if (!res.ok) throw new Error('http ' + res.status);
-      const txt = await res.text();
-      setAttach(s => s && s.feature === feature ? { ...s, content: txt, loading: false } : s);
-    } catch (_) {
-      setAttach(s => s && s.feature === feature ? { ...s, loading: false, error: true } : s);
-    }
-  };
-
-  const downloadAttachment = () => {
-    if (!attach?.content) return;
-    const blob = new Blob([attach.content], { type: 'text/markdown;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url; link.download = attach.file;
-    document.body.appendChild(link); link.click(); link.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
-  };
+  const [files, setFiles] = useState([]);       // [{id,feature,label,content,updated_at,updated_by}] — données métier éditables
+  const [edit, setEdit] = useState(null);       // {id, feature, label, content, draft, saving, deleting} — modale d'édition d'un fichier
 
   const load = () => {
     sb.rpc('get_ai_prompts').then(({ data, error }) => {
@@ -12441,8 +12420,58 @@ function AdminAIPromptsScreen({ onBack, onBilanData }) {
       const d = {}; (data || []).forEach(r => { d[r.feature] = r.system_prompt; });
       setDrafts(d);
     });
+    sb.rpc('get_prompt_files').then(({ data, error }) => {
+      if (error) { console.error('get_prompt_files', error); setFiles([]); return; }
+      setFiles(data || []);
+    });
   };
   useEffect(load, []);
+
+  const filesFor = (feature) => files.filter(f => f.feature === feature);
+
+  const openFile = (f) => setEdit({ id:f.id, feature:f.feature, label:f.label, content:f.content, draft:f.content, saving:false, deleting:false });
+
+  const addFile = async (feature) => {
+    const label = window.prompt('Nom du fichier de données métier :', '');
+    if (label === null) return;                 // annulé
+    const { data, error } = await sb.rpc('create_prompt_file', { p_feature: feature, p_label: label.trim() || 'Nouveau fichier', p_content: '' });
+    if (error) { setMsg({ feature, type:'err', text: 'Création impossible : ' + (error.message || 'erreur') }); return; }
+    const newId = data;
+    const newFile = { id:newId, feature, label: label.trim() || 'Nouveau fichier', content:'', updated_at: new Date().toISOString() };
+    setFiles(prev => [...prev, newFile]);
+    openFile(newFile);
+  };
+
+  const saveFile = async () => {
+    if (!edit) return;
+    setEdit(s => ({ ...s, saving:true }));
+    const { error } = await sb.rpc('set_prompt_file', { p_id: edit.id, p_label: edit.label, p_content: edit.draft });
+    if (error) { setEdit(s => ({ ...s, saving:false })); setMsg({ feature: edit.feature, type:'err', text: 'Échec enregistrement fichier : ' + (error.message || 'erreur') }); return; }
+    setFiles(prev => prev.map(f => f.id===edit.id ? { ...f, label:edit.label, content:edit.draft, updated_at:new Date().toISOString() } : f));
+    setEdit(s => ({ ...s, content:s.draft, saving:false }));
+    setMsg({ feature: edit.feature, type:'ok', text: 'Fichier enregistré. Pris en compte au prochain appel IA.' });
+  };
+
+  const deleteFile = async () => {
+    if (!edit) return;
+    if (!window.confirm('Supprimer définitivement ce fichier de données métier ?')) return;
+    setEdit(s => ({ ...s, deleting:true }));
+    const { error } = await sb.rpc('delete_prompt_file', { p_id: edit.id });
+    if (error) { setEdit(s => ({ ...s, deleting:false })); setMsg({ feature: edit.feature, type:'err', text: 'Suppression impossible : ' + (error.message || 'erreur') }); return; }
+    setFiles(prev => prev.filter(f => f.id !== edit.id));
+    setMsg({ feature: edit.feature, type:'ok', text: 'Fichier supprimé.' });
+    setEdit(null);
+  };
+
+  const downloadFile = () => {
+    if (!edit) return;
+    const blob = new Blob([edit.draft ?? ''], { type: 'text/markdown;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url; link.download = slugifyMd(edit.label);
+    document.body.appendChild(link); link.click(); link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
 
   const save = async (feature) => {
     setSavingFeat(feature); setMsg(null);
@@ -12520,51 +12549,74 @@ function AdminAIPromptsScreen({ onBack, onBilanData }) {
                   📊 Voir les données utilisées
                 </button>
               )}
-              {PROMPT_ATTACHMENTS[r.feature] && (
-                <button onClick={() => openAttachment(r.feature)}
-                  style={{marginTop:8, width:'100%', display:'flex', alignItems:'center', justifyContent:'center', gap:8, background:'rgba(255,255,255,.05)', border:'1px solid rgba(255,255,255,.16)', borderRadius:10, color:'rgba(255,255,255,.8)', fontSize:13, fontWeight:700, padding:'10px 14px', cursor:'pointer', fontFamily:'inherit'}}>
-                  <span style={{fontSize:16}}>📎</span> {PROMPT_ATTACHMENTS[r.feature].label}
-                </button>
-              )}
+              {/* Fichiers de données métier attachés à ce prompt (éditables) + ajout */}
+              <div style={{marginTop:10, paddingTop:10, borderTop:'1px solid rgba(255,255,255,.08)'}}>
+                <div style={{fontSize:11, color:'rgba(255,255,255,.4)', fontWeight:700, textTransform:'uppercase', letterSpacing:'.5px', marginBottom:8}}>Données métier</div>
+                <div style={{display:'flex', flexDirection:'column', gap:6}}>
+                  {filesFor(r.feature).map(f => (
+                    <button key={f.id} onClick={() => openFile(f)}
+                      style={{width:'100%', display:'flex', alignItems:'center', gap:8, background:'rgba(255,255,255,.05)', border:'1px solid rgba(255,255,255,.16)', borderRadius:10, color:'rgba(255,255,255,.85)', fontSize:13, fontWeight:700, padding:'10px 12px', cursor:'pointer', fontFamily:'inherit', textAlign:'left'}}>
+                      <span style={{fontSize:15}}>📎</span>
+                      <span style={{flex:1, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis'}}>{f.label}</span>
+                      <span style={{fontSize:11, color:'rgba(255,255,255,.35)'}}>modifier ›</span>
+                    </button>
+                  ))}
+                  <button onClick={() => addFile(r.feature)}
+                    style={{width:'100%', display:'flex', alignItems:'center', justifyContent:'center', gap:6, background:'transparent', border:'1px dashed rgba(255,255,255,.22)', borderRadius:10, color:'rgba(255,255,255,.6)', fontSize:12.5, fontWeight:700, padding:'9px 12px', cursor:'pointer', fontFamily:'inherit'}}>
+                    <span style={{fontSize:15}}>＋</span> Ajouter un fichier
+                  </button>
+                </div>
+              </div>
             </div>
           );
         })}
       </div>
     </div>
 
-    {attach && (
-      <div onClick={() => setAttach(null)}
+    {edit && (() => {
+      const dirty = edit.draft !== edit.content;
+      return (
+      <div onClick={() => { if (!edit.saving && !edit.deleting) setEdit(null); }}
         style={{position:'fixed', inset:0, background:'rgba(0,0,0,.6)', zIndex:1000, display:'flex', alignItems:'center', justifyContent:'center', padding:16}}>
         <div onClick={e => e.stopPropagation()}
-          style={{background:'#0a3944', border:'1px solid rgba(255,255,255,.14)', borderRadius:14, width:'100%', maxWidth:720, maxHeight:'86vh', display:'flex', flexDirection:'column', overflow:'hidden'}}>
-          <div style={{display:'flex', alignItems:'center', justifyContent:'space-between', gap:10, padding:'14px 16px', borderBottom:'1px solid rgba(255,255,255,.1)'}}>
-            <div style={{display:'flex', alignItems:'center', gap:8, minWidth:0}}>
+          style={{background:'#0a3944', border:'1px solid rgba(255,255,255,.14)', borderRadius:14, width:'100%', maxWidth:760, maxHeight:'90vh', display:'flex', flexDirection:'column', overflow:'hidden'}}>
+          <div style={{display:'flex', alignItems:'center', justifyContent:'space-between', gap:10, padding:'12px 16px', borderBottom:'1px solid rgba(255,255,255,.1)'}}>
+            <div style={{display:'flex', alignItems:'center', gap:8, minWidth:0, flex:1}}>
               <span style={{fontSize:18}}>📎</span>
-              <div style={{minWidth:0}}>
-                <div style={{fontWeight:800, fontSize:14, color:'#fff', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis'}}>{attach.label}</div>
-                <code style={{fontSize:11, color:'rgba(255,255,255,.45)'}}>{attach.file}</code>
-              </div>
+              <input value={edit.label} onChange={e => setEdit(s => ({ ...s, label: e.target.value }))}
+                style={{flex:1, minWidth:0, background:'rgba(0,0,0,.2)', border:'1px solid rgba(255,255,255,.14)', borderRadius:8, color:'#fff', fontSize:14, fontWeight:800, padding:'6px 10px', fontFamily:'inherit'}}/>
             </div>
-            <button onClick={() => setAttach(null)} style={{flexShrink:0, background:'rgba(255,255,255,.08)', border:'none', borderRadius:8, color:'rgba(255,255,255,.7)', fontSize:16, fontWeight:700, width:30, height:30, cursor:'pointer', fontFamily:'inherit'}}>✕</button>
+            <button onClick={() => setEdit(null)} disabled={edit.saving || edit.deleting} style={{flexShrink:0, background:'rgba(255,255,255,.08)', border:'none', borderRadius:8, color:'rgba(255,255,255,.7)', fontSize:16, fontWeight:700, width:30, height:30, cursor:'pointer', fontFamily:'inherit'}}>✕</button>
           </div>
-          <div style={{flex:1, overflow:'auto', padding:'14px 16px'}}>
-            {attach.loading ? (
-              <div style={{textAlign:'center', padding:30}}><StarSpinner size={28}/></div>
-            ) : attach.error ? (
-              <div style={{color:'#ff8080', fontSize:13, textAlign:'center', padding:20}}>Fichier introuvable ({attach.file}). Vérifie qu'il est bien déployé à la racine de l'app.</div>
-            ) : (
-              <pre style={{margin:0, whiteSpace:'pre-wrap', wordBreak:'break-word', fontFamily:'ui-monospace, Menlo, Consolas, monospace', fontSize:12, lineHeight:1.55, color:'rgba(255,255,255,.88)'}}>{attach.content}</pre>
-            )}
+          <div style={{flex:1, overflow:'auto', padding:'12px 16px', display:'flex', flexDirection:'column'}}>
+            <textarea value={edit.draft} onChange={e => setEdit(s => ({ ...s, draft: e.target.value }))} spellCheck={false}
+              style={{width:'100%', minHeight:'46vh', flex:1, resize:'vertical', boxSizing:'border-box', background:'rgba(0,0,0,.28)', border:'1px solid rgba(255,255,255,.14)', borderRadius:10, color:'rgba(255,255,255,.9)', fontSize:12.5, lineHeight:1.55, padding:'12px 14px', fontFamily:'ui-monospace, Menlo, Consolas, monospace'}}/>
           </div>
-          <div style={{padding:'12px 16px', borderTop:'1px solid rgba(255,255,255,.1)', display:'flex', justifyContent:'flex-end', gap:8}}>
-            <button onClick={downloadAttachment} disabled={!attach.content}
-              style={{background: attach.content ? '#ffb340' : 'rgba(255,255,255,.1)', border:'none', borderRadius:9, color: attach.content ? '#1a1208' : 'rgba(255,255,255,.4)', fontSize:13, fontWeight:800, padding:'9px 18px', cursor: attach.content ? 'pointer' : 'default', fontFamily:'inherit'}}>
-              ⬇ Télécharger le .md
-            </button>
+          <div style={{padding:'10px 16px', borderTop:'1px solid rgba(255,255,255,.1)', display:'flex', alignItems:'center', justifyContent:'space-between', gap:8, flexWrap:'wrap'}}>
+            <div style={{display:'flex', gap:8}}>
+              <button onClick={deleteFile} disabled={edit.saving || edit.deleting}
+                style={{background:'rgba(255,80,80,.12)', border:'1px solid rgba(255,80,80,.35)', borderRadius:9, color:'#ff8080', fontSize:12.5, fontWeight:700, padding:'9px 14px', cursor:'pointer', fontFamily:'inherit'}}>
+                {edit.deleting ? 'Suppression…' : '🗑 Supprimer'}
+              </button>
+              <button onClick={downloadFile}
+                style={{background:'rgba(255,255,255,.06)', border:'1px solid rgba(255,255,255,.16)', borderRadius:9, color:'rgba(255,255,255,.7)', fontSize:12.5, fontWeight:700, padding:'9px 14px', cursor:'pointer', fontFamily:'inherit'}}>
+                ⬇ .md
+              </button>
+            </div>
+            <div style={{display:'flex', alignItems:'center', gap:10}}>
+              {dirty && <span style={{fontSize:11.5, color:'#ffb340', fontWeight:600}}>Modifications non enregistrées</span>}
+              {dirty && (
+                <button onClick={saveFile} disabled={edit.saving}
+                  style={{background:'#ffb340', border:'none', borderRadius:9, color:'#1a1208', fontSize:13, fontWeight:800, padding:'9px 18px', cursor:'pointer', fontFamily:'inherit', opacity: edit.saving?.6:1}}>
+                  {edit.saving ? <><StarSpinner size={14} color="#1a1208"/> Enregistrement…</> : 'Enregistrer'}
+                </button>
+              )}
+            </div>
           </div>
         </div>
       </div>
-    )}
+      );
+    })()}
 
     <StickyFooter onBack={onBack}/>
     </>

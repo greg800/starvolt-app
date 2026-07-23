@@ -126,6 +126,14 @@ Deno.serve(async (req) => {
     if (pr?.system_prompt) systemPrompt = pr.system_prompt;
   } catch (_) { /* fallback */ }
 
+  // Données métier attachées au prompt (table ai_prompt_files, éditables dans l'admin).
+  try {
+    const { data: pfiles } = await db
+      .from("ai_prompt_files").select("content").eq("feature", "quiz_feedback");
+    const extra = (pfiles || []).map((f: { content: string }) => (f.content || "").trim()).filter(Boolean).join("\n\n");
+    if (extra) systemPrompt += "\n\n=== DONNÉES MÉTIER DE RÉFÉRENCE (fournies par l'admin) ===\n" + extra;
+  } catch (_) { /* best-effort */ }
+
   const userContent =
     "RÉPONSES DE L'UTILISATEUR (JSON) :\n" + JSON.stringify(facts) +
     "\n\nCATALOGUE DU MODULE COMPRENDRE (thèmes → sujets → questions, JSON) :\n" +
