@@ -59,6 +59,41 @@ Foyer : **5 MWh/an** (5 000 kWh), **maison** de **100 m²**.
 
 ---
 
+## Estimation de la consommation et du coût du chauffage
+
+Une fois la classe DPE estimée, on peut estimer ce que **pèse le chauffage** dans le foyer,
+à partir de la colonne « Part du chauffage » de la table de travail.
+
+**Méthode :**
+
+1. **Part du chauffage (X %)** = valeur de la colonne « Part du chauffage » pour la classe
+   DPE estimée (A = 30 % … G = 75 %).
+2. **Consommation chauffage (Y)** = consommation annuelle (kWh) × X %.
+   - Exprimer en MWh si ≥ 1 000 kWh (ex. 2 500 kWh → 2,5 MWh).
+3. **Coût du chauffage (Z)** = facture annuelle (€) × X %.
+
+Ces deux grandeurs (consommation annuelle et facture annuelle) sont fournies dans les
+données du foyer : ne rien recalculer d'autre, juste appliquer le pourcentage.
+
+**Phrase à générer** (à formuler comme une estimation) :
+
+> Nous estimons que votre chauffage représente environ **X %** de votre facture,
+> soit **~Y MWh** et **~Z €/an**.
+
+**Exemple** (dans le prolongement du précédent) : maison DPE C → part du chauffage = 50 %.
+Conso 5 MWh → chauffage ≈ **2,5 MWh/an**. Facture 1 000 €/an → chauffage ≈ **500 €/an**.
+→ « Nous estimons que votre chauffage représente environ 50 % de votre facture, soit
+~2,5 MWh et ~500 €/an. »
+
+- N'inclure cette phrase que si la **classe DPE a pu être estimée** ET que la **facture
+  annuelle** (pour le montant en €) et/ou la **consommation annuelle** (pour les MWh) sont
+  connues. Si seule la conso est connue, ne donner que les MWh ; si seule la facture est
+  connue, ne donner que les €.
+- Arrondir raisonnablement (chiffres « ronds », préfixe « ~ » ou « environ ») : c'est une
+  estimation, pas une facture détaillée.
+
+---
+
 ## Consignes de rédaction pour l'IA
 
 - Inclure la phrase métier dans le bilan **uniquement si la surface (ou sa tranche) ET la

@@ -59,6 +59,14 @@ La classe DPE estimée est la première dont le seuil haut est >= à la conso su
 5 MWh, maison de 100 m2 -> 50 kWh/m2 -> classe C -> 10% des maisons consomment moins.
 Phrase : "Vous consommez 50 kWh/m2 = notre estimation (non contractuelle) DPE C, 10% des maisons consomment moins que vous."
 
+## Estimation conso et cout du chauffage
+1. Part du chauffage (X%) = colonne "Part chauffage" de la classe DPE estimee.
+2. Conso chauffage (Y) = conso annuelle (kWh) x X% (en MWh si >= 1000 kWh).
+3. Cout chauffage (Z) = facture annuelle (EUR) x X%.
+Phrase : "Nous estimons que votre chauffage represente environ X% de votre facture, soit ~Y MWh et ~Z EUR/an."
+Exemple : maison DPE C -> 50% ; conso 5 MWh -> ~2,5 MWh ; facture 1000 EUR -> ~500 EUR/an.
+N'inclure que si classe DPE estimee ET facture et/ou conso connues (sinon donner seulement la grandeur connue). Arrondir, prefixe "~".
+
 ## Consignes
 - Inclure la phrase seulement si surface (ou tranche) ET conso annuelle connues ; sinon ne pas l'inventer.
 - Jamais présenté comme un DPE officiel ; rester bienveillant (potentiel d'amélioration).`;
