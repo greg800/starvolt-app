@@ -12397,11 +12397,42 @@ function AdminAICostsScreen({ onBack }) {
 }
 
 // ─── AdminAIPromptsScreen : éditer les prompts qui cadrent chaque service IA ───
+// Données métier attachées à un prompt (fichier .md servi par l'app, visible + téléchargeable).
+// Clé = feature ; valeur = { file, label }. Cliquer l'icône fichier ouvre l'aperçu + téléchargement.
+const PROMPT_ATTACHMENTS = {
+  bilan: { file: 'bilan-dpe-reference.md', label: 'Données métier — estimation DPE' },
+};
+
 function AdminAIPromptsScreen({ onBack, onBilanData }) {
   const [rows, setRows] = useState(null);       // [{feature,label,system_prompt,updated_at,updated_by}]
   const [drafts, setDrafts] = useState({});     // {feature: texte en cours d'édition}
   const [savingFeat, setSavingFeat] = useState(null);
   const [msg, setMsg] = useState(null);         // {feature, type:'ok'|'err', text}
+  const [attach, setAttach] = useState(null);   // {feature, file, label, content|null, loading, error} — aperçu fichier métier
+
+  const openAttachment = async (feature) => {
+    const a = PROMPT_ATTACHMENTS[feature];
+    if (!a) return;
+    setAttach({ feature, file: a.file, label: a.label, content: null, loading: true, error: false });
+    try {
+      const res = await fetch('/' + a.file, { cache: 'no-store' });
+      if (!res.ok) throw new Error('http ' + res.status);
+      const txt = await res.text();
+      setAttach(s => s && s.feature === feature ? { ...s, content: txt, loading: false } : s);
+    } catch (_) {
+      setAttach(s => s && s.feature === feature ? { ...s, loading: false, error: true } : s);
+    }
+  };
+
+  const downloadAttachment = () => {
+    if (!attach?.content) return;
+    const blob = new Blob([attach.content], { type: 'text/markdown;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url; link.download = attach.file;
+    document.body.appendChild(link); link.click(); link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
 
   const load = () => {
     sb.rpc('get_ai_prompts').then(({ data, error }) => {
@@ -12489,11 +12520,52 @@ function AdminAIPromptsScreen({ onBack, onBilanData }) {
                   📊 Voir les données utilisées
                 </button>
               )}
+              {PROMPT_ATTACHMENTS[r.feature] && (
+                <button onClick={() => openAttachment(r.feature)}
+                  style={{marginTop:8, width:'100%', display:'flex', alignItems:'center', justifyContent:'center', gap:8, background:'rgba(255,255,255,.05)', border:'1px solid rgba(255,255,255,.16)', borderRadius:10, color:'rgba(255,255,255,.8)', fontSize:13, fontWeight:700, padding:'10px 14px', cursor:'pointer', fontFamily:'inherit'}}>
+                  <span style={{fontSize:16}}>📎</span> {PROMPT_ATTACHMENTS[r.feature].label}
+                </button>
+              )}
             </div>
           );
         })}
       </div>
     </div>
+
+    {attach && (
+      <div onClick={() => setAttach(null)}
+        style={{position:'fixed', inset:0, background:'rgba(0,0,0,.6)', zIndex:1000, display:'flex', alignItems:'center', justifyContent:'center', padding:16}}>
+        <div onClick={e => e.stopPropagation()}
+          style={{background:'#0a3944', border:'1px solid rgba(255,255,255,.14)', borderRadius:14, width:'100%', maxWidth:720, maxHeight:'86vh', display:'flex', flexDirection:'column', overflow:'hidden'}}>
+          <div style={{display:'flex', alignItems:'center', justifyContent:'space-between', gap:10, padding:'14px 16px', borderBottom:'1px solid rgba(255,255,255,.1)'}}>
+            <div style={{display:'flex', alignItems:'center', gap:8, minWidth:0}}>
+              <span style={{fontSize:18}}>📎</span>
+              <div style={{minWidth:0}}>
+                <div style={{fontWeight:800, fontSize:14, color:'#fff', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis'}}>{attach.label}</div>
+                <code style={{fontSize:11, color:'rgba(255,255,255,.45)'}}>{attach.file}</code>
+              </div>
+            </div>
+            <button onClick={() => setAttach(null)} style={{flexShrink:0, background:'rgba(255,255,255,.08)', border:'none', borderRadius:8, color:'rgba(255,255,255,.7)', fontSize:16, fontWeight:700, width:30, height:30, cursor:'pointer', fontFamily:'inherit'}}>✕</button>
+          </div>
+          <div style={{flex:1, overflow:'auto', padding:'14px 16px'}}>
+            {attach.loading ? (
+              <div style={{textAlign:'center', padding:30}}><StarSpinner size={28}/></div>
+            ) : attach.error ? (
+              <div style={{color:'#ff8080', fontSize:13, textAlign:'center', padding:20}}>Fichier introuvable ({attach.file}). Vérifie qu'il est bien déployé à la racine de l'app.</div>
+            ) : (
+              <pre style={{margin:0, whiteSpace:'pre-wrap', wordBreak:'break-word', fontFamily:'ui-monospace, Menlo, Consolas, monospace', fontSize:12, lineHeight:1.55, color:'rgba(255,255,255,.88)'}}>{attach.content}</pre>
+            )}
+          </div>
+          <div style={{padding:'12px 16px', borderTop:'1px solid rgba(255,255,255,.1)', display:'flex', justifyContent:'flex-end', gap:8}}>
+            <button onClick={downloadAttachment} disabled={!attach.content}
+              style={{background: attach.content ? '#ffb340' : 'rgba(255,255,255,.1)', border:'none', borderRadius:9, color: attach.content ? '#1a1208' : 'rgba(255,255,255,.4)', fontSize:13, fontWeight:800, padding:'9px 18px', cursor: attach.content ? 'pointer' : 'default', fontFamily:'inherit'}}>
+              ⬇ Télécharger le .md
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
+
     <StickyFooter onBack={onBack}/>
     </>
   );

@@ -29,6 +29,40 @@ function json(body: unknown, status = 200) {
   });
 }
 
+// Fallback embarqué des données métier DPE si le fichier servi par l'app est injoignable.
+// DOIT rester identique à /bilan-dpe-reference.md (source de vérité, éditable dans l'admin).
+const DPE_REFERENCE_FALLBACK = `# Données métier — Estimation DPE (non contractuelle)
+
+Périmètre : logements chauffés à l'électricité (maison individuelle ou appartement).
+
+## Table de travail
+La classe DPE estimée est la première dont le seuil haut est >= à la conso surfacique (kWh/m2/an).
+
+| Classe | Seuil haut (kWh/m2/an) | Part chauffage | % maisons qui consomment moins | % appartements qui consomment moins |
+|:---:|:---:|:---:|:---:|:---:|
+| A | <= 22 | 30% | 0% | 0% |
+| B | <= 39 | 40% | 2% | 4% |
+| C | <= 63 | 50% | 10% | 18% |
+| D | <= 93 | 60% | 30% | 45% |
+| E | <= 126 | 65% | 58% | 71% |
+| F | <= 163 | 70% | 80% | 87% |
+| G | > 163 | 75% | 92% | 95% |
+
+## Mode d'emploi
+1. Conso surfacique = conso annuelle (kWh) / surface (m2). Surface inconnue : milieu de tranche (< 70 m2 -> 50 ; 70-150 m2 -> 110 ; > 150 m2 -> 180).
+2. Classe DPE = première dont le seuil haut est >= conso surfacique.
+3. Colonne selon habitat (maison / appartement).
+4. "% qui consomment moins que vous" : lire la case (classe x habitat).
+5. Toujours "estimation non contractuelle".
+
+## Exemple
+5 MWh, maison de 100 m2 -> 50 kWh/m2 -> classe C -> 10% des maisons consomment moins.
+Phrase : "Vous consommez 50 kWh/m2 = notre estimation (non contractuelle) DPE C, 10% des maisons consomment moins que vous."
+
+## Consignes
+- Inclure la phrase seulement si surface (ou tranche) ET conso annuelle connues ; sinon ne pas l'inventer.
+- Jamais présenté comme un DPE officiel ; rester bienveillant (potentiel d'amélioration).`;
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   if (req.method !== "POST") return json({ error: "method_not_allowed" }, 405);
@@ -103,6 +137,28 @@ Deno.serve(async (req) => {
       .from("ai_prompts").select("system_prompt").eq("feature", "bilan").maybeSingle();
     if (pr?.system_prompt) systemPrompt = pr.system_prompt;
   } catch (_) { /* fallback sur le défaut */ }
+
+  // --- Données métier DPE : appendues au prompt système (estimation non contractuelle). ---
+  //     Source de vérité = le fichier servi par l'app (éditable + téléchargeable dans l'admin,
+  //     carte du prompt « Ton bilan en clair »). Récupéré en direct ; fallback sur DPE_REFERENCE_FALLBACK
+  //     si l'URL est injoignable. GARDER CES DEUX SOURCES SYNCHRONES.
+  try {
+    let refMd = "";
+    try {
+      const r = await fetch("https://app.starvolt.fr/bilan-dpe-reference.md", {
+        signal: AbortSignal.timeout(3000),
+      });
+      if (r.ok) refMd = (await r.text()).trim();
+    } catch (_) { /* on retombe sur le fallback embarqué */ }
+    if (!refMd) refMd = DPE_REFERENCE_FALLBACK;
+    if (refMd) {
+      systemPrompt +=
+        "\n\n=== DONNÉES MÉTIER DE RÉFÉRENCE (estimation DPE non contractuelle) ===\n" +
+        "Utilise ces données pour, si la surface (ou sa tranche) et la consommation annuelle " +
+        "sont connues, ajouter au bilan une phrase d'estimation DPE non contractuelle, " +
+        "en suivant STRICTEMENT le mode d'emploi ci-dessous.\n\n" + refMd;
+    }
+  } catch (_) { /* best-effort : le bilan fonctionne sans la référence */ }
 
   const userContent =
     "Voici les chiffres de cet utilisateur (JSON). Rédige son bilan en clair.\n\n" +
