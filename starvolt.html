@@ -5156,6 +5156,38 @@ function EnergyBalanceChart({ balance, level, selMonth, selDay, setLevel, setSel
 }
 
 // ─── MonSiteScreen ────────────────────────────
+// ─── Rendu Markdown léger pour les bilans IA ───
+// L'IA peut structurer le bilan (titres #/##/###, gras **…**, listes «- »). On le rend
+// proprement au lieu d'afficher la syntaxe brute. mdInline gère le gras dans une ligne.
+function mdInline(text){
+  return String(text).split(/\*\*/).map((p,i)=> i%2===1 ? <strong key={i}>{p}</strong> : <React.Fragment key={i}>{p}</React.Fragment>);
+}
+function BilanMarkdown({ text }){
+  if(!text) return null;
+  const lines = String(text).replace(/\r/g,'').split('\n');
+  const out = [];
+  lines.forEach((line,i)=>{
+    const l = line.trim();
+    let m;
+    if(l===''){ out.push(<div key={i} style={{height:8}}/>); }
+    else if(m=l.match(/^###\s+(.*)/)){ out.push(<div key={i} style={{fontSize:13.5,fontWeight:800,color:'rgba(255,255,255,.9)',margin:'10px 0 3px'}}>{mdInline(m[1])}</div>); }
+    else if(m=l.match(/^##\s+(.*)/)){  out.push(<div key={i} style={{fontSize:14.5,fontWeight:800,color:'#ffb340',margin:'12px 0 4px'}}>{mdInline(m[1])}</div>); }
+    else if(m=l.match(/^#\s+(.*)/)){   out.push(<div key={i} style={{fontSize:16,fontWeight:900,color:'#fff',margin:'2px 0 6px'}}>{mdInline(m[1])}</div>); }
+    else if(m=l.match(/^[-*]\s+(.*)/)){ out.push(<div key={i} style={{display:'flex',gap:8,margin:'2px 0'}}><span style={{color:'#7dd940',flexShrink:0}}>•</span><span style={{flex:1}}>{mdInline(m[1])}</span></div>); }
+    else { out.push(<div key={i} style={{margin:'2px 0'}}>{mdInline(l)}</div>); }
+  });
+  return <div style={{fontSize:13.5,lineHeight:1.55,color:'rgba(255,255,255,.85)'}}>{out}</div>;
+}
+// Version texte brut (syntaxe Markdown retirée) pour l'aperçu tronqué de la tuile.
+function stripBilanMd(text){
+  return String(text||'')
+    .replace(/^#{1,6}\s+/gm,'')
+    .replace(/\*\*/g,'')
+    .replace(/^\s*[-*]\s+/gm,'• ')
+    .replace(/\n{2,}/g,'\n')
+    .trim();
+}
+
 function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre, onOnboardingQuestions, onOptimisation, cartVersion=0, can = () => true }) {
   const[sites,setSites]=useState(null);
   const[activeId,setActiveId]=useState(null);
@@ -5846,7 +5878,7 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
           <h1 className="welcome-title">Votre bilan<br/><span className="accent">en clair</span></h1>
         </div>
         <div className="card" style={{padding:'18px 18px'}}>
-          <div style={{fontSize:15,lineHeight:1.6,color:'rgba(255,255,255,.92)',whiteSpace:'pre-wrap'}}>{site.bilan_ia}</div>
+          <BilanMarkdown text={site.bilan_ia}/>
         </div>
       </div>
       <StickyFooter>
@@ -6151,13 +6183,19 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
                 </div>
                 {site.bilan_ia ? (
                   <>
-                    <div style={{
-                      fontSize:13.5,lineHeight:1.55,color:'rgba(255,255,255,.85)',whiteSpace:'pre-wrap',
-                      ...(bilanUpdating?{opacity:.4}:{}),
-                      ...(bilanOpen?{}:{display:'-webkit-box',WebkitLineClamp:4,WebkitBoxOrient:'vertical',overflow:'hidden'})
-                    }}>
-                      {site.bilan_ia}
-                    </div>
+                    {bilanOpen ? (
+                      <div style={{...(bilanUpdating?{opacity:.4}:{})}}>
+                        <BilanMarkdown text={site.bilan_ia}/>
+                      </div>
+                    ) : (
+                      <div style={{
+                        fontSize:13.5,lineHeight:1.55,color:'rgba(255,255,255,.85)',
+                        display:'-webkit-box',WebkitLineClamp:4,WebkitBoxOrient:'vertical',overflow:'hidden',
+                        ...(bilanUpdating?{opacity:.4}:{})
+                      }}>
+                        {stripBilanMd(site.bilan_ia)}
+                      </div>
+                    )}
                     <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:10,marginTop:8,flexWrap:'wrap'}}>
                       <button
                         onClick={()=>setBilanOpen(v=>!v)}
