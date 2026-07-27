@@ -13236,7 +13236,7 @@ function AdminBilanDataScreen({ onBack }) {
                 ) : generating ? (
                   <div style={{textAlign:'center', padding:40}}><StarSpinner size={34}/></div>
                 ) : bilanText ? (
-                  <div style={{fontSize:14, lineHeight:1.6, color:'rgba(255,255,255,.88)', whiteSpace:'pre-wrap'}}>{bilanText}</div>
+                  <BilanMarkdown text={bilanText}/>
                 ) : (
                   <div style={{color:'rgba(255,255,255,.4)', fontSize:13.5}}>Aucun bilan n'a encore été généré pour ce site.</div>
                 )}
