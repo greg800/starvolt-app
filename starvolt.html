@@ -6990,8 +6990,24 @@ function SimulationsScreen({ onACC, onBox, onSolar, onOptimisation, onDiyBox, on
   }), [maxSaving, accSaving, boxSaving, solarSaving]);
 
   // ── Filtrage des offres ───────────────────────
-  const offresFiltrees = React.useMemo(() => offres.filter(o => {
+  const offresFiltrees = React.useMemo(() => {
+    // Une offre déjà ajoutée au panier n'est plus proposée ici : inutile de la
+    // resélectionner. Pour changer de nouveau (ex. re-changer de fournisseur),
+    // il faut retirer l'article correspondant depuis le Panier. Mêmes drapeaux
+    // localStorage que le Panier ; le retour du Panier remonte cet écran → relu.
+    const typeInCart = {
+      optimisation_fournisseur: !!localStorage.getItem('starvolt_optimisation_chosen'),
+      acc:        localStorage.getItem('starvolt_acc_chosen') === 'true',
+      box:        !!localStorage.getItem('starvolt_box_chosen') && localStorage.getItem('starvolt_box_chosen') !== 'diy',
+      diy_box:    !!localStorage.getItem('starvolt_diy_box_chosen'),
+      solaire:    !!localStorage.getItem('starvolt_solar_chosen'),
+      flex_seule: !!localStorage.getItem('starvolt_flex_only_chosen'),
+    };
+    return offres.filter(o => {
     if (!offerAllowed(o)) return false; // permission de rôle (zone "offers")
+    // Déjà au panier → ne plus proposer (réactivable en vidant l'article du panier)
+    const primaryType = (o.types_offre || []).find(t => typeHandler[t]);
+    if (primaryType && typeInCart[primaryType]) return false;
     // Préalables techniques (paramétrés par offre) : le site doit remplir TOUTES
     // les conditions cochées. Tant que le profil du site n'est pas chargé
     // (siteProfile null) on ne masque pas (évite un flash / masquage à tort au chargement).
@@ -7018,7 +7034,8 @@ function SimulationsScreen({ onACC, onBox, onSolar, onOptimisation, onDiyBox, on
       if (statut  && exclusions.includes(statut))  return false;
     }
     return true;
-  }), [offres, delaiFilter, investFilter, reductFilter, siteProfile]);
+    });
+  }, [offres, delaiFilter, investFilter, reductFilter, siteProfile]);
 
   // ── Picto d'une offre ─────────────────────────
   const getPicto = (o) => {
