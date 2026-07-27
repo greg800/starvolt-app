@@ -4550,6 +4550,71 @@ function buildBilanFacts({ site, tariffs, globalVars, prodProfil, quiz }) {
   };
 }
 
+// ─── Enrichissement du bilan IA : données utilisateur + panier ───
+// Climat approximatif par département (2 premiers chiffres du CP) : contextualise le
+// potentiel solaire (ensoleillement) et le chauffage. Valeurs indicatives annuelles.
+function climateForPostal(cp){
+  const d=String(cp||'').trim().slice(0,2);
+  if(!/^\d\d$|^2[aAbB]$/.test(d)) return null;
+  const SUD_MED=['06','13','83','84','30','34','11','66','2a','2b','20'];
+  const SUD_OUEST=['31','32','33','40','47','64','65','81','82','09','24','46','12'];
+  const RHONE=['26','07','04','05','48','43','63','15','38','73','74','69','01','42'];
+  const OUEST=['44','85','49','29','22','56','35','17','16','79','86','53','72','50','14','61'];
+  const NORD_EST=['59','62','80','02','60','76','08','51','55','54','57','88','67','68','90','52','10','70','25','39','21','89','58','71','03'];
+  const dl=d.toLowerCase();
+  const region=SUD_MED.includes(dl)?'Sud (méditerranéen)':SUD_OUEST.includes(dl)?'Sud-Ouest':RHONE.includes(dl)?'Sud-Est / Alpes / vallée du Rhône':OUEST.includes(dl)?'Ouest (océanique)':NORD_EST.includes(dl)?'Nord / Est':'Centre / Île-de-France';
+  const T={'Sud (méditerranéen)':{ensoleillement_h_an:2750,temp_moyenne_c:15},'Sud-Ouest':{ensoleillement_h_an:2050,temp_moyenne_c:13.5},'Sud-Est / Alpes / vallée du Rhône':{ensoleillement_h_an:2250,temp_moyenne_c:12},'Ouest (océanique)':{ensoleillement_h_an:1800,temp_moyenne_c:12.5},'Nord / Est':{ensoleillement_h_an:1650,temp_moyenne_c:11},'Centre / Île-de-France':{ensoleillement_h_an:1750,temp_moyenne_c:11.5}};
+  return {region,...T[region]};
+}
+
+// Mesures d'économie choisies (panier) — lues dans localStorage (connu côté user uniquement).
+function buildCartFacts(){
+  const g=k=>localStorage.getItem(k), num=k=>{const v=parseInt(g(k)||'0',10);return isNaN(v)?0:v;};
+  const m=[];
+  if(g('starvolt_optimisation_chosen')) m.push({mesure:'Changement de fournisseur / tarif',detail:g('starvolt_optimisation_tariff_nom')||null,gain_annuel_eur:num('starvolt_optimisation_saving')||null,cout_eur:0,delai:'immédiat'});
+  if(g('starvolt_acc_chosen')==='true') m.push({mesure:'Autoconsommation collective',gain_annuel_eur:num('starvolt_acc_saving')||null,cout_eur:0,delai:'quelques semaines'});
+  const box=g('starvolt_box_chosen');
+  if(box&&box!=='diy') m.push({mesure:'Box Comwatt'+(box==='buy'?' (achat)':' (offerte)'),gain_annuel_eur:num('starvolt_box_saving')||null,cout_eur:box==='buy'?600:0,delai:'quelques semaines'});
+  if(g('starvolt_diy_box_chosen')){let t=0;try{t=JSON.parse(g('starvolt_diy_box_chosen')||'{}').total||0;}catch{} m.push({mesure:'Box Comwatt en autonomie (DIY)',gain_annuel_eur:num('starvolt_box_saving')||null,cout_eur:t||null,delai:'immédiat'});}
+  if(g('starvolt_solar_chosen')) m.push({mesure:'Panneaux solaires + batterie',gain_annuel_eur:(num('starvolt_solar_saving')||num('starvolt_baisse_facture'))||null,cout_eur:num('starvolt_investissement_total')||null,delai:'1 à 3 mois'});
+  if(g('starvolt_flex_only_chosen')) m.push({mesure:'Flexibilité seule (pilotage)',gain_annuel_eur:num('starvolt_flex_only_saving')||null,cout_eur:0,delai:'quelques semaines'});
+  if(m.length===0) return null;
+  return {mesures:m,gain_annuel_total_eur:m.reduce((s,x)=>s+(x.gain_annuel_eur||0),0)||null,cout_total_eur:m.reduce((s,x)=>s+(x.cout_eur||0),0)||null};
+}
+
+// Profil UTILISATEUR (compte, engagement, quiz, module Apprendre, feedback, climat).
+// Engagement + feedback via RPC get_user_engagement (contourne la RLS user_events/app_feedback).
+async function buildUserFacts({ user, codePostal }){
+  if(!user?.id) return null;
+  const out={};
+  try{ const {data}=await sb.rpc('get_user_engagement'); if(data) Object.assign(out,data); }catch{}
+  if(out.compte_cree_le) out.anciennete_jours=Math.max(0,Math.round((Date.now()-new Date(out.compte_cree_le))/86400000));
+  const nc=out.nb_connexions||0, nk=out.nb_clics||0;
+  out.profil_usage=(nc<=1&&nk<30)?'nouveau (à accompagner : expliquer l’appli, être pédagogue)':'averti (récurrent : aller droit au but, ton direct)';
+  try{ const q=await fetchQuizSummary(user.id); if(q){out.quiz_niveau_etoiles=q.stars;out.quiz_taux_erreur_pct=q.errorPct;} }catch{}
+  try{
+    const [{data:subs},{data:qs},{data:prog}]=await Promise.all([
+      sb.from('learn_subjects').select('id'),
+      sb.from('learn_questions').select('id,subject_id'),
+      sb.from('user_learn_progress').select('subject_id,completed_at,failed_question_ids').eq('user_id',user.id),
+    ]);
+    const qBy={}; (qs||[]).forEach(q=>{qBy[q.subject_id]=(qBy[q.subject_id]||0)+1;});
+    let learned=0,okQuiz=0,failed=0;
+    (prog||[]).forEach(r=>{ if(r.completed_at)learned++; const qc=qBy[r.subject_id]||0; const f=(r.failed_question_ids&&r.failed_question_ids.length)||0; failed+=f; okQuiz+=Math.max(0,qc-f); });
+    out.apprendre={sujets_appris:learned,sujets_total:(subs||[]).length,quiz_reussis:okQuiz,quiz_total:(qs||[]).length,quiz_echecs:failed};
+  }catch{}
+  const cl=climateForPostal(codePostal); if(cl) out.localisation={code_postal:String(codePostal),...cl};
+  return out;
+}
+
+// Assemble le JSON complet envoyé à l'IA : faits du SITE + section utilisateur + section panier.
+async function buildFullBilanFacts({ site, tariffs, globalVars, prodProfil, quiz, user }){
+  const siteFacts=buildBilanFacts({ site, tariffs, globalVars, prodProfil, quiz });
+  if(!siteFacts) return null;
+  const userFacts=await buildUserFacts({ user, codePostal: site?.code_postal });
+  return { ...siteFacts, utilisateur: userFacts||undefined, panier: buildCartFacts()||undefined };
+}
+
 // Description du foyer envoyée à l'IA pour le MESSAGE D'ACCUEIL (avant conso).
 // N'utilise QUE les champs déclarés au questionnaire d'inscription (flex_*),
 // la consommation ENEDIS n'étant pas encore disponible à ce stade.
@@ -5656,11 +5721,11 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
     (async()=>{
       try{
         const quiz=await fetchQuizSummary(user.id);
-        const facts=buildBilanFacts({site,tariffs,globalVars,prodProfil:prodProfilData,quiz});
+        const facts=await buildFullBilanFacts({site,tariffs,globalVars,prodProfil:prodProfilData,quiz,user});
         if(!facts) return;
         const{data,error}=await sb.functions.invoke('bilan',{body:{facts}});
         if(error||!data?.text){ console.warn('bilan error',error||data); return; }
-        await sb.from('sites').update({bilan_ia:data.text,bilan_ia_at:new Date().toISOString()}).eq('id',sid);
+        await sb.from('sites').update({bilan_ia:data.text,bilan_ia_at:new Date().toISOString(),bilan_ia_facts:facts}).eq('id',sid);
         setSites(prev=>prev?prev.map(s=>s.id===sid?{...s,bilan_ia:data.text}:s):prev);
       }catch(e){ console.warn('bilan exception',e); }
       finally{ setBilanGenerating(false); }
@@ -5674,11 +5739,11 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
     setBilanUpdating(true);
     try{
       const quiz=await fetchQuizSummary(user.id);
-      const facts=buildBilanFacts({site,tariffs,globalVars,prodProfil:prodProfilData,quiz});
+      const facts=await buildFullBilanFacts({site,tariffs,globalVars,prodProfil:prodProfilData,quiz,user});
       if(!facts){ return; }
       const{data,error}=await sb.functions.invoke('bilan',{body:{facts}});
       if(error||!data?.text){ console.warn('bilan regen error',error||data); return; }
-      await sb.from('sites').update({bilan_ia:data.text,bilan_ia_at:new Date().toISOString()}).eq('id',sid);
+      await sb.from('sites').update({bilan_ia:data.text,bilan_ia_at:new Date().toISOString(),bilan_ia_facts:facts}).eq('id',sid);
       setSites(prev=>prev?prev.map(s=>s.id===sid?{...s,bilan_ia:data.text}:s):prev);
       // Afficher le conseil dans une boîte de dialogue pleine page avec 2 CTA
       // (comprendre ma conso / simuler des économies).
@@ -13090,11 +13155,18 @@ function AdminBilanDataScreen({ onBack }) {
     const { data, error } = await sb.rpc('admin_get_site_bilan_data', { p_site_id: siteId });
     const row = data && data[0];
     if (error || !row) { setFacts(null); setLoading(false); return; }
-    // SOURCE UNIQUE loadProdProfil : repli GPS si profil_production_id null (comme Mon site)
-    const prodProfil = await loadProdProfil(row);
-    const quiz = await fetchQuizSummary(row.user_id);
     setBilanText(row.bilan_ia || null);
-    setFacts(buildBilanFacts({ site: row, tariffs, globalVars: null, prodProfil, quiz }));
+    if (row.bilan_ia_facts) {
+      // JSON réellement envoyé à l'IA lors de la dernière génération côté utilisateur
+      // (inclut les sections « utilisateur » et « panier »). Source de vérité.
+      setFacts(row.bilan_ia_facts);
+    } else {
+      // Repli : jamais généré par le client enrichi → on reconstruit les faits du site seuls.
+      // SOURCE UNIQUE loadProdProfil : repli GPS si profil_production_id null (comme Mon site)
+      const prodProfil = await loadProdProfil(row);
+      const quiz = await fetchQuizSummary(row.user_id);
+      setFacts(buildBilanFacts({ site: row, tariffs, globalVars: null, prodProfil, quiz }));
+    }
     setLoading(false);
   };
 
@@ -13157,6 +13229,49 @@ function AdminBilanDataScreen({ onBack }) {
     ];
   };
 
+  // Section « Utilisateur » (données du compte, communes à tous ses sites)
+  const userRows = (u) => !u ? [] : [
+    ['Compte créé le', u.compte_cree_le ? new Date(u.compte_cree_le).toLocaleDateString('fr-FR') : '—'],
+    ['Ancienneté', u.anciennete_jours != null ? u.anciennete_jours + ' j' : '—'],
+    ['Connexions', u.nb_connexions ?? '—'],
+    ['Clics dans l’appli', u.nb_clics ?? '—'],
+    ['Profil d’usage', u.profil_usage || '—'],
+    ['Écran le plus visité', u.ecran_le_plus_visite || '—'],
+    ['Quiz — niveau', u.quiz_niveau_etoiles != null ? (u.quiz_niveau_etoiles > 0 ? '⭐'.repeat(u.quiz_niveau_etoiles) : '🐻 (0)') : '—'],
+    ['Quiz — taux d’erreur', u.quiz_taux_erreur_pct != null ? u.quiz_taux_erreur_pct + ' %' : '—'],
+    ['Apprendre — sujets appris', u.apprendre ? `${u.apprendre.sujets_appris}/${u.apprendre.sujets_total}` : '—'],
+    ['Apprendre — quiz réussis', u.apprendre ? `${u.apprendre.quiz_reussis}/${u.apprendre.quiz_total} (${u.apprendre.quiz_echecs} échecs)` : '—'],
+    ['Feedback 👍 / 👎', (u.feedback_positifs != null || u.feedback_negatifs != null) ? `${u.feedback_positifs || 0} / ${u.feedback_negatifs || 0}` : '—'],
+    ['Région', u.localisation?.region || '—'],
+    ['Climat', u.localisation ? `${u.localisation.temp_moyenne_c} °C · ${u.localisation.ensoleillement_h_an} h soleil/an` : '—'],
+  ];
+
+  // Section « Panier » (mesures d'économie choisies)
+  const panierRows = (p) => {
+    if (!p || !(p.mesures || []).length) return [];
+    const rows = p.mesures.map(m => [m.mesure, [
+      m.gain_annuel_eur != null ? `+${m.gain_annuel_eur} €/an` : null,
+      m.cout_eur ? `coût ${m.cout_eur} €` : null,
+      m.delai ? `délai ${m.delai}` : null,
+      m.detail || null,
+    ].filter(Boolean).join(' · ') || '—']);
+    rows.push(['Gain annuel total', p.gain_annuel_total_eur != null ? `+${p.gain_annuel_total_eur} €/an` : '—']);
+    rows.push(['Coût total', p.cout_total_eur != null ? `${p.cout_total_eur} €` : '—']);
+    return rows;
+  };
+
+  const renderSection = (title, rows) => rows.length ? (
+    <div className="card" style={{padding:0, overflow:'hidden', marginBottom:12}}>
+      <div style={{padding:'10px 14px', fontWeight:800, fontSize:12.5, color:'#ffb340', borderBottom:'1px solid rgba(255,255,255,.08)'}}>{title}</div>
+      {rows.map(([label, value], i) => (
+        <div key={label + i} style={{display:'flex', gap:12, padding:'10px 14px', borderTop: i ? '1px solid rgba(255,255,255,.07)' : 'none'}}>
+          <div style={{flex:'1 1 52%', fontSize:12.5, color:'rgba(255,255,255,.6)', lineHeight:1.4}}>{label}</div>
+          <div style={{flex:'1 1 48%', fontSize:13, fontWeight:700, color:'#fff', textAlign:'right', lineHeight:1.4}}>{value}</div>
+        </div>
+      ))}
+    </div>
+  ) : null;
+
   return (
     <>
     <div className="screen fade-in" style={{padding:'0 0 90px', maxWidth:'100%', width:'100%'}}>
@@ -13200,14 +13315,11 @@ function AdminBilanDataScreen({ onBack }) {
                 Ce site n'a pas de profil de consommation : aucun bilan ne peut être généré.
               </div>
             ) : (
-              <div className="card" style={{padding:0, overflow:'hidden'}}>
-                {factRows(facts).map(([label, value], i) => (
-                  <div key={label} style={{display:'flex', gap:12, padding:'11px 14px', borderTop: i ? '1px solid rgba(255,255,255,.07)' : 'none'}}>
-                    <div style={{flex:'1 1 55%', fontSize:12.5, color:'rgba(255,255,255,.6)', lineHeight:1.4}}>{label}</div>
-                    <div style={{flex:'1 1 45%', fontSize:13, fontWeight:700, color:'#fff', textAlign:'right', lineHeight:1.4}}>{value}</div>
-                  </div>
-                ))}
-              </div>
+              <>
+                {renderSection('👤 Utilisateur', userRows(facts.utilisateur))}
+                {renderSection('🏠 Site — avant travaux', factRows(facts))}
+                {renderSection('🛒 Panier — mesures choisies', panierRows(facts.panier))}
+              </>
             )}
           </div>
 
