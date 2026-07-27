@@ -10197,10 +10197,16 @@ function SolarSimScreen({ user, userProfile, onBack, onPanier, onMonSite, onCart
   const [batKwh,   setBatKwh]   = useState(()=>{try{return JSON.parse(localStorage.getItem('starvolt_solar_defaults'))?.batKwh||'10';}catch{return'10';}});
   const [thermKwh, setThermKwh] = useState(()=>{try{return JSON.parse(localStorage.getItem('starvolt_solar_defaults'))?.thermKwh||'5';}catch{return'5';}});
 
-  // Persister les valeurs dans localStorage → Ma prod peut les copier comme defaults
+  // Persister les valeurs dans localStorage → Ma prod peut les copier comme defaults.
+  // On TAGUE siteId (cible de confiance lue par resolveCartEquipment → Mon site / Panier)
+  // UNIQUEMENT une fois le solaire choisi : sinon les valeurs par défaut (6/10) fuiteraient
+  // vers un site qui n'a rien choisi. Sans ce tag, resolveCartEquipment ignore ces valeurs
+  // et, pour un site sans solaire existant, force PV/batterie à 0 (bug « n'ajoute pas de PV »).
   useEffect(()=>{
-    localStorage.setItem('starvolt_solar_defaults',JSON.stringify({pvKwc,batKwh,thermKwh}));
-  },[pvKwc,batKwh,thermKwh]);
+    const sid=localStorage.getItem('starvolt_active_site_id');
+    const tag=(chosen||!!localStorage.getItem('starvolt_solar_chosen'))&&sid?{siteId:sid}:{};
+    localStorage.setItem('starvolt_solar_defaults',JSON.stringify({pvKwc,batKwh,thermKwh,...tag}));
+  },[pvKwc,batKwh,thermKwh,chosen]);
 
   // Données pour calcul réel
   const [siteRef,    setSiteRef]    = useState(null);  // {conso_profil, currentBill, curTariff, site}
@@ -10344,7 +10350,9 @@ function SolarSimScreen({ user, userProfile, onBack, onPanier, onMonSite, onCart
     }
     // 3) Appliquer le couple retenu (state + localStorage + DB)
     setPvKwc(bestPv); setBatKwh(bestBat);
-    try{const d=JSON.parse(localStorage.getItem('starvolt_solar_defaults')||'{}');localStorage.setItem('starvolt_solar_defaults',JSON.stringify({...d,pvKwc:bestPv,batKwh:bestBat}));}catch{localStorage.setItem('starvolt_solar_defaults',JSON.stringify({pvKwc:bestPv,batKwh:bestBat,thermKwh:'0'}));}
+    // Tague siteId : cible de confiance lue par resolveCartEquipment (Mon site / Panier) sans
+    // dépendre de l'écriture DB (course). Solaire choisi ici → le tag est légitime.
+    try{const d=JSON.parse(localStorage.getItem('starvolt_solar_defaults')||'{}');localStorage.setItem('starvolt_solar_defaults',JSON.stringify({...d,pvKwc:bestPv,batKwh:bestBat,siteId:activeSiteId}));}catch{localStorage.setItem('starvolt_solar_defaults',JSON.stringify({pvKwc:bestPv,batKwh:bestBat,thermKwh:'0',siteId:activeSiteId}));}
     if (activeSiteId) sb.from('sites').update({puissance_pv_kwc:parseFloat(bestPv),batterie_capacite_kwh:parseFloat(bestBat)}).eq('id',activeSiteId);
     if (solarBoxSaving) localStorage.setItem('starvolt_solar_saving',String(solarBoxSaving));
     // 4) Suite du flux existant
