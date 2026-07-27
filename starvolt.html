@@ -5184,6 +5184,7 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
   const[prodOpen,setProdOpen]=useState(false);
   const[consoChartOpen,setConsoChartOpen]=useState(true);
   const[showFlexForm,setShowFlexForm]=useState(false);
+  const[showBilanResult,setShowBilanResult]=useState(false); // boîte pleine page du bilan après « Mettre à jour les conseils »
   const[showEnedis,setShowEnedis]=useState(false); // fiche « infos compteur ENEDIS »
   const[linkyStatus,setLinkyStatus]=useState(null); // null | 'loading' | 'pending' | 'ordering' | 'done' | 'error'
   const[linkyUserUrl,setLinkyUserUrl]=useState(null);
@@ -5648,9 +5649,9 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
       await sb.from('sites').update({bilan_ia:data.text,bilan_ia_at:new Date().toISOString()}).eq('id',sid);
       setSites(prev=>prev?prev.map(s=>s.id===sid?{...s,bilan_ia:data.text}:s):prev);
       setBilanOpen(true);
-      // À la fin de la mise à jour des conseils : ouvrir la boîte de dialogue du parcours
-      // d'onboarding (questionnaire foyer) pour affiner/vérifier le profil.
-      setShowFlexForm(true);
+      // À la fin de la mise à jour des conseils : afficher le conseil dans une boîte de
+      // dialogue pleine page avec 2 CTA (comprendre ma conso / simuler des économies).
+      setShowBilanResult(true);
     }catch(e){ console.warn('bilan regen exception',e); }
     finally{ setBilanUpdating(false); }
   };
@@ -5834,6 +5835,31 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
   },[site?.tarif_id,tariffs]);
 
   if(sites===null)return(<><div className="screen fade-in"><div style={{textAlign:'center',padding:40}}><StarSpinner size={34}/></div></div><StickyFooter onBack={onBack}/></>);
+  // Boîte de dialogue pleine page affichée à la fin de « Mettre à jour les conseils » :
+  // le conseil IA + 2 CTA (comprendre ma conso → Mon site ; simuler → Simulations).
+  if(showBilanResult&&site){
+    return (
+      <>
+      <div className="screen fade-in">
+        <div className="auth-header">
+          <div className="welcome-tag" style={{color:'#ffb340'}}>Vos conseils</div>
+          <h1 className="welcome-title">Votre bilan<br/><span className="accent">en clair</span></h1>
+        </div>
+        <div className="card" style={{padding:'18px 18px'}}>
+          <div style={{fontSize:15,lineHeight:1.6,color:'rgba(255,255,255,.92)',whiteSpace:'pre-wrap'}}>{site.bilan_ia}</div>
+        </div>
+      </div>
+      <StickyFooter>
+        <button className="btn btn-primary" style={{width:'100%',fontSize:15,padding:'13px'}} onClick={()=>setShowBilanResult(false)}>
+          🔍 Je veux comprendre ma conso
+        </button>
+        <button className="btn" style={{width:'100%',fontSize:14}} onClick={()=>{ setShowBilanResult(false); onSimulations&&onSimulations(); }}>
+          📊 Je veux simuler des économies
+        </button>
+      </StickyFooter>
+      </>
+    );
+  }
   if(showFlexForm&&site){
     return <OnboardingTypeform
       siteId={activeId}
