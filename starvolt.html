@@ -10654,12 +10654,20 @@ function PanierScreen({ user, onBack, onGoTo, onMonSite }) {
     };
     removes[key].forEach(k => localStorage.removeItem(k));
     if(key==='solar'){
-      // Retirer le solaire = revenir à l'équipement EXISTANT : on efface la cible enregistrée
-      // (puissance_pv_kwc / batterie_capacite_kwh → null) et le cache slider, sinon Mon site
-      // resterait sur la puissance augmentée. null → repli sur pv_existant / batterie_existante.
+      // Retirer le solaire = « Ma prod » revient à l'équipement DÉCLARÉ par l'utilisateur :
+      // - PV/batterie déclarés (pv_existant / batterie_existante > 0) → on y revient ;
+      // - rien déclaré → 0 (on supprime la puissance).
+      // On écrit la cible EXPLICITEMENT (DB + solar_defaults tagué siteId) plutôt que null :
+      // resolveCartEquipment la lit alors de façon SYNCHRONE, sans course avec l'écriture DB
+      // (sinon Mon site pouvait garder la puissance optimisée le temps que le null commite).
       const sid=localStorage.getItem('starvolt_active_site_id');
-      if(sid) sb.from('sites').update({puissance_pv_kwc:null,batterie_capacite_kwh:null}).eq('id',sid);
-      localStorage.removeItem('starvolt_solar_defaults');
+      const pvRevert  = solarInfo?.pvExist  || 0;   // = Math.max(0, pv_existant_kwc)
+      const batRevert = solarInfo?.batExist || 0;   // = Math.max(0, batterie_existante_kwh)
+      if(sid) sb.from('sites').update({puissance_pv_kwc:pvRevert,batterie_capacite_kwh:batRevert}).eq('id',sid);
+      // On conserve le stockage thermique / box (thermKwh) : seul le solaire est retiré.
+      try{ const d=JSON.parse(localStorage.getItem('starvolt_solar_defaults')||'{}');
+        localStorage.setItem('starvolt_solar_defaults',JSON.stringify({...d,pvKwc:String(pvRevert),batKwh:String(batRevert),siteId:sid})); }
+      catch{ localStorage.setItem('starvolt_solar_defaults',JSON.stringify({pvKwc:String(pvRevert),batKwh:String(batRevert),siteId:sid})); }
     }
     setItems(s => ({...s, [key]: false}));
   };
