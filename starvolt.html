@@ -5648,6 +5648,9 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
       await sb.from('sites').update({bilan_ia:data.text,bilan_ia_at:new Date().toISOString()}).eq('id',sid);
       setSites(prev=>prev?prev.map(s=>s.id===sid?{...s,bilan_ia:data.text}:s):prev);
       setBilanOpen(true);
+      // À la fin de la mise à jour des conseils : ouvrir la boîte de dialogue du parcours
+      // d'onboarding (questionnaire foyer) pour affiner/vérifier le profil.
+      setShowFlexForm(true);
     }catch(e){ console.warn('bilan regen exception',e); }
     finally{ setBilanUpdating(false); }
   };
