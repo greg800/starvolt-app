@@ -7003,11 +7003,17 @@ function SimulationsScreen({ onACC, onBox, onSolar, onOptimisation, onDiyBox, on
       solaire:    !!localStorage.getItem('starvolt_solar_chosen'),
       flex_seule: !!localStorage.getItem('starvolt_flex_only_chosen'),
     };
+    // Une box Comwatt est UNIQUE : le solaire (PV+batterie installe systématiquement une box),
+    // l'installation de box et la box en autonomie (DIY) aboutissent toutes à une box. Dès qu'un
+    // de ces trois est au panier, on ne propose plus aucune AUTRE offre "box" (installée ou DIY).
+    const boxImpliedInCart = typeInCart.solaire || typeInCart.box || typeInCart.diy_box;
     return offres.filter(o => {
     if (!offerAllowed(o)) return false; // permission de rôle (zone "offers")
     // Déjà au panier → ne plus proposer (réactivable en vidant l'article du panier)
     const primaryType = (o.types_offre || []).find(t => typeHandler[t]);
     if (primaryType && typeInCart[primaryType]) return false;
+    // Box déjà couverte (solaire, box installée ou DIY) → masquer les autres offres box
+    if (boxImpliedInCart && (primaryType === 'box' || primaryType === 'diy_box')) return false;
     // Préalables techniques (paramétrés par offre) : le site doit remplir TOUTES
     // les conditions cochées. Tant que le profil du site n'est pas chargé
     // (siteProfile null) on ne masque pas (évite un flash / masquage à tort au chargement).
