@@ -2758,6 +2758,7 @@ function AuthLoginScreen({ onGoToSignup }) {
   const [error,   setError]   = useState(null);
   const [forgot,  setForgot]  = useState(false);
   const [resetOk, setResetOk] = useState(false);
+  const [showPwd, setShowPwd] = useState(false);
 
   const handleLogin = async () => {
     if (!email.trim() || !pwd) { setError('Email et mot de passe requis.'); return; }
@@ -2815,7 +2816,11 @@ function AuthLoginScreen({ onGoToSignup }) {
           {!forgot && (
             <div className="inp-group">
               <label className="inp-label">Mot de passe</label>
-              <input className="inp" type="password" value={pwd} onChange={e=>setPwd(e.target.value)} placeholder="••••••••"/>
+              <div style={{position:'relative'}}>
+                <input className="inp" type={showPwd?'text':'password'} value={pwd} onChange={e=>setPwd(e.target.value)} placeholder="••••••••" style={{paddingRight:44}}/>
+                <button type="button" onClick={()=>setShowPwd(v=>!v)} title={showPwd?'Masquer le mot de passe':'Afficher le mot de passe'}
+                  style={{position:'absolute',right:6,top:'50%',transform:'translateY(-50%)',background:'none',border:'none',cursor:'pointer',fontSize:16,lineHeight:1,padding:'5px 6px'}}>{showPwd?'🙈':'👁️'}</button>
+              </div>
             </div>
           )}
           {error && <div className="auth-error">{error}</div>}
