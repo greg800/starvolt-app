@@ -4528,8 +4528,6 @@ function buildBilanFacts({ site, tariffs, globalVars, prodProfil, quiz }) {
     batterie_existante_kwh: site.flex_has_battery ? (site.batterie_existante_kwh != null ? Number(site.batterie_existante_kwh) : null) : (site.flex_has_battery === false ? 0 : null),
     box_comwatt_existante: site.box_comwatt_existante == null ? null : (site.box_comwatt_existante ? 'oui' : 'non'),
     equipements_energivores_autres: site.flex_other_equipment || null,
-    quiz_niveau_etoiles: quiz?.stars ?? null,
-    quiz_taux_erreur_pct: quiz?.errorPct ?? null,
     puissance_max_kw: puissanceMaxKw,
     puissance_max_survenue: puissanceMaxSurvenue,
     puissance_min_kw: puissanceMinKw,
@@ -13127,9 +13125,9 @@ function AdminCyberSecurityScreen({ onBack }) {
 function AdminBilanDataScreen({ onBack }) {
   const [sites, setSites] = useState(null);
   const [tariffs, setTariffs] = useState([]);
-  const [selId, setSelId] = useState('');
-  const [facts, setFacts] = useState(undefined); // undefined = rien chargé, null = pas de données
-  const [bilanText, setBilanText] = useState(null);
+  const [selId, setSelId] = useState('');            // site choisi dans le menu (point d'entrée)
+  const [userSites, setUserSites] = useState(null);  // [{site_id,nom,facts,bilan_ia}] pour l'utilisateur ; null = rien chargé
+  const [activeTab, setActiveTab] = useState('');    // site_id de l'onglet actif
   const [loading, setLoading] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [genErr, setGenErr] = useState(null);
@@ -13148,43 +13146,57 @@ function AdminBilanDataScreen({ onBack }) {
     ]).then(([{ data: s }, { data: t }]) => { setSites(s || []); setTariffs(t || []); });
   }, []);
 
+  // Charge TOUS les sites de l'utilisateur propriétaire du site choisi → un onglet par site.
   const loadSite = async (siteId) => {
-    setSelId(siteId); setFacts(undefined); setBilanText(null); setGenErr(null);
+    setSelId(siteId); setUserSites(null); setActiveTab(''); setGenErr(null);
     if (!siteId) return;
     setLoading(true);
-    const { data, error } = await sb.rpc('admin_get_site_bilan_data', { p_site_id: siteId });
-    const row = data && data[0];
-    if (error || !row) { setFacts(null); setLoading(false); return; }
-    setBilanText(row.bilan_ia || null);
-    if (row.bilan_ia_facts) {
-      // JSON réellement envoyé à l'IA lors de la dernière génération côté utilisateur
-      // (inclut les sections « utilisateur » et « panier »). Source de vérité.
-      setFacts(row.bilan_ia_facts);
-    } else {
-      // Repli : jamais généré par le client enrichi → on reconstruit les faits du site seuls.
-      // SOURCE UNIQUE loadProdProfil : repli GPS si profil_production_id null (comme Mon site)
-      const prodProfil = await loadProdProfil(row);
-      const quiz = await fetchQuizSummary(row.user_id);
-      setFacts(buildBilanFacts({ site: row, tariffs, globalVars: null, prodProfil, quiz }));
-    }
+    const sel = (sites || []).find(s => s.site_id === siteId);
+    const ownerId = sel?.owner_id;
+    const owned = (sites || []).filter(s => ownerId ? s.owner_id === ownerId : s.site_id === siteId);
+    const entries = await Promise.all(owned.map(async os => {
+      const { data } = await sb.rpc('admin_get_site_bilan_data', { p_site_id: os.site_id });
+      const row = data && data[0];
+      if (!row) return { site_id: os.site_id, nom: os.site_nom || 'Site', facts: null, bilan_ia: null };
+      let facts = null;
+      if (row.bilan_ia_facts) {
+        facts = row.bilan_ia_facts; // JSON réellement envoyé à l'IA (utilisateur + panier compris)
+      } else if (row.conso_profil) {
+        // Repli : jamais généré par le client enrichi → faits du site seuls.
+        const prodProfil = await loadProdProfil(row);
+        facts = buildBilanFacts({ site: row, tariffs, globalVars: null, prodProfil, quiz: null });
+      }
+      return { site_id: os.site_id, nom: row.nom || os.site_nom || 'Site', facts, bilan_ia: row.bilan_ia || null };
+    }));
+    setUserSites(entries);
+    setActiveTab(siteId);
     setLoading(false);
   };
 
   const generate = async () => {
-    if (!selId || !facts) return;
+    const entry = (userSites || []).find(e => e.site_id === activeTab);
+    if (!entry || !entry.facts) return;
     setGenerating(true); setGenErr(null);
     try {
-      const { data, error } = await sb.functions.invoke('bilan', { body: { facts } });
+      const { data, error } = await sb.functions.invoke('bilan', { body: { facts: entry.facts } });
       if (error || !data?.text) { setGenErr('Échec de la génération : ' + (error?.message || 'réponse vide')); return; }
-      const { error: wErr } = await sb.rpc('admin_set_site_bilan', { p_site_id: selId, p_text: data.text });
+      const { error: wErr } = await sb.rpc('admin_set_site_bilan', { p_site_id: activeTab, p_text: data.text });
       if (wErr) { setGenErr('Génération OK mais enregistrement refusé : ' + wErr.message); return; }
-      setBilanText(data.text);
+      setUserSites(prev => (prev || []).map(e => e.site_id === activeTab ? { ...e, bilan_ia: data.text } : e));
     } catch (e) {
       setGenErr('Erreur : ' + (e?.message || e));
     } finally {
       setGenerating(false);
     }
   };
+
+  // Valeurs dérivées de l'onglet actif
+  const activeEntry = (userSites || []).find(e => e.site_id === activeTab) || null;
+  const facts = activeEntry ? activeEntry.facts : undefined; // undefined = rien chargé, null = pas de conso
+  const bilanText = activeEntry?.bilan_ia || null;
+  // Section utilisateur : snapshot pris à la dernière génération (identique pour tous ses sites) —
+  // on prend l'onglet actif, sinon le premier site qui en a un.
+  const userFacts = activeEntry?.facts?.utilisateur || (userSites || []).map(e => e.facts?.utilisateur).find(Boolean) || null;
 
   const factRows = (f) => {
     if (!f) return [];
@@ -13212,8 +13224,6 @@ function AdminBilanDataScreen({ onBack }) {
       ['Batterie existante', f.batterie_existante_kwh != null ? (f.batterie_existante_kwh > 0 ? f.batterie_existante_kwh + ' kWh' : 'non') : '—'],
       ['Box Comwatt existante', f.box_comwatt_existante || '—'],
       ['Autres équipements énergivores', f.equipements_energivores_autres || '—'],
-      ['Niveau quizz', f.quiz_niveau_etoiles != null ? (f.quiz_niveau_etoiles > 0 ? '⭐'.repeat(f.quiz_niveau_etoiles) : '🐻 (0 étoile)') : '—'],
-      ['Quizz — taux d’erreur (1er coup)', f.quiz_taux_erreur_pct != null ? f.quiz_taux_erreur_pct + ' %' : '—'],
       ['Puissance max (courbe)', f.puissance_max_kw != null ? f.puissance_max_kw + ' kW' + (f.puissance_max_survenue ? ` (${f.puissance_max_survenue.mois}, ${f.puissance_max_survenue.heure}h)` : '') : '—'],
       ['Puissance min / veille', f.puissance_min_kw != null ? f.puissance_min_kw + ' kW' + (f.puissance_min_survenue ? ` (${f.puissance_min_survenue.mois}, ${f.puissance_min_survenue.heure}h)` : '') : '—'],
       ['Puissance souscrite', f.puissance_souscrite_kva != null ? f.puissance_souscrite_kva + ' kVA' : '—'],
@@ -13309,27 +13319,43 @@ function AdminBilanDataScreen({ onBack }) {
 
             {loading ? (
               <div style={{textAlign:'center', padding:40}}><StarSpinner size={34}/></div>
-            ) : facts === undefined ? null
-              : facts === null ? (
-              <div style={{textAlign:'center', color:'rgba(255,255,255,.4)', fontSize:14, padding:'24px 0'}}>
-                Ce site n'a pas de profil de consommation : aucun bilan ne peut être généré.
-              </div>
-            ) : (
+            ) : userSites === null ? null : (
               <>
-                {renderSection('👤 Utilisateur', userRows(facts.utilisateur))}
-                {renderSection('🏠 Site — avant travaux', factRows(facts))}
-                {renderSection('🛒 Panier — mesures choisies', panierRows(facts.panier))}
+                {renderSection('👤 Utilisateur', userRows(userFacts))}
+                {userSites.length > 1 && (
+                  <div style={{display:'flex', flexWrap:'wrap', gap:6, marginBottom:12}}>
+                    {userSites.map(e => (
+                      <button key={e.site_id} onClick={() => setActiveTab(e.site_id)}
+                        style={{fontSize:12, fontWeight:700, padding:'6px 11px', borderRadius:8, cursor:'pointer', fontFamily:'inherit',
+                          background: e.site_id === activeTab ? '#ffb340' : 'rgba(255,255,255,.08)',
+                          color: e.site_id === activeTab ? '#1a1208' : 'rgba(255,255,255,.7)',
+                          border: e.site_id === activeTab ? 'none' : '1px solid rgba(255,255,255,.15)'}}>
+                        {e.nom}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {activeEntry && activeEntry.facts === null ? (
+                  <div style={{textAlign:'center', color:'rgba(255,255,255,.4)', fontSize:14, padding:'24px 0'}}>
+                    Ce site n'a pas de profil de consommation : aucun bilan ne peut être généré.
+                  </div>
+                ) : activeEntry && activeEntry.facts ? (
+                  <>
+                    {renderSection('🏠 Site — avant travaux', factRows(activeEntry.facts))}
+                    {renderSection('🛒 Panier — mesures choisies', panierRows(activeEntry.facts.panier))}
+                  </>
+                ) : null}
               </>
             )}
           </div>
 
           {/* Colonne droite (2/3) : le texte affiché à l'utilisateur */}
-          {(facts !== undefined || isMobile) && (
+          {(userSites !== null || isMobile) && (
             <div style={{flex: isMobile ? '1 1 auto' : '2 1 0', minWidth:0, width: isMobile ? '100%' : 'auto'}}>
               <div className="card" style={{padding:16, position:'relative', overflow:'hidden'}}>
                 <div style={{display:'flex', alignItems:'center', justifyContent:'space-between', gap:10, flexWrap:'wrap', marginBottom:12}}>
                   <div style={{fontWeight:800, fontSize:14, color:'#fff', display:'flex', alignItems:'center', gap:6}}>
-                    ✨ Votre bilan en clair
+                    ✨ Votre bilan en clair{activeEntry && (userSites||[]).length > 1 ? ` — ${activeEntry.nom}` : ''}
                   </div>
                   <button onClick={generate} disabled={!facts || generating || loading}
                     style={{background: (!facts||generating||loading) ? 'rgba(255,255,255,.1)' : '#ffb340', border:'none', borderRadius:9,
