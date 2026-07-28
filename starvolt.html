@@ -5744,6 +5744,19 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
       const quiz=await fetchQuizSummary(user.id);
       const facts=await buildFullBilanFacts({site,tariffs,globalVars,prodProfil:prodProfilData,quiz,user});
       if(!facts){ return; }
+      // ── Économie de tokens/attente : si ni les conditions initiales (site) ni le panier
+      //    n'ont changé depuis la dernière génération, l'ancien conseil est toujours valable.
+      //    On compare la signature « config » (faits sans la section utilisateur, volatile :
+      //    ancienneté, nb de clics… qui n'influencent pas les recommandations).
+      //    Sérialisation canonique (tri récursif des clés) car le jsonb stocké réordonne
+      //    les clés : une comparaison sur JSON.stringify brut échouerait à tort.
+      const canon=v=>{ if(v===null||typeof v!=='object') return v; if(Array.isArray(v)) return v.map(canon); return Object.keys(v).sort().reduce((o,k)=>{o[k]=canon(v[k]);return o;},{}); };
+      const configSig=f=>{ if(!f) return null; const {utilisateur,...rest}=f; try{return JSON.stringify(canon(rest));}catch{return null;} };
+      const curSig=configSig(facts);
+      if(site.bilan_ia && curSig && curSig===configSig(site.bilan_ia_facts)){
+        setShowBilanResult(true);
+        return;
+      }
       const{data,error}=await sb.functions.invoke('bilan',{body:{facts}});
       if(error||!data?.text){ console.warn('bilan regen error',error||data); return; }
       await sb.from('sites').update({bilan_ia:data.text,bilan_ia_at:new Date().toISOString(),bilan_ia_facts:facts}).eq('id',sid);
@@ -15563,7 +15576,7 @@ function OnboardingAdviceScreen({ user, profile, siteId, onAutoEval, onKnowledge
 
       <div className="card" style={{padding:'18px 18px',minHeight:120,display:'flex',alignItems:text?'flex-start':'center',justifyContent:'center'}}>
         {text || failed ? (
-          <div style={{fontSize:15,lineHeight:1.6,color:'rgba(255,255,255,.92)',whiteSpace:'pre-wrap'}}>{text || fallback}</div>
+          <BilanMarkdown text={text || fallback}/>
         ) : (
           <StarSpinner size={30} label="On prépare tes premiers conseils…" labelColor="rgba(255,255,255,.7)"/>
         )}
@@ -15635,7 +15648,7 @@ function OnboardingEvalResultScreen({ results, questions, onDone }) {
 
       <div className="card" style={{padding:'18px 18px',minHeight:140,display:'flex',alignItems:(text||failed)?'flex-start':'center',justifyContent:'center'}}>
         {text || failed ? (
-          <div style={{fontSize:15,lineHeight:1.6,color:'rgba(255,255,255,.92)',whiteSpace:'pre-wrap'}}>{text || fallback}</div>
+          <BilanMarkdown text={text || fallback}/>
         ) : (
           <StarSpinner size={30} label="On analyse tes réponses…" labelColor="rgba(255,255,255,.7)"/>
         )}
@@ -16564,7 +16577,7 @@ function BilanReadyPopup({ data, onUnderstood }) {
         {bilanText && (
           <div style={{marginTop:6,marginBottom:16,padding:'13px 14px',background:'rgba(240,160,80,.07)',border:'1px solid rgba(240,160,80,.22)',borderRadius:14}}>
             <div style={{fontWeight:800,fontSize:13,color:'white',display:'flex',alignItems:'center',gap:6,marginBottom:9}}>✨ Votre bilan en clair</div>
-            <div style={{fontSize:13.5,lineHeight:1.55,color:'rgba(255,255,255,.85)',whiteSpace:'pre-wrap'}}>{bilanText}</div>
+            <BilanMarkdown text={bilanText}/>
           </div>
         )}
 
@@ -17231,6 +17244,13 @@ function App() {
     localStorage.getItem('starvolt_solar_chosen'),
   ].filter(Boolean).length : 0;
 
+  // Le popup « bilan prêt » ne doit pas interrompre une boîte de dialogue que
+  // l'utilisateur est en train de lire pendant l'intégration (message d'accueil,
+  // quiz d'auto-évaluation, retour IA). Il patiente jusqu'à ce que l'écran soit fermé.
+  const onboardingDialogOpen =
+    ['ONBOARDING_QUESTIONS','ONBOARDING_ADVICE','ONBOARDING_EVAL_RESULT'].includes(state.screen)
+    || (state.screen === 'COMPRENDRE_QUIZ' && state.onboardingEval);
+
   return (
     <div className="app">
       {imperso && (
@@ -17271,7 +17291,7 @@ function App() {
         <FeedbackModal sentiment={feedbackSentiment} user={user} screen={state.screen} onClose={()=>setFeedbackSentiment(null)}/>
       )}
       {user && <GlobalBilanWatcher onReady={handleBilanReady}/>}
-      {bilanPopup && <BilanReadyPopup data={bilanPopup} onUnderstood={handleBilanUnderstood}/>}
+      {bilanPopup && !onboardingDialogOpen && <BilanReadyPopup data={bilanPopup} onUnderstood={handleBilanUnderstood}/>}
       {secReport && <SecReportPopup check={secReport} title="🛡️ Sécurité — dernier rapport" onClose={dismissSecReport}/>}
       {!secReport && codeAuditDue && <SecCodeReminderPopup lastAt={codeAuditDue.lastAt} onClose={()=>setCodeAuditDue(null)}/>}
       {user && !isAuthScreen && <ApproxConsoBanner screen={state.screen} userId={user.id}/>}
