@@ -394,7 +394,9 @@
 
     /* Parcours automatique — vert clair = on avance sur le chemin pré-calculé,
        vert foncé = on sort vers l'analyse manuelle (page « Mon site »). */
-    .btn-auto  { background: var(--green); color: #1a4500; font-weight: 800; }
+    /* Bordure transparente de même épaisseur que .btn-manual : sans elle, les deux
+       boutons côte à côte (flex:1) ne font pas exactement la même largeur. */
+    .btn-auto  { background: var(--green); color: #1a4500; font-weight: 800; border: 1.5px solid transparent; }
     .btn-auto:hover { background: var(--green-light); box-shadow: 0 8px 28px rgba(125,217,64,.4); }
     .btn-manual {
       background: var(--green-dark); color: #d8f5c4;
@@ -5279,7 +5281,7 @@ function BilanMarkdown({ text }){
   return <div style={{fontSize:13.5,lineHeight:1.55,color:'rgba(255,255,255,.85)'}}>{out}</div>;
 }
 
-function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre, onOnboardingQuestions, onOptimisation, cartVersion=0, can = () => true }) {
+function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre, onOnboardingQuestions, onOptimisation, onParcoursAuto, cartVersion=0, can = () => true }) {
   const[sites,setSites]=useState(null);
   const[activeId,setActiveId]=useState(null);
   const[tariffs,setTariffs]=useState([]);
@@ -5970,7 +5972,8 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
 
   if(sites===null)return(<><div className="screen fade-in"><div style={{textAlign:'center',padding:40}}><StarSpinner size={34}/></div></div><StickyFooter onBack={onBack}/></>);
   // Boîte de dialogue pleine page affichée à la fin de « Mettre à jour les conseils » :
-  // le conseil IA + 2 CTA (comprendre ma conso → Mon site ; simuler → Simulations).
+  // le conseil IA + les 2 sorties du parcours (vert clair = suivre le chemin guidé
+  // levier par levier ; vert foncé = rester sur « Mon site » en analyse manuelle).
   if(showBilanResult&&site){
     return (
       <>
@@ -5983,12 +5986,13 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
           <BilanMarkdown text={site.bilan_ia}/>
         </div>
       </div>
-      <StickyFooter>
-        <button className="btn btn-primary" style={{width:'100%',fontSize:15,padding:'13px'}} onClick={()=>setShowBilanResult(false)}>
-          🔍 Je veux comprendre ma conso
+      <StickyFooter row>
+        <button className="btn btn-auto" style={{fontSize:14}}
+          onClick={()=>{ setShowBilanResult(false); onParcoursAuto&&onParcoursAuto(); }}>
+          Suivre conseil
         </button>
-        <button className="btn" style={{width:'100%',fontSize:14}} onClick={()=>{ setShowBilanResult(false); onSimulations&&onSimulations(); }}>
-          📊 Je veux simuler des économies
+        <button className="btn btn-manual" style={{fontSize:14}} onClick={()=>setShowBilanResult(false)}>
+          Mode manuel
         </button>
       </StickyFooter>
       </>
@@ -17258,12 +17262,18 @@ function App() {
   // efface l'état → on ne rattrape jamais l'utilisateur contre son gré.
   const [autoSt, setAutoSt] = useState(() => autoGetState());
 
-  // Armé quand l'utilisateur choisit le chemin guidé, juste avant son bilan.
-  const autoStart = useCallback(() => {
+  // Arme un parcours neuf. NB : ces callbacks sont posés directement en onClick,
+  // qui passerait l'événement en 1er argument — d'où deux fonctions distinctes
+  // plutôt qu'un paramètre de destination.
+  const autoArm = useCallback(() => {
     const st = { siteId: localStorage.getItem('starvolt_active_site_id'), seen: [], total: null };
     autoSetState(st); setAutoSt(st);
-    goTo('AUTO_BILAN');
-  }, [goTo]);
+  }, []);
+  // Fin de l'intégration : on passe par l'étape bilan avant les leviers.
+  const autoStart = useCallback(() => { autoArm(); goTo('AUTO_BILAN'); }, [autoArm, goTo]);
+  // Depuis « Votre bilan en clair » : le bilan vient d'être lu, on attaque
+  // directement les leviers sans le réafficher.
+  const autoStartLeviers = useCallback(() => { autoArm(); goTo('AUTO_LEVIER'); }, [autoArm, goTo]);
 
   // Retour d'un écran de simulation : le levier validé est au panier, il sort de
   // la liste des éligibles — le tapis reprend donc tout seul au levier suivant.
@@ -17597,7 +17607,7 @@ function App() {
           onBack={goBack}/>;
 
       case 'MA_CONSO':
-        return <MonSiteScreen user={user} userProfile={profile} onBack={goBack} onSimulations={()=>goTo('SIMULATIONS')} onComprendre={()=>goTo('COMPRENDRE_HOME')} onOnboardingQuestions={(sid)=>goTo('ONBOARDING_QUESTIONS',{onbSiteId:sid})} onOptimisation={()=>goTo('OPTIMISATION')} cartVersion={cartVersion} can={can}/>;
+        return <MonSiteScreen user={user} userProfile={profile} onBack={goBack} onSimulations={()=>goTo('SIMULATIONS')} onComprendre={()=>goTo('COMPRENDRE_HOME')} onOnboardingQuestions={(sid)=>goTo('ONBOARDING_QUESTIONS',{onbSiteId:sid})} onOptimisation={()=>goTo('OPTIMISATION')} onParcoursAuto={autoStartLeviers} cartVersion={cartVersion} can={can}/>;
       case 'ONBOARDING_QUESTIONS':
         return <OnboardingTypeform siteId={state.onbSiteId} extended onDone={()=>{
           // Arme le watcher global : il surveillera la collecte ENEDIS + le bilan en fond
