@@ -58,6 +58,7 @@
       --teal-light:  #0da890;
       --green:       #7dd940;
       --green-light: #a3ed6a;
+      --green-dark:  #1b4d14;
       --white:       #ffffff;
       --font:        'Poppins', sans-serif;
       --r-card:      22px;
@@ -390,6 +391,27 @@
       border: 1.5px solid rgba(255,255,255,.22);
     }
     .btn-no:hover { background: rgba(255,255,255,.18); }
+
+    /* Parcours automatique — vert clair = on avance sur le chemin pré-calculé,
+       vert foncé = on sort vers l'analyse manuelle (page « Mon site »). */
+    .btn-auto  { background: var(--green); color: #1a4500; font-weight: 800; }
+    .btn-auto:hover { background: var(--green-light); box-shadow: 0 8px 28px rgba(125,217,64,.4); }
+    .btn-manual {
+      background: var(--green-dark); color: #d8f5c4;
+      border: 1.5px solid rgba(125,217,64,.35); font-weight: 700;
+    }
+    .btn-manual:hover { background: #23601a; box-shadow: 0 8px 24px rgba(0,0,0,.3); }
+    .btn-auto-alt {
+      background: rgba(125,217,64,.12); color: #a3ed6a;
+      border: 1.5px solid rgba(125,217,64,.45); font-weight: 700; font-size: 14px;
+    }
+    .btn-auto-alt:hover { background: rgba(125,217,64,.2); }
+
+    /* Barre de progression du tapis roulant */
+    .auto-prog { display: flex; gap: 4px; margin: 0 0 14px; }
+    .auto-prog span { flex: 1; height: 4px; border-radius: 2px; background: rgba(255,255,255,.12); }
+    .auto-prog span.done { background: rgba(125,217,64,.45); }
+    .auto-prog span.cur  { background: var(--green); }
 
     .btn-sec {
       background: rgba(255,255,255,.12); color: white;
@@ -7027,6 +7049,229 @@ const PICTOS_DEFAUT = {
   flex_seule:               '/flex.png',
 };
 
+// ═══════════════════════════════════════════════════════════════════════════
+// PARCOURS AUTOMATIQUE (« tapis roulant »)
+// ═══════════════════════════════════════════════════════════════════════════
+// À la fin de l'intégration, l'utilisateur est guidé pas à pas : un levier
+// d'économie par écran, du plus accessible au plus engageant. À chaque étape,
+// deux sorties seulement — vert clair = on continue le chemin pré-calculé,
+// vert foncé = on bascule en analyse manuelle (page « Mon site »).
+// L'état vit dans localStorage : le parcours survit à un aller-retour vers un
+// écran de simulation (où le levier est réellement mis au panier) et à un
+// rechargement de l'app.
+
+const AUTO_LS_KEY = 'starvolt_auto_parcours'; // { siteId, idx } — présent ⇒ mode auto actif
+
+function autoGetState() { try { const r = localStorage.getItem(AUTO_LS_KEY); return r ? JSON.parse(r) : null; } catch { return null; } }
+function autoSetState(s) { try { localStorage.setItem(AUTO_LS_KEY, JSON.stringify(s)); } catch {} }
+function autoClearState() { try { localStorage.removeItem(AUTO_LS_KEY); } catch {} }
+
+// Type « principal » d'une offre = premier type qui pilote un écran de simulation.
+const AUTO_TYPE_SCREEN = {
+  optimisation_fournisseur: 'OPTIMISATION',
+  acc:                      'ACC_MAP',
+  box:                      'BOX_SIM',
+  diy_box:                  'DIY_BOX_SIM',
+  solaire:                  'SOLAR_SIM',
+  flex_seule:               'FLEX_SIM',
+};
+const offrePrimaryType = (o) => (o?.types_offre || []).find(t => AUTO_TYPE_SCREEN[t]) || null;
+
+// Drapeaux panier — MÊMES CLÉS que PanierScreen et SimulationsScreen.
+function readCartFlags() {
+  const g = (k) => { try { return localStorage.getItem(k); } catch { return null; } };
+  const box = g('starvolt_box_chosen');
+  return {
+    optimisation_fournisseur: !!g('starvolt_optimisation_chosen'),
+    acc:        g('starvolt_acc_chosen') === 'true',
+    box:        !!box && box !== 'diy',
+    diy_box:    !!g('starvolt_diy_box_chosen'),
+    solaire:    !!g('starvolt_solar_chosen'),
+    flex_seule: !!g('starvolt_flex_only_chosen'),
+  };
+}
+
+// Éligibilité d'une offre dans le parcours automatique. Reprend les règles de
+// SimulationsScreen (rôle, panier, préalables techniques, exclusions de public)
+// SANS les sliders de filtre, et ajoute le cas particulier ACC.
+function autoOffreEligible(o, ctx) {
+  const { siteProfile, cartFlags, accNearby, can } = ctx;
+  if (can && !can('offer_ids', o.id)) return false;
+  const t = offrePrimaryType(o);
+  if (!t) return false;
+  if (cartFlags[t]) return false;                      // déjà au panier
+  // Une box Comwatt est UNIQUE : solaire, box installée et box DIY aboutissent
+  // toutes à une box — dès que l'une est au panier, on ne propose plus les autres.
+  const boxImplied = cartFlags.solaire || cartFlags.box || cartFlags.diy_box;
+  if (boxImplied && (t === 'box' || t === 'diy_box')) return false;
+  // CAS PARTICULIER ACC : jamais proposée si aucun générateur ACC à moins de
+  // 20 km de l'adresse du site. accNearby === null ⇒ pas encore calculé, on ne
+  // masque pas (évite de sauter l'étape à tort pendant le géocodage).
+  if (t === 'acc' && accNearby === false) return false;
+  const prealables = o.prealables_techniques || [];
+  if (prealables.length > 0 && siteProfile) {
+    const meets = {
+      box:            siteProfile.hasBox,
+      no_box:         !siteProfile.hasBox,
+      chauffage_elec: siteProfile.hasChauffElec,
+      solaire:        siteProfile.hasSolaire,
+      batterie:       siteProfile.hasBatterie,
+    };
+    if (prealables.some(p => !meets[p])) return false;
+  }
+  const excl = o.public_cibles || [];
+  if (excl.length > 0 && siteProfile) {
+    if (siteProfile.type_logement && excl.includes(siteProfile.type_logement)) return false;
+    if (siteProfile.statut && excl.includes(siteProfile.statut)) return false;
+  }
+  return true;
+}
+
+// Ordre du tapis roulant : « les choix accessibles, les moins coûteux, les plus
+// efficaces » d'abord. 1) investissement croissant 2) délai croissant
+// 3) économie annuelle décroissante.
+function autoRankOffres(offres, savingByType) {
+  return [...offres].sort((a, b) => {
+    const ia = a.investissement_min ?? 0, ib = b.investissement_min ?? 0;
+    if (ia !== ib) return ia - ib;
+    const da = a.delai_min_jours ?? 0, db = b.delai_min_jours ?? 0;
+    if (da !== db) return da - db;
+    const sa = savingByType[offrePrimaryType(a)] || 0, sbv = savingByType[offrePrimaryType(b)] || 0;
+    return sbv - sa;
+  });
+}
+
+// Variables utilisables dans le « texte court » d'une offre (admin → Gestion
+// des offres → Modifier une offre). Affichées comme puces cliquables côté admin.
+const AUTO_TEXT_VARS = [
+  { token: 'eco',     label: 'Économies annuelles sur la facture actuelle (€/an)' },
+  { token: 'facture', label: 'Facture annuelle actuelle (€)' },
+  { token: 'apres',   label: 'Facture annuelle après ce levier (€)' },
+  { token: 'pct',     label: 'Réduction de la facture (%)' },
+  { token: 'invest',  label: 'Investissement initial (€)' },
+  { token: 'delai',   label: 'Délai de mise en œuvre' },
+  { token: 'roi',     label: 'Retour sur investissement (années)' },
+  { token: 'prenom',  label: 'Prénom de l’utilisateur' },
+];
+
+// Remplace les variables du texte court par leurs valeurs. Tolère la notation
+// « X€eco » (écriture spontanée) en plus de la forme canonique « {eco} ».
+function renderTexteAuto(tpl, vars) {
+  if (!tpl) return '';
+  let out = String(tpl)
+    .replace(/X\s*€?\s*eco\b/gi, '{eco}')
+    .replace(/X\s*€?\s*facture\b/gi, '{facture}')
+    .replace(/X\s*€?\s*invest\w*/gi, '{invest}');
+  Object.entries(vars).forEach(([k, v]) => { out = out.split('{' + k + '}').join(v); });
+  return out;
+}
+
+// Y a-t-il un générateur ACC à moins de 20 km ? Résultat mis en cache par site
+// (le géocodage est un appel réseau, inutile de le refaire à chaque étape).
+async function autoAccNearby(siteId) {
+  if (!siteId) return null;
+  const ck = 'starvolt_acc_nearby_' + siteId;
+  try { const c = localStorage.getItem(ck); if (c === '1') return true; if (c === '0') return false; } catch {}
+  const { data: site } = await sb.from('sites').select('adresse_ligne1,code_postal,ville').eq('id', siteId).maybeSingle();
+  if (!site) return null;
+  const q = [site.adresse_ligne1, site.code_postal, site.ville].filter(Boolean).join(' ');
+  if (!q) return null;
+  try {
+    const geo = await fetch(`https://api-adresse.data.gouv.fr/search/?q=${encodeURIComponent(q)}&limit=1`).then(r => r.json());
+    const feat = geo?.features?.[0];
+    if (!feat) return null;
+    const [lon, lat] = feat.geometry.coordinates;
+    const { data: acc } = await sb.from('sites_acc').select('latitude,longitude');
+    const near = (acc || []).some(s => s.latitude && s.longitude &&
+      haversine(lat, lon, parseFloat(s.latitude), parseFloat(s.longitude)) <= 20);
+    try { localStorage.setItem(ck, near ? '1' : '0'); } catch {}
+    return near;
+  } catch { return null; }
+}
+
+// ─── Économies annuelles estimées par type de levier ─────────────────────────
+// SOURCE UNIQUE : utilisée par les tuiles de SimulationsScreen ET par le
+// parcours automatique — les deux doivent afficher exactement le même chiffre.
+async function computeSavingsByType(user) {
+  const empty = { hasConso: false, savings: {}, currentBill: null, bestTariffName: null, solar: null };
+  if (!user) return empty;
+  const activeId = localStorage.getItem('starvolt_active_site_id');
+  const cols = 'id,conso_profil,tarif_id,profil_production_id,adresse_ligne1,code_postal,ville,heure_debut_hc1,heure_fin_hc1,heure_debut_hc2,heure_fin_hc2,hc_debut1,hc_fin1,hc_debut2,hc_fin2';
+  const [{ data: siteData }, { data: tariffs }, { data: nat }, { data: spotRows }] = await Promise.all([
+    activeId
+      ? sb.from('sites').select(cols).eq('id', activeId).maybeSingle()
+      : sb.from('sites').select(cols).eq('user_id', user.id).not('conso_profil', 'is', null).order('created_at').limit(1).maybeSingle(),
+    sb.from('tarifs_electricite').select('*').order('nom'),
+    sb.from('parametres_nationaux').select('*').eq('id', 1).maybeSingle(),
+    sb.rpc('get_spot_json'),
+  ]);
+  const site = Array.isArray(siteData) ? siteData[0] : siteData;
+  if (!site?.conso_profil) return empty;
+
+  const out = { hasConso: true, savings: {}, currentBill: null, bestTariffName: null, solar: null };
+  const { kwh_hc, kwh_hp } = calcHcHp(site.conso_profil, site, nat);
+  const kwh_total = kwh_hc + kwh_hp;
+
+  if (tariffs?.length && kwh_total > 0) {
+    const ranked = tariffs.map(t => ({ t, result: calcTariffCost(t, kwh_hc, kwh_hp) }))
+      .filter(({ result }) => result !== null).sort((a, b) => a.result.total - b.result.total);
+    if (ranked.length) {
+      const cur = site.tarif_id ? ranked.find(r => r.t.id === site.tarif_id) : null;
+      const saving = cur ? Math.round(cur.result.total - ranked[0].result.total) : null;
+      out.savings.optimisation_fournisseur = saving;
+      if (saving > 0) out.bestTariffName = ranked[0].t.nom;
+
+      const curTariff = site.tarif_id ? tariffs.find(t => t.id === site.tarif_id) : null;
+      const curBill = cur?.result?.total || (kwh_total * 0.18);
+      out.currentBill = Math.round(curBill);
+
+      // Box : 140 € de cagnotte flexibilité + gain réel du stockage heure par heure
+      const solDef = (() => { try { return JSON.parse(localStorage.getItem('starvolt_solar_defaults')) || {}; } catch { return {}; } })();
+      const bkv = parseFloat(solDef.batKwh) || 0, tkv = parseFloat(solDef.thermKwh) || 0;
+      const sp = spotRows ? buildSpotMap(spotRows) : null;
+      const storRes = curTariff ? computeStorageOptimization(site.conso_profil, curTariff, curTariff, site, bkv, tkv, { ...nat, opti_tarif: true }, sp) : null;
+      const _ratioSim = (nat?.ratio_puissance_stockage ?? 50) / 100;
+      const flexGainSim = Math.round((parseFloat(solDef.thermKwh) || 10) * 14 + (parseFloat(solDef.batKwh) || 10) * _ratioSim * 27);
+      const bSav = Math.round(flexGainSim + (storRes?.saving || 0));
+      if (bSav > 0) out.savings.box = bSav;
+
+      // SOURCE UNIQUE loadProdProfil : repli GPS si profil_production_id null (comme Mon site)
+      const _prodProfil = await loadProdProfil(site);
+      const accSavEst = (() => {
+        let k = 0;
+        for (let m = 1; m <= 12; m++) for (let d = 1; d <= PROF_DAYS[m - 1]; d++) for (let h = 0; h < 24; h++) {
+          const idx = profIdx(m, d, h);
+          if (_prodProfil ? !(_prodProfil[idx] > 0) : (h < 9 || h >= 18)) continue;
+          k += (site.conso_profil[idx] || 0) / 1000;
+        }
+        return Math.max(0, Math.round(k * ((site.tarif_id ? tariffs.find(t => t.id === site.tarif_id)?.prix_hp || 0.24 : 0.24) - 0.11)));
+      })();
+      if (accSavEst > 0) out.savings.acc = accSavEst;
+      const adjBillSolar = Math.max(0, curBill - (saving || 0) - accSavEst);
+
+      if (_prodProfil) {
+        const ratioBat   = ((nat?.ratio_puissance_stockage           ?? 50) / 100);
+        const ratioTherm = ((nat?.ratio_puissance_stockage_thermique ?? 50) / 100);
+        const pBat   = nat?.pertes_batterie  ?? 10;
+        const pTherm = nat?.pertes_thermique ?? 0;
+        const kw = parseFloat(solDef.pvKwc) || 6, bk = parseFloat(solDef.batKwh) || 10, tk = parseFloat(solDef.thermKwh) || 5;
+        const bal = computeEnergyBalance(site.conso_profil, _prodProfil, kw, bk * ratioBat * 1000, bk, pBat, tk * ratioTherm, tk, pTherm);
+        const gridBuy = bal.monthly.reduce((s, m) => s + m.grid_buy, 0);
+        const injKwh  = bal.monthly.reduce((s, m) => s + m.injection, 0);
+        const prixMoyen = kwh_total > 0 && curBill ? curBill / kwh_total : 0.18;
+        const prixRachat = nat?.prix_rachat_injection ?? 0.04;
+        const nouvFact = Math.max(0, gridBuy * prixMoyen - injKwh * prixRachat);
+        const realSav = Math.max(0, Math.round(curBill - nouvFact));
+        out.savings.solaire = realSav > 0 ? realSav : Math.round(adjBillSolar * 0.70);
+        out.solar = { gridKwh: gridBuy, injKwh, prixBase: prixMoyen, prixRachat };
+      } else {
+        out.savings.solaire = Math.round(adjBillSolar * 0.70);
+      }
+    }
+  }
+  return out;
+}
+
 function SimulationsScreen({ onACC, onBox, onSolar, onOptimisation, onDiyBox, onFlexSeule, onBack, onMonSite, onComprendre, user, userProfile, can = () => true }) {
   // Une offre est visible si elle est autorisée pour le rôle courant (zone
   // "offer_ids", clé = id de l'offre). Non définie → visible (fail-open) :
@@ -7181,103 +7426,25 @@ function SimulationsScreen({ onACC, onBox, onSolar, onOptimisation, onDiyBox, on
   const anyFiltreActif = filtresActifs.vitesse || filtresActifs.investissement || filtresActifs.economie;
   const showSliders = offres.length > 0 && anyFiltreActif && (delaiFilter != null);
 
+  // SOURCE UNIQUE computeSavingsByType : le parcours automatique affiche
+  // exactement les mêmes chiffres que ces tuiles.
   useEffect(() => {
     if (!user) return;
-    const activeId = localStorage.getItem('starvolt_active_site_id');
-    Promise.all([
-      activeId
-        ? sb.from('sites').select('id,conso_profil,tarif_id,profil_production_id,adresse_ligne1,code_postal,ville,heure_debut_hc1,heure_fin_hc1,heure_debut_hc2,heure_fin_hc2,hc_debut1,hc_fin1,hc_debut2,hc_fin2').eq('id', activeId).maybeSingle()
-        : sb.from('sites').select('id,conso_profil,tarif_id,profil_production_id,adresse_ligne1,code_postal,ville,heure_debut_hc1,heure_fin_hc1,heure_debut_hc2,heure_fin_hc2,hc_debut1,hc_fin1,hc_debut2,hc_fin2').eq('user_id', user.id).not('conso_profil','is',null).order('created_at').limit(1).maybeSingle(),
-      sb.from('tarifs_electricite').select('*').order('nom'),
-      sb.from('parametres_nationaux').select('*').eq('id',1).maybeSingle(),
-      sb.rpc('get_spot_json'),
-    ]).then(async ([{ data: siteData }, { data: tariffs }, { data: nat }, { data: spotRows }]) => {
-      const site = Array.isArray(siteData) ? siteData[0] : siteData;
-      if (!site?.conso_profil) return;
+    let alive = true;
+    computeSavingsByType(user).then(r => {
+      if (!alive || !r.hasConso) return;
       setHasConso(true);
-
-      const { kwh_hc, kwh_hp } = calcHcHp(site.conso_profil, site, nat);
-      const kwh_total = kwh_hc + kwh_hp;
-
-      // Optimisation savings
-      if (tariffs?.length && kwh_total > 0) {
-        const ranked = tariffs.map(t=>({t,result:calcTariffCost(t,kwh_hc,kwh_hp)})).filter(({result})=>result!==null).sort((a,b)=>a.result.total-b.result.total);
-        if (ranked.length) {
-          const cur = site.tarif_id ? ranked.find(r=>r.t.id===site.tarif_id) : null;
-          const saving = cur ? Math.round(cur.result.total - ranked[0].result.total) : null;
-          setMaxSaving(saving);
-          if (saving > 0) setBestTariffName(ranked[0].t.nom);
-
-          // Box saving: 140€ flex + gain réel du stockage calculé heure par heure
-          const curTariff = site.tarif_id ? tariffs.find(t => t.id === site.tarif_id) : null;
-          const curBill = cur?.result?.total || (kwh_total * 0.18);
-          const solDef=(()=>{try{return JSON.parse(localStorage.getItem('starvolt_solar_defaults'))||{};}catch{return{};}})();
-          const bkv=parseFloat(solDef.batKwh)||0, tkv=parseFloat(solDef.thermKwh)||0;
-          const sp = spotRows ? buildSpotMap(spotRows) : null;
-          const storRes = curTariff ? computeStorageOptimization(site.conso_profil, curTariff, curTariff, site, bkv, tkv, {...nat, opti_tarif:true}, sp) : null;
-          const _ratioSim = (nat?.ratio_puissance_stockage ?? 50) / 100;
-          const flexGainSim = Math.round((parseFloat(solDef.thermKwh)||10)*14 + (parseFloat(solDef.batKwh)||10)*_ratioSim*27);
-          const bSav = Math.round(flexGainSim + (storRes?.saving || 0));
-          if (bSav > 0) setBoxSaving(bSav);
-          // Charger le profil de production (utilisé pour estim ACC + solar)
-          // SOURCE UNIQUE loadProdProfil : repli GPS si profil_production_id null (comme Mon site)
-          const _prodProfil = site.conso_profil ? await loadProdProfil(site) : null;
-          // accSavEst : heures prod non nulle (ou 9h–18h si pas de profil)
-          const accSavEst = (() => {
-            let k=0;
-            for(let m=1;m<=12;m++) for(let d=1;d<=PROF_DAYS[m-1];d++) for(let h=0;h<24;h++){
-              const idx=profIdx(m,d,h);
-              if(_prodProfil?!(_prodProfil[idx]>0):(h<9||h>=18)) continue;
-              k+=(site.conso_profil[idx]||0)/1000;
-            }
-            return Math.max(0,Math.round(k*((site.tarif_id?tariffs.find(t=>t.id===site.tarif_id)?.prix_hp||0.24:0.24)-0.11)));
-          })();
-          const adjBillSolar = Math.max(0, curBill - (saving||0) - accSavEst);
-          // Calcul réel des économies solaires
-          if (_prodProfil) {
-              const ratioBat   = ((nat?.ratio_puissance_stockage              ?? 50) / 100);
-              const ratioTherm = ((nat?.ratio_puissance_stockage_thermique    ?? 50) / 100);
-              const pBat   = nat?.pertes_batterie   ?? 10;
-              const pTherm = nat?.pertes_thermique  ?? 0;
-              const solDef=(()=>{try{return JSON.parse(localStorage.getItem('starvolt_solar_defaults'))||{};}catch{return{};}})();
-              const kw=parseFloat(solDef.pvKwc)||6, bk=parseFloat(solDef.batKwh)||10, tk=parseFloat(solDef.thermKwh)||5;
-              const bal = computeEnergyBalance(site.conso_profil, _prodProfil, kw,
-                bk*ratioBat*1000, bk, pBat, tk*ratioTherm, tk, pTherm);
-              const gridBuy = bal.monthly.reduce((s,m) => s + m.grid_buy, 0);
-              const injKwh  = bal.monthly.reduce((s,m) => s + m.injection, 0);
-              const prixMoyen = kwh_total > 0 && curBill ? curBill / kwh_total : 0.18;
-              const prixRachat = nat?.prix_rachat_injection ?? 0.04;
-              const nouvFact = Math.max(0, gridBuy * prixMoyen - injKwh * prixRachat);
-              const realSav = Math.max(0, Math.round(curBill - nouvFact));
-              setSolarSaving(realSav > 0 ? realSav : Math.round(adjBillSolar * 0.70));
-              setSolGridKwh(gridBuy); setSolInjKwh(injKwh);
-              setSolPrixBase(prixMoyen); setSolPrixRachat(prixRachat);
-          } else {
-            setSolarSaving(Math.round(adjBillSolar * 0.70));
-          }
-        }
-      }
-
-      // ACC savings : heures prod non nulle (ou 9h–18h si pas de profil)
-      if (site.conso_profil) {
-        const _prodProfilAcc = await loadProdProfil(site);
-        let kwh918 = 0;
-        for (let m=1; m<=12; m++)
-          for (let d=1; d<=PROF_DAYS[m-1]; d++)
-            for (let h=0; h<24; h++) {
-              const idx=profIdx(m,d,h);
-              if(_prodProfilAcc?!(_prodProfilAcc[idx]>0):(h<9||h>=18)) continue;
-              kwh918 += (site.conso_profil[idx]||0)/1000;
-            }
-        let priceRef = 0.24;
-        if (site.tarif_id && tariffs?.length) {
-          const t = tariffs.find(x=>x.id===site.tarif_id);
-          if (t?.prix_hp) priceRef = t.prix_hp;
-        }
-        const sav = Math.round(kwh918 * (priceRef - 0.11));
-        if (sav > 0) setAccSaving(sav);
+      setMaxSaving(r.savings.optimisation_fournisseur ?? null);
+      if (r.bestTariffName) setBestTariffName(r.bestTariffName);
+      if (r.savings.box > 0)     setBoxSaving(r.savings.box);
+      if (r.savings.acc > 0)     setAccSaving(r.savings.acc);
+      if (r.savings.solaire != null) setSolarSaving(r.savings.solaire);
+      if (r.solar) {
+        setSolGridKwh(r.solar.gridKwh); setSolInjKwh(r.solar.injKwh);
+        setSolPrixBase(r.solar.prixBase); setSolPrixRachat(r.solar.prixRachat);
       }
     });
+    return () => { alive = false; };
   }, [user?.id]);
 
   if (changedTariff) {
@@ -7687,7 +7854,7 @@ function calcDynamicCost(tariff, consoProfile, spotMap, natParams, userProfile) 
 }
 
 // ─── OptimisationScreen ───────────────────────
-function OptimisationScreen({ user, userProfile, onBack, onPanier, onMonSite, onCartUpdate }) {
+function OptimisationScreen({ user, userProfile, onBack, onPanier, onMonSite, onCartUpdate, nextLabel = "Mon site →" }) {
   const [sites,           setSites]           = useState(null);
   const [activeId]                            = useState(() => localStorage.getItem('starvolt_active_site_id'));
   const [tariffs,         setTariffs]         = useState([]);
@@ -7773,7 +7940,7 @@ function OptimisationScreen({ user, userProfile, onBack, onPanier, onMonSite, on
         </div>
       </div>
       <StickyFooter row onBack={onBack}>
-        <button className="btn btn-yes" onClick={onMonSite||onPanier}>Mon site →</button>
+        <button className="btn btn-yes" onClick={onMonSite||onPanier}>{nextLabel}</button>
       </StickyFooter>
       </>
     );
@@ -7792,7 +7959,7 @@ function OptimisationScreen({ user, userProfile, onBack, onPanier, onMonSite, on
     <>
     <StickyFooter row onBack={onBack}>
       {!loading && (showPanier ? (
-        <button className="btn btn-yes" onClick={onMonSite||onPanier}>Mon site →</button>
+        <button className="btn btn-yes" onClick={onMonSite||onPanier}>{nextLabel}</button>
       ) : heroSaving !== null ? (
         <button className="btn btn-yes" onClick={() => {
           if (heroSaving > 0) confetti({ particleCount:120, spread:70, origin:{y:.6} });
@@ -9058,7 +9225,7 @@ function AccMapScreen({ user, userProfile, onBack, onJoin, onCreate, onPanier })
 }
 
 // ─── AccResultScreen ──────────────────────────
-function AccResultScreen({ state, onBack, onPanier, onMonSite }) {
+function AccResultScreen({ state, onBack, onPanier, onMonSite, nextLabel = "Mon site →" }) {
   const isJoin = state.accAction === 'join';
   const { accSavings, accPriceKwh, eligibleSite, activeSite } = state;
   return (
@@ -9096,7 +9263,7 @@ function AccResultScreen({ state, onBack, onPanier, onMonSite }) {
       </div>
     </div>
     <StickyFooter row onBack={onBack}>
-      <button className="btn btn-yes" onClick={onMonSite||onPanier}>Mon site →</button>
+      <button className="btn btn-yes" onClick={onMonSite||onPanier}>{nextLabel}</button>
     </StickyFooter>
     </>
   );
@@ -9418,7 +9585,7 @@ function OnboardingTypeform({ siteId, onDone, onBack, initial=null, extended=fal
 }
 
 // ─── BoxSimScreen ─────────────────────────────
-function BoxSimScreen({ user, userProfile, onBack, onPanier, onMonSite, onCartUpdate }) {
+function BoxSimScreen({ user, userProfile, onBack, onPanier, onMonSite, onCartUpdate, nextLabel = "Mon site →" }) {
   const [loading,      setLoading]      = useState(true);
   const [currentBill,  setCurrentBill]  = useState(null);
   const [isDynamic,    setIsDynamic]    = useState(false);
@@ -9560,7 +9727,7 @@ function BoxSimScreen({ user, userProfile, onBack, onPanier, onMonSite, onCartUp
         </div>
       </div>
       <StickyFooter row onBack={onBack}>
-        <button className="btn btn-yes" onClick={onMonSite||onPanier}>Mon site →</button>
+        <button className="btn btn-yes" onClick={onMonSite||onPanier}>{nextLabel}</button>
       </StickyFooter>
       </>
     );
@@ -9637,7 +9804,7 @@ function BoxSimScreen({ user, userProfile, onBack, onPanier, onMonSite, onCartUp
 
       {!loading && (chosen ? (
         <StickyFooter row onBack={onBack}>
-          <button className="btn btn-yes" onClick={onMonSite||onPanier}>Mon site →</button>
+          <button className="btn btn-yes" onClick={onMonSite||onPanier}>{nextLabel}</button>
         </StickyFooter>
       ) : (
         <div className="sticky-footer">
@@ -9812,7 +9979,7 @@ function buildFlexOnlyDetails(flex) {
 }
 
 // ─── FlexSeuleScreen ── Flexibilité sans ajout d'objets connectés (client déjà équipé d'une box)
-function FlexSeuleScreen({ user, userProfile, onBack, onPanier, onMonSite, onCartUpdate }) {
+function FlexSeuleScreen({ user, userProfile, onBack, onPanier, onMonSite, onCartUpdate, nextLabel = "Mon site →" }) {
   const [loading,      setLoading]      = useState(true);
   const [currentBill,  setCurrentBill]  = useState(null);
   const [activeSiteId, setActiveSiteId] = useState(null);
@@ -9960,7 +10127,7 @@ function FlexSeuleScreen({ user, userProfile, onBack, onPanier, onMonSite, onCar
         )}
       </div>
       <StickyFooter row onBack={onBack}>
-        <button className="btn btn-yes" onClick={onMonSite||onPanier}>Mon site →</button>
+        <button className="btn btn-yes" onClick={onMonSite||onPanier}>{nextLabel}</button>
       </StickyFooter>
       </>
     );
@@ -10036,7 +10203,7 @@ function FlexSeuleScreen({ user, userProfile, onBack, onPanier, onMonSite, onCar
 
       {!loading && (chosen ? (
         <StickyFooter row onBack={onBack}>
-          <button className="btn btn-yes" onClick={onMonSite||onPanier}>Mon site →</button>
+          <button className="btn btn-yes" onClick={onMonSite||onPanier}>{nextLabel}</button>
         </StickyFooter>
       ) : (
         <div className="sticky-footer">
@@ -10057,7 +10224,7 @@ function FlexSeuleScreen({ user, userProfile, onBack, onPanier, onMonSite, onCar
 }
 
 // ─── InstallSoiMemeScreen ──────────────────────
-function InstallSoiMemeScreen({ user, userProfile, onBack, onPanier, onMonSite, onCartUpdate }) {
+function InstallSoiMemeScreen({ user, userProfile, onBack, onPanier, onMonSite, onCartUpdate, nextLabel = "Mon site →" }) {
   const [loading,     setLoading]   = useState(true);
   const [prixMat,     setPrixMat]   = useState(null);
   const [siteId,      setSiteId]    = useState(null);
@@ -10201,7 +10368,7 @@ function InstallSoiMemeScreen({ user, userProfile, onBack, onPanier, onMonSite, 
         </div>
       </div>
       <StickyFooter row onBack={onBack}>
-        <button className="btn btn-yes" style={{flex:1}} onClick={onMonSite||onPanier}>Mon site →</button>
+        <button className="btn btn-yes" style={{flex:1}} onClick={onMonSite||onPanier}>{nextLabel}</button>
       </StickyFooter>
       </>
     );
@@ -10304,7 +10471,7 @@ function InstallSoiMemeScreen({ user, userProfile, onBack, onPanier, onMonSite, 
 }
 
 // ─── SolarSimScreen ───────────────────────────
-function SolarSimScreen({ user, userProfile, onBack, onPanier, onMonSite, onCartUpdate }) {
+function SolarSimScreen({ user, userProfile, onBack, onPanier, onMonSite, onCartUpdate, nextLabel = "Mon site →" }) {
   const [loading,      setLoading]      = useState(true);
   const [currentBill,  setCurrentBill]  = useState(null);
   const [adjustedBill, setAdjustedBill] = useState(null);
@@ -10541,7 +10708,7 @@ function SolarSimScreen({ user, userProfile, onBack, onPanier, onMonSite, onCart
         </div>
       </div>
       <StickyFooter row onBack={onBack}>
-        <button className="btn btn-yes" onClick={onMonSite||onPanier}>Mon site →</button>
+        <button className="btn btn-yes" onClick={onMonSite||onPanier}>{nextLabel}</button>
       </StickyFooter>
       </>
     );
@@ -10628,7 +10795,7 @@ function SolarSimScreen({ user, userProfile, onBack, onPanier, onMonSite, onCart
       {!loading && (
         chosen ? (
           <StickyFooter row onBack={onBack}>
-            <button className="btn btn-yes" onClick={onMonSite||onPanier}>Mon site →</button>
+            <button className="btn btn-yes" onClick={onMonSite||onPanier}>{nextLabel}</button>
           </StickyFooter>
         ) : (
           <StickyFooter onBack={onBack}>
@@ -13583,6 +13750,7 @@ function AdminOffreEditScreen({ offre, onSave, onDelete, onBack }) {
   const [form, setForm] = useState({
     titre:               offre?.titre              || '',
     sous_titre:          offre?.sous_titre          || '',
+    texte_auto:          offre?.texte_auto          || '',
     delai_min_jours:     offre?.delai_min_jours     ?? '',
     investissement_min:  offre?.investissement_min  ?? '',
     reduction_pct:       offre?.reduction_pct       ?? '',
@@ -13654,6 +13822,7 @@ function AdminOffreEditScreen({ offre, onSave, onDelete, onBack }) {
     const payload = {
       titre:              form.titre.trim(),
       sous_titre:         form.sous_titre.trim() || null,
+      texte_auto:         form.texte_auto.trim() || null,
       delai_min_jours:    form.delai_min_jours !== '' ? Number(form.delai_min_jours) : null,
       investissement_min: form.investissement_min !== '' ? Number(form.investissement_min) : null,
       reduction_pct:      form.reduction_pct !== '' ? Number(form.reduction_pct) : null,
@@ -13717,6 +13886,37 @@ function AdminOffreEditScreen({ offre, onSave, onDelete, onBack }) {
           <input className="inp" maxLength={50} value={form.sous_titre} placeholder="Ex : Économisez dès le premier mois"
             onChange={e => set('sous_titre', e.target.value)}/>
           <div style={{textAlign:'right',fontSize:11,color:'rgba(255,255,255,.35)',marginTop:4}}>{form.sous_titre.length}/50</div>
+        </div>
+
+        <div className="inp-group">
+          <label className="inp-label" style={{marginBottom:4}}>
+            Texte court du parcours automatique <span style={{color:'rgba(255,255,255,.4)',fontWeight:400}}>max 400 car.</span>
+          </label>
+          <div style={{fontSize:11,color:'rgba(255,255,255,.4)',marginBottom:8,lineHeight:1.5}}>
+            Présente en quelques phrases l'avantage de ce levier. C'est ce texte que lit
+            l'utilisateur guidé pas à pas, juste avant qu'on lui propose de mettre l'offre
+            dans son panier. Cliquez sur une variable pour l'insérer : elle sera remplacée
+            par la valeur calculée pour le site de l'utilisateur.
+          </div>
+          <div style={{display:'flex',flexWrap:'wrap',gap:6,marginBottom:8}}>
+            {AUTO_TEXT_VARS.map(v => (
+              <button key={v.token} type="button" title={v.label}
+                onClick={() => set('texte_auto', (form.texte_auto + '{' + v.token + '}').slice(0, 400))}
+                style={{
+                  background:'rgba(125,217,64,.12)', border:'1px solid rgba(125,217,64,.35)',
+                  color:'#a3ed6a', borderRadius:8, padding:'4px 9px', fontSize:11,
+                  fontWeight:700, cursor:'pointer', fontFamily:'inherit',
+                }}>{'{' + v.token + '}'}</button>
+            ))}
+          </div>
+          <textarea className="inp" rows={5} maxLength={400} value={form.texte_auto}
+            placeholder="Ex : Changer de fournisseur, c'est le geste le plus rapide et le moins risqué. Sans travaux, sans coupure, tu économises {eco} par an — ta facture passe de {facture} à {apres}."
+            onChange={e => set('texte_auto', e.target.value)}
+            style={{resize:'vertical',lineHeight:1.5}}/>
+          <div style={{textAlign:'right',fontSize:11,color:'rgba(255,255,255,.35)',marginTop:4}}>{form.texte_auto.length}/400</div>
+          <div style={{marginTop:8,fontSize:10.5,color:'rgba(255,255,255,.35)',lineHeight:1.6}}>
+            {AUTO_TEXT_VARS.map(v => <div key={v.token}><strong style={{color:'rgba(163,237,106,.7)'}}>{'{' + v.token + '}'}</strong> — {v.label}</div>)}
+          </div>
         </div>
 
         <div className="inp-group">
@@ -15298,6 +15498,8 @@ const SCREEN_LABELS = {
   HOME_CHOICE:'Accueil', HOME_LOGGED_IN:'Accueil',
   ONBOARDING_QUESTIONS:'Inscription — questionnaire foyer', ONBOARDING_ADVICE:'Inscription — message d’accueil',
   ONBOARDING_EVAL_RESULT:'Inscription — retour auto-évaluation',
+  AUTO_BILAN:'Parcours auto — bilan', AUTO_LEVIER:'Parcours auto — levier',
+  AUTO_FIN:'Parcours auto — fin',
   COMPRENDRE_HOME:'Comprendre — accueil', COMPRENDRE_GROUP:'Comprendre — thème',
   COMPRENDRE_SUBJECT:'Comprendre — sujet', COMPRENDRE_QUIZ:'Comprendre — quiz',
   COMPRENDRE_SCORE:'Comprendre — score',
@@ -15528,7 +15730,7 @@ function HomeChoiceScreen({ profile, user, onComprendre, onAction, can = () => t
 // ENEDIS tourne en tâche de fond. Génère un message d'accueil IA à partir de la
 // SEULE description du foyer (flex_*), puis propose 2 chemins : auto-évaluation
 // (thème dédié) ou base de connaissance (accueil Comprendre).
-function OnboardingAdviceScreen({ user, profile, siteId, onAutoEval, onKnowledge }) {
+function OnboardingAdviceScreen({ user, profile, siteId, onAutoEval, onKnowledge, onManuel }) {
   const [text, setText] = useState(null);
   const [failed, setFailed] = useState(false);
   const firedRef = useRef(false);
@@ -15583,14 +15785,12 @@ function OnboardingAdviceScreen({ user, profile, siteId, onAutoEval, onKnowledge
       </div>
     </div>
 
-    <StickyFooter>
-      <button className="btn btn-primary" style={{width:'100%',fontSize:15,padding:'13px'}} onClick={onAutoEval}>
-        🎯 Auto-évaluation en 10 questions
-      </button>
-      <button className="btn" style={{width:'100%',fontSize:14}} onClick={onKnowledge}>
-        📚 Lire la base de connaissance
-      </button>
-    </StickyFooter>
+    <AutoFooter
+      ctaLabel="🎯 Auto-évaluation en 10 questions →"
+      onCta={onAutoEval}
+      altLabel="📚 Lire la base de connaissance"
+      onAlt={onKnowledge}
+      onManuel={onManuel}/>
     </>
   );
 }
@@ -15598,7 +15798,7 @@ function OnboardingAdviceScreen({ user, profile, siteId, onAutoEval, onKnowledge
 // ─── OnboardingEvalResultScreen : retour IA après l'auto-évaluation d'accueil ──
 // À la fin des 10 questions, l'IA (edge quiz-feedback) commente les bonnes/mauvaises
 // réponses et oriente vers des sujets à creuser. CTA « Ok j'ai compris » → Comprendre.
-function OnboardingEvalResultScreen({ results, questions, onDone }) {
+function OnboardingEvalResultScreen({ results, questions, onDone, onManuel }) {
   const [text, setText] = useState(null);
   const [failed, setFailed] = useState(false);
   const firedRef = useRef(false);
@@ -15655,11 +15855,294 @@ function OnboardingEvalResultScreen({ results, questions, onDone }) {
       </div>
     </div>
 
+    <AutoFooter
+      ctaLabel="Ok j’ai compris, voir mon bilan →"
+      onCta={onDone}
+      onManuel={onManuel}/>
+    </>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ÉCRANS DU PARCOURS AUTOMATIQUE
+// ═══════════════════════════════════════════════════════════════════════════
+
+// Pied de page commun au tapis roulant : vert clair = on avance sur le chemin
+// pré-calculé, vert foncé = on sort vers l'analyse manuelle (« Mon site »).
+function AutoFooter({ ctaLabel, onCta, ctaDisabled = false, altLabel, onAlt, onManuel }) {
+  return (
     <StickyFooter>
-      <button className="btn btn-primary" style={{width:'100%',fontSize:15,padding:'13px'}} onClick={onDone}>
-        Ok j'ai compris →
+      <button className="btn btn-auto" style={{width:'100%',fontSize:15,padding:'13px'}}
+        onClick={onCta} disabled={ctaDisabled}>{ctaLabel}</button>
+      {altLabel && (
+        <button className="btn btn-auto-alt" style={{width:'100%'}} onClick={onAlt}>{altLabel}</button>
+      )}
+      <button className="btn btn-manual" style={{width:'100%',fontSize:13}} onClick={onManuel}>
+        🔧 Je préfère analyser moi-même
       </button>
     </StickyFooter>
+  );
+}
+
+// ─── ParcoursBilanScreen : « conseil coach global incluant courbe de charge » ──
+// Dernière étape avant les leviers. Le bilan IA est produit en fond par
+// GlobalBilanWatcher ; tant qu'il n'est pas là on patiente, sans jamais bloquer
+// l'utilisateur (il peut avancer quand même — la collecte ENEDIS peut être longue).
+function ParcoursBilanScreen({ profile, bilanData, onNext, onManuel }) {
+  // Repli : si le watcher a déjà tiré (ou n'est plus armé), le bilan est en base.
+  // Sans ça, un utilisateur qui reprend son parcours resterait sur le spinner.
+  const [fallback, setFallback] = useState(null);
+  useEffect(() => {
+    if (bilanData) return;
+    const siteId = localStorage.getItem('starvolt_active_site_id');
+    if (!siteId) return;
+    let alive = true;
+    const load = () => sb.from('sites').select('bilan_ia,conso_annuelle_kwh').eq('id', siteId).maybeSingle()
+      .then(({ data }) => {
+        if (!alive || !data?.bilan_ia) return;
+        setFallback({ collected: true, errored: false, errorMsg: null, bilanText: data.bilan_ia,
+          consoKwh: data.conso_annuelle_kwh ? Math.round(data.conso_annuelle_kwh) : null });
+      });
+    load();
+    const t = setInterval(load, 12000); // la collecte ENEDIS peut arriver pendant la lecture
+    return () => { alive = false; clearInterval(t); };
+  }, [bilanData]);
+
+  const data    = bilanData || fallback;
+  const ready   = !!data;
+  const errored = !!data?.errored;
+  const prenom  = profile?.prenom ? `, ${profile.prenom}` : '';
+
+  return (
+    <>
+    <div className="screen fade-in">
+      <div className="auth-header">
+        <div className="welcome-tag" style={{color:'#7dd940'}}>Ton bilan personnalisé</div>
+        <h1 className="welcome-title">Ta conso,<br/><span className="accent">décryptée</span></h1>
+      </div>
+
+      {ready && !errored && data.consoKwh != null && (
+        <div className="card" style={{padding:'14px 16px',marginBottom:12,textAlign:'center',border:'1.5px solid rgba(125,217,64,.4)'}}>
+          <div style={{fontSize:11,color:'rgba(255,255,255,.45)',textTransform:'uppercase',letterSpacing:'.5px',marginBottom:4}}>Ta consommation annuelle</div>
+          <div style={{fontSize:32,fontWeight:900,color:'#7dd940',lineHeight:1}}>{data.consoKwh.toLocaleString('fr-FR')} <span style={{fontSize:16}}>kWh</span></div>
+        </div>
+      )}
+
+      <div className="card" style={{padding:'18px',minHeight:150,display:'flex',alignItems:ready?'flex-start':'center',justifyContent:'center'}}>
+        {!ready ? (
+          <StarSpinner size={30} label="On récupère ta courbe de charge ENEDIS et on l'analyse…" labelColor="rgba(255,255,255,.7)"/>
+        ) : errored ? (
+          <div style={{fontSize:13.5,lineHeight:1.55,color:'rgba(255,255,255,.85)'}}>
+            La récupération automatique de tes données ENEDIS n'a pas abouti{data.errorMsg ? ' :' : '.'}
+            {data.errorMsg && (
+              <div style={{marginTop:8,padding:'9px 11px',background:'rgba(255,138,106,.1)',border:'1px solid rgba(255,138,106,.25)',borderRadius:10,fontSize:12.5,color:'rgba(255,200,180,.95)'}}>{data.errorMsg}</div>
+            )}
+            <div style={{marginTop:10,color:'rgba(255,255,255,.7)'}}>
+              Pas d'inquiétude{prenom} : on continue avec des estimations, et tu pourras relancer la collecte depuis « Mon site ».
+            </div>
+          </div>
+        ) : (
+          <BilanMarkdown text={data.bilanText}/>
+        )}
+      </div>
+
+      {!ready && (
+        <div style={{fontSize:12,color:'rgba(255,255,255,.45)',lineHeight:1.5,marginTop:12,textAlign:'center'}}>
+          Ça peut prendre quelques minutes. Tu peux avancer dès maintenant : ton bilan t'attendra dans « Mon site ».
+        </div>
+      )}
+    </div>
+
+    <AutoFooter
+      ctaLabel={ready ? '⚡ Découvrir mes leviers d’économie →' : 'Continuer sans attendre →'}
+      onCta={onNext}
+      onManuel={onManuel}/>
+    </>
+  );
+}
+
+// ─── ParcoursLevierScreen : un levier d'économie par écran ────────────────────
+// Cœur du tapis roulant. Charge une fois les offres, le profil du site, les
+// économies estimées et l'éligibilité ACC, puis déroule les leviers dans l'ordre
+// « accessible → peu coûteux → efficace ». Trois sorties par étape : je valide
+// (→ écran de simulation dédié, qui met réellement au panier puis revient ici),
+// je passe au levier suivant, ou je bascule en analyse manuelle.
+// La position dans le tapis n'est PAS un index : une offre validée disparaît de
+// la liste des éligibles (elle est au panier), ce qui décalerait tous les index.
+// On mémorise donc les offres déjà écartées (« seen ») ; le levier courant est
+// simplement le premier éligible non encore écarté.
+function ParcoursLevierScreen({ user, profile, can = () => true, onValider, onManuel, onFini }) {
+  const [offres,     setOffres]     = useState(null); // éligibles, classés
+  const [savings,    setSavings]    = useState({});
+  const [currentBill,setCurrentBill]= useState(null);
+  const [seen,       setSeen]       = useState(() => autoGetState()?.seen || []);
+  const [total,      setTotal]      = useState(() => autoGetState()?.total || null);
+
+  useEffect(() => {
+    if (!user?.id) return;
+    let alive = true;
+    const siteId = localStorage.getItem('starvolt_active_site_id');
+    (async () => {
+      const [{ data: allOffres }, siteRow, accNearby, sav] = await Promise.all([
+        sb.from('offres').select('*').order('created_at'),
+        siteId
+          ? sb.from('sites').select('flex_type_logement,flex_statut,box_comwatt_existante,flex_chauffage,flex_ecs,pv_existant_kwc,batterie_existante_kwh').eq('id', siteId).maybeSingle()
+          : Promise.resolve({ data: null }),
+        autoAccNearby(siteId),
+        computeSavingsByType(user),
+      ]);
+      if (!alive) return;
+      const d = siteRow?.data;
+      const siteProfile = d ? {
+        type_logement: d.flex_type_logement,
+        statut:        d.flex_statut,
+        hasBox:        !!d.box_comwatt_existante,
+        hasChauffElec: siteChauffageElec(d.flex_chauffage) || d.flex_ecs === 'elec',
+        hasSolaire:    (parseFloat(d.pv_existant_kwc) || 0) > 0,
+        hasBatterie:   (parseFloat(d.batterie_existante_kwh) || 0) > 0,
+      } : null;
+      const cartFlags = readCartFlags();
+      const eligibles = (allOffres || []).filter(o => autoOffreEligible(o, { siteProfile, cartFlags, accNearby, can }));
+      const ranked = autoRankOffres(eligibles, sav.savings || {});
+      setSavings(sav.savings || {});
+      setCurrentBill(sav.currentBill);
+      setOffres(ranked);
+      // Longueur du tapis figée au premier passage → barre de progression stable.
+      const st = autoGetState() || {};
+      if (st.total == null) {
+        const t = ranked.filter(o => !(st.seen || []).includes(o.id)).length;
+        setTotal(t);
+        autoSetState({ ...st, siteId, total: t });
+      }
+    })();
+    return () => { alive = false; };
+  }, [user?.id]);
+
+  const remaining = offres ? offres.filter(o => !seen.includes(o.id)) : null;
+
+  // Fin du tapis : plus aucun levier à présenter.
+  useEffect(() => {
+    if (remaining && remaining.length === 0) onFini();
+  }, [remaining && remaining.length]);
+
+  const skipCurrent = (id) => {
+    const next = [...seen, id];
+    setSeen(next);
+    autoSetState({ ...(autoGetState() || {}), siteId: localStorage.getItem('starvolt_active_site_id'), seen: next });
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  if (!offres) {
+    return (
+      <div className="screen fade-in" style={{display:'flex',alignItems:'center',justifyContent:'center',minHeight:'50vh'}}>
+        <StarSpinner size={30} label="On prépare tes leviers d’économie…" labelColor="rgba(255,255,255,.7)"/>
+      </div>
+    );
+  }
+  if (remaining.length === 0) return null; // l'effet ci-dessus enchaîne sur l'écran de fin
+
+  const nbTotal = total || remaining.length;
+  const done    = Math.max(0, nbTotal - remaining.length);
+  const o    = remaining[0];
+  const type = offrePrimaryType(o);
+  const eco  = savings[type] || 0;
+  const invest = o.investissement_min ?? 0;
+  const fmtE = (v) => `${Math.round(v).toLocaleString('fr-FR')} €`;
+  const texte = renderTexteAuto(o.texte_auto, {
+    eco:     fmtE(eco),
+    facture: currentBill != null ? fmtE(currentBill) : '—',
+    apres:   currentBill != null ? fmtE(Math.max(0, currentBill - eco)) : '—',
+    pct:     currentBill ? `${Math.round(eco / currentBill * 100)} %` : (o.reduction_pct != null ? `${o.reduction_pct} %` : '—'),
+    invest:  invest > 0 ? fmtE(invest) : '0 €',
+    delai:   o.delai_min_jours ? `${o.delai_min_jours} jours` : 'immédiat',
+    roi:     invest > 0 && eco > 0 ? `${Math.ceil(invest / eco)} an${Math.ceil(invest / eco) > 1 ? 's' : ''}` : 'immédiat',
+    prenom:  profile?.prenom || '',
+  }) || (
+    // Repli quand aucun texte court n'est saisi côté admin.
+    `${o.sous_titre ? o.sous_titre + '. ' : ''}Ce levier te fait économiser environ ${fmtE(eco)} par an` +
+    `${invest > 0 ? `, pour un investissement initial de ${fmtE(invest)}` : ', sans aucun investissement'}` +
+    `${o.delai_min_jours ? `, avec une mise en œuvre en ${o.delai_min_jours} jours` : ''}.`
+  );
+
+  const picto = o.picto_url || PICTOS_DEFAUT[(o.types_offre || [])[0]] || '/optimisation.png';
+  const chips = [
+    invest > 0 ? `💶 ${fmtE(invest)} d’investissement` : '💶 Sans investissement',
+    o.delai_min_jours ? `⏱ ${o.delai_min_jours} jours` : '⏱ Immédiat',
+    o.duree_engagement > 0 ? `📜 Engagement ${o.duree_engagement} an${o.duree_engagement > 1 ? 's' : ''}` : '📜 Sans engagement',
+  ];
+
+  return (
+    <>
+    <div className="screen fade-in">
+      <div className="auto-prog">
+        {Array.from({length: nbTotal}).map((_, i) => <span key={i} className={i < done ? 'done' : i === done ? 'cur' : ''}/>)}
+      </div>
+      <div style={{fontSize:11,color:'rgba(255,255,255,.45)',textTransform:'uppercase',letterSpacing:'.6px',marginBottom:14,textAlign:'center'}}>
+        Levier {done + 1} sur {nbTotal}
+      </div>
+
+      <div style={{textAlign:'center',marginBottom:16}}>
+        <img src={picto} alt="" style={{width:72,height:72,objectFit:'contain',mixBlendMode:'screen',marginBottom:10}}/>
+        <h1 style={{fontSize:23,fontWeight:900,color:'white',lineHeight:1.2,margin:0}}>{o.titre}</h1>
+      </div>
+
+      {eco > 0 && (
+        <div className="card" style={{padding:'16px',marginBottom:12,textAlign:'center',border:'1.5px solid rgba(125,217,64,.4)'}}>
+          <div style={{fontSize:11,color:'rgba(255,255,255,.45)',textTransform:'uppercase',letterSpacing:'.5px',marginBottom:4}}>Économies estimées</div>
+          <div style={{fontSize:36,fontWeight:900,color:'#7dd940',lineHeight:1}}>-{Math.round(eco).toLocaleString('fr-FR')} €<span style={{fontSize:18}}>/an</span></div>
+          {currentBill > 0 && (
+            <div style={{fontSize:12,color:'rgba(255,255,255,.45)',marginTop:6}}>
+              Ta facture passerait de <strong style={{color:'white'}}>{fmtE(currentBill)}</strong> à <strong style={{color:'#7dd940'}}>{fmtE(Math.max(0, currentBill - eco))}</strong> par an
+            </div>
+          )}
+        </div>
+      )}
+
+      <div className="card" style={{padding:'16px 18px',marginBottom:12}}>
+        <div style={{fontSize:14.5,lineHeight:1.6,color:'rgba(255,255,255,.9)',whiteSpace:'pre-wrap'}}>{texte}</div>
+      </div>
+
+      <div style={{display:'flex',flexWrap:'wrap',gap:6,marginBottom:8}}>
+        {chips.map((c, i) => (
+          <span key={i} style={{fontSize:11,color:'rgba(255,255,255,.6)',background:'rgba(255,255,255,.06)',border:'1px solid rgba(255,255,255,.1)',borderRadius:8,padding:'5px 9px'}}>{c}</span>
+        ))}
+      </div>
+    </div>
+
+    <AutoFooter
+      ctaLabel="✓ Oui, je le mets dans mon panier"
+      onCta={() => onValider(o, type)}
+      altLabel={remaining.length > 1 ? 'Voir le levier suivant →' : 'Terminer et voir mon panier →'}
+      onAlt={() => skipCurrent(o.id)}
+      onManuel={onManuel}/>
+    </>
+  );
+}
+
+// ─── ParcoursFinScreen : sortie du tapis roulant ─────────────────────────────
+function ParcoursFinScreen({ onPanier, onManuel }) {
+  const flags  = readCartFlags();
+  const nbItems = Object.values(flags).filter(Boolean).length;
+  return (
+    <>
+    <div className="screen fade-in">
+      {nbItems > 0 && <Fireworks final/>}
+      <div style={{textAlign:'center',marginBottom:20,marginTop:8}}>
+        <div style={{fontSize:52,marginBottom:8}}>{nbItems > 0 ? '🎉' : '🧭'}</div>
+        <div style={{fontSize:22,fontWeight:900,color:'white',lineHeight:1.2,marginBottom:8}}>
+          {nbItems > 0 ? 'Ton plan d’action est prêt !' : 'Tu as vu tous les leviers'}
+        </div>
+        <div style={{fontSize:14,color:'rgba(255,255,255,.6)',lineHeight:1.6}}>
+          {nbItems > 0
+            ? `Tu as retenu ${nbItems} levier${nbItems > 1 ? 's' : ''} d’économie. Vérifie ton panier : tu y verras ta nouvelle facture et le gain sur 25 ans.`
+            : 'Aucun levier retenu pour l’instant. Tu peux explorer ta consommation en détail et revenir quand tu veux.'}
+        </div>
+      </div>
+    </div>
+    <AutoFooter
+      ctaLabel={nbItems > 0 ? '🛒 Voir mon panier →' : 'Voir mon panier →'}
+      onCta={onPanier}
+      onManuel={onManuel}/>
     </>
   );
 }
@@ -16653,7 +17136,9 @@ function App() {
         }
       }
     }
-    return 'HOME_CHOICE';
+    // Un parcours automatique en cours reprend là où il s'est arrêté : le tapis
+    // roulant survit à un rechargement ou à une reconnexion.
+    return autoGetState() ? 'AUTO_LEVIER' : 'HOME_CHOICE';
   }, []);
 
   // Étape 0 — charge les permissions du rôle courant (AUCUN masquage pour l'instant).
@@ -16766,7 +17251,36 @@ function App() {
 
   const handleLogout = async () => { await sb.auth.signOut(); };
 
-  // Watcher global « bilan prêt » → ouvre la popup (points 7-8)
+  // ─── Parcours automatique (« tapis roulant ») ───────────────────────────────
+  // autoSt non nul ⇒ l'utilisateur est sur le chemin guidé. Les écrans de
+  // simulation dédiés le savent : leur CTA de fin renvoie sur le levier suivant
+  // au lieu de « Mon site ». Toute sortie explicite (analyse manuelle, panier)
+  // efface l'état → on ne rattrape jamais l'utilisateur contre son gré.
+  const [autoSt, setAutoSt] = useState(() => autoGetState());
+
+  // Armé quand l'utilisateur choisit le chemin guidé, juste avant son bilan.
+  const autoStart = useCallback(() => {
+    const st = { siteId: localStorage.getItem('starvolt_active_site_id'), seen: [], total: null };
+    autoSetState(st); setAutoSt(st);
+    goTo('AUTO_BILAN');
+  }, [goTo]);
+
+  // Retour d'un écran de simulation : le levier validé est au panier, il sort de
+  // la liste des éligibles — le tapis reprend donc tout seul au levier suivant.
+  const autoResume = useCallback(() => { updateCart(); goTo('AUTO_LEVIER'); }, [goTo]);
+
+  const autoExit = useCallback((dest, updates) => {
+    autoClearState(); setAutoSt(null);
+    if (dest) goTo(dest, updates || {});
+  }, [goTo]);
+
+  // Props communes aux écrans de simulation quand ils sont traversés en mode auto.
+  const autoSimProps = autoSt
+    ? { onMonSite: autoResume, nextLabel: 'Continuer mon parcours →' }
+    : { onMonSite: () => goTo('MA_CONSO') };
+
+  // Watcher global « bilan prêt ». En mode auto, le bilan n'ouvre PAS de popup :
+  // il alimente l'étape « ton bilan » du tapis roulant (écran AUTO_BILAN).
   const handleBilanReady = useCallback((payload) => { setBilanPopup(payload); }, []);
   // CTA « ok j'ai compris » → page « mon site ma conso » devant l'histogramme + arme le tutoriel (points 8-9)
   const handleBilanUnderstood = useCallback(() => {
@@ -17097,6 +17611,7 @@ function App() {
       case 'ONBOARDING_ADVICE':
         return <OnboardingAdviceScreen user={user} profile={profile} siteId={state.onbSiteId}
           onKnowledge={()=>goTo('COMPRENDRE_HOME')}
+          onManuel={()=>autoExit('MA_CONSO')}
           onAutoEval={async ()=>{
             // Lance IMMÉDIATEMENT le quiz du sujet « Auto évaluation en 10 questions »
             // (thème « Energie, de quoi parlons nous ? ») — 1re question directement.
@@ -17114,7 +17629,31 @@ function App() {
         return <OnboardingEvalResultScreen
           results={state.quizResults?.results || []}
           questions={state.learnQuestions || []}
-          onDone={()=>goTo('COMPRENDRE_HOME')}/>;
+          onDone={autoStart}
+          onManuel={()=>autoExit('MA_CONSO')}/>;
+
+      // ─── Tapis roulant : bilan → leviers un par un → panier ─────────────────
+      case 'AUTO_BILAN':
+        return <ParcoursBilanScreen profile={profile} bilanData={bilanPopup}
+          onNext={()=>goTo('AUTO_LEVIER')}
+          onManuel={()=>autoExit('MA_CONSO', { focusHisto: true })}/>;
+
+      case 'AUTO_LEVIER':
+        return <ParcoursLevierScreen user={user} profile={profile} can={can}
+          onValider={(offre, type)=>{
+            // On passe par l'écran de simulation dédié : c'est LUI qui connaît le
+            // détail (tarif retenu, box achetée/gratuite, dimensionnement PV…) et
+            // qui écrit le panier. Son CTA de fin ramène ici, au levier suivant.
+            const dest = AUTO_TYPE_SCREEN[type];
+            if (dest) goTo(dest); else goTo('AUTO_LEVIER');
+          }}
+          onManuel={()=>autoExit('MA_CONSO')}
+          onFini={()=>goTo('AUTO_FIN')}/>;
+
+      case 'AUTO_FIN':
+        return <ParcoursFinScreen
+          onPanier={()=>autoExit('PANIER')}
+          onManuel={()=>autoExit('MA_CONSO')}/>;
 
       case 'SIMULATIONS': {
         const base = { name: profile?.prenom||'', address:'Zone ACC', initialBill:2000, bill:2000, bravoItems:[], investment:0, eligible:true };
@@ -17137,19 +17676,19 @@ function App() {
         return <PanierScreen user={user} onBack={()=>goTo('SIMULATIONS')} onGoTo={goTo} onMonSite={()=>goTo('MA_CONSO')}/>;
 
       case 'BOX_SIM':
-        return <BoxSimScreen user={user} userProfile={profile} onBack={goBack} onPanier={()=>goTo('PANIER')} onMonSite={()=>goTo('MA_CONSO')} onCartUpdate={updateCart}/>;
+        return <BoxSimScreen user={user} userProfile={profile} onBack={goBack} onPanier={()=>goTo('PANIER')} onCartUpdate={updateCart} {...autoSimProps}/>;
 
       case 'FLEX_SIM':
-        return <FlexSeuleScreen user={user} userProfile={profile} onBack={goBack} onPanier={()=>goTo('PANIER')} onMonSite={()=>goTo('MA_CONSO')} onCartUpdate={updateCart}/>;
+        return <FlexSeuleScreen user={user} userProfile={profile} onBack={goBack} onPanier={()=>goTo('PANIER')} onCartUpdate={updateCart} {...autoSimProps}/>;
 
       case 'DIY_BOX_SIM':
-        return <InstallSoiMemeScreen user={user} userProfile={profile} onBack={goBack} onPanier={()=>goTo('PANIER')} onMonSite={()=>goTo('MA_CONSO')} onCartUpdate={updateCart}/>;
+        return <InstallSoiMemeScreen user={user} userProfile={profile} onBack={goBack} onPanier={()=>goTo('PANIER')} onCartUpdate={updateCart} {...autoSimProps}/>;
 
       case 'SOLAR_SIM':
-        return <SolarSimScreen user={user} userProfile={profile} onBack={goBack} onPanier={()=>goTo('PANIER')} onMonSite={()=>goTo('MA_CONSO')} onCartUpdate={updateCart}/>;
+        return <SolarSimScreen user={user} userProfile={profile} onBack={goBack} onPanier={()=>goTo('PANIER')} onCartUpdate={updateCart} {...autoSimProps}/>;
 
       case 'OPTIMISATION':
-        return <OptimisationScreen user={user} userProfile={profile} onBack={goBack} onPanier={()=>goTo('PANIER')} onMonSite={()=>goTo('MA_CONSO')} onCartUpdate={updateCart}/>;
+        return <OptimisationScreen user={user} userProfile={profile} onBack={goBack} onPanier={()=>goTo('PANIER')} onCartUpdate={updateCart} {...autoSimProps}/>;
 
       case 'ACC_MAP':
         return <AccMapScreen user={user} userProfile={profile} onBack={goBack}
@@ -17158,7 +17697,7 @@ function App() {
           onPanier={()=>goTo('PANIER')}/>;
 
       case 'ACC_RESULT':
-        return <AccResultScreen state={state} onBack={()=>goTo('SIMULATIONS')} onPanier={()=>goTo('PANIER')} onMonSite={()=>goTo('MA_CONSO')}/>;
+        return <AccResultScreen state={state} onBack={()=>goTo('SIMULATIONS')} onPanier={()=>goTo('PANIER')} {...autoSimProps}/>;
 
       case 'AUTH_SIGNUP':
         return <AuthSignupScreen
@@ -17247,8 +17786,11 @@ function App() {
   // Le popup « bilan prêt » ne doit pas interrompre une boîte de dialogue que
   // l'utilisateur est en train de lire pendant l'intégration (message d'accueil,
   // quiz d'auto-évaluation, retour IA). Il patiente jusqu'à ce que l'écran soit fermé.
+  // En mode automatique, le bilan n'a pas non plus à surgir en popup : il EST
+  // l'étape AUTO_BILAN du tapis roulant, qui lit directement `bilanPopup`.
   const onboardingDialogOpen =
-    ['ONBOARDING_QUESTIONS','ONBOARDING_ADVICE','ONBOARDING_EVAL_RESULT'].includes(state.screen)
+    ['ONBOARDING_QUESTIONS','ONBOARDING_ADVICE','ONBOARDING_EVAL_RESULT','AUTO_BILAN','AUTO_LEVIER','AUTO_FIN'].includes(state.screen)
+    || !!autoSt
     || (state.screen === 'COMPRENDRE_QUIZ' && state.onboardingEval);
 
   return (
@@ -17283,7 +17825,7 @@ function App() {
         onProfileClick={user ? () => goTo('PROFILE') : null}
         isAdmin={isAdmin}
         onAdmin={()=>goTo('ADMIN')}
-        onPanier={user && state.screen !== 'PANIER' && can('menus','panier') ? ()=>goTo('PANIER') : null}
+        onPanier={user && state.screen !== 'PANIER' && can('menus','panier') ? ()=>autoExit('PANIER') : null}
         cartCount={cartCount}
         onFeedback={user && !isAuthScreen ? (s)=>setFeedbackSentiment(s) : null}
       />
