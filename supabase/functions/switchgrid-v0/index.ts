@@ -952,11 +952,22 @@ async function finalizeRec(rec) {
       // toujours (updated_at figé), même quand le journalier R65 est DÉJÀ disponible.
       const reqAgeMs = Date.now() - new Date(rec.created_at).getTime();
       const WAIT_MS = 30 * 60 * 1000;
+      // Repli journalier ANTICIPÉ. ENEDIS sert la R65 (journalier) en ~2 min, alors
+      // que la R63 (courbe de charge) reste parfois "PENDING" des dizaines de minutes.
+      // Attendre le plafond de 30 min laissait l'utilisateur devant un spinner pendant
+      // toute l'intégration (cas constaté en prod le 2026-08-03). On écrit donc le
+      // journalier dès SOFT_MS et on CONTINUE de sonder : quand la courbe arrive,
+      // shouldOverwrite la substitue au journalier (loadcurve > daily) sans que
+      // l'utilisateur n'ait rien à faire — le cron « switchgrid-finalize » (5 min)
+      // prend le relais s'il a quitté l'application.
+      const SOFT_MS = 3 * 60 * 1000;
       const r63Ok = r63?.status === "SUCCESS";
       // R63 considérée "terminée" si SUCCESS, FAILED, ou PENDING depuis trop longtemps
       // (coincée) → on débloque alors le repli journalier au lieu d'attendre sans fin.
       const r63Stale = isPending(r63) && reqAgeMs > WAIT_MS;
       const r63Done = !r63 || r63?.status === "SUCCESS" || r63?.status === "FAILED" || r63Stale;
+      // Courbe encore en route, mais assez attendu pour servir une 1re estimation.
+      const r63Soft = isPending(r63) && reqAgeMs > SOFT_MS;
       const r65Ok = r65?.status === "SUCCESS";
       // Construire le meilleur candidat disponible.
       let candidate = null;
@@ -977,10 +988,10 @@ async function finalizeRec(rec) {
           };
         }
       }
-      // Repli journalier R65 (si pas de courbe précise et R63 terminée).
+      // Repli journalier R65 (si pas de courbe précise et R63 terminée OU trop lente).
       // Garde-fou : exiger une couverture journalière suffisante pour écarter un
       // R65 encore partiel (ENEDIS en cours de remplissage) qui fausserait l'annuel.
-      if (!candidate && r63Done && r65Ok) {
+      if (!candidate && (r63Done || r63Soft) && r65Ok) {
         const d = await fetchDaily(r65);
         if (d.daysPresent >= MIN_DAILY_DAYS) {
           candidate = {
@@ -1035,6 +1046,13 @@ async function finalizeRec(rec) {
           su.conso_coverage = Math.round(candidate.coverage * 1000) / 1000;
           su.conso_annuelle_kwh = Math.round(total / 100) / 10;
           su.conso_gaps = candidate.gaps ?? null;
+          // Estimation journalière remplacée par la vraie courbe : le bilan IA avait
+          // été rédigé sur des chiffres approximatifs. On le vide pour qu'il soit
+          // régénéré sur les vrais (client et watcher ne régénèrent que si null).
+          if (candidate.source === "loadcurve" && oldSite?.conso_source === "daily") {
+            su.bilan_ia = null;
+            su.bilan_ia_at = null;
+          }
         }
         await sbUpdate("sites", `id=eq.${rec.site_id}`, su);
         // Le C68_ASYNC ET la courbe d'INJECTION sont plus lents que le soutirage (souvent
@@ -1046,11 +1064,15 @@ async function finalizeRec(rec) {
         // injection FAILED, donc plus "pending", on ne l'attend pas inutilement).
         // (reqAgeMs / WAIT_MS sont définis plus haut dans ce bloc.)
         const awaitingInj = (isPending(r63Inj) || isPending(r65Inj)) && !inj;
-        if ((isPending(c68) || awaitingInj) && reqAgeMs < WAIT_MS) {
+        // Journalier servi par anticipation : la courbe de charge est toujours en
+        // route. On ne fige surtout pas "done", sinon plus personne ne la sonderait
+        // et le site resterait sur une estimation approximative à vie.
+        const awaitingCurve = candidate.source === "daily" && isPending(r63);
+        if ((isPending(c68) || awaitingInj || awaitingCurve) && reqAgeMs < WAIT_MS) {
           return jsonResp({
             status: "ordering",
             conso_source: overwrite ? candidate.source : oldSite?.conso_source ?? candidate.source,
-            awaiting: isPending(c68) ? "C68" : "INJECTION"
+            awaiting: awaitingCurve ? "LOADCURVE" : isPending(c68) ? "C68" : "INJECTION"
           });
         }
         await sbUpdate("switchgrid_requests", `id=eq.${requestId}`, {
