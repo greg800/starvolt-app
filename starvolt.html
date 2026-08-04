@@ -5247,6 +5247,215 @@ function EnergyBalanceChart({ balance, level, selMonth, selDay, setLevel, setSel
   );
 }
 
+// ─── TarifPicker : recherche d'offre + capture de facture ────────────────────
+// Remplace le menu déroulant des tarifs. Recherche en clair côté client (la
+// grille fait quelques dizaines de lignes : aucun service d'indexation externe
+// n'est nécessaire). Si le client ne trouve pas son offre, il dépose sa facture
+// et on la lit (edge function facture-ocr).
+
+// Familles de mots équivalents : sans elles, « TRV » ne trouve pas « Tarif Bleu »
+// et « total » ne trouve pas « TotalEnergies ». C'est ce que ferait la table de
+// synonymes d'un moteur d'indexation — ici en clair, et gratuit.
+const TARIF_SYNONYMES = [
+  ['trv', 'tarif bleu', 'tarif reglemente', 'reglemente'],
+  ['hc', 'heures creuses', 'creuses'],
+  ['hp', 'heures pleines', 'pleines'],
+  ['edf', 'electricite de france'],
+  ['total', 'totalenergies', 'total energies'],
+  ['eni', 'plenitude'],
+  ['engie', 'gdf'],
+  ['pv', 'solaire', 'photovoltaique'],
+];
+
+// Casse, accents et ponctuation ne doivent jamais faire rater un résultat.
+function normTarifTxt(s) {
+  return (s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .replace(/[^a-z0-9]+/g, ' ').trim();
+}
+
+// Un tarif correspond si CHAQUE mot tapé (ou l'un de ses synonymes) apparaît
+// quelque part dans « fournisseur + nom + type ». Recherche par préfixe : on
+// veut des résultats dès la 3ᵉ lettre, pendant la frappe.
+function tarifMatch(tarif, requete) {
+  const foin = normTarifTxt(`${tarif.fournisseur || ''} ${tarif.nom || ''} ${tarif.type_tarif || ''}`);
+  const mots = normTarifTxt(requete).split(' ').filter(Boolean);
+  if (!mots.length) return true;
+  return mots.every(mot => {
+    const groupe = TARIF_SYNONYMES.find(g => g.some(v => v === mot || v.startsWith(mot)));
+    const variantes = groupe ? [mot, ...groupe] : [mot];
+    return variantes.some(v => foin.includes(v) || foin.split(' ').some(w => w.startsWith(v)));
+  });
+}
+
+function TarifPicker({ user, siteId, tariffs, value, onChange, onTariffsChanged }) {
+  const tarifActuel = (tariffs || []).find(t => t.id === value) || null;
+  const [q, setQ]           = useState('');
+  const [ouvert, setOuvert] = useState(false);
+  const [mode, setMode]     = useState('recherche'); // recherche | facture | resultat
+  const [consent, setConsent] = useState(false);
+  const [fichier, setFichier] = useState(null);
+  const [busy, setBusy]     = useState(false);
+  const [err, setErr]       = useState('');
+  const [res, setRes]       = useState(null);
+
+  // Catalogue proposable : les offres vérifiées uniquement (les brouillons des
+  // autres clients ne sont jamais proposés — cf. tarifsVisibles).
+  const catalogue = React.useMemo(
+    () => (tariffs || []).filter(t => t.statut !== 'brouillon'), [tariffs]);
+  const resultats = React.useMemo(
+    () => catalogue.filter(t => tarifMatch(t, q)).slice(0, 8), [catalogue, q]);
+
+  const choisir = (t) => { onChange(t.id); setOuvert(false); setQ(''); };
+
+  const deposerFacture = async () => {
+    if (!fichier || !consent) return;
+    setBusy(true); setErr('');
+    try {
+      const ext = (fichier.name.split('.').pop() || 'pdf').toLowerCase();
+      const cle = `${user.id}/${crypto.randomUUID()}.${ext}`;
+      const { error: upErr } = await sb.storage.from('factures')
+        .upload(cle, fichier, { contentType: fichier.type || 'application/pdf' });
+      if (upErr) throw new Error(upErr.message);
+
+      const { data: fac, error: insErr } = await sb.from('factures').insert({
+        user_id: user.id, site_id: siteId || null, storage_key: cle,
+        mime: fichier.type || 'application/pdf', taille_octets: fichier.size,
+        consentement_at: new Date().toISOString(),
+      }).select('id').single();
+      if (insErr) throw new Error(insErr.message);
+
+      const { data, error: fnErr } = await sb.functions.invoke('facture-ocr', { body: { facture_id: fac.id } });
+      if (fnErr) throw new Error(fnErr.message || 'lecture impossible');
+      if (data?.error) throw new Error(data.error);
+
+      setRes(data);
+      setMode('resultat');
+      if (data.tarif_id) onChange(data.tarif_id);
+      onTariffsChanged?.();
+    } catch (e) {
+      setErr(String(e.message || e));
+    } finally { setBusy(false); }
+  };
+
+  const lbl = { fontSize:10, color:'rgba(255,255,255,.45)', fontWeight:700, letterSpacing:'.5px', display:'block', marginBottom:4 };
+
+  // ── Résultat de la lecture ──
+  if (mode === 'resultat' && res) {
+    const ok = res.statut === 'catalogue' || res.statut === 'corrobore';
+    const brouillon = res.statut === 'brouillon';
+    return (
+      <div>
+        <label style={lbl}>TARIF D'ÉLECTRICITÉ</label>
+        <div style={{
+          padding:'12px 14px', borderRadius:12, fontSize:12.5, lineHeight:1.55,
+          border:`1px solid ${ok ? 'rgba(125,217,64,.3)' : brouillon ? 'rgba(240,160,80,.3)' : 'rgba(255,255,255,.15)'}`,
+          background: ok ? 'rgba(125,217,64,.1)' : brouillon ? 'rgba(240,160,80,.08)' : 'rgba(255,255,255,.04)',
+          color:'rgba(255,255,255,.8)',
+        }}>
+          {ok && <><strong style={{color:'#7dd940'}}>✓ Offre identifiée</strong><br/>
+            {res.offre_nom || 'Votre offre'} — vos économies sont calculées sur vos vrais prix.</>}
+          {brouillon && <><strong style={{color:'#f0a050'}}>Offre enregistrée — montants provisoires</strong><br/>
+            Nous avons lu les prix sur votre facture et calculé vos économies avec.
+            Un conseiller vérifie votre grille tarifaire ; vous recevrez un email dès qu'elle est confirmée.</>}
+          {!ok && !brouillon && <><strong>Facture difficile à lire</strong><br/>
+            Nous n'avons pas pu en tirer vos prix de façon fiable. Un conseiller la reprend à la main et revient vers vous.</>}
+        </div>
+        <button onClick={() => { setMode('recherche'); setRes(null); setFichier(null); setConsent(false); }}
+          style={{ marginTop:8, background:'none', border:'none', color:'rgba(255,255,255,.5)', fontSize:12,
+                   textDecoration:'underline', cursor:'pointer', padding:0, fontFamily:'inherit' }}>
+          Choisir mon offre autrement
+        </button>
+      </div>
+    );
+  }
+
+  // ── Dépôt de facture ──
+  if (mode === 'facture') {
+    return (
+      <div>
+        <label style={lbl}>AJOUTER MA FACTURE</label>
+        <div style={{ fontSize:11.5, color:'rgba(255,255,255,.5)', lineHeight:1.5, marginBottom:8 }}>
+          PDF ou photo. Nous y lisons votre offre et vos prix pour chiffrer vos économies sur vos vrais montants.
+        </div>
+        <input type="file" accept=".pdf,image/png,image/jpeg,image/webp"
+          onChange={e => { setFichier(e.target.files?.[0] || null); setErr(''); }}
+          style={{ fontSize:12, color:'rgba(255,255,255,.7)', width:'100%', marginBottom:10 }}/>
+        <label style={{ display:'flex', gap:8, alignItems:'flex-start', fontSize:11.5,
+                        color:'rgba(255,255,255,.6)', lineHeight:1.5, cursor:'pointer', marginBottom:10 }}>
+          <input type="checkbox" checked={consent} onChange={e => setConsent(e.target.checked)} style={{ marginTop:2 }}/>
+          <span>J'autorise Starvolt à conserver ma facture pour affiner mon estimation. Elle est stockée
+            de façon chiffrée et supprimée automatiquement au bout de 3 mois.</span>
+        </label>
+        {err && <div style={{ fontSize:11.5, color:'#ff8080', marginBottom:8 }}>{err}</div>}
+        <div style={{ display:'flex', gap:8 }}>
+          <button onClick={deposerFacture} disabled={!fichier || !consent || busy}
+            style={{ flex:1, padding:'10px', borderRadius:10, border:'none', fontFamily:'inherit',
+                     fontSize:13, fontWeight:800, cursor: (!fichier || !consent || busy) ? 'default' : 'pointer',
+                     background: (!fichier || !consent || busy) ? 'rgba(255,255,255,.08)' : '#7dd940',
+                     color: (!fichier || !consent || busy) ? 'rgba(255,255,255,.35)' : '#06222b' }}>
+            {busy ? 'Lecture en cours…' : 'Envoyer ma facture'}
+          </button>
+          <button onClick={() => { setMode('recherche'); setErr(''); }} disabled={busy}
+            style={{ padding:'10px 14px', borderRadius:10, fontFamily:'inherit', fontSize:13,
+                     background:'rgba(255,255,255,.06)', border:'1px solid rgba(255,255,255,.15)',
+                     color:'rgba(255,255,255,.6)', cursor:'pointer' }}>
+            Annuler
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Recherche ──
+  return (
+    <div>
+      <label style={lbl}>TARIF D'ÉLECTRICITÉ</label>
+      <input className="inp" style={{ fontSize:13, padding:'8px 12px', maxWidth:320 }}
+        value={ouvert ? q : (tarifActuel?.nom || '')}
+        placeholder={tarifActuel ? tarifActuel.nom : 'Cherchez votre offre (ex : EDF bleu, TRV…)'}
+        onFocus={() => { setOuvert(true); setQ(''); }}
+        onChange={e => { setQ(e.target.value); setOuvert(true); }}/>
+      {tarifActuel?.statut === 'brouillon' && !ouvert && (
+        <div style={{ fontSize:10.5, color:'#f0a050', marginTop:4 }}>
+          ⏳ Grille lue sur votre facture, en cours de vérification
+        </div>
+      )}
+      {ouvert && (
+        <div style={{ marginTop:6, maxWidth:320 }}>
+          <div style={{ maxHeight:190, overflowY:'auto', borderRadius:10, border:'1px solid rgba(255,255,255,.12)' }}>
+            {resultats.map(t => (
+              <div key={t.id} onClick={() => choisir(t)}
+                style={{ padding:'9px 12px', cursor:'pointer', fontSize:12.5, color:'rgba(255,255,255,.8)',
+                         borderBottom:'1px solid rgba(255,255,255,.06)',
+                         background: t.id === value ? 'rgba(125,217,64,.1)' : 'transparent' }}>
+                <div style={{ fontWeight:600 }}>{t.nom}</div>
+                {t.fournisseur && <div style={{ fontSize:10.5, color:'rgba(255,255,255,.4)' }}>{t.fournisseur}</div>}
+              </div>
+            ))}
+            {resultats.length === 0 && (
+              <div style={{ padding:'10px 12px', fontSize:12, color:'rgba(255,255,255,.4)' }}>
+                Aucune offre ne correspond.
+              </div>
+            )}
+          </div>
+          <div style={{ display:'flex', gap:10, marginTop:6, alignItems:'center' }}>
+            <button onClick={() => { setMode('facture'); setOuvert(false); }}
+              style={{ background:'none', border:'none', color:'#7dd940', fontSize:12, fontWeight:700,
+                       textDecoration:'underline', cursor:'pointer', padding:0, fontFamily:'inherit' }}>
+              Je ne trouve pas mon offre → ajouter ma facture
+            </button>
+            <button onClick={() => setOuvert(false)}
+              style={{ background:'none', border:'none', color:'rgba(255,255,255,.4)', fontSize:12,
+                       cursor:'pointer', padding:0, fontFamily:'inherit', marginLeft:'auto' }}>
+              Fermer
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── MonSiteScreen ────────────────────────────
 // ─── Icône tête + coche (réutilisée depuis la landing « L'énergie enfin expliquée ») ───
 function IconHeadCheck({ color='#fff' }) {
@@ -6332,13 +6541,10 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
               </div>
               {consoOpen && <div style={{padding:'10px 14px 12px'}}>
                 <div style={{display:'flex',flexDirection:'column',gap:8}}>
-                  <div>
-                    <label style={{fontSize:10,color:'rgba(255,255,255,.45)',fontWeight:700,letterSpacing:'.5px',display:'block',marginBottom:4}}>TARIF D'ÉLECTRICITÉ</label>
-                    <select className="inp inp-sel" style={{fontSize:13,padding:'8px 36px 8px 12px',maxWidth:320}} value={site.tarif_id||''} onChange={e=>updateSite({tarif_id:e.target.value||null})}>
-                      <option value=''>— Sélectionner —</option>
-                      {tariffs.map(t=><option key={t.id} value={t.id}>{t.nom}</option>)}
-                    </select>
-                  </div>
+                  <TarifPicker
+                    user={user} siteId={site.id} tariffs={tariffs} value={site.tarif_id||null}
+                    onChange={id=>updateSite({tarif_id:id||null})}
+                    onTariffsChanged={()=>sb.from('tarifs_electricite').select('*').order('nom').then(({data})=>setTariffs(data||[]))}/>
                   <div ref={enedisRef}>
                     <label style={{fontSize:10,color:'rgba(255,255,255,.45)',fontWeight:700,letterSpacing:'.5px',display:'block',marginBottom:4}}>PDL (numéro compteur Linky)</label>
                     <div style={{display:'flex',alignItems:'center',gap:8}}>
@@ -7083,6 +7289,18 @@ const AUTO_TYPE_SCREEN = {
 };
 const offrePrimaryType = (o) => (o?.types_offre || []).find(t => AUTO_TYPE_SCREEN[t]) || null;
 
+// ─── Grille de tarifs : brouillons issus de l'OCR ────────────────────────────
+// Une seule grille (tarifs_electricite). Un tarif lu sur une facture y entre
+// avec statut='brouillon' : il sert UNIQUEMENT à calculer la facture de celui
+// qui l'a déposé (son site pointe dessus) et n'apparaît dans AUCUN comparatif
+// ni catalogue tant qu'il n'est pas vérifié. Sinon un prix mal lu sur UNE
+// facture fausserait l'estimation de TOUS les futurs clients — risque de
+// mis-selling inacceptable pour une filiale du Crédit Agricole.
+// Il devient visible de tous quand il est promu 'verifie' : validation admin
+// ou corroboration par 2 factures concordantes.
+const tarifsVisibles = (tariffs, tarifIdSite) =>
+  (tariffs || []).filter(t => t.statut !== 'brouillon' || t.id === tarifIdSite);
+
 // ─── Niveau de bricolage (1–5) ───────────────────────────────────────────────
 // Échelle déclarée par l'utilisateur au questionnaire logement (sites.flex_bricolage).
 // Sert UNIQUEMENT à filtrer les offres : une offre n'est proposée que si
@@ -7280,7 +7498,8 @@ async function computeSavingsByType(user) {
   }
 
   if (tariffs?.length && kwh_total > 0) {
-    const ranked = tariffs.map(t => ({ t, result: calcTariffCost(t, kwh_hc, kwh_hp) }))
+    const ranked = tarifsVisibles(tariffs, site.tarif_id)
+      .map(t => ({ t, result: calcTariffCost(t, kwh_hc, kwh_hp) }))
       .filter(({ result }) => result !== null).sort((a, b) => a.result.total - b.result.total);
     if (ranked.length) {
       const cur = site.tarif_id ? ranked.find(r => r.t.id === site.tarif_id) : null;
@@ -7963,7 +8182,7 @@ function OptimisationScreen({ user, userProfile, onBack, onPanier, onMonSite, on
     ? { consoProfile: site.conso_profil, spotMap, natParams, site }
     : null;
 
-  const ranked = tariffs
+  const ranked = tarifsVisibles(tariffs, site?.tarif_id)
     .map(t => ({ t, result: calcTariffCost(t, kwh_hc, kwh_hp, dynamicCtx) }))
     .filter(({ result }) => result !== null)
     .sort((a, b) => a.result.total - b.result.total);
@@ -12027,7 +12246,7 @@ function AdminQuizFailsScreen({ user, onBack }) {
   );
 }
 
-function AdminScreen({ onTariffs, onUsers, onRoles, onSites, onSpot, onAcc, onProduction, onGlobalVars, onFactureVars, onPrix, onOffres, onLearn, onFeedback, onProofread, onAICosts, onAIPrompts, onCyberSecurity, onViewLogs, onViewFails, onImpersonate, onBack }) {
+function AdminScreen({ onTariffs, onUsers, onRoles, onSites, onSpot, onAcc, onProduction, onGlobalVars, onFactureVars, onPrix, onOffres, onLearn, onFeedback, onFactures, onProofread, onAICosts, onAIPrompts, onCyberSecurity, onViewLogs, onViewFails, onImpersonate, onBack }) {
   return (
     <>
     <div className="screen screen-admin fade-in">
@@ -12143,6 +12362,14 @@ function AdminScreen({ onTariffs, onUsers, onRoles, onSites, onSpot, onAcc, onPr
             </div>
             <span className="sim-arrow">→</span>
           </button>
+          <button className="sim-btn" onClick={onFactures}>
+            <span className="sim-icon">📄</span>
+            <div className="sim-text">
+              <div className="sim-title">Factures à valider</div>
+              <div className="sim-sub">Grilles lues sur facture, à confirmer en un clic</div>
+            </div>
+            <span className="sim-arrow">→</span>
+          </button>
         </div>
 
         <div className="admin-group">
@@ -12193,6 +12420,167 @@ function AdminScreen({ onTariffs, onUsers, onRoles, onSites, onSpot, onAcc, onPr
           </button>
         </div>
       </div>
+    </div>
+    <StickyFooter onBack={onBack}/>
+    </>
+  );
+}
+
+// ─── AdminFacturesScreen : valider les grilles lues sur facture ──────────────
+// « L'admin ne crée jamais un tarif à la main, il valide un brouillon
+// pré-rempli » : chaque ligne est déjà remplie avec ce qui a été lu, l'admin
+// relit le PDF joint, corrige si besoin, et valide en un clic.
+function AdminFacturesScreen({ onBack }) {
+  const [rows, setRows]   = useState(null);
+  const [edit, setEdit]   = useState(null);   // extraction en cours de validation
+  const [form, setForm]   = useState({});
+  const [pdfUrl, setPdfUrl] = useState(null);
+  const [busy, setBusy]   = useState(false);
+  const [msg, setMsg]     = useState('');
+
+  const load = () => sb.rpc('get_factures_a_valider').then(({ data }) => setRows(data || []));
+  useEffect(() => { load(); }, []);
+
+  const ouvrir = async (r) => {
+    setEdit(r); setMsg(''); setPdfUrl(null);
+    setForm({
+      nom: r.offre_nom || '', fournisseur: r.fournisseur || '',
+      abo_annuel: r.abo_mensuel != null ? Math.round(r.abo_mensuel * 12 * 100) / 100 : '',
+      prix_hp: r.prix_hp ?? r.prix_base ?? '', prix_hc: r.prix_hc ?? '',
+      type_tarif: r.type_tarif || 'fixe', puissance_kva: r.puissance_kva ?? '',
+    });
+    // Lien signé (1 h) — le bucket est privé, jamais d'URL publique.
+    const { data } = await sb.storage.from('factures').createSignedUrl(r.storage_key, 3600);
+    if (data?.signedUrl) setPdfUrl(data.signedUrl);
+  };
+
+  const envoyer = async (action) => {
+    setBusy(true); setMsg('');
+    const corrections = action === 'valider' ? {
+      nom: form.nom.trim() || null, fournisseur: form.fournisseur.trim() || null,
+      abo_annuel: form.abo_annuel !== '' ? Number(form.abo_annuel) : null,
+      prix_hp: form.prix_hp !== '' ? Number(form.prix_hp) : null,
+      prix_hc: form.prix_hc !== '' ? Number(form.prix_hc) : null,
+      type_tarif: form.type_tarif,
+      puissance_kva: form.puissance_kva !== '' ? Number(form.puissance_kva) : null,
+    } : {};
+    const { data, error } = await sb.functions.invoke('tarif-valider', {
+      body: { extraction_id: edit.extraction_id, action, corrections },
+    });
+    setBusy(false);
+    if (error || data?.error) { setMsg('Échec : ' + (data?.error || error.message)); return; }
+    setMsg(action === 'valider'
+      ? `Validé. ${data.fusionnees} doublon(s) fusionné(s), ${data.emails_envoyes} email(s) envoyé(s).`
+      : 'Brouillon rejeté.');
+    setEdit(null); load();
+  };
+
+  const th = { textAlign:'left', padding:'8px 10px', color:'rgba(255,255,255,.4)', fontWeight:600,
+    borderBottom:'1px solid rgba(255,255,255,.08)', whiteSpace:'nowrap', fontSize:12 };
+  const td = { padding:'10px', borderBottom:'1px solid rgba(255,255,255,.06)', whiteSpace:'nowrap' };
+  const champ = (l, k, type='text') => (
+    <div className="inp-group" style={{marginBottom:8}}>
+      <label className="inp-label" style={{fontSize:11}}>{l}</label>
+      <input className="inp" type={type} step="0.0001" value={form[k]}
+        onChange={e => setForm(f => ({ ...f, [k]: e.target.value }))}/>
+    </div>
+  );
+
+  return (
+    <>
+    <div className="screen fade-in" style={{padding:'0 0 80px', maxWidth:'100%', width:'100%'}}>
+      <div className="auth-header">
+        <div className="welcome-tag" style={{color:'#ffb340'}}>Administration</div>
+        <h1 className="welcome-title">Factures<br/><span className="accent">à valider {rows ? `(${rows.length})` : ''}</span></h1>
+      </div>
+
+      {msg && <div style={{margin:'0 16px 12px', padding:'10px 14px', borderRadius:10, fontSize:12.5,
+        background:'rgba(125,217,64,.1)', border:'1px solid rgba(125,217,64,.3)', color:'#7dd940'}}>{msg}</div>}
+
+      {!rows ? <div style={{textAlign:'center',padding:40}}><StarSpinner size={34}/></div>
+       : rows.length === 0 ? (
+        <div style={{textAlign:'center',padding:'40px 20px',color:'rgba(255,255,255,.4)',fontSize:14,lineHeight:1.6}}>
+          Aucune facture en attente.<br/>
+          <span style={{fontSize:12}}>La corroboration (2 factures concordantes) en absorbe une partie automatiquement.</span>
+        </div>
+      ) : edit ? (
+        <div style={{padding:'0 16px'}}>
+          <button onClick={() => setEdit(null)} style={{background:'none',border:'none',color:'rgba(255,255,255,.5)',
+            fontSize:13,cursor:'pointer',padding:0,marginBottom:12,fontFamily:'inherit'}}>← Retour à la file</button>
+
+          <div className="card" style={{padding:14, marginBottom:12}}>
+            <div style={{fontSize:12, color:'rgba(255,255,255,.5)', lineHeight:1.6}}>
+              Déposée par <strong style={{color:'white'}}>{edit.prenom} {edit.nom}</strong> ({edit.email})<br/>
+              Confiance sur les prix : <strong style={{color: (edit.confiance?.prix ?? 0) >= 0.7 ? '#7dd940' : '#f0a050'}}>
+                {Math.round((edit.confiance?.prix ?? 0) * 100)} %</strong>
+              {(edit.confiance?.alertes || []).length > 0 &&
+                <> · <span style={{color:'#f0a050'}}>{edit.confiance.alertes.join(', ')}</span></>}
+              <br/>PDF purgé le {new Date(edit.retention_until).toLocaleDateString('fr-FR')}
+            </div>
+            {pdfUrl && <a href={pdfUrl} target="_blank" rel="noopener noreferrer"
+              style={{display:'inline-block',marginTop:10,fontSize:12.5,color:'#7dd940',fontWeight:700}}>
+              📄 Ouvrir la facture</a>}
+          </div>
+
+          {champ('Nom de l\'offre', 'nom')}
+          {champ('Fournisseur', 'fournisseur')}
+          <div className="inp-group" style={{marginBottom:8}}>
+            <label className="inp-label" style={{fontSize:11}}>Type de tarif</label>
+            <select className="inp inp-sel" value={form.type_tarif}
+              onChange={e => setForm(f => ({ ...f, type_tarif: e.target.value }))}>
+              {['base','hp_hc','tempo','dynamique','fixe'].map(v => <option key={v} value={v}>{v}</option>)}
+            </select>
+          </div>
+          {champ('Abonnement annuel (€)', 'abo_annuel', 'number')}
+          {champ('Prix HP ou base (€/kWh)', 'prix_hp', 'number')}
+          {champ('Prix HC (€/kWh)', 'prix_hc', 'number')}
+          {champ('Puissance (kVA)', 'puissance_kva', 'number')}
+
+          <div style={{display:'flex', gap:8, marginTop:14}}>
+            <button onClick={() => envoyer('valider')} disabled={busy}
+              style={{flex:1,padding:'12px',borderRadius:12,border:'none',background:'#7dd940',color:'#06222b',
+                fontFamily:'inherit',fontSize:14,fontWeight:800,cursor:busy?'default':'pointer',opacity:busy?.5:1}}>
+              {busy ? '…' : '✓ Valider — le client est prévenu'}
+            </button>
+            <button onClick={() => envoyer('rejeter')} disabled={busy}
+              style={{padding:'12px 16px',borderRadius:12,background:'rgba(255,255,255,.06)',
+                border:'1px solid rgba(255,255,255,.15)',color:'rgba(255,255,255,.6)',
+                fontFamily:'inherit',fontSize:13,cursor:busy?'default':'pointer'}}>
+              Rejeter
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div style={{padding:'0 16px'}}><div className="adm-freeze">
+          <table style={{width:'100%',borderCollapse:'collapse',fontSize:13}}>
+            <thead><tr>
+              {['Utilisateur','Offre lue','Fournisseur','Confiance','Concordantes','Reçue le',''].map(c =>
+                <th key={c} style={th} className={c === 'Utilisateur' ? 'frz-col' : undefined}>{c}</th>)}
+            </tr></thead>
+            <tbody>
+              {rows.map(r => (
+                <tr key={r.extraction_id}>
+                  <td style={td} className="frz-col">{r.prenom} {r.nom}</td>
+                  <td style={td}>{r.offre_nom || <span style={{color:'rgba(255,255,255,.3)'}}>illisible</span>}</td>
+                  <td style={td}>{r.fournisseur || '—'}</td>
+                  <td style={{...td, color: (r.confiance?.prix ?? 0) >= 0.7 ? '#7dd940' : '#f0a050'}}>
+                    {Math.round((r.confiance?.prix ?? 0) * 100)} %
+                  </td>
+                  <td style={td}>{r.nb_concordantes}</td>
+                  <td style={td}>{new Date(r.created_at).toLocaleDateString('fr-FR')}</td>
+                  <td style={td}>
+                    <button onClick={() => ouvrir(r)} style={{background:'rgba(125,217,64,.12)',
+                      border:'1px solid rgba(125,217,64,.3)',color:'#7dd940',borderRadius:8,
+                      padding:'5px 10px',fontSize:12,fontWeight:700,cursor:'pointer',fontFamily:'inherit'}}>
+                      Examiner
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div></div>
+      )}
     </div>
     <StickyFooter onBack={onBack}/>
     </>
@@ -15773,7 +16161,8 @@ const SCREEN_LABELS = {
   BOX_SIM:'Simulation box', DIY_BOX_SIM:'Installer soi-même Comwatt',
   SOLAR_SIM:'Simulation solaire', SOLAR:'Solaire', COMWATT:'Box Comwatt',
   PANIER:'Panier', PROFILE:'Mon profil', ADDRESS:'Adresse', FINAL:'Récapitulatif final',
-  ADMIN:'Admin', ADMIN_FEEDBACK:'Admin — retours', ADMIN_ROLES_MGMT:'Admin — gestion des rôles',
+  ADMIN:'Admin', ADMIN_FEEDBACK:'Admin — retours', ADMIN_FACTURES:'Admin — factures à valider',
+  ADMIN_ROLES_MGMT:'Admin — gestion des rôles',
   ADMIN_CYBER_SECURITY:'Admin — cyber-sécurité',
 };
 const screenLabel = (s) => SCREEN_LABELS[s] || s || 'Inconnue';
@@ -17747,6 +18136,7 @@ function App() {
           onOffres={()=>goTo('ADMIN_OFFRES')}
           onLearn={()=>goTo('ADMIN_LEARN')}
           onFeedback={()=>goTo('ADMIN_FEEDBACK')}
+          onFactures={()=>goTo('ADMIN_FACTURES')}
           onProofread={()=>goTo('ADMIN_PROOFREAD')}
           onAICosts={()=>goTo('ADMIN_AI_COSTS')}
           onAIPrompts={()=>goTo('ADMIN_AI_PROMPTS')}
@@ -17761,6 +18151,9 @@ function App() {
 
       case 'ADMIN_FEEDBACK':
         return <AdminFeedbackScreen onBack={goBack}/>;
+
+      case 'ADMIN_FACTURES':
+        return <AdminFacturesScreen onBack={goBack}/>;
 
       case 'ADMIN_PROOFREAD':
         return <AdminProofreadScreen onBack={goBack}/>;
