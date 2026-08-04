@@ -12468,7 +12468,18 @@ function AdminFacturesScreen({ onBack }) {
       body: { extraction_id: edit.extraction_id, action, corrections },
     });
     setBusy(false);
-    if (error || data?.error) { setMsg('Échec : ' + (data?.error || error.message)); return; }
+    if (error || data?.error) {
+      // Sur un non-2xx, supabase-js ne renvoie qu'un message générique : le vrai
+      // motif est dans le corps de la réponse (error.context). Sans ça, l'admin
+      // lit « non-2xx status code » et n'a aucune idée de quoi corriger.
+      let motif = data?.error || error?.message || 'erreur inconnue';
+      try {
+        const corps = await error?.context?.json();
+        if (corps?.message || corps?.error) motif = corps.message || corps.error;
+      } catch {}
+      setMsg('Échec : ' + motif);
+      return;
+    }
     setMsg(action === 'valider'
       ? `Validé. ${data.fusionnees} doublon(s) fusionné(s), ${data.emails_envoyes} email(s) envoyé(s).`
       : 'Brouillon rejeté.');

@@ -117,17 +117,34 @@ Deno.serve(async (req) => {
     return json({ ok: true, action: "rejete" });
   }
 
-  if (!ext.tarif_id) return json({ error: "sans_brouillon", message: "Aucune grille n'a pu être lue sur cette facture." }, 422);
-
-  // ── Validation : corrections éventuelles de l'admin, puis promotion ──
+  // ── Validation : corrections de l'admin, puis promotion ──
   const maj: Record<string, any> = {
     statut: "verifie", verifie_le: new Date().toISOString(), verifie_par: adminEmail,
   };
   for (const champ of ["nom", "fournisseur", "abo_annuel", "prix_hp", "prix_hc", "type_tarif", "puissance_kva"]) {
     if (corrections[champ] !== undefined) maj[champ] = corrections[champ];
   }
-  const { error: upErr } = await db.from("tarifs_electricite").update(maj).eq("id", ext.tarif_id);
-  if (upErr) return json({ error: "update_failed", detail: upErr.message }, 500);
+
+  // Facture lue avec une confiance trop faible : aucun brouillon n'a été créé
+  // (on refuse de calculer sur des prix incertains). C'est précisément le cas
+  // qui remonte à l'admin — la validation CRÉE alors le tarif à partir des
+  // valeurs qu'il vient de relire sur le PDF et de corriger.
+  let tarifId: string | null = ext.tarif_id;
+  if (!tarifId) {
+    if (!maj.nom) return json({ error: "nom_requis", message: "Le nom de l'offre est obligatoire." }, 400);
+    if (maj.prix_hp == null && maj.prix_hc == null) {
+      return json({ error: "prix_requis", message: "Renseignez au moins un prix du kWh." }, 400);
+    }
+    const { data: cree, error: insErr } = await db.from("tarifs_electricite")
+      .insert({ ...maj, source: "ocr" }).select("id").single();
+    if (insErr || !cree) return json({ error: "insert_failed", detail: insErr?.message }, 500);
+    tarifId = cree.id;
+    // Le site du déposant part de zéro : on le rattache au tarif désormais réel.
+    if (ext.site_id) await db.from("sites").update({ tarif_id: tarifId }).eq("id", ext.site_id);
+  } else {
+    const { error: upErr } = await db.from("tarifs_electricite").update(maj).eq("id", tarifId);
+    if (upErr) return json({ error: "update_failed", detail: upErr.message }, 500);
+  }
 
   // ── Fusion des autres brouillons de la MÊME offre : leurs sites basculent
   //    sur le tarif désormais vérifié, leurs brouillons sont supprimés.
@@ -135,21 +152,21 @@ Deno.serve(async (req) => {
     .select("id,tarif_id").eq("cle_offre", ext.cle_offre)
     .eq("statut", "brouillon").neq("id", extraction_id);
   for (const j of jumelles || []) {
-    if (j.tarif_id && j.tarif_id !== ext.tarif_id) {
-      await db.from("sites").update({ tarif_id: ext.tarif_id }).eq("tarif_id", j.tarif_id);
+    if (j.tarif_id && j.tarif_id !== tarifId) {
+      await db.from("sites").update({ tarif_id: tarifId }).eq("tarif_id", j.tarif_id);
       await db.from("tarifs_electricite").delete().eq("id", j.tarif_id).eq("statut", "brouillon");
     }
   }
   const aResoudre = [extraction_id, ...(jumelles || []).map((j: Record<string, any>) => j.id)];
   await db.from("factures_extractions").update({
-    statut: "promu", resolu_le: new Date().toISOString(), resolu_par: adminEmail, tarif_id: ext.tarif_id,
+    statut: "promu", resolu_le: new Date().toISOString(), resolu_par: adminEmail, tarif_id: tarifId,
   }).in("id", aResoudre);
 
   // ── Notification des clients concernés ──
   // Destinataires = les sites qui pointent sur ce tarif (ils avaient des
   // montants provisoires). Un client n'est notifié qu'une fois par tarif.
-  const { data: sites } = await db.from("sites").select("id,user_id").eq("tarif_id", ext.tarif_id);
-  const { data: tarif } = await db.from("tarifs_electricite").select("nom").eq("id", ext.tarif_id).maybeSingle();
+  const { data: sites } = await db.from("sites").select("id,user_id").eq("tarif_id", tarifId);
+  const { data: tarif } = await db.from("tarifs_electricite").select("nom").eq("id", tarifId).maybeSingle();
   const vus = new Set<string>();
   let envoyes = 0, echecs = 0;
 
@@ -158,7 +175,7 @@ Deno.serve(async (req) => {
     vus.add(s.user_id);
 
     const { data: deja } = await db.from("recalcul_notifs")
-      .select("id").eq("user_id", s.user_id).eq("tarif_id", ext.tarif_id).maybeSingle();
+      .select("id").eq("user_id", s.user_id).eq("tarif_id", tarifId).maybeSingle();
     if (deja) continue;
 
     const { data: u } = await db.auth.admin.getUserById(s.user_id);
@@ -168,7 +185,7 @@ Deno.serve(async (req) => {
 
     const notifToken = crypto.randomUUID();
     await db.from("recalcul_notifs").insert({
-      user_id: s.user_id, site_id: s.id, tarif_id: ext.tarif_id, token: notifToken,
+      user_id: s.user_id, site_id: s.id, tarif_id: tarifId, token: notifToken,
     });
 
     if (!RESEND_API_KEY) { echecs++; continue; }
@@ -190,7 +207,7 @@ Deno.serve(async (req) => {
   }
 
   return json({
-    ok: true, action: "valide", tarif_id: ext.tarif_id,
+    ok: true, action: "valide", tarif_id: tarifId,
     fusionnees: (jumelles || []).length, emails_envoyes: envoyes, emails_echoues: echecs,
   });
 });
