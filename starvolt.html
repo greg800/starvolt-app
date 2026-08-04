@@ -6006,6 +6006,7 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
       initial={(site.flex_chauffage||site.flex_type_logement)?{
         chauffage:site.flex_chauffage,ecs:site.flex_ecs,surface:site.flex_surface,
         type_logement:site.flex_type_logement,statut:site.flex_statut,
+        bricolage: site.flex_bricolage ?? undefined,
         has_solar: site.flex_has_solar==null?undefined:(site.flex_has_solar?'oui':'non'),
         pv_kwc: site.flex_has_solar ? (site.flex_pv_comment?'__unknown__':(site.puissance_pv_kwc>0?String(site.puissance_pv_kwc):undefined)) : undefined,
         pv_comment: site.flex_pv_comment||undefined,
@@ -7082,6 +7083,37 @@ const AUTO_TYPE_SCREEN = {
 };
 const offrePrimaryType = (o) => (o?.types_offre || []).find(t => AUTO_TYPE_SCREEN[t]) || null;
 
+// ─── Niveau de bricolage (1–5) ───────────────────────────────────────────────
+// Échelle déclarée par l'utilisateur au questionnaire logement (sites.flex_bricolage).
+// Sert UNIQUEMENT à filtrer les offres : une offre n'est proposée que si
+// bricolage >= offres.niveau_min. Le geste le plus poussé que l'utilisateur se
+// sent de faire donne son niveau ; les gestes réglementés restent confiés à un pro.
+const BRICOLAGE_LEVELS = [
+  { n: 1, label: 'Peindre un mur',                                              sub: 'Aucun geste électrique' },
+  { n: 2, label: 'Changer une prise de courant',                                sub: 'Petit geste électrique simple' },
+  { n: 3, label: 'Changer un disjoncteur dans une armoire électrique',          sub: 'Intervention en tableau' },
+  { n: 4, label: 'Remplacer une armoire électrique',                            sub: 'Intervention lourde en tableau' },
+  { n: 5, label: 'Monter en toiture pour installer du matériel (panneaux)',      sub: 'Travail en hauteur + raccordement' },
+];
+
+// Ce que le niveau choisi débloque — retour immédiat à la sélection.
+function bricolageUnlock(n) {
+  if (n <= 1) return 'On vous proposera des offres clés en main, pose incluse.';
+  if (n === 2) return 'Vous pourrez installer vous-même du matériel simple (box, batterie enfichable) et économiser la pose.';
+  return "Certaines offres d'auto-installation vous seront ouvertes. Les gestes réglementés resteront toujours confiés à un pro.";
+}
+
+// Filtre unique de la spec §10 : bricolage >= niveau_min.
+// Niveau inconnu (utilisateur n'ayant pas encore répondu) ⇒ traité comme 1, le
+// plus prudent : on ne propose jamais d'auto-installation à quelqu'un qui ne
+// s'est pas déclaré capable de la faire. Sans effet tant que l'admin n'a pas
+// relevé le niveau_min d'une offre (défaut = 1, visible par tous).
+function bricolageOk(o, bricolage) {
+  const min = o?.niveau_min ?? 1;
+  if (min <= 1) return true;
+  return (bricolage ?? 1) >= min;
+}
+
 // Drapeaux panier — MÊMES CLÉS que PanierScreen et SimulationsScreen.
 function readCartFlags() {
   const g = (k) => { try { return localStorage.getItem(k); } catch { return null; } };
@@ -7113,6 +7145,9 @@ function autoOffreEligible(o, ctx) {
   // 20 km de l'adresse du site. accNearby === null ⇒ pas encore calculé, on ne
   // masque pas (évite de sauter l'étape à tort pendant le géocodage).
   if (t === 'acc' && accNearby === false) return false;
+  // Niveau de bricolage requis (spec §10) : jamais d'auto-installation proposée
+  // à quelqu'un qui ne s'est pas déclaré capable du geste.
+  if (!bricolageOk(o, siteProfile?.bricolage)) return false;
   const prealables = o.prealables_techniques || [];
   if (prealables.length > 0 && siteProfile) {
     const meets = {
@@ -7336,13 +7371,14 @@ function SimulationsScreen({ onACC, onBox, onSolar, onOptimisation, onDiyBox, on
     });
     if (user?.id) {
       const activeId = localStorage.getItem('starvolt_active_site_id');
-      const cols = 'flex_type_logement,flex_statut,box_comwatt_existante,flex_chauffage,flex_ecs,pv_existant_kwc,batterie_existante_kwh';
+      const cols = 'flex_type_logement,flex_statut,flex_bricolage,box_comwatt_existante,flex_chauffage,flex_ecs,pv_existant_kwc,batterie_existante_kwh';
       const q = activeId
         ? sb.from('sites').select(cols).eq('id', activeId).maybeSingle()
         : sb.from('sites').select(cols).eq('user_id', user.id).order('created_at').limit(1).maybeSingle();
       q.then(({ data }) => { if (data) setSiteProfile({
         type_logement: data.flex_type_logement,
         statut: data.flex_statut,
+        bricolage: data.flex_bricolage,
         hasBox: !!data.box_comwatt_existante,
         hasChauffElec: siteChauffageElec(data.flex_chauffage) || data.flex_ecs === 'elec',
         hasSolaire: (parseFloat(data.pv_existant_kwc) || 0) > 0,
@@ -7407,6 +7443,8 @@ function SimulationsScreen({ onACC, onBox, onSolar, onOptimisation, onDiyBox, on
     if (primaryType && typeInCart[primaryType]) return false;
     // Box déjà couverte (solaire, box installée ou DIY) → masquer les autres offres box
     if (boxImpliedInCart && (primaryType === 'box' || primaryType === 'diy_box')) return false;
+    // Niveau de bricolage requis (spec §10) — même règle que le parcours automatique.
+    if (!bricolageOk(o, siteProfile?.bricolage)) return false;
     // Préalables techniques (paramétrés par offre) : le site doit remplir TOUTES
     // les conditions cochées. Tant que le profil du site n'est pas chargé
     // (siteProfile null) on ne masque pas (évite un flash / masquage à tort au chargement).
@@ -9349,6 +9387,10 @@ const ONBOARDING_QUESTIONS = [
     { value:'locataire',    emoji:'🔑', label:'Locataire' },
     { value:'proprietaire', emoji:'📜', label:'Propriétaire' },
   ]},
+  // Niveau de bricolage : seule entrée du filtre offres/niveau_min (spec §10).
+  { key:'bricolage', type:'scale',
+    title:'Êtes-vous bricoleur ou bricoleuse ?',
+    subtitle:"Pour vous proposer — ou non — les offres où vous installez vous-même et payez moins. Choisissez le geste le plus poussé que vous vous sentez de faire." },
 ];
 
 // Questions supplémentaires — UNIQUEMENT propriétaire en maison individuelle (prop extended).
@@ -9392,7 +9434,7 @@ function OnboardingTypeform({ siteId, onDone, onBack, initial=null, extended=fal
   const [answers, setAnswers] = useState(() => {
     if (!initial) return {};
     const a = {};
-    ['chauffage','ecs','surface','type_logement','statut',
+    ['chauffage','ecs','surface','type_logement','statut','bricolage',
      'has_solar','pv_kwc','pv_comment','has_battery','battery_kwh','has_comwatt','other_equip']
       .forEach(k => { if (initial[k] != null && initial[k] !== '') a[k] = initial[k]; });
     return a;
@@ -9400,6 +9442,7 @@ function OnboardingTypeform({ siteId, onDone, onBack, initial=null, extended=fal
   const [busy,    setBusy]    = useState(false); // bloque les clics pendant l'auto-avance
   const [inputVal, setInputVal] = useState('');
   const advanceRef = useRef(null);
+  const scaleRefs  = useRef([]); // boutons de l'échelle 1–5 (navigation clavier)
   useEffect(() => () => clearTimeout(advanceRef.current), []);
 
   const activeOf = (ans) => allQuestions.filter(qq => !qq.when || qq.when(ans));
@@ -9414,7 +9457,7 @@ function OnboardingTypeform({ siteId, onDone, onBack, initial=null, extended=fal
   }, [step, q?.key]);
 
   const finish = async (allAnswers) => {
-    const { chauffage=null, ecs=null, surface=null, type_logement=null, statut=null,
+    const { chauffage=null, ecs=null, surface=null, type_logement=null, statut=null, bricolage=null,
             has_solar=null, pv_kwc=null, pv_comment=null, has_battery=null, battery_kwh=null, has_comwatt=null, other_equip=null } = allAnswers;
     const idx = surface === 'small' ? 0 : surface === 'medium' ? 1 : 2;
     let kw = 0;
@@ -9448,6 +9491,7 @@ function OnboardingTypeform({ siteId, onDone, onBack, initial=null, extended=fal
     if (siteId) {
       try {
         const upd = { flex_chauffage:chauffage, flex_ecs:ecs, flex_surface:surface, flex_type_logement:type_logement, flex_statut:statut };
+        if (bricolage != null) upd.flex_bricolage = Number(bricolage);
         if (has_solar != null)   upd.flex_has_solar = hasSolar;
         if (has_battery != null) upd.flex_has_battery = hasBattery;
         if (extended) {
@@ -9463,7 +9507,7 @@ function OnboardingTypeform({ siteId, onDone, onBack, initial=null, extended=fal
         if (has_comwatt != null)      upd.box_comwatt_existante = has_comwatt === 'oui';
         else if (has_solar === 'non') upd.box_comwatt_existante = false;
         await sb.from('sites').update(upd).eq('id', siteId);
-        localStorage.setItem('starvolt_flex_'+siteId, JSON.stringify({ chauffage, ecs, surface, type_logement, statut }));
+        localStorage.setItem('starvolt_flex_'+siteId, JSON.stringify({ chauffage, ecs, surface, type_logement, statut, bricolage }));
       } catch {}
     }
     onDone?.(kw);
@@ -9482,7 +9526,9 @@ function OnboardingTypeform({ siteId, onDone, onBack, initial=null, extended=fal
     setBusy(true);
     const next = { ...answers, [q.key]: value };
     setAnswers(next);
-    advanceRef.current = setTimeout(() => advanceWith(next), 320);
+    // L'échelle affiche un message « ce que ça débloque » à la sélection : on laisse
+    // le temps de le lire avant l'auto-avance.
+    advanceRef.current = setTimeout(() => advanceWith(next), q.type === 'scale' ? 900 : 320);
   };
 
   // Validation d'une réponse saisie (number/text) — pas d'auto-avance, déclenchée par bouton.
@@ -9590,6 +9636,64 @@ function OnboardingTypeform({ siteId, onDone, onBack, initial=null, extended=fal
                   Je ne sais pas
                 </button>
               )}
+            </div>
+          ) : q.type === 'scale' ? (
+            // Échelle 1–5 : liste verticale, sémantique radiogroup, clavier ↑↓←→/Home/End.
+            <div>
+              <div role="radiogroup" aria-label={q.title} style={{ display:'flex', flexDirection:'column', gap:9 }}
+                onKeyDown={e => {
+                  const cur = (answers[q.key] || 1) - 1;
+                  let next = null;
+                  if (e.key === 'ArrowDown' || e.key === 'ArrowRight') next = Math.min(cur + 1, BRICOLAGE_LEVELS.length - 1);
+                  else if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') next = Math.max(cur - 1, 0);
+                  else if (e.key === 'Home') next = 0;
+                  else if (e.key === 'End') next = BRICOLAGE_LEVELS.length - 1;
+                  else return;
+                  e.preventDefault();
+                  setAnswers(a => ({ ...a, [q.key]: next + 1 }));
+                  scaleRefs.current[next]?.focus();
+                }}>
+                {BRICOLAGE_LEVELS.map((l, i) => {
+                  const sel = answers[q.key] === l.n;
+                  return (
+                    <button key={l.n} type="button" role="radio" aria-checked={sel}
+                      ref={el => (scaleRefs.current[i] = el)}
+                      tabIndex={sel || (!answers[q.key] && i === 0) ? 0 : -1}
+                      onClick={() => pick(l.n)}
+                      style={{
+                        display:'flex', alignItems:'center', gap:13, width:'100%', boxSizing:'border-box',
+                        padding:'13px 14px', borderRadius:14, textAlign:'left', cursor:'pointer',
+                        border:`2px solid ${sel ? '#7dd940' : 'rgba(255,255,255,.13)'}`,
+                        background: sel ? 'rgba(125,217,64,.13)' : 'rgba(255,255,255,.04)',
+                        color:'white', fontFamily:'inherit',
+                        transition:'border-color .15s, background .15s',
+                      }}>
+                      <span style={{
+                        flex:'none', width:32, height:32, borderRadius:9, display:'flex',
+                        alignItems:'center', justifyContent:'center', fontSize:15, fontWeight:900,
+                        background: sel ? '#7dd940' : 'rgba(255,255,255,.07)',
+                        color: sel ? '#06222b' : 'rgba(255,255,255,.5)',
+                      }}>{l.n}</span>
+                      <span style={{ flex:1, minWidth:0 }}>
+                        <span style={{ display:'block', fontSize:14, fontWeight:700, lineHeight:1.3, color: sel ? '#7dd940' : 'rgba(255,255,255,.88)' }}>{l.label}</span>
+                        <span style={{ display:'block', fontSize:11.5, marginTop:2, color:'rgba(255,255,255,.45)' }}>{l.sub}</span>
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+              {answers[q.key] && (
+                <div role="status" style={{
+                  marginTop:14, padding:'12px 14px', borderRadius:12, display:'flex', gap:8,
+                  alignItems:'flex-start', background:'rgba(125,217,64,.12)', color:'#7dd940',
+                  fontSize:12.5, fontWeight:600, lineHeight:1.45,
+                }}>
+                  <span aria-hidden="true">→</span><span>{bricolageUnlock(answers[q.key])}</span>
+                </div>
+              )}
+              <p style={{ fontSize:11, color:'rgba(255,255,255,.35)', marginTop:16, lineHeight:1.5, textAlign:'center' }}>
+                Le niveau sert à filtrer les offres et adapter les conseils. La sécurité est gérée en aval : aucun geste réglementé n'est proposé sans passage par un pro.
+              </p>
             </div>
           ) : (
             <div style={{ display:'grid', gridTemplateColumns:`repeat(${q.cols}, 1fr)`, gap:10 }}>
@@ -13675,6 +13779,7 @@ function AdminOffresScreen({ onEdit, onNew, onFiltres, onBack }) {
                   {o.delai_min_jours != null && <span>⏱ {o.delai_min_jours}j min</span>}
                   {o.investissement_min != null && <span>💰 {o.investissement_min.toLocaleString('fr-FR')} € min</span>}
                   {o.reduction_pct != null && <span>📉 -{o.reduction_pct}%</span>}
+                  {(o.niveau_min ?? 1) > 1 && <span>🔧 bricolage {o.niveau_min}+</span>}
                 </div>
                 <div className="tariff-row-meta" style={{marginTop:4}}>🏷 {typeLabel(o.types_offre)}</div>
               </div>
@@ -13802,6 +13907,7 @@ function AdminOffreEditScreen({ offre, onSave, onDelete, onBack }) {
     reversibilite:       offre?.reversibilite       || 'totalement_reversible',
     public_cibles:       offre?.public_cibles       || [],
     prealables_techniques: offre?.prealables_techniques || [],
+    niveau_min:          offre?.niveau_min          ?? 1,
   });
 
   const PICTOS_PRESET = [
@@ -13922,6 +14028,7 @@ function AdminOffreEditScreen({ offre, onSave, onDelete, onBack }) {
       reversibilite:      form.reversibilite,
       public_cibles:      form.public_cibles,
       prealables_techniques: form.prealables_techniques,
+      niveau_min:         Number(form.niveau_min) || 1,
       updated_at:         new Date().toISOString(),
     };
     let error;
@@ -14124,6 +14231,34 @@ function AdminOffreEditScreen({ offre, onSave, onDelete, onBack }) {
               </div>
               <span style={{fontSize:20,lineHeight:1}}>{t.icon}</span>
               <span style={{fontSize:13,color: form.prealables_techniques.includes(t.value) ? 'white' : 'rgba(255,255,255,.65)'}}>{t.label}</span>
+            </div>
+          ))}
+        </div>
+
+        <div className="inp-group">
+          <label className="inp-label" style={{marginBottom:4}}>Niveau de bricolage minimum</label>
+          <div style={{fontSize:11,color:'rgba(255,255,255,.4)',marginBottom:10}}>
+            L'offre n'est proposée qu'aux utilisateurs ayant déclaré ce niveau ou plus (question « Êtes-vous bricoleur ? »).
+            Niveau 1 = offre clé en main, visible par tous. À partir du niveau 3, l'utilisateur intervient en tableau électrique —
+            les gestes réglementés doivent rester confiés à un pro.
+          </div>
+          {BRICOLAGE_LEVELS.map(l => (
+            <div key={l.n} onClick={() => set('niveau_min', l.n)} style={{
+              display:'flex',alignItems:'center',gap:12,padding:'11px 14px',marginBottom:6,
+              borderRadius:10,cursor:'pointer',border:'1px solid',
+              borderColor: form.niveau_min === l.n ? 'var(--green)' : 'rgba(255,255,255,.12)',
+              background: form.niveau_min === l.n ? 'rgba(125,217,64,.1)' : 'rgba(255,255,255,.04)',
+            }}>
+              <div style={{
+                width:24,height:24,borderRadius:6,flexShrink:0,display:'flex',
+                alignItems:'center',justifyContent:'center',fontSize:12,fontWeight:900,
+                background: form.niveau_min === l.n ? 'var(--green)' : 'rgba(255,255,255,.07)',
+                color: form.niveau_min === l.n ? '#0a1a04' : 'rgba(255,255,255,.5)',
+              }}>{l.n}</div>
+              <div style={{minWidth:0}}>
+                <div style={{fontSize:13,color: form.niveau_min === l.n ? 'white' : 'rgba(255,255,255,.65)'}}>{l.label}</div>
+                <div style={{fontSize:10.5,color:'rgba(255,255,255,.35)',marginTop:2}}>{l.sub}</div>
+              </div>
             </div>
           ))}
         </div>
@@ -16115,7 +16250,7 @@ function ParcoursLevierScreen({ user, profile, can = () => true, onValider, onMa
       const [{ data: allOffres }, siteRow, accNearby, sav] = await Promise.all([
         sb.from('offres').select('*').order('created_at'),
         siteId
-          ? sb.from('sites').select('flex_type_logement,flex_statut,box_comwatt_existante,flex_chauffage,flex_ecs,pv_existant_kwc,batterie_existante_kwh').eq('id', siteId).maybeSingle()
+          ? sb.from('sites').select('flex_type_logement,flex_statut,flex_bricolage,box_comwatt_existante,flex_chauffage,flex_ecs,pv_existant_kwc,batterie_existante_kwh').eq('id', siteId).maybeSingle()
           : Promise.resolve({ data: null }),
         autoAccNearby(siteId),
         computeSavingsByType(user),
@@ -16125,6 +16260,7 @@ function ParcoursLevierScreen({ user, profile, can = () => true, onValider, onMa
       const siteProfile = d ? {
         type_logement: d.flex_type_logement,
         statut:        d.flex_statut,
+        bricolage:     d.flex_bricolage,
         hasBox:        !!d.box_comwatt_existante,
         hasChauffElec: siteChauffageElec(d.flex_chauffage) || d.flex_ecs === 'elec',
         hasSolaire:    (parseFloat(d.pv_existant_kwc) || 0) > 0,
