@@ -5287,7 +5287,9 @@ function tarifMatch(tarif, requete) {
   });
 }
 
-function TarifPicker({ user, siteId, tariffs, value, onChange, onTariffsChanged }) {
+// hideLabel : dans le questionnaire d'intégration, le titre de la question tient
+// déjà lieu de libellé — le répéter ferait doublon.
+function TarifPicker({ user, siteId, tariffs, value, onChange, onTariffsChanged, hideLabel = false }) {
   const tarifActuel = (tariffs || []).find(t => t.id === value) || null;
   const [q, setQ]           = useState('');
   const [ouvert, setOuvert] = useState(false);
@@ -5345,7 +5347,7 @@ function TarifPicker({ user, siteId, tariffs, value, onChange, onTariffsChanged 
     const brouillon = res.statut === 'brouillon';
     return (
       <div>
-        <label style={lbl}>TARIF D'ÉLECTRICITÉ</label>
+        {!hideLabel && <label style={lbl}>TARIF D'ÉLECTRICITÉ</label>}
         <div style={{
           padding:'12px 14px', borderRadius:12, fontSize:12.5, lineHeight:1.55,
           border:`1px solid ${ok ? 'rgba(125,217,64,.3)' : brouillon ? 'rgba(240,160,80,.3)' : 'rgba(255,255,255,.15)'}`,
@@ -5409,7 +5411,7 @@ function TarifPicker({ user, siteId, tariffs, value, onChange, onTariffsChanged 
   // ── Recherche ──
   return (
     <div>
-      <label style={lbl}>TARIF D'ÉLECTRICITÉ</label>
+      {!hideLabel && <label style={lbl}>TARIF D'ÉLECTRICITÉ</label>}
       <input className="inp" style={{ fontSize:13, padding:'8px 12px', maxWidth:320 }}
         value={ouvert ? q : (tarifActuel?.nom || '')}
         placeholder={tarifActuel ? tarifActuel.nom : 'Cherchez votre offre (ex : EDF bleu, TRV…)'}
@@ -6216,6 +6218,7 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
         chauffage:site.flex_chauffage,ecs:site.flex_ecs,surface:site.flex_surface,
         type_logement:site.flex_type_logement,statut:site.flex_statut,
         bricolage: site.flex_bricolage ?? undefined,
+        tarif_id: site.tarif_id ?? undefined,
         has_solar: site.flex_has_solar==null?undefined:(site.flex_has_solar?'oui':'non'),
         pv_kwc: site.flex_has_solar ? (site.flex_pv_comment?'__unknown__':(site.puissance_pv_kwc>0?String(site.puissance_pv_kwc):undefined)) : undefined,
         pv_comment: site.flex_pv_comment||undefined,
@@ -9606,6 +9609,12 @@ const ONBOARDING_QUESTIONS = [
     { value:'locataire',    emoji:'🔑', label:'Locataire' },
     { value:'proprietaire', emoji:'📜', label:'Propriétaire' },
   ]},
+  // Contrat actuel : c'est LA donnée qui permet de chiffrer une économie (sans
+  // tarif de référence, on ne peut comparer à rien). Jamais bloquante : on peut
+  // passer, quitte à la renseigner plus tard depuis « Mon site ».
+  { key:'tarif_id', type:'tarif', optional:true,
+    title:"Quel est votre fournisseur d'électricité aujourd'hui ?",
+    subtitle:"C'est ce qui nous permet de chiffrer vos économies en euros, et pas seulement en pourcentages. Si vous ne trouvez pas votre offre, déposez votre facture : nous la lisons pour vous." },
   // Niveau de bricolage : seule entrée du filtre offres/niveau_min (spec §10).
   { key:'bricolage', type:'scale',
     title:'Êtes-vous bricoleur ou bricoleuse ?',
@@ -9653,7 +9662,7 @@ function OnboardingTypeform({ siteId, onDone, onBack, initial=null, extended=fal
   const [answers, setAnswers] = useState(() => {
     if (!initial) return {};
     const a = {};
-    ['chauffage','ecs','surface','type_logement','statut','bricolage',
+    ['chauffage','ecs','surface','type_logement','statut','bricolage','tarif_id',
      'has_solar','pv_kwc','pv_comment','has_battery','battery_kwh','has_comwatt','other_equip']
       .forEach(k => { if (initial[k] != null && initial[k] !== '') a[k] = initial[k]; });
     return a;
@@ -9663,6 +9672,16 @@ function OnboardingTypeform({ siteId, onDone, onBack, initial=null, extended=fal
   const advanceRef = useRef(null);
   const scaleRefs  = useRef([]); // boutons de l'échelle 1–5 (navigation clavier)
   useEffect(() => () => clearTimeout(advanceRef.current), []);
+
+  // Question « fournisseur actuel » : le catalogue et l'utilisateur courant sont
+  // chargés une fois pour toutes (le dépôt de facture a besoin de l'id user pour
+  // ranger le fichier dans SON dossier du bucket).
+  const [tariffs, setTariffs] = useState([]);
+  const [me,      setMe]      = useState(null);
+  useEffect(() => {
+    sb.from('tarifs_electricite').select('*').order('nom').then(({ data }) => setTariffs(data || []));
+    sb.auth.getUser().then(({ data }) => setMe(data?.user || null));
+  }, []);
 
   const activeOf = (ans) => allQuestions.filter(qq => !qq.when || qq.when(ans));
   const activeQs = activeOf(answers);
@@ -9676,7 +9695,7 @@ function OnboardingTypeform({ siteId, onDone, onBack, initial=null, extended=fal
   }, [step, q?.key]);
 
   const finish = async (allAnswers) => {
-    const { chauffage=null, ecs=null, surface=null, type_logement=null, statut=null, bricolage=null,
+    const { chauffage=null, ecs=null, surface=null, type_logement=null, statut=null, bricolage=null, tarif_id=null,
             has_solar=null, pv_kwc=null, pv_comment=null, has_battery=null, battery_kwh=null, has_comwatt=null, other_equip=null } = allAnswers;
     const idx = surface === 'small' ? 0 : surface === 'medium' ? 1 : 2;
     let kw = 0;
@@ -9711,6 +9730,9 @@ function OnboardingTypeform({ siteId, onDone, onBack, initial=null, extended=fal
       try {
         const upd = { flex_chauffage:chauffage, flex_ecs:ecs, flex_surface:surface, flex_type_logement:type_logement, flex_statut:statut };
         if (bricolage != null) upd.flex_bricolage = Number(bricolage);
+        // Le dépôt de facture a pu rattacher le site à un tarif de lui-même ;
+        // on n'écrase donc que si l'utilisateur a bien désigné une offre.
+        if (tarif_id) upd.tarif_id = tarif_id;
         if (has_solar != null)   upd.flex_has_solar = hasSolar;
         if (has_battery != null) upd.flex_has_battery = hasBattery;
         if (extended) {
@@ -9855,6 +9877,32 @@ function OnboardingTypeform({ siteId, onDone, onBack, initial=null, extended=fal
                   Je ne sais pas
                 </button>
               )}
+            </div>
+          ) : q.type === 'tarif' ? (
+            // Pas d'auto-avance ici : le dépôt d'une facture déclenche une
+            // lecture qui prend plusieurs secondes, et passer à l'écran suivant
+            // pendant ce temps ferait perdre le résultat à l'utilisateur.
+            <div>
+              {me ? (
+                <TarifPicker
+                  user={me} siteId={siteId} tariffs={tariffs} hideLabel
+                  value={answers[q.key] || null}
+                  onChange={id => setAnswers(a => ({ ...a, [q.key]: id }))}
+                  onTariffsChanged={() => sb.from('tarifs_electricite').select('*').order('nom')
+                    .then(({ data }) => setTariffs(data || []))}/>
+              ) : (
+                <div style={{ fontSize:13, color:'rgba(255,255,255,.4)' }}>Chargement…</div>
+              )}
+              <button
+                onClick={() => advanceWith({ ...answers })}
+                style={{
+                  width:'100%', marginTop:18, padding:'16px', borderRadius:16, border:'none',
+                  background: answers[q.key] ? '#7dd940' : 'rgba(255,255,255,.08)',
+                  color: answers[q.key] ? '#06222b' : 'rgba(255,255,255,.5)',
+                  fontFamily:'inherit', fontSize:16, fontWeight:800, cursor:'pointer',
+                }}>
+                {answers[q.key] ? 'Continuer →' : 'Je ne sais pas — passer'}
+              </button>
             </div>
           ) : q.type === 'scale' ? (
             // Échelle 1–5 : liste verticale, sémantique radiogroup, clavier ↑↓←→/Home/End.
