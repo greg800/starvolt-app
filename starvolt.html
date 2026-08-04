@@ -7167,6 +7167,10 @@ function renderTexteAuto(tpl, vars) {
     .replace(/X\s*€?\s*facture\b/gi, '{facture}')
     .replace(/X\s*€?\s*invest\w*/gi, '{invest}');
   Object.entries(vars).forEach(([k, v]) => { out = out.split('{' + k + '}').join(v); });
+  // Les jetons monétaires portent déjà leur unité. Si l'admin a écrit « {eco} € »
+  // (réflexe naturel), on absorbe le symbole en double plutôt que d'afficher
+  // « 320 € € ». Idem pour un « % » redondant après {pct}.
+  out = out.replace(/€\s*€/g, '€').replace(/%\s*%/g, '%');
   return out;
 }
 
@@ -7200,7 +7204,7 @@ async function computeSavingsByType(user) {
   const empty = { hasConso: false, savings: {}, currentBill: null, bestTariffName: null, solar: null };
   if (!user) return empty;
   const activeId = localStorage.getItem('starvolt_active_site_id');
-  const cols = 'id,conso_profil,tarif_id,profil_production_id,adresse_ligne1,code_postal,ville,heure_debut_hc1,heure_fin_hc1,heure_debut_hc2,heure_fin_hc2,hc_debut1,hc_fin1,hc_debut2,hc_fin2';
+  const cols = 'id,conso_profil,tarif_id,profil_production_id,adresse_ligne1,code_postal,ville,heure_debut_hc1,heure_fin_hc1,heure_debut_hc2,heure_fin_hc2,hc_debut1,hc_fin1,hc_debut2,hc_fin2,flex_chauffage,flex_ecs,flex_surface';
   const [{ data: siteData }, { data: tariffs }, { data: nat }, { data: spotRows }] = await Promise.all([
     activeId
       ? sb.from('sites').select(cols).eq('id', activeId).maybeSingle()
@@ -7215,6 +7219,22 @@ async function computeSavingsByType(user) {
   const out = { hasConso: true, savings: {}, currentBill: null, bestTariffName: null, solar: null };
   const { kwh_hc, kwh_hp } = calcHcHp(site.conso_profil, site, nat);
   const kwh_total = kwh_hc + kwh_hp;
+
+  // ── Leviers de flexibilité pure (box à monter soi-même, flexibilité seule) ──
+  // Leur gain dépend des capteurs/actionneurs que l'utilisateur choisira, donc
+  // il n'est pas connu à ce stade. On retient la PUISSANCE MINIMUM RECOMMANDÉE
+  // pour ce logement (recommendedThermKw) : c'est le dimensionnement que l'écran
+  // DIY demande de couvrir, et le chiffre qu'il affichera à la confirmation si
+  // l'utilisateur suit la recommandation. Aucun tarif n'entre en jeu ici.
+  const theorKw = recommendedThermKw({
+    chauffage: site.flex_chauffage, ecs: site.flex_ecs, surface: site.flex_surface,
+  });
+  if (theorKw > 0) {
+    const flexGain = Math.round(theorKw * FLEX_EUR_PAR_KW);
+    out.savings.diy_box    = flexGain;
+    out.savings.flex_seule = flexGain; // même cagnotte : pilotage des mêmes équipements
+    out.thermKwRecommande  = theorKw;
+  }
 
   if (tariffs?.length && kwh_total > 0) {
     const ranked = tariffs.map(t => ({ t, result: calcTariffCost(t, kwh_hc, kwh_hp) }))
@@ -9653,10 +9673,7 @@ function BoxSimScreen({ user, userProfile, onBack, onPanier, onMonSite, onCartUp
 
   // Helper : calcule thermKwh depuis les données flex déjà connues
   const applyExistingFlex=(flex)=>{
-    const idx=flex.surface==='small'?0:flex.surface==='medium'?1:2;
-    let kw=0;
-    if(flex.chauffage==='elec'||flex.chauffage==='pac') kw+=[3,7,12][idx];
-    if(flex.ecs==='elec') kw+=[2,3,4][idx];
+    const kw=recommendedThermKw(flex);
     try{const d=JSON.parse(localStorage.getItem('starvolt_solar_defaults')||'{}');d.thermKwh=String(kw);localStorage.setItem('starvolt_solar_defaults',JSON.stringify(d));}catch{}
     return kw;
   };
@@ -9971,14 +9988,34 @@ Si une disposition est déclarée nulle ou inapplicable, les autres dispositions
 Les présentes Conditions sont rédigées en langue française.
 En cas de traduction, seule la version française fait foi.`;
 
+// ─── Puissance thermique pilotable recommandée pour un site ──────────────────
+// SOURCE UNIQUE du dimensionnement « minimum recommandé », dérivé de la surface
+// et des équipements déclarés (chauffage / eau chaude). Sert au catalogue DIY
+// (capacité théorique à couvrir), à la box installée, au solaire, et à
+// l'estimation d'économies du parcours automatique.
+// Cagnotte flexibilité : FLEX_EUR_PAR_KW € par kW piloté et par an.
+const FLEX_EUR_PAR_KW = 14;
+const FLEX_KW_CHAUFFAGE = [3, 7, 12]; // small / medium / large
+const FLEX_KW_ECS       = [2, 3, 4];
+const flexSurfIdx = (surface) => surface === 'small' ? 0 : surface === 'medium' ? 1 : 2;
+
+function recommendedThermKw(flex) {
+  if (!flex) return 0;
+  const idx = flexSurfIdx(flex.surface);
+  let kw = 0;
+  if (flex.chauffage === 'elec' || flex.chauffage === 'pac') kw += FLEX_KW_CHAUFFAGE[idx];
+  if (flex.ecs === 'elec') kw += FLEX_KW_ECS[idx];
+  return kw;
+}
+
 // Construit la liste des équipements pilotés + gain individuel depuis les données flex du site.
 function buildFlexOnlyDetails(flex) {
   if (!flex) return [];
-  const idx = flex.surface === 'small' ? 0 : flex.surface === 'medium' ? 1 : 2;
+  const idx = flexSurfIdx(flex.surface);
   const d = [];
-  if (flex.chauffage === 'pac')       { const kw = [3,7,12][idx]; d.push({ name:'Pompe à chaleur',      kw, gain: kw*14 }); }
-  else if (flex.chauffage === 'elec') { const kw = [3,7,12][idx]; d.push({ name:'Chauffage électrique', kw, gain: kw*14 }); }
-  if (flex.ecs === 'elec')            { const kw = [2,3,4][idx];  d.push({ name:'Chauffe-eau',           kw, gain: kw*14 }); }
+  if (flex.chauffage === 'pac')       { const kw = FLEX_KW_CHAUFFAGE[idx]; d.push({ name:'Pompe à chaleur',      kw, gain: kw*FLEX_EUR_PAR_KW }); }
+  else if (flex.chauffage === 'elec') { const kw = FLEX_KW_CHAUFFAGE[idx]; d.push({ name:'Chauffage électrique', kw, gain: kw*FLEX_EUR_PAR_KW }); }
+  if (flex.ecs === 'elec')            { const kw = FLEX_KW_ECS[idx];       d.push({ name:'Chauffe-eau',           kw, gain: kw*FLEX_EUR_PAR_KW }); }
   return d;
 }
 
@@ -10251,12 +10288,8 @@ function InstallSoiMemeScreen({ user, userProfile, onBack, onPanier, onMonSite, 
       const flex = lsFlex || (site?.flex_chauffage&&site?.flex_ecs&&site?.flex_surface ? {chauffage:site.flex_chauffage,ecs:site.flex_ecs,surface:site.flex_surface,type_logement:site.flex_type_logement,statut:site.flex_statut} : null);
       if (flex) {
         setSiteFlex(flex);
-        // Calculer la capacité théorique depuis les données existantes
-        const idx = flex.surface==='small'?0:flex.surface==='medium'?1:2;
-        let kw = 0;
-        if(flex.chauffage==='elec'||flex.chauffage==='pac') kw += [3,7,12][idx];
-        if(flex.ecs==='elec') kw += [2,3,4][idx];
-        setTheorKw(kw);
+        // Capacité théorique = puissance pilotable recommandée pour ce logement
+        setTheorKw(recommendedThermKw(flex));
         setStep('catalog'); // formulaire déjà rempli → aller directement au catalogue
       }
       setLoading(false);
@@ -10332,7 +10365,7 @@ function InstallSoiMemeScreen({ user, userProfile, onBack, onPanier, onMonSite, 
   if (step === 'confirmed') {
     const tot = totalPrice();
     const effectiveKw = theorKw > 0 ? Math.min(theorKw, equipKw) : equipKw;
-    const flexGain = Math.round(effectiveKw * 14);
+    const flexGain = Math.round(effectiveKw * FLEX_EUR_PAR_KW);
     return (
       <>
       <div className="screen fade-in">
@@ -10615,10 +10648,7 @@ function SolarSimScreen({ user, userProfile, onBack, onPanier, onMonSite, onCart
 
   // Helper : calcule thermKwh depuis flex existant
   const applyExistingFlexSolar=(flex)=>{
-    const idx=flex.surface==='small'?0:flex.surface==='medium'?1:2;
-    let kw=0;
-    if(flex.chauffage==='elec'||flex.chauffage==='pac') kw+=[3,7,12][idx];
-    if(flex.ecs==='elec') kw+=[2,3,4][idx];
+    const kw=recommendedThermKw(flex);
     try{const d=JSON.parse(localStorage.getItem('starvolt_solar_defaults')||'{}');d.thermKwh=String(kw);localStorage.setItem('starvolt_solar_defaults',JSON.stringify(d));}catch{}
     setThermKwh(String(kw));
   };
