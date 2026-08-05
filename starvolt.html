@@ -234,6 +234,7 @@
     }
     .sticky-footer-inner.row { flex-direction: row; gap: 10px; }
     .sticky-footer-inner.row .btn { flex: 1; }
+    .sticky-footer-inner.wide { max-width: 880px; }
 
     /* =============================================
        SCREEN
@@ -408,6 +409,40 @@
       border: 1.5px solid rgba(125,217,64,.45); font-weight: 700; font-size: 14px;
     }
     .btn-auto-alt:hover { background: rgba(125,217,64,.2); }
+
+    /* Pied du tapis roulant : les 4 actions tiennent sur UNE ligne.
+       En mobile seuls les pictos et les mots courts sont affichés — les
+       libellés longs (.a4-lg) n'apparaissent qu'à partir de 768px, sinon la
+       ligne déborde sur un écran de 375 px. */
+    .auto4 { display: flex; align-items: stretch; gap: 6px; width: 100%; }
+    .auto4 > button {
+      display: flex; align-items: center; justify-content: center; gap: 6px;
+      border-radius: 12px; font-family: inherit; font-weight: 700;
+      font-size: 12px; line-height: 1.1; white-space: nowrap;
+      padding: 12px 8px; cursor: pointer; border: 1.5px solid transparent;
+      transition: filter .15s, background .15s;
+    }
+    .auto4 > button:hover { filter: brightness(1.1); }
+    .auto4 .a4-ico  { flex: 0 0 auto; padding: 12px 11px; }
+    .auto4 .a4-grow { flex: 1 1 0; min-width: 0; }
+    .auto4 svg { flex: 0 0 auto; }
+    /* Retour et mode manuel : vert foncé. Le picto on/off = « je décide ». */
+    .auto4 .a4-dark  { background: var(--green-dark); color: #d8f5c4; border-color: rgba(125,217,64,.35); }
+    /* En savoir + : vert clair, c'est le chemin qu'on propose. */
+    .auto4 .a4-light { background: var(--green); color: #1a4500; font-weight: 800; }
+    /* Levier suivant : flèche blanche, neutre — on avance sans rien engager. */
+    .auto4 .a4-next  { background: rgba(255,255,255,.10); color: #fff; border-color: rgba(255,255,255,.22); }
+    .auto4 .a4-lg { display: none; }
+    @media (min-width: 768px) {
+      /* Les libellés longs prennent la largeur de leur texte plutôt que de se
+         partager la ligne à parts égales : sinon ils sont tronqués. */
+      .auto4 { gap: 9px; justify-content: center; }
+      .auto4 > button { font-size: 13.5px; padding: 13px 16px; }
+      .auto4 .a4-ico { padding: 13px 13px; }
+      .auto4 .a4-grow { flex: 0 1 auto; }
+      .auto4 .a4-sm { display: none; }
+      .auto4 .a4-lg { display: inline; }
+    }
 
     /* Barre de progression du tapis roulant */
     .auto-prog { display: flex; gap: 4px; margin: 0 0 14px; }
@@ -1471,11 +1506,13 @@ function TopBar({ name, avatarName, showName, logoOnly = false, onLogoClick, onP
 }
 
 // ─── Sticky Footer ────────────────────────────
-function StickyFooter({ row = false, onBack, children }) {
+// wide : desserre le plafond de 520 px, nécessaire quand une seule ligne doit
+// porter plusieurs libellés longs (pied du tapis roulant en desktop).
+function StickyFooter({ row = false, wide = false, onBack, children }) {
   const forceRow = row || !!onBack;
   return (
     <div className="sticky-footer">
-      <div className={`sticky-footer-inner${forceRow ? ' row' : ''}`}>
+      <div className={`sticky-footer-inner${forceRow ? ' row' : ''}${wide ? ' wide' : ''}`}>
         {onBack && (
           <button onClick={onBack} style={{
             flexGrow:0, flexShrink:0, flexBasis:'auto',
@@ -5455,6 +5492,37 @@ function TarifPicker({ user, siteId, tariffs, value, onChange, onTariffsChanged,
         </div>
       )}
     </div>
+  );
+}
+
+// ─── Picto on/off ─────────────────────────────────────────────────────────────
+// Désigne désormais le MODE MANUEL (« j'analyse moi-même »), et lui seul :
+// l'interrupteur, c'est l'utilisateur qui décide. Le parcours guidé, lui, est
+// représenté par le robot ci-dessous.
+function IconPower({ color='white', strokeWidth=6 }) {
+  return (
+    <svg viewBox="0 0 100 100" fill="none" stroke={color} strokeWidth={strokeWidth}
+         strokeLinecap="round" strokeLinejoin="round" xmlns="http://www.w3.org/2000/svg"
+         style={{width:'100%',height:'100%'}}>
+      <line x1="50" y1="8" x2="50" y2="42"/>
+      <path d="M 28 22 A 30 30 0 1 0 72 22"/>
+    </svg>
+  );
+}
+
+// ─── Picto robot : le parcours AUTOMATIQUE ───────────────────────────────────
+// Source : Vectorstall / Noun Project. Les deux <text> de crédit d'auteur du
+// fichier d'origine sont retirés (ils vivaient sous le dessin, d'où le viewBox
+// ramené de 0 0 60 75 à 0 0 60 60). Tracé blanc sur fond transparent.
+function IconRobot({ color='white' }) {
+  return (
+    <svg viewBox="0 0 60 60" fill={color} xmlns="http://www.w3.org/2000/svg"
+         style={{width:'100%',height:'100%'}}>
+      <path d="M11.46,29.44v2.59H9.82c-2.2,0-3.98,1.79-3.98,3.98v7.46c0,2.19,1.79,3.98,3.98,3.98h1.65v2.59c0,2.74,2.23,4.97,4.97,4.97h27.21c2.74,0,4.97-2.23,4.97-4.97v-2.59h1.58c2.2,0,3.98-1.79,3.98-3.98v-7.46c0-2.19-1.79-3.98-3.98-3.98h-1.58v-2.59c0-2.74-2.23-4.97-4.97-4.97H31c-0.02-1.67,0.15-5.36,1.63-9.01c0.66,0.28,1.39,0.44,2.15,0.44c3.01,0,5.45-2.45,5.45-5.45S37.79,5,34.78,5s-5.45,2.45-5.45,5.45c0,1.51,0.62,2.88,1.62,3.87c-1.77,4.1-1.97,8.24-1.95,10.15H16.43C13.69,24.47,11.46,26.7,11.46,29.44z M11.39,45.44H9.82c-1.09,0-1.98-0.89-1.98-1.98v-7.46c0-1.09,0.89-1.98,1.98-1.98h1.57V45.44z M34.78,7c1.9,0,3.45,1.55,3.45,3.45s-1.55,3.45-3.45,3.45s-3.45-1.55-3.45-3.45S32.88,7,34.78,7z M50.18,34.03c1.09,0,1.98,0.89,1.98,1.98v7.46c0,1.09-0.89,1.98-1.98,1.98h-1.58V34.03H50.18z M46.61,29.44v3.59v13.42v3.59c0,1.64-1.33,2.97-2.97,2.97H16.43c-1.64,0-2.97-1.33-2.97-2.97v-20.6c0-1.64,1.33-2.97,2.97-2.97h27.21C45.28,26.47,46.61,27.8,46.61,29.44z"/>
+      <path d="M36.92,38.29c0.2,0.2,0.45,0.29,0.71,0.29s0.51-0.1,0.71-0.29l2.25-2.25c0.39-0.39,0.39-1.02,0-1.41s-1.02-0.39-1.41,0l-1.55,1.55l-1.55-1.55c-0.39-0.39-1.02-0.39-1.41,0s-0.39,1.02,0,1.41L36.92,38.29z"/>
+      <path d="M21.73,38.29c0.2,0.2,0.45,0.29,0.71,0.29s0.51-0.1,0.71-0.29l2.25-2.25c0.39-0.39,0.39-1.02,0-1.41s-1.02-0.39-1.41,0l-1.55,1.55l-1.55-1.55c-0.39-0.39-1.02-0.39-1.41,0s-0.39,1.02,0,1.41L21.73,38.29z"/>
+      <path d="M23.81,45.55c-0.25,0.49-0.06,1.09,0.44,1.35c1.81,0.92,3.8,1.38,5.79,1.38c1.99,0,3.97-0.46,5.79-1.38c0.49-0.25,0.69-0.85,0.44-1.35c-0.25-0.49-0.85-0.69-1.34-0.44c-3.05,1.56-6.7,1.56-9.75,0C24.66,44.86,24.06,45.06,23.81,45.55z"/>
+    </svg>
   );
 }
 
@@ -16421,17 +16489,12 @@ function HomeChoiceScreen({ profile, user, onComprendre, onAction, can = () => t
         )}
       </button>}
       {can('menus','passer_action') && <button onClick={onAction} style={{flex:1,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',backgroundImage:'linear-gradient(180deg, rgba(16,92,86,.62) 0%, rgba(12,104,80,.40) 42%, rgba(11,120,74,.52) 100%), url("/action-bg.jpg")',backgroundSize:'cover',backgroundPosition:'right 78%',backgroundRepeat:'no-repeat',border:'none',cursor:'pointer',padding:'clamp(14px,3.2vh,40px) 24px',gap:'clamp(7px,1.3vh,14px)',textAlign:'center',width:'100%',minHeight:0,overflow:'hidden'}}>
-        <div style={{width:'clamp(40px,8vw,56px)',height:'clamp(40px,8vw,56px)',flexShrink:0,filter:'drop-shadow(0 2px 14px rgba(4,32,20,.5))'}}>
-          <svg viewBox="0 0 100 100" fill="none" stroke="white" strokeWidth="6" strokeLinecap="round" strokeLinejoin="round" xmlns="http://www.w3.org/2000/svg">
-            {/* trait vertical */}
-            <line x1="50" y1="8" x2="50" y2="42"/>
-            {/* arc power */}
-            <path d="M 28 22 A 30 30 0 1 0 72 22"/>
-          </svg>
+        <div style={{width:'clamp(46px,9.2vw,64px)',height:'clamp(46px,9.2vw,64px)',flexShrink:0,filter:'drop-shadow(0 2px 14px rgba(4,32,20,.5))'}}>
+          <IconRobot/>
         </div>
         <div style={{fontSize:'clamp(23px,6.2vw,32px)',fontWeight:900,color:'white',lineHeight:1.15,textShadow:'0 2px 18px rgba(4,32,20,.6)'}}>Passer à l'action<br/>dès maintenant</div>
         <div style={{fontSize:'clamp(14px,4vw,19.5px)',color:'rgba(255,255,255,.82)',maxWidth:420,lineHeight:1.45,textShadow:'0 1px 12px rgba(4,32,20,.55)'}}>Simulez vos économies et choisissez les meilleures solutions pour votre logement</div>
-        <div style={{marginTop:'clamp(2px,0.6vh,8px)',padding:'clamp(9px,1.5vh,13px) 32px',background:'rgba(255,255,255,.14)',borderRadius:14,fontSize:15,fontWeight:700,color:'white',border:'1.5px solid rgba(255,255,255,.25)'}}>Mon site →</div>
+        <div style={{marginTop:'clamp(2px,0.6vh,8px)',padding:'clamp(9px,1.5vh,13px) 32px',background:'rgba(255,255,255,.14)',borderRadius:14,fontSize:15,fontWeight:700,color:'white',border:'1.5px solid rgba(255,255,255,.25)'}}>C'est parti →</div>
       </button>}
     </div>
   );
@@ -16596,6 +16659,48 @@ function AutoFooter({ ctaLabel, onCta, ctaDisabled = false, altLabel, onAlt, onM
   );
 }
 
+// Pied de page des écrans de LEVIER : 4 actions sur une seule ligne.
+// De gauche à droite : revenir en arrière · en savoir plus sur ce levier (le
+// chemin proposé, en vert clair) · passer en analyse manuelle · levier suivant.
+// Les libellés longs sont réservés au desktop (voir .auto4 dans le <style>).
+function AutoLevierFooter({ onBack, onSavoirPlus, onManuel, onSuivant, dernier = false }) {
+  return (
+    <StickyFooter wide>
+      <div className="auto4">
+        <button className="a4-dark a4-ico" onClick={onBack} aria-label="Retour" title="Retour">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round">
+            <line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/>
+          </svg>
+        </button>
+
+        <button className="a4-light a4-grow" onClick={onSavoirPlus}>
+          <span className="a4-sm">En savoir +</span>
+          <span className="a4-lg">Je veux en savoir davantage</span>
+        </button>
+
+        <button className="a4-dark a4-grow" onClick={onManuel}>
+          <span style={{width:16,height:16,display:'inline-flex',flexShrink:0}}>
+            <IconPower color="#d8f5c4" strokeWidth={8}/>
+          </span>
+          <span className="a4-sm">Manuel</span>
+          <span className="a4-lg">Je préfère analyser moi-même</span>
+        </button>
+
+        <button className="a4-next a4-ico" onClick={onSuivant}
+          aria-label={dernier ? 'Terminer' : 'Voir le levier suivant'}
+          title={dernier ? 'Terminer' : 'Voir le levier suivant'}>
+          <span className="a4-lg" style={{fontWeight:700}}>{dernier ? 'Terminer' : 'Voir le levier suivant'}</span>
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round">
+            <line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/>
+          </svg>
+        </button>
+      </div>
+    </StickyFooter>
+  );
+}
+
 // ─── ParcoursBilanScreen : « conseil coach global incluant courbe de charge » ──
 // Dernière étape avant les leviers. Le bilan IA est produit en fond par
 // GlobalBilanWatcher ; tant qu'il n'est pas là on patiente, sans jamais bloquer
@@ -16683,7 +16788,7 @@ function ParcoursBilanScreen({ profile, bilanData, onNext, onManuel }) {
 // la liste des éligibles (elle est au panier), ce qui décalerait tous les index.
 // On mémorise donc les offres déjà écartées (« seen ») ; le levier courant est
 // simplement le premier éligible non encore écarté.
-function ParcoursLevierScreen({ user, profile, can = () => true, onValider, onManuel, onFini }) {
+function ParcoursLevierScreen({ user, profile, can = () => true, onValider, onManuel, onFini, onAucun, onBack }) {
   const [offres,     setOffres]     = useState(null); // éligibles, classés
   const [savings,    setSavings]    = useState({});
   const [currentBill,setCurrentBill]= useState(null);
@@ -16733,10 +16838,16 @@ function ParcoursLevierScreen({ user, profile, can = () => true, onValider, onMa
 
   const remaining = offres ? offres.filter(o => !seen.includes(o.id)) : null;
 
-  // Fin du tapis : plus aucun levier à présenter.
+  // Deux façons de n'avoir rien à afficher, qui ne mènent PAS au même endroit :
+  //  - aucun levier éligible dès le départ (offres vide) → il n'y a rien à
+  //    dérouler, on renvoie l'utilisateur sur sa page énergie plutôt que sur un
+  //    écran de fin de parcours qu'il n'a jamais commencé ;
+  //  - tous les leviers ont été vus → vraie fin de tapis, on va au panier.
   useEffect(() => {
+    if (!offres) return;
+    if (offres.length === 0) { onAucun(); return; }
     if (remaining && remaining.length === 0) onFini();
-  }, [remaining && remaining.length]);
+  }, [offres && offres.length, remaining && remaining.length]);
 
   const skipCurrent = (id) => {
     const next = [...seen, id];
@@ -16822,12 +16933,12 @@ function ParcoursLevierScreen({ user, profile, can = () => true, onValider, onMa
       </div>
     </div>
 
-    <AutoFooter
-      ctaLabel="✓ Oui, je le mets dans mon panier"
-      onCta={() => onValider(o, type)}
-      altLabel={remaining.length > 1 ? 'Voir le levier suivant →' : 'Terminer et voir mon panier →'}
-      onAlt={() => skipCurrent(o.id)}
-      onManuel={onManuel}/>
+    <AutoLevierFooter
+      onBack={onBack}
+      onSavoirPlus={() => onValider(o, type)}
+      onManuel={onManuel}
+      onSuivant={() => skipCurrent(o.id)}
+      dernier={remaining.length === 1}/>
     </>
   );
 }
@@ -18101,7 +18212,7 @@ function App() {
     switch (state.screen) {
 
       case 'HOME_CHOICE':
-        return <HomeChoiceScreen profile={profile} user={user} onComprendre={()=>goTo('COMPRENDRE_HOME')} onAction={()=>goTo('MA_CONSO')} can={can}/>;
+        return <HomeChoiceScreen profile={profile} user={user} onComprendre={()=>goTo('COMPRENDRE_HOME')} onAction={autoStartLeviers} can={can}/>;
 
       case 'COMPRENDRE_HOME':
         return <ComprendreHomeScreen user={user} rolePerms={rolePerms} onGroup={(g)=>goTo('COMPRENDRE_GROUP',{learnGroup:g})} onAction={()=>goTo('MA_CONSO')} onBack={()=>goTo('HOME_CHOICE')}/>;
@@ -18169,7 +18280,7 @@ function App() {
       }
 
       case 'HOME_LOGGED_IN': // ancien écran retiré → on redirige vers la nouvelle landing
-        return <HomeChoiceScreen profile={profile} user={user} onComprendre={()=>goTo('COMPRENDRE_HOME')} onAction={()=>goTo('MA_CONSO')} can={can}/>;
+        return <HomeChoiceScreen profile={profile} user={user} onComprendre={()=>goTo('COMPRENDRE_HOME')} onAction={autoStartLeviers} can={can}/>;
 
       case 'PROFILE':
         return <ProfileScreen
@@ -18371,6 +18482,10 @@ function App() {
             if (dest) goTo(dest); else goTo('AUTO_LEVIER');
           }}
           onManuel={()=>autoExit('MA_CONSO')}
+          onBack={goBack}
+          // Aucun levier éligible : rien à dérouler, on sort du parcours et on
+          // pose l'utilisateur sur sa page énergie.
+          onAucun={()=>autoExit('MA_CONSO')}
           onFini={()=>goTo('AUTO_FIN')}/>;
 
       case 'AUTO_FIN':
