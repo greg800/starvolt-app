@@ -5571,7 +5571,7 @@ function BilanMarkdown({ text, fontSize = 13.5 }){
   return <div style={{fontSize,lineHeight:1.55,color:'rgba(255,255,255,.85)'}}>{out}</div>;
 }
 
-function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre, onOnboardingQuestions, onOptimisation, onParcoursAuto, cartVersion=0, can = () => true }) {
+function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre, onOnboardingQuestions, onOptimisation, onParcoursAuto, consoPrete = true, cartVersion=0, can = () => true }) {
   const[sites,setSites]=useState(null);
   const[activeId,setActiveId]=useState(null);
   const[tariffs,setTariffs]=useState([]);
@@ -7233,17 +7233,17 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
       <StickyFooter wide>
         <div className="ctabar">
           <BackButton onClick={onBack}/>
-          <button className="cta cta-primary cta-grow" onClick={onParcoursAuto}
+          {consoPrete !== false && <button className="cta cta-primary cta-grow" onClick={onParcoursAuto}
             aria-label="Les conseils du pro" title="Les conseils du pro">
             <span style={{width:22,height:22,display:'inline-flex',flexShrink:0}}>
               <IconRobot color="#1a4500"/>
             </span>
             <span className="lbl-lg">Les conseils du pro</span>
-          </button>
-          <button className="cta cta-second cta-grow" onClick={onComprendre}
+          </button>}
+          <button className={`cta cta-grow ${consoPrete === false ? 'cta-primary' : 'cta-second'}`} onClick={onComprendre}
             aria-label="Comprendre" title="Comprendre">
             <span style={{width:20,height:20,display:'inline-flex',flexShrink:0}}>
-              <IconHeadCheck color="#d8f5c4"/>
+              <IconHeadCheck color={consoPrete === false ? '#1a4500' : '#d8f5c4'}/>
             </span>
             <span className="lbl-lg">Comprendre</span>
           </button>
@@ -16435,7 +16435,10 @@ function getVideoEmbed(url) {
 }
 
 // ─── HomeChoiceScreen ─────────────────────────────────────────────────────────
-function HomeChoiceScreen({ profile, user, onComprendre, onAction, can = () => true }) {
+// consoPrete : false ⇒ la collecte ENEDIS n'a rien donné. La zone basse ne
+// lance PAS le parcours guidé (il n'aurait aucun chiffre à présenter) : elle
+// renvoie vers « Mon site », le seul endroit où l'on fournit sa consommation.
+function HomeChoiceScreen({ profile, user, onComprendre, onAction, onCollecte, consoPrete = true, can = () => true }) {
   const [learnStats, setLearnStats] = useState(null);
 
   useEffect(() => {
@@ -16502,13 +16505,21 @@ function HomeChoiceScreen({ profile, user, onComprendre, onAction, can = () => t
           </div>
         )}
       </button>}
-      {can('menus','passer_action') && <button onClick={onAction} style={{flex:1,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',backgroundImage:'linear-gradient(180deg, rgba(16,92,86,.62) 0%, rgba(12,104,80,.40) 42%, rgba(11,120,74,.52) 100%), url("/action-bg.jpg")',backgroundSize:'cover',backgroundPosition:'right 78%',backgroundRepeat:'no-repeat',border:'none',cursor:'pointer',padding:'clamp(14px,3.2vh,40px) 24px',gap:'clamp(7px,1.3vh,14px)',textAlign:'center',width:'100%',minHeight:0,overflow:'hidden'}}>
+      {can('menus','passer_action') && <button onClick={consoPrete === false ? onCollecte : onAction} style={{flex:1,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',backgroundImage:'linear-gradient(180deg, rgba(16,92,86,.62) 0%, rgba(12,104,80,.40) 42%, rgba(11,120,74,.52) 100%), url("/action-bg.jpg")',backgroundSize:'cover',backgroundPosition:'right 78%',backgroundRepeat:'no-repeat',border:'none',cursor:'pointer',padding:'clamp(14px,3.2vh,40px) 24px',gap:'clamp(7px,1.3vh,14px)',textAlign:'center',width:'100%',minHeight:0,overflow:'hidden'}}>
         <div style={{width:'clamp(46px,9.2vw,64px)',height:'clamp(46px,9.2vw,64px)',flexShrink:0,filter:'drop-shadow(0 2px 14px rgba(4,32,20,.5))'}}>
-          <IconRobot/>
+          {consoPrete === false ? <IconPower/> : <IconRobot/>}
         </div>
-        <div style={{fontSize:'clamp(23px,6.2vw,32px)',fontWeight:900,color:'white',lineHeight:1.15,textShadow:'0 2px 18px rgba(4,32,20,.6)'}}>Passer à l'action<br/>dès maintenant</div>
-        <div style={{fontSize:'clamp(14px,4vw,19.5px)',color:'rgba(255,255,255,.82)',maxWidth:420,lineHeight:1.45,textShadow:'0 1px 12px rgba(4,32,20,.55)'}}>Simulez vos économies et choisissez les meilleures solutions pour votre logement</div>
-        <div style={{marginTop:'clamp(2px,0.6vh,8px)',padding:'clamp(9px,1.5vh,13px) 32px',background:'rgba(255,255,255,.14)',borderRadius:14,fontSize:15,fontWeight:700,color:'white',border:'1.5px solid rgba(255,255,255,.25)'}}>C'est parti →</div>
+        <div style={{fontSize:'clamp(23px,6.2vw,32px)',fontWeight:900,color:'white',lineHeight:1.15,textShadow:'0 2px 18px rgba(4,32,20,.6)'}}>
+          {consoPrete === false ? <>Connecter<br/>ma consommation</> : <>Passer à l'action<br/>dès maintenant</>}
+        </div>
+        <div style={{fontSize:'clamp(14px,4vw,19.5px)',color:'rgba(255,255,255,.82)',maxWidth:420,lineHeight:1.45,textShadow:'0 1px 12px rgba(4,32,20,.55)'}}>
+          {consoPrete === false
+            ? "Sans vos données ENEDIS, aucune économie ne peut être chiffrée. C'est l'affaire de quelques minutes."
+            : 'Simulez vos économies et choisissez les meilleures solutions pour votre logement'}
+        </div>
+        <div style={{marginTop:'clamp(2px,0.6vh,8px)',padding:'clamp(9px,1.5vh,13px) 32px',background:'rgba(255,255,255,.14)',borderRadius:14,fontSize:15,fontWeight:700,color:'white',border:'1.5px solid rgba(255,255,255,.25)'}}>
+          {consoPrete === false ? 'Récupérer ma conso →' : "C'est parti →"}
+        </div>
       </button>}
     </div>
   );
@@ -16714,10 +16725,17 @@ function AutoLevierFooter({ onBack, onSavoirPlus, onManuel, onSuivant, dernier =
 // Dernière étape avant les leviers. Le bilan IA est produit en fond par
 // GlobalBilanWatcher ; tant qu'il n'est pas là on patiente, sans jamais bloquer
 // l'utilisateur (il peut avancer quand même — la collecte ENEDIS peut être longue).
-function ParcoursBilanScreen({ profile, bilanData, onNext, onManuel }) {
+function ParcoursBilanScreen({ user, profile, bilanData, onNext, onManuel }) {
   // Repli : si le watcher a déjà tiré (ou n'est plus armé), le bilan est en base.
   // Sans ça, un utilisateur qui reprend son parcours resterait sur le spinner.
   const [fallback, setFallback] = useState(null);
+  // « regen » : le conseil affiché ne correspond plus à la configuration
+  // actuelle du site (nouveau tarif, panneaux ajoutés, panier modifié…) et on
+  // est en train d'en produire un neuf. État distinct de l'attente ENEDIS :
+  // ici la donnée est là, c'est l'analyse qui tourne.
+  const [regen, setRegen] = useState(false);
+  const regenRef = useRef(false);
+
   useEffect(() => {
     if (bilanData) return;
     const siteId = localStorage.getItem('starvolt_active_site_id');
@@ -16734,8 +16752,71 @@ function ParcoursBilanScreen({ profile, bilanData, onNext, onManuel }) {
     return () => { alive = false; clearInterval(t); };
   }, [bilanData]);
 
+  // ── Rafraîchissement du conseil avant de dérouler les leviers ──────────────
+  // On ne rappelle l'IA que si la CONFIGURATION a bougé : on compare la
+  // signature des faits (hors section « utilisateur », volatile : ancienneté,
+  // nombre de clics… qui ne changent pas les recommandations). Sérialisation
+  // canonique car le jsonb stocké réordonne les clés.
+  useEffect(() => {
+    if (!user?.id || regenRef.current) return;
+    const siteId = localStorage.getItem('starvolt_active_site_id');
+    if (!siteId) return;
+    regenRef.current = true;
+    let alive = true;
+    (async () => {
+      try {
+        const [{ data: site }, { data: tariffs }, { data: nat }] = await Promise.all([
+          sb.from('sites').select('*').eq('id', siteId).maybeSingle(),
+          sb.from('tarifs_electricite').select('*').order('nom'),
+          sb.from('parametres_nationaux').select('*').eq('id', 1).maybeSingle(),
+        ]);
+        if (!alive || !site) return;
+        // Sans conso, aucun bilan n'est possible : l'écran reste sur l'attente ENEDIS.
+        if (!(site.conso_annuelle_kwh > 0) || !site.conso_profil) return;
+
+        const globalVars = mergeGlobalVars(nat);
+        let prodProfil = null;
+        if (site.profil_production_id) {
+          const { data: pp } = await sb.from('profils_production').select('profil')
+            .eq('id', site.profil_production_id).maybeSingle();
+          prodProfil = pp?.profil || null;
+        }
+        const quiz  = await fetchQuizSummary(user.id);
+        const facts = await buildFullBilanFacts({ site, tariffs: tariffs || [], globalVars, prodProfil, quiz, user });
+        if (!alive || !facts) return;
+
+        const canon = v => { if (v === null || typeof v !== 'object') return v;
+          if (Array.isArray(v)) return v.map(canon);
+          return Object.keys(v).sort().reduce((o, k) => { o[k] = canon(v[k]); return o; }, {}); };
+        const configSig = f => { if (!f) return null; const { utilisateur, ...rest } = f;
+          try { return JSON.stringify(canon(rest)); } catch { return null; } };
+        const curSig = configSig(facts);
+
+        // Conseil déjà à jour → on l'affiche tel quel, sans rappeler l'IA.
+        if (site.bilan_ia && curSig && curSig === configSig(site.bilan_ia_facts)) {
+          setFallback(f => f || { collected: true, errored: false, errorMsg: null, bilanText: site.bilan_ia,
+            consoKwh: site.conso_annuelle_kwh ? Math.round(site.conso_annuelle_kwh) : null });
+          return;
+        }
+
+        setRegen(true);
+        const { data, error } = await sb.functions.invoke('bilan', { body: { facts } });
+        if (!alive) return;
+        if (error || !data?.text) { console.warn('bilan regen error', error || data); return; }
+        await sb.from('sites').update({
+          bilan_ia: data.text, bilan_ia_at: new Date().toISOString(), bilan_ia_facts: facts,
+        }).eq('id', siteId);
+        if (!alive) return;
+        setFallback({ collected: true, errored: false, errorMsg: null, bilanText: data.text,
+          consoKwh: site.conso_annuelle_kwh ? Math.round(site.conso_annuelle_kwh) : null });
+      } catch (e) { console.warn('bilan regen exception', e); }
+      finally { if (alive) setRegen(false); }
+    })();
+    return () => { alive = false; };
+  }, [user?.id]);
+
   const data    = bilanData || fallback;
-  const ready   = !!data;
+  const ready   = !!data && !regen;
   const errored = !!data?.errored;
   const prenom  = profile?.prenom ? `, ${profile.prenom}` : '';
 
@@ -16754,8 +16835,21 @@ function ParcoursBilanScreen({ profile, bilanData, onNext, onManuel }) {
         </div>
       )}
 
-      <div className="card" style={{padding:'18px',minHeight:150,display:'flex',alignItems:ready?'flex-start':'center',justifyContent:'center'}}>
-        {!ready ? (
+      <div className="card" style={{padding:regen?'34px 18px':'18px',minHeight:regen?260:150,display:'flex',alignItems:ready?'flex-start':'center',justifyContent:'center'}}>
+        {regen ? (
+          // La donnée est là, c'est l'analyse qui tourne : on le montre en grand
+          // pour que l'attente se lise comme une réflexion, pas comme un blocage.
+          <div style={{textAlign:'center'}}>
+            <StarSpinner size={64} label={null}/>
+            <div style={{fontSize:17,fontWeight:900,color:'white',marginTop:18,lineHeight:1.3}}>
+              On analyse votre situation…
+            </div>
+            <div style={{fontSize:13.5,color:'rgba(255,255,255,.6)',marginTop:8,lineHeight:1.55,maxWidth:320}}>
+              Votre configuration a changé depuis le dernier conseil. On refait le calcul
+              sur vos chiffres actuels — quelques secondes.
+            </div>
+          </div>
+        ) : !ready ? (
           <StarSpinner size={30} label="On récupère ta courbe de charge ENEDIS et on l'analyse…" labelColor="rgba(255,255,255,.7)"/>
         ) : errored ? (
           <div style={{fontSize:13.5,lineHeight:1.55,color:'rgba(255,255,255,.85)'}}>
@@ -16772,17 +16866,25 @@ function ParcoursBilanScreen({ profile, bilanData, onNext, onManuel }) {
         )}
       </div>
 
-      {!ready && (
+      {!ready && !regen && (
         <div style={{fontSize:12,color:'rgba(255,255,255,.45)',lineHeight:1.5,marginTop:12,textAlign:'center'}}>
           Ça peut prendre quelques minutes. Tu peux avancer dès maintenant : ton bilan t'attendra dans « Mon site ».
         </div>
       )}
     </div>
 
-    <AutoFooter
-      ctaLabel={ready ? '⚡ Découvrir mes leviers d’économie →' : 'Continuer sans attendre →'}
-      onCta={onNext}
-      onManuel={onManuel}/>
+    {/* Une seule sortie : on lit le conseil, puis on déroule les leviers.
+        Pendant la régénération le CTA est masqué — enchaîner sur les leviers
+        avant d'avoir lu le conseil viderait l'étape de son sens. */}
+    {!regen && (
+      <StickyFooter wide>
+        <div className="ctabar">
+          <button className="cta cta-primary cta-grow" onClick={onNext}>
+            {ready ? "Ok, j'ai compris" : 'Continuer sans attendre'}
+          </button>
+        </div>
+      </StickyFooter>
+    )}
     </>
   );
 }
@@ -18091,6 +18193,28 @@ function App() {
   // efface l'état → on ne rattrape jamais l'utilisateur contre son gré.
   const [autoSt, setAutoSt] = useState(() => autoGetState());
 
+  // ─── Verrou « pas de conso, pas d'action » ──────────────────────────────────
+  // Tant que la collecte ENEDIS n'a rien donné, l'app n'a rien à simuler : les
+  // leviers, le parcours guidé et les simulations afficheraient des écrans vides
+  // ou des chiffres inventés. On masque donc tout ce chemin. Restent ouverts
+  // « Comprendre » (qui ne demande aucune donnée) et « Mon site » — cette
+  // dernière EST l'endroit où l'on fournit la conso manquante : la masquer
+  // enfermerait l'utilisateur sans aucun moyen de s'en sortir.
+  // On ne lit que conso_annuelle_kwh : conso_profil est un tableau de 8784
+  // entiers, inutile de le rapatrier juste pour tester sa présence.
+  const [consoPrete, setConsoPrete] = useState(null); // null = pas encore su
+  useEffect(() => {
+    if (!user?.id) { setConsoPrete(null); return; }
+    let alive = true;
+    const activeId = localStorage.getItem('starvolt_active_site_id');
+    const q = activeId
+      ? sb.from('sites').select('conso_annuelle_kwh').eq('id', activeId).maybeSingle()
+      : sb.from('sites').select('conso_annuelle_kwh').eq('user_id', user.id)
+          .not('conso_profil', 'is', null).order('created_at').limit(1).maybeSingle();
+    q.then(({ data }) => { if (alive) setConsoPrete(!!(data && data.conso_annuelle_kwh > 0)); });
+    return () => { alive = false; };
+  }, [user?.id, state.screen]);
+
   // Arme un parcours neuf. NB : ces callbacks sont posés directement en onClick,
   // qui passerait l'événement en 1er argument — d'où deux fonctions distinctes
   // plutôt qu'un paramètre de destination.
@@ -18100,9 +18224,6 @@ function App() {
   }, []);
   // Fin de l'intégration : on passe par l'étape bilan avant les leviers.
   const autoStart = useCallback(() => { autoArm(); goTo('AUTO_BILAN'); }, [autoArm, goTo]);
-  // Depuis « Votre bilan en clair » : le bilan vient d'être lu, on attaque
-  // directement les leviers sans le réafficher.
-  const autoStartLeviers = useCallback(() => { autoArm(); goTo('AUTO_LEVIER'); }, [autoArm, goTo]);
 
   // Retour d'un écran de simulation : le levier validé est au panier, il sort de
   // la liste des éligibles — le tapis reprend donc tout seul au levier suivant.
@@ -18221,7 +18342,7 @@ function App() {
     switch (state.screen) {
 
       case 'HOME_CHOICE':
-        return <HomeChoiceScreen profile={profile} user={user} onComprendre={()=>goTo('COMPRENDRE_HOME')} onAction={autoStartLeviers} can={can}/>;
+        return <HomeChoiceScreen profile={profile} user={user} onComprendre={()=>goTo('COMPRENDRE_HOME')} onAction={autoStart} onCollecte={()=>goTo('MA_CONSO')} consoPrete={consoPrete} can={can}/>;
 
       case 'COMPRENDRE_HOME':
         return <ComprendreHomeScreen user={user} rolePerms={rolePerms} onGroup={(g)=>goTo('COMPRENDRE_GROUP',{learnGroup:g})} onAction={()=>goTo('MA_CONSO')} onBack={()=>goTo('HOME_CHOICE')}/>;
@@ -18289,7 +18410,7 @@ function App() {
       }
 
       case 'HOME_LOGGED_IN': // ancien écran retiré → on redirige vers la nouvelle landing
-        return <HomeChoiceScreen profile={profile} user={user} onComprendre={()=>goTo('COMPRENDRE_HOME')} onAction={autoStartLeviers} can={can}/>;
+        return <HomeChoiceScreen profile={profile} user={user} onComprendre={()=>goTo('COMPRENDRE_HOME')} onAction={autoStart} onCollecte={()=>goTo('MA_CONSO')} consoPrete={consoPrete} can={can}/>;
 
       case 'PROFILE':
         return <ProfileScreen
@@ -18440,7 +18561,7 @@ function App() {
           onBack={goBack}/>;
 
       case 'MA_CONSO':
-        return <MonSiteScreen user={user} userProfile={profile} onBack={goBack} onSimulations={()=>goTo('SIMULATIONS')} onComprendre={()=>goTo('COMPRENDRE_HOME')} onOnboardingQuestions={(sid)=>goTo('ONBOARDING_QUESTIONS',{onbSiteId:sid})} onOptimisation={()=>goTo('OPTIMISATION')} onParcoursAuto={autoStartLeviers} cartVersion={cartVersion} can={can}/>;
+        return <MonSiteScreen user={user} userProfile={profile} onBack={goBack} onSimulations={()=>goTo('SIMULATIONS')} onComprendre={()=>goTo('COMPRENDRE_HOME')} onOnboardingQuestions={(sid)=>goTo('ONBOARDING_QUESTIONS',{onbSiteId:sid})} onOptimisation={()=>goTo('OPTIMISATION')} onParcoursAuto={autoStart} consoPrete={consoPrete} cartVersion={cartVersion} can={can}/>;
       case 'ONBOARDING_QUESTIONS':
         return <OnboardingTypeform siteId={state.onbSiteId} extended onDone={()=>{
           // Arme le watcher global : il surveillera la collecte ENEDIS + le bilan en fond
@@ -18477,7 +18598,7 @@ function App() {
 
       // ─── Tapis roulant : bilan → leviers un par un → panier ─────────────────
       case 'AUTO_BILAN':
-        return <ParcoursBilanScreen profile={profile} bilanData={bilanPopup}
+        return <ParcoursBilanScreen user={user} profile={profile} bilanData={bilanPopup}
           onNext={()=>goTo('AUTO_LEVIER')}
           onManuel={()=>autoExit('MA_CONSO', { focusHisto: true })}/>;
 
