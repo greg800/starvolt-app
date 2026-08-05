@@ -12940,6 +12940,7 @@ function AdminProofreadScreen({ onBack }) {
   const [applying, setApplying] = useState(false);
   const [doneMsg, setDoneMsg] = useState(null);
   const [lastRun, setLastRun] = useState(null); // { usage, cost }
+  const [partiel, setPartiel] = useState(null);  // lots non relus (échec réseau/API)
 
   const TBL_LABEL = { learn_groups:'Thème', learn_subjects:'Sujet', learn_questions:'Question', learn_choices:'Réponse' };
   const FLD_LABEL = { title:'titre', description:'description', content:'contenu', question:'question', text:'texte' };
@@ -12958,6 +12959,9 @@ function AdminProofreadScreen({ onBack }) {
       setCorrections(cs);
       setScanned(data?.scanned || 0);
       setLastRun(data?.cost ? { usage: data.usage, cost: data.cost } : null);
+      // Relecture partielle : sans ce signal, l'admin croirait tout le module
+      // relu alors qu'une partie n'a jamais été envoyée au correcteur.
+      setPartiel(data?.lots_en_echec ? { echecs: data.lots_en_echec, lots: data.lots, detail: (data.echecs||[])[0] } : null);
       const s = {}; cs.forEach((_, i) => { s[i] = true; }); // tout sélectionné par défaut
       setSel(s);
     } catch (e) {
@@ -13030,6 +13034,14 @@ function AdminProofreadScreen({ onBack }) {
 
         {loading && <div style={{textAlign:'center', color:'rgba(255,255,255,.45)', fontSize:12, marginTop:10}}>Cela peut prendre 20 à 60 secondes selon la quantité de texte.</div>}
 
+        {partiel && !loading && (
+          <div style={{margin:'0 0 10px',padding:'10px 14px',borderRadius:12,fontSize:12.5,lineHeight:1.5,
+            background:'rgba(240,160,80,.12)',border:'1px solid rgba(240,160,80,.4)',color:'#ffd9ac'}}>
+            <strong>Relecture partielle :</strong> {partiel.echecs} lot(s) sur {partiel.lots} n'ont pas pu être analysés.
+            Le contenu correspondant n'a PAS été relu — relancez pour le couvrir.
+            {partiel.detail && <div style={{marginTop:4,opacity:.75,fontSize:11.5}}>{partiel.detail}</div>}
+          </div>
+        )}
         {lastRun && !loading && (
           <div style={{marginTop:12, display:'flex', alignItems:'center', justifyContent:'center', gap:6, flexWrap:'wrap', color:'rgba(255,255,255,.5)', fontSize:12}}>
             <span>Coût de ce run :</span>

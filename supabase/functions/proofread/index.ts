@@ -97,8 +97,6 @@ Deno.serve(async (req) => {
   if (items.length === 0) return json({ corrections: [], scanned: 0 });
 
   // --- Appel Claude (proofreading strict, structuré) ---
-  const payloadItems = items.map((it) => ({ key: it.key, text: it.text }));
-
   // Prompt système : éditable depuis le menu admin (table ai_prompts), fallback sur le défaut codé.
   const DEFAULT_SYSTEM_PROMPT =
     "Tu es correcteur orthographique et grammatical de français. " +
@@ -144,45 +142,84 @@ Deno.serve(async (req) => {
     },
   };
 
-  const userContent =
-    "Voici les items à relire (JSON). Corrige et appelle l'outil report_corrections.\n\n" +
-    JSON.stringify(payloadItems);
+  // ── Découpage en lots ───────────────────────────────────────────────────────
+  // Un seul appel pour TOUT le module (≈74 000 caractères, 500+ items) saturait
+  // l'isolate : « Function failed due to not having enough compute resources ».
+  // On découpe en lots bornés, traités par vagues : la mémoire reste plate et
+  // aucun appel ne dure assez longtemps pour épuiser le budget de la fonction.
+  // Un lot qui échoue n'emporte plus toute la relecture — les autres passent.
+  const BUDGET_CARACTERES = 12000;
+  const MAX_ITEMS_LOT     = 60;
+  const CONCURRENCE       = 3;
 
-  let aiResp: Response;
-  try {
-    aiResp = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": ANTHROPIC_API_KEY,
-        "anthropic-version": "2023-06-01",
-      },
-      body: JSON.stringify({
-        model: MODEL,
-        max_tokens: 16000,
-        system: systemPrompt,
-        tools: [tool],
-        tool_choice: { type: "tool", name: "report_corrections" },
-        messages: [{ role: "user", content: userContent }],
-      }),
-    });
-  } catch (e) {
-    return json({ error: "anthropic_fetch", detail: String(e) }, 502);
+  const lots: (typeof items)[] = [];
+  {
+    let courant: typeof items = [];
+    let taille = 0;
+    for (const it of items) {
+      if (courant.length > 0 &&
+          (taille + it.text.length > BUDGET_CARACTERES || courant.length >= MAX_ITEMS_LOT)) {
+        lots.push(courant); courant = []; taille = 0;
+      }
+      courant.push(it);
+      taille += it.text.length;
+    }
+    if (courant.length > 0) lots.push(courant);
   }
 
-  if (!aiResp.ok) {
-    const t = await aiResp.text();
-    return json({ error: "anthropic_error", status: aiResp.status, detail: t }, 502);
+  type ResultatLot = {
+    corrections: { key: string; after: string; reason?: string }[];
+    inTok: number; outTok: number; erreur?: string;
+  };
+
+  const traiterLot = async (lot: typeof items): Promise<ResultatLot> => {
+    const vide: ResultatLot = { corrections: [], inTok: 0, outTok: 0 };
+    const contenu =
+      "Voici les items à relire (JSON). Corrige et appelle l'outil report_corrections.\n\n" +
+      JSON.stringify(lot.map((it) => ({ key: it.key, text: it.text })));
+    let resp: Response;
+    try {
+      resp = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": ANTHROPIC_API_KEY,
+          "anthropic-version": "2023-06-01",
+        },
+        body: JSON.stringify({
+          model: MODEL,
+          // Les corrections renvoient le texte COMPLET de chaque item modifié :
+          // la sortie peut approcher la taille du lot, jamais la dépasser.
+          max_tokens: 8000,
+          system: systemPrompt,
+          tools: [tool],
+          tool_choice: { type: "tool", name: "report_corrections" },
+          messages: [{ role: "user", content: contenu }],
+        }),
+      });
+    } catch (e) { return { ...vide, erreur: String(e) }; }
+
+    if (!resp.ok) return { ...vide, erreur: `HTTP ${resp.status} — ${(await resp.text()).slice(0, 200)}` };
+    const j = await resp.json();
+    const tu = (j.content || []).find((c: { type: string }) => c.type === "tool_use");
+    return {
+      corrections: tu?.input?.corrections || [],
+      inTok:  j.usage?.input_tokens  ?? 0,
+      outTok: j.usage?.output_tokens ?? 0,
+    };
+  };
+
+  const resultats: ResultatLot[] = [];
+  for (let i = 0; i < lots.length; i += CONCURRENCE) {
+    const vague = await Promise.all(lots.slice(i, i + CONCURRENCE).map(traiterLot));
+    resultats.push(...vague);
   }
 
-  const aiJson = await aiResp.json();
-  const toolUse = (aiJson.content || []).find((c: { type: string }) => c.type === "tool_use");
-  const rawCorrections: { key: string; after: string; reason?: string }[] =
-    toolUse?.input?.corrections || [];
+  const rawCorrections = resultats.flatMap((r) => r.corrections);
+  const echecs  = resultats.filter((r) => r.erreur).map((r) => r.erreur as string);
+  const inTok   = resultats.reduce((n, r) => n + r.inTok, 0);
+  const outTok  = resultats.reduce((n, r) => n + r.outTok, 0);
 
-  // --- Coût réel à partir du usage renvoyé par Anthropic ---
-  const inTok = aiJson.usage?.input_tokens ?? 0;
-  const outTok = aiJson.usage?.output_tokens ?? 0;
   const price = PRICES[MODEL] || { in: 0, out: 0 };
   const costUsd = (inTok / 1e6) * price.in + (outTok / 1e6) * price.out;
   const costEur = costUsd / USD_PER_EUR;
@@ -221,6 +258,10 @@ Deno.serve(async (req) => {
   return json({
     corrections,
     scanned: items.length,
+    lots: lots.length,
+    // Relecture partielle : l'admin doit savoir qu'une partie n'a pas été vue.
+    lots_en_echec: echecs.length,
+    echecs: echecs.slice(0, 3),
     usage: { input_tokens: inTok, output_tokens: outTok },
     cost: { usd: Number(costUsd.toFixed(6)), eur: Number(costEur.toFixed(6)) },
   });
