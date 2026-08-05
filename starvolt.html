@@ -3143,6 +3143,34 @@ function TxtInput({value,onSave,placeholder,style}){
 // Fiche « infos compteur » : tout ce qui a été collecté via ENEDIS / Switchgrid pour un site.
 // Sert à diagnostiquer une confusion de PDL (ex : deux sites affichant la même conso).
 function SiteEnedisDetail({ site, tariffs=[], onBack }){
+  // Chronologie de la collecte : la demande part vers ENEDIS (switchgrid_requests),
+  // les données arrivent parfois des dizaines de minutes plus tard. Afficher les
+  // deux bornes ET la durée évite d'avoir à faire la soustraction de tête pour
+  // savoir si une collecte traîne.
+  const [demande, setDemande] = useState(null);
+  useEffect(() => {
+    if (!site?.id) return;
+    let alive = true;
+    sb.from('switchgrid_requests').select('created_at,status')
+      .eq('site_id', site.id).order('created_at', { ascending: false }).limit(1).maybeSingle()
+      .then(({ data }) => { if (alive) setDemande(data || null); });
+    return () => { alive = false; };
+  }, [site?.id]);
+
+  const dureeCollecte = (() => {
+    if (!demande?.created_at || !site?.conso_imported_at) return null;
+    const min = Math.round((new Date(site.conso_imported_at) - new Date(demande.created_at)) / 60000);
+    // Une réception antérieure à la demande signale une collecte plus ancienne
+    // que la dernière demande : la durée n'aurait alors aucun sens.
+    return min >= 0 ? min : null;
+  })();
+  const fmtDuree = (min) => {
+    if (min == null) return null;
+    if (min < 60) return `${min} min`;
+    const h = Math.floor(min / 60);
+    return `${h} h ${String(min % 60).padStart(2, '0')} min (${min.toLocaleString('fr-FR')} min)`;
+  };
+
   const pdl = (site.pdl||'').trim();
   const pdlOk = pdl.length===14 && /^\d{14}$/.test(pdl);
   const tarif = tariffs.find(t=>t.id===site.tarif_id);
@@ -3289,7 +3317,17 @@ function SiteEnedisDetail({ site, tariffs=[], onBack }){
               <span style={{fontSize:13,color:'rgba(255,255,255,.5)',fontStyle:'italic'}}>Les trous d'une courbe de charge sont comblés par estimation (jours voisins de même type). Le décompte exact sera disponible aux prochaines collectes.</span>
             </Row>
           )}
-          <Row label="Dernière collecte">{val(fmtDate(site.conso_imported_at))}</Row>
+          <Row label="Demande envoyée à ENEDIS">{val(fmtDate(demande?.created_at))}</Row>
+          <Row label="Réception complète">{val(fmtDate(site.conso_imported_at))}</Row>
+          <Row label="Durée de la collecte">
+            {dureeCollecte != null
+              ? fmtDuree(dureeCollecte)
+              : <span style={{fontSize:13,color:'rgba(255,255,255,.5)',fontStyle:'italic'}}>
+                  {demande?.created_at && !site.conso_imported_at
+                    ? 'Collecte en cours — pas encore de réception.'
+                    : 'Non calculable : la dernière réception est antérieure à la dernière demande.'}
+                </span>}
+          </Row>
         </Card>
 
         <Card title="Fluctuations aux bascules HC / HP" emoji="🔀">
@@ -7442,11 +7480,17 @@ function readCartFlags() {
 // SimulationsScreen (rôle, panier, préalables techniques, exclusions de public)
 // SANS les sliders de filtre, et ajoute le cas particulier ACC.
 function autoOffreEligible(o, ctx) {
-  const { siteProfile, cartFlags, accNearby, can } = ctx;
+  const { siteProfile, cartFlags, accNearby, can, savings } = ctx;
   if (can && !can('offer_ids', o.id)) return false;
   const t = offrePrimaryType(o);
   if (!t) return false;
   if (cartFlags[t]) return false;                      // déjà au panier
+  // Changer de fournisseur n'a de sens que s'il y a mieux ailleurs. Si le tarif
+  // actuel est déjà le moins cher, l'économie calculée est nulle (ou négative) :
+  // proposer le levier reviendrait à annoncer un gain de 0 €, ou pire à pousser
+  // vers une offre plus chère. Les autres leviers n'ont pas ce garde-fou : leur
+  // gain ne dépend pas d'une comparaison avec l'existant.
+  if (t === 'optimisation_fournisseur' && savings && !(savings.optimisation_fournisseur > 0)) return false;
   // Une box Comwatt est UNIQUE : solaire, box installée et box DIY aboutissent
   // toutes à une box — dès que l'une est au panier, on ne propose plus les autres.
   const boxImplied = cartFlags.solaire || cartFlags.box || cartFlags.diy_box;
@@ -7754,6 +7798,9 @@ function SimulationsScreen({ onACC, onBox, onSolar, onOptimisation, onDiyBox, on
     if (primaryType && typeInCart[primaryType]) return false;
     // Box déjà couverte (solaire, box installée ou DIY) → masquer les autres offres box
     if (boxImpliedInCart && (primaryType === 'box' || primaryType === 'diy_box')) return false;
+    // Déjà au meilleur tarif → rien à gagner à changer (même règle que le
+    // parcours automatique : on n'annonce pas un gain de 0 €).
+    if (primaryType === 'optimisation_fournisseur' && !(maxSaving > 0)) return false;
     // Niveau de bricolage requis (spec §10) — même règle que le parcours automatique.
     if (!bricolageOk(o, siteProfile?.bricolage)) return false;
     // Préalables techniques (paramétrés par offre) : le site doit remplir TOUTES
@@ -7783,7 +7830,7 @@ function SimulationsScreen({ onACC, onBox, onSolar, onOptimisation, onDiyBox, on
     }
     return true;
     });
-  }, [offres, delaiFilter, investFilter, reductFilter, siteProfile]);
+  }, [offres, delaiFilter, investFilter, reductFilter, siteProfile, maxSaving]);
 
   // ── Picto d'une offre ─────────────────────────
   const getPicto = (o) => {
@@ -14655,7 +14702,7 @@ function AdminOffreEditScreen({ offre, onSave, onDelete, onBack }) {
           </div>
 
           <textarea className="inp" rows={6} maxLength={700} value={form.texte_auto} ref={texteAutoRef}
-            placeholder={"Ex :\n## Le geste le plus rapide\nSans travaux, sans coupure, tu économises **{eco}** par an — ta facture passe de {facture} à {apres}."}
+            placeholder={"Ex :\n## Le geste le plus rapide\nSans travaux, sans coupure, vous économisez **{eco}** par an — votre facture passe de {facture} à {apres}."}
             onChange={e => set('texte_auto', e.target.value)}
             style={{resize:'vertical',lineHeight:1.5}}/>
           <div style={{textAlign:'right',fontSize:11,color:'rgba(255,255,255,.35)',marginTop:4}}>{form.texte_auto.length}/700</div>
@@ -16561,7 +16608,7 @@ function OnboardingAdviceScreen({ user, profile, siteId, onAutoEval, onKnowledge
   }, [siteId]);
 
   const prenom = profile?.prenom ? `, ${profile.prenom}` : '';
-  const fallback = `Bienvenue${prenom} ! Pendant que nous récupérons ta consommation d'électricité, découvre Starvolt : l'appli qui t'aide à comprendre ta consommation et à réduire ta facture (meilleur tarif, autoconsommation entre voisins, pilotage de tes appareils, solaire). En attendant tes chiffres, tu peux déjà tester tes connaissances ou explorer notre base de connaissance.`;
+  const fallback = `Bienvenue${prenom} ! Pendant que nous récupérons votre consommation d'électricité, découvrez Starvolt : l'appli qui vous aide à comprendre votre consommation et à réduire votre facture (meilleur tarif, autoconsommation entre voisins, pilotage de vos appareils, solaire). En attendant vos chiffres, vous pouvez déjà tester vos connaissances ou explorer notre base de connaissance.`;
 
   return (
     <>
@@ -16573,14 +16620,14 @@ function OnboardingAdviceScreen({ user, profile, siteId, onAutoEval, onKnowledge
 
       <div style={{fontSize:12,color:'rgba(255,255,255,.55)',lineHeight:1.5,margin:'0 0 16px',display:'flex',alignItems:'center',gap:8}}>
         <StarSpinner size={16} color="rgba(125,217,64,.9)"/>
-        <span>On récupère ta consommation ENEDIS en arrière-plan. Elle apparaîtra dans « Mon site » d'ici quelques minutes.</span>
+        <span>On récupère votre consommation ENEDIS en arrière-plan. Elle apparaîtra dans « Mon site » d'ici quelques minutes.</span>
       </div>
 
       <div className="card" style={{padding:'18px 18px',minHeight:120,display:'flex',alignItems:text?'flex-start':'center',justifyContent:'center'}}>
         {text || failed ? (
           <BilanMarkdown text={text || fallback}/>
         ) : (
-          <StarSpinner size={30} label="On prépare tes premiers conseils…" labelColor="rgba(255,255,255,.7)"/>
+          <StarSpinner size={30} label="On prépare vos premiers conseils…" labelColor="rgba(255,255,255,.7)"/>
         )}
       </div>
     </div>
@@ -16631,14 +16678,14 @@ function OnboardingEvalResultScreen({ results, questions, onDone, onManuel }) {
     return () => { alive = false; };
   }, []);
 
-  const fallback = `Bravo d'avoir joué le jeu de cette auto-évaluation ! Tu as répondu correctement à ${correct} question${correct>1?'s':''} sur ${total}. C'est déjà une bonne base pour comprendre l'énergie et agir sur ta facture. Explore maintenant le module Comprendre : chaque thème t'aidera à aller plus loin, à ton rythme.`;
+  const fallback = `Bravo d'avoir joué le jeu de cette auto-évaluation ! Vous avez répondu correctement à ${correct} question${correct>1?'s':''} sur ${total}. C'est déjà une bonne base pour comprendre l'énergie et agir sur votre facture. Explorez maintenant le module Comprendre : chaque thème vous aidera à aller plus loin, à votre rythme.`;
 
   return (
     <>
     <div className="screen fade-in">
       <div className="auth-header">
         <div className="welcome-tag" style={{color:'#7dd940'}}>Auto-évaluation</div>
-        <h1 className="welcome-title">Ton résultat,<br/><span className="accent">décrypté</span></h1>
+        <h1 className="welcome-title">Votre résultat,<br/><span className="accent">décrypté</span></h1>
       </div>
 
       <div style={{display:'flex',alignItems:'center',justifyContent:'center',gap:10,margin:'0 0 16px'}}>
@@ -16650,7 +16697,7 @@ function OnboardingEvalResultScreen({ results, questions, onDone, onManuel }) {
         {text || failed ? (
           <BilanMarkdown text={text || fallback}/>
         ) : (
-          <StarSpinner size={30} label="On analyse tes réponses…" labelColor="rgba(255,255,255,.7)"/>
+          <StarSpinner size={30} label="On analyse vos réponses…" labelColor="rgba(255,255,255,.7)"/>
         )}
       </div>
     </div>
@@ -16824,13 +16871,13 @@ function ParcoursBilanScreen({ user, profile, bilanData, onNext, onManuel }) {
     <>
     <div className="screen fade-in">
       <div className="auth-header">
-        <div className="welcome-tag" style={{color:'#7dd940'}}>Ton bilan personnalisé</div>
-        <h1 className="welcome-title">Ta conso,<br/><span className="accent">décryptée</span></h1>
+        <div className="welcome-tag" style={{color:'#7dd940'}}>Votre bilan personnalisé</div>
+        <h1 className="welcome-title">Votre conso,<br/><span className="accent">décryptée</span></h1>
       </div>
 
       {ready && !errored && data.consoKwh != null && (
         <div className="card" style={{padding:'14px 16px',marginBottom:12,textAlign:'center',border:'1.5px solid rgba(125,217,64,.4)'}}>
-          <div style={{fontSize:11,color:'rgba(255,255,255,.45)',textTransform:'uppercase',letterSpacing:'.5px',marginBottom:4}}>Ta consommation annuelle</div>
+          <div style={{fontSize:11,color:'rgba(255,255,255,.45)',textTransform:'uppercase',letterSpacing:'.5px',marginBottom:4}}>Votre consommation annuelle</div>
           <div style={{fontSize:32,fontWeight:900,color:'#7dd940',lineHeight:1}}>{data.consoKwh.toLocaleString('fr-FR')} <span style={{fontSize:16}}>kWh</span></div>
         </div>
       )}
@@ -16850,15 +16897,15 @@ function ParcoursBilanScreen({ user, profile, bilanData, onNext, onManuel }) {
             </div>
           </div>
         ) : !ready ? (
-          <StarSpinner size={30} label="On récupère ta courbe de charge ENEDIS et on l'analyse…" labelColor="rgba(255,255,255,.7)"/>
+          <StarSpinner size={30} label="On récupère votre courbe de charge ENEDIS et on l'analyse…" labelColor="rgba(255,255,255,.7)"/>
         ) : errored ? (
           <div style={{fontSize:13.5,lineHeight:1.55,color:'rgba(255,255,255,.85)'}}>
-            La récupération automatique de tes données ENEDIS n'a pas abouti{data.errorMsg ? ' :' : '.'}
+            La récupération automatique de vos données ENEDIS n'a pas abouti{data.errorMsg ? ' :' : '.'}
             {data.errorMsg && (
               <div style={{marginTop:8,padding:'9px 11px',background:'rgba(255,138,106,.1)',border:'1px solid rgba(255,138,106,.25)',borderRadius:10,fontSize:12.5,color:'rgba(255,200,180,.95)'}}>{data.errorMsg}</div>
             )}
             <div style={{marginTop:10,color:'rgba(255,255,255,.7)'}}>
-              Pas d'inquiétude{prenom} : on continue avec des estimations, et tu pourras relancer la collecte depuis « Mon site ».
+              Pas d'inquiétude{prenom} : on continue avec des estimations, et vous pourrez relancer la collecte depuis « Mon site ».
             </div>
           </div>
         ) : (
@@ -16868,7 +16915,7 @@ function ParcoursBilanScreen({ user, profile, bilanData, onNext, onManuel }) {
 
       {!ready && !regen && (
         <div style={{fontSize:12,color:'rgba(255,255,255,.45)',lineHeight:1.5,marginTop:12,textAlign:'center'}}>
-          Ça peut prendre quelques minutes. Tu peux avancer dès maintenant : ton bilan t'attendra dans « Mon site ».
+          Ça peut prendre quelques minutes. Vous pouvez avancer dès maintenant : votre bilan vous attendra dans « Mon site ».
         </div>
       )}
     </div>
@@ -16931,7 +16978,7 @@ function ParcoursLevierScreen({ user, profile, can = () => true, onValider, onMa
         hasBatterie:   (parseFloat(d.batterie_existante_kwh) || 0) > 0,
       } : null;
       const cartFlags = readCartFlags();
-      const eligibles = (allOffres || []).filter(o => autoOffreEligible(o, { siteProfile, cartFlags, accNearby, can }));
+      const eligibles = (allOffres || []).filter(o => autoOffreEligible(o, { siteProfile, cartFlags, accNearby, can, savings: sav.savings || {} }));
       const ranked = autoRankOffres(eligibles, sav.savings || {});
       setSavings(sav.savings || {});
       setCurrentBill(sav.currentBill);
@@ -16970,7 +17017,7 @@ function ParcoursLevierScreen({ user, profile, can = () => true, onValider, onMa
   if (!offres) {
     return (
       <div className="screen fade-in" style={{display:'flex',alignItems:'center',justifyContent:'center',minHeight:'50vh'}}>
-        <StarSpinner size={30} label="On prépare tes leviers d’économie…" labelColor="rgba(255,255,255,.7)"/>
+        <StarSpinner size={30} label="On prépare vos leviers d’économie…" labelColor="rgba(255,255,255,.7)"/>
       </div>
     );
   }
@@ -16994,7 +17041,7 @@ function ParcoursLevierScreen({ user, profile, can = () => true, onValider, onMa
     prenom:  profile?.prenom || '',
   }) || (
     // Repli quand aucun texte court n'est saisi côté admin.
-    `${o.sous_titre ? o.sous_titre + '. ' : ''}Ce levier te fait économiser environ ${fmtE(eco)} par an` +
+    `${o.sous_titre ? o.sous_titre + '. ' : ''}Ce levier vous fait économiser environ ${fmtE(eco)} par an` +
     `${invest > 0 ? `, pour un investissement initial de ${fmtE(invest)}` : ', sans aucun investissement'}` +
     `${o.delai_min_jours ? `, avec une mise en œuvre en ${o.delai_min_jours} jours` : ''}.`
   );
@@ -17012,8 +17059,8 @@ function ParcoursLevierScreen({ user, profile, can = () => true, onValider, onMa
       <div className="auto-prog">
         {Array.from({length: nbTotal}).map((_, i) => <span key={i} className={i < done ? 'done' : i === done ? 'cur' : ''}/>)}
       </div>
-      <div style={{fontSize:11,color:'rgba(255,255,255,.45)',textTransform:'uppercase',letterSpacing:'.6px',marginBottom:14,textAlign:'center'}}>
-        Levier {done + 1} sur {nbTotal}
+      <div style={{fontSize:20,fontWeight:900,color:'white',marginBottom:14,textAlign:'center',letterSpacing:'-.01em'}}>
+        Levier <span style={{color:'#7dd940'}}>{done + 1}</span> sur {nbTotal}
       </div>
 
       <div style={{textAlign:'center',marginBottom:16}}>
@@ -17027,7 +17074,7 @@ function ParcoursLevierScreen({ user, profile, can = () => true, onValider, onMa
           <div style={{fontSize:36,fontWeight:900,color:'#7dd940',lineHeight:1}}>-{Math.round(eco).toLocaleString('fr-FR')} €<span style={{fontSize:18}}>/an</span></div>
           {currentBill > 0 && (
             <div style={{fontSize:12,color:'rgba(255,255,255,.45)',marginTop:6}}>
-              Ta facture passerait de <strong style={{color:'white'}}>{fmtE(currentBill)}</strong> à <strong style={{color:'#7dd940'}}>{fmtE(Math.max(0, currentBill - eco))}</strong> par an
+              Votre facture passerait de <strong style={{color:'white'}}>{fmtE(currentBill)}</strong> à <strong style={{color:'#7dd940'}}>{fmtE(Math.max(0, currentBill - eco))}</strong> par an
             </div>
           )}
         </div>
@@ -17065,12 +17112,12 @@ function ParcoursFinScreen({ onPanier, onManuel }) {
       <div style={{textAlign:'center',marginBottom:20,marginTop:8}}>
         <div style={{fontSize:52,marginBottom:8}}>{nbItems > 0 ? '🎉' : '🧭'}</div>
         <div style={{fontSize:22,fontWeight:900,color:'white',lineHeight:1.2,marginBottom:8}}>
-          {nbItems > 0 ? 'Ton plan d’action est prêt !' : 'Tu as vu tous les leviers'}
+          {nbItems > 0 ? 'Votre plan d’action est prêt !' : 'Vous avez vu tous les leviers'}
         </div>
         <div style={{fontSize:14,color:'rgba(255,255,255,.6)',lineHeight:1.6}}>
           {nbItems > 0
-            ? `Tu as retenu ${nbItems} levier${nbItems > 1 ? 's' : ''} d’économie. Vérifie ton panier : tu y verras ta nouvelle facture et le gain sur 25 ans.`
-            : 'Aucun levier retenu pour l’instant. Tu peux explorer ta consommation en détail et revenir quand tu veux.'}
+            ? `Vous avez retenu ${nbItems} levier${nbItems > 1 ? 's' : ''} d’économie. Vérifiez votre panier : vous y verrez votre nouvelle facture et le gain sur 25 ans.`
+            : 'Aucun levier retenu pour l’instant. Vous pouvez explorer votre consommation en détail et revenir quand vous voulez.'}
         </div>
       </div>
     </div>
@@ -17545,7 +17592,7 @@ function ComprendreScoreScreen({ user, subject, score, total, results, isRevisio
       {mastered ? (
         <div className="card" style={{textAlign:'center',padding:'14px 18px',border:'1.5px solid rgba(125,217,64,.3)',marginBottom:12}}>
           <div style={{color:'#7dd940',fontWeight:700,fontSize:15}}>✓ Sujet maîtrisé !</div>
-          {failedIds.length > 0 && <div style={{fontSize:12,color:'rgba(255,255,255,.5)',marginTop:4}}>Les {failedIds.length} question{failedIds.length>1?'s':''} ratée{failedIds.length>1?'s':''} seront proposées en révision lors de ta prochaine session.</div>}
+          {failedIds.length > 0 && <div style={{fontSize:12,color:'rgba(255,255,255,.5)',marginTop:4}}>Les {failedIds.length} question{failedIds.length>1?'s':''} ratée{failedIds.length>1?'s':''} seront proposées en révision lors de votre prochaine session.</div>}
         </div>
       ) : (
         <div className="card" style={{textAlign:'center',padding:'14px 18px',border:'1.5px solid rgba(255,180,60,.25)',marginBottom:12}}>
@@ -18023,7 +18070,7 @@ class ErrorBoundary extends React.Component {
         <div style={{fontSize:46,marginBottom:14}}>⚠️</div>
         <div style={{fontSize:18,fontWeight:800,color:'#fff',marginBottom:8}}>Une erreur est survenue</div>
         <div style={{fontSize:13,color:'rgba(255,255,255,.6)',lineHeight:1.6,marginBottom:18}}>
-          Cet écran n'a pas pu s'afficher. Tu peux revenir en arrière ou recharger l'application.
+          Cet écran n'a pas pu s'afficher. Vous pouvez revenir en arrière ou recharger l'application.
         </div>
         <div style={{fontSize:11,color:'rgba(255,255,255,.4)',fontFamily:'monospace',background:'rgba(0,0,0,.25)',
           borderRadius:10,padding:'10px 12px',marginBottom:18,wordBreak:'break-word',textAlign:'left'}}>{msg}</div>
@@ -18103,6 +18150,32 @@ function App() {
       sessionStorage.setItem('starvolt_session_started', '1');
     }
   }, []);
+
+  // ─── Purge au changement de compte ──────────────────────────────────────────
+  // Le panier et le site actif vivent dans localStorage : ils SURVIVENT à une
+  // déconnexion. Le garde-fou ci-dessus ne se déclenche qu'au rechargement de
+  // page — se déconnecter puis créer un compte dans la même session laissait
+  // donc le panier du précédent (constaté : des panneaux solaires déjà au
+  // panier sur un compte neuf), et pire, un site_id appartenant à un AUTRE
+  // utilisateur. On purge dès que l'identité change.
+  useEffect(() => {
+    if (!user?.id) return;
+    let precedent = null;
+    try { precedent = localStorage.getItem('starvolt_last_user_id'); } catch {}
+    if (precedent !== user.id) {
+      clearPanierLS();
+      const prefixes = ['starvolt_flex_', 'starvolt_acc_nearby_', 'starvolt_linky_', 'starvolt_therm_kwh_'];
+      const exactes  = ['starvolt_active_site_id', 'starvolt_auto_parcours', 'starvolt_box_chosen',
+                        'starvolt_onboarding', 'starvolt_await_bilan', 'starvolt_focus_enedis',
+                        'starvolt_run_tutorial'];
+      try {
+        Object.keys(localStorage)
+          .filter(k => exactes.includes(k) || prefixes.some(p => k.startsWith(p)))
+          .forEach(k => localStorage.removeItem(k));
+      } catch {}
+    }
+    try { localStorage.setItem('starvolt_last_user_id', user.id); } catch {}
+  }, [user?.id]);
 
   useEffect(() => {
     sb.auth.getSession().then(({ data: { session } }) => {
@@ -18342,7 +18415,7 @@ function App() {
     switch (state.screen) {
 
       case 'HOME_CHOICE':
-        return <HomeChoiceScreen profile={profile} user={user} onComprendre={()=>goTo('COMPRENDRE_HOME')} onAction={autoStart} onCollecte={()=>goTo('MA_CONSO')} consoPrete={consoPrete} can={can}/>;
+        return <HomeChoiceScreen profile={profile} user={user} onComprendre={()=>goTo('COMPRENDRE_HOME')} onAction={autoStart} onCollecte={()=>{ try{localStorage.setItem('starvolt_focus_enedis','1');}catch{} goTo('MA_CONSO'); }} consoPrete={consoPrete} can={can}/>;
 
       case 'COMPRENDRE_HOME':
         return <ComprendreHomeScreen user={user} rolePerms={rolePerms} onGroup={(g)=>goTo('COMPRENDRE_GROUP',{learnGroup:g})} onAction={()=>goTo('MA_CONSO')} onBack={()=>goTo('HOME_CHOICE')}/>;
@@ -18410,7 +18483,7 @@ function App() {
       }
 
       case 'HOME_LOGGED_IN': // ancien écran retiré → on redirige vers la nouvelle landing
-        return <HomeChoiceScreen profile={profile} user={user} onComprendre={()=>goTo('COMPRENDRE_HOME')} onAction={autoStart} onCollecte={()=>goTo('MA_CONSO')} consoPrete={consoPrete} can={can}/>;
+        return <HomeChoiceScreen profile={profile} user={user} onComprendre={()=>goTo('COMPRENDRE_HOME')} onAction={autoStart} onCollecte={()=>{ try{localStorage.setItem('starvolt_focus_enedis','1');}catch{} goTo('MA_CONSO'); }} consoPrete={consoPrete} can={can}/>;
 
       case 'PROFILE':
         return <ProfileScreen
