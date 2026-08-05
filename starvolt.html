@@ -7433,6 +7433,17 @@ const tarifLabel = (t) => !t ? '' : (t.fournisseur ? `${t.fournisseur} ${t.nom}`
 // mis-selling inacceptable pour une filiale du Crédit Agricole.
 // Il devient visible de tous quand il est promu 'verifie' : validation admin
 // ou corroboration par 2 factures concordantes.
+// Une grille STATIQUE de plus de 3 mois n'est probablement plus le prix du
+// marché : la proposer ferait miroiter une économie qui n'existe plus. Les
+// tarifs DYNAMIQUES échappent à la règle — leur prix suit le marché heure par
+// heure, seuls l'abonnement et la marge sont figés : ils ne périment pas.
+const TARIF_PEREMPTION_MS = 92 * 24 * 3600 * 1000;
+const tarifPerime = (t) => {
+  if (!t || t.tarif_dynamique) return false;
+  const ref = t.last_modified || t.date_debut || t.created_at;
+  return ref ? (Date.now() - new Date(ref).getTime()) > TARIF_PEREMPTION_MS : false;
+};
+
 const tarifsVisibles = (tariffs, tarifIdSite) =>
   (tariffs || []).filter(t =>
     // Grille archivée (remplacée par une version plus récente) : elle ne sert
@@ -7440,7 +7451,8 @@ const tarifsVisibles = (tariffs, tarifIdSite) =>
     // encore le tarif du site — sa facture doit rester calculable en attendant
     // qu'il bascule sur la nouvelle grille.
     (t.actif !== false || t.id === tarifIdSite) &&
-    (t.statut !== 'brouillon' || t.id === tarifIdSite));
+    (t.statut !== 'brouillon' || t.id === tarifIdSite) &&
+    (!tarifPerime(t) || t.id === tarifIdSite));
 
 // ─── Niveau de bricolage (1–5) ───────────────────────────────────────────────
 // Échelle déclarée par l'utilisateur au questionnaire logement (sites.flex_bricolage).
@@ -15023,13 +15035,9 @@ function AdminTariffsScreen({ onEdit, onNew, onBack }) {
 
   const fmt = (ts) => ts ? new Date(ts).toLocaleDateString('fr-FR', {day:'2-digit',month:'2-digit',year:'2-digit'}) : '—';
 
-  // Un tarif qui n'a pas bouge depuis 3 mois est probablement perime : les
-  // grilles du marche changent plusieurs fois par an.
-  const TROIS_MOIS = 92 * 24 * 3600 * 1000;
-  const perime = (t) => {
-    const ref = t.last_modified || t.date_debut || t.created_at;
-    return ref ? (Date.now() - new Date(ref).getTime()) > TROIS_MOIS : false;
-  };
+  // Même règle que le comparatif (tarifPerime, module-level) : une seule
+  // définition, sinon la pastille admin et le filtrage divergeraient.
+  const perime = tarifPerime;
   const nbPerimes = tariffs.filter(perime).length;
 
   // ── Import de PDF du comparateur ──────────────────────────────────────────
