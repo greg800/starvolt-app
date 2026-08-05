@@ -5388,7 +5388,7 @@ function TarifPicker({ user, siteId, tariffs, value, onChange, onTariffsChanged,
   // Catalogue proposable : les offres vérifiées uniquement (les brouillons des
   // autres clients ne sont jamais proposés — cf. tarifsVisibles).
   const catalogue = React.useMemo(
-    () => (tariffs || []).filter(t => t.statut !== 'brouillon'), [tariffs]);
+    () => (tariffs || []).filter(t => t.statut !== 'brouillon' && t.actif !== false), [tariffs]);
   const resultats = React.useMemo(
     () => catalogue.filter(t => tarifMatch(t, q)).slice(0, 8), [catalogue, q]);
 
@@ -7434,7 +7434,13 @@ const tarifLabel = (t) => !t ? '' : (t.fournisseur ? `${t.fournisseur} ${t.nom}`
 // Il devient visible de tous quand il est promu 'verifie' : validation admin
 // ou corroboration par 2 factures concordantes.
 const tarifsVisibles = (tariffs, tarifIdSite) =>
-  (tariffs || []).filter(t => t.statut !== 'brouillon' || t.id === tarifIdSite);
+  (tariffs || []).filter(t =>
+    // Grille archivée (remplacée par une version plus récente) : elle ne sert
+    // qu'à expliquer un chiffrage passé, jamais à comparer. Sauf si c'est
+    // encore le tarif du site — sa facture doit rester calculable en attendant
+    // qu'il bascule sur la nouvelle grille.
+    (t.actif !== false || t.id === tarifIdSite) &&
+    (t.statut !== 'brouillon' || t.id === tarifIdSite));
 
 // ─── Niveau de bricolage (1–5) ───────────────────────────────────────────────
 // Échelle déclarée par l'utilisateur au questionnaire logement (sites.flex_bricolage).
@@ -14925,17 +14931,136 @@ function AdminOffreEditScreen({ offre, onSave, onDelete, onBack }) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Bilan d'un import de PDF : ce qui est entré, ce qui a remplacé quoi, et
+// SURTOUT ce qui a été refusé avec le motif — une offre silencieusement ignorée
+// serait pire qu'un échec visible, l'admin croirait sa grille à jour.
+function ImportBilan({ etat, onFermer }) {
+  const carte = { padding:'12px 14px', borderRadius:12, marginBottom:8, fontSize:12.5, lineHeight:1.55 };
+  if (etat.encours) {
+    return (
+      <div style={{...carte, background:'rgba(125,217,64,.1)', border:'1px solid rgba(125,217,64,.3)', color:'#d8f5c4',
+                   display:'flex', alignItems:'center', gap:12}}>
+        <StarSpinner size={22}/>
+        <div>
+          <div style={{fontWeight:800, color:'#fff'}}>Lecture du fichier {etat.fait + 1} sur {etat.total}</div>
+          <div style={{opacity:.8}}>{etat.fichier} — l'analyse d'un comparatif complet prend une dizaine de secondes.</div>
+        </div>
+      </div>
+    );
+  }
+  const tot = (cle) => etat.bilans.reduce((n, b) => n + (b.bilan?.[cle]?.length || 0), 0);
+  return (
+    <div style={{...carte, background:'rgba(255,255,255,.05)', border:'1px solid rgba(255,255,255,.14)', color:'rgba(255,255,255,.85)'}}>
+      <div style={{display:'flex', alignItems:'center', marginBottom:8}}>
+        <div style={{fontWeight:900, color:'#fff', fontSize:14}}>Bilan de l'import</div>
+        <button onClick={onFermer} style={{marginLeft:'auto', background:'none', border:'none', color:'rgba(255,255,255,.5)',
+          fontSize:18, cursor:'pointer', padding:'0 4px', lineHeight:1}}>×</button>
+      </div>
+      <div style={{marginBottom:10, color:'rgba(255,255,255,.65)'}}>
+        <strong style={{color:'#7dd940'}}>{tot('importes')}</strong> ajoutés ·{' '}
+        <strong style={{color:'#7dd940'}}>{tot('remplaces')}</strong> mis à jour ·{' '}
+        <strong style={{color: tot('rejetes') ? '#ff8080' : 'inherit'}}>{tot('rejetes')}</strong> non importés
+      </div>
+
+      {etat.bilans.map((b, i) => (
+        <div key={i} style={{marginBottom:10, paddingTop:8, borderTop:'1px solid rgba(255,255,255,.08)'}}>
+          <div style={{fontWeight:700, color:'#fff', marginBottom:4}}>
+            {b.fichier}
+            {b.date_grille && <span style={{fontWeight:400, color:'rgba(255,255,255,.45)'}}> — grille du {b.date_grille}
+              {b.puissance_kva ? ` · ${b.puissance_kva} kVA` : ''}</span>}
+          </div>
+          {b.echec && <div style={{color:'#ff8080'}}>Échec : {b.echec}</div>}
+
+          {b.bilan?.remplaces?.length > 0 && (
+            <div style={{marginTop:4}}>
+              {b.bilan.remplaces.map((r, j) => (
+                <div key={j} style={{marginBottom:3}}>
+                  <span style={{color:'#7dd940'}}>↻</span> {r.offre} —{' '}
+                  <span style={{color:'rgba(255,255,255,.5)'}}>abo {r.avant.abo} → </span>
+                  <strong style={{color:'#fff'}}>{r.apres.abo} €</strong>
+                  <span style={{color:'rgba(255,255,255,.5)'}}> · kWh {r.avant.hp} → </span>
+                  <strong style={{color:'#fff'}}>{r.apres.hp} €</strong>
+                  {r.sites_bascules > 0 && <span style={{color:'rgba(255,200,80,.9)'}}> · {r.sites_bascules} site(s) basculé(s)</span>}
+                </div>
+              ))}
+            </div>
+          )}
+          {b.bilan?.importes?.length > 0 && (
+            <div style={{marginTop:4, color:'rgba(255,255,255,.7)'}}>
+              {b.bilan.importes.map((r, j) => (
+                <div key={j}><span style={{color:'#7dd940'}}>+</span> {r.offre} <span style={{opacity:.6}}>({r.etat})</span></div>
+              ))}
+            </div>
+          )}
+          {b.bilan?.rejetes?.length > 0 && (
+            <div style={{marginTop:6}}>
+              <div style={{color:'#ff8080', fontWeight:700, marginBottom:2}}>Non importés :</div>
+              {b.bilan.rejetes.map((r, j) => (
+                <div key={j} style={{color:'rgba(255,180,180,.9)', marginBottom:2}}>
+                  • {r.offre} — <span style={{opacity:.85}}>{r.motifs.join(' ; ')}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function AdminTariffsScreen({ onEdit, onNew, onBack }) {
   const [tariffs, setTariffs] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [imports, setImports] = useState(null);   // { encours, total, fait, fichier, bilans[] }
+  const fileRef = useRef(null);
 
-  useEffect(() => {
-    sb.from('tarifs_electricite')
-      .select('*').order('created_at')
-      .then(({ data }) => { setTariffs(data || []); setLoading(false); });
-  }, []);
+  // Les grilles archivees ne sont pas listees : elles ne servent qu'a expliquer
+  // un chiffrage passe (cf. colonne actif).
+  const charger = () => sb.from('tarifs_electricite')
+    .select('*').eq('actif', true).order('created_at')
+    .then(({ data }) => { setTariffs(data || []); setLoading(false); });
+  useEffect(() => { charger(); }, []);
 
   const fmt = (ts) => ts ? new Date(ts).toLocaleDateString('fr-FR', {day:'2-digit',month:'2-digit',year:'2-digit'}) : '—';
+
+  // Un tarif qui n'a pas bouge depuis 3 mois est probablement perime : les
+  // grilles du marche changent plusieurs fois par an.
+  const TROIS_MOIS = 92 * 24 * 3600 * 1000;
+  const perime = (t) => {
+    const ref = t.last_modified || t.date_debut || t.created_at;
+    return ref ? (Date.now() - new Date(ref).getTime()) > TROIS_MOIS : false;
+  };
+  const nbPerimes = tariffs.filter(perime).length;
+
+  // ── Import de PDF du comparateur ──────────────────────────────────────────
+  // Un appel par fichier, en serie : chaque PDF pese plus d'un Mo et sa lecture
+  // dure une dizaine de secondes ; les lancer en parallele ne ferait que
+  // multiplier les risques de depassement de delai.
+  const importer = async (files) => {
+    const liste = Array.from(files || []);
+    if (!liste.length) return;
+    setImports({ encours: true, total: liste.length, fait: 0, fichier: liste[0].name, bilans: [] });
+    const bilans = [];
+    for (let i = 0; i < liste.length; i++) {
+      const f = liste[i];
+      setImports(st => ({ ...st, fait: i, fichier: f.name }));
+      try {
+        const buf = new Uint8Array(await f.arrayBuffer());
+        let bin = '';
+        for (let j = 0; j < buf.length; j += 0x8000) bin += String.fromCharCode(...buf.subarray(j, j + 0x8000));
+        const { data, error } = await sb.functions.invoke('tarifs-import', {
+          body: { fichier_nom: f.name, pdf_base64: btoa(bin) },
+        });
+        if (error || data?.error) {
+          let motif = data?.error || error?.message || 'erreur inconnue';
+          try { const corps = await error?.context?.json(); if (corps?.message || corps?.error) motif = corps.message || corps.error; } catch {}
+          bilans.push({ fichier: f.name, echec: motif });
+        } else bilans.push(data);
+      } catch (e) { bilans.push({ fichier: f.name, echec: String(e.message || e) }); }
+    }
+    setImports({ encours: false, total: liste.length, fait: liste.length, bilans });
+    charger();
+  };
 
   return (
     <>
@@ -14944,6 +15069,14 @@ function AdminTariffsScreen({ onEdit, onNew, onBack }) {
         <div className="welcome-tag" style={{color:'#ffb340'}}>Administration</div>
         <h1 className="welcome-title">Tarifs<br/><span className="accent">d'électricité</span></h1>
       </div>
+      {!loading && nbPerimes > 0 && (
+        <div style={{margin:'0 0 10px',padding:'10px 14px',borderRadius:12,fontSize:12.5,lineHeight:1.5,
+          background:'rgba(220,50,50,.12)',border:'1px solid rgba(220,50,50,.35)',color:'#ffb3b3'}}>
+          <strong>{nbPerimes} tarif{nbPerimes>1?'s':''}</strong> sans mise à jour depuis plus de 3 mois.
+          Importez un comparatif à jour pour rafraîchir les grilles.
+        </div>
+      )}
+      {imports && <ImportBilan etat={imports} onFermer={()=>setImports(null)}/>}
       {loading ? <div style={{textAlign:'center',padding:40}}><StarSpinner size={34}/></div> : (
         <div style={{display:'flex',flexDirection:'column',gap:8,marginBottom:80}}>
           {tariffs.map(t => (
@@ -14960,6 +15093,8 @@ function AdminTariffsScreen({ onEdit, onNew, onBack }) {
                 <div className="tariff-row-badges">
                   {t.tarif_dynamique && <span className="tariff-badge dyn">Dynamique</span>}
                   {t.bat_virtuelle && <span className="tariff-badge bat">Bat. virtuelle</span>}
+                  {perime(t) && <span style={{background:'rgba(220,50,50,.9)',color:'#fff',fontSize:10,fontWeight:800,
+                    borderRadius:6,padding:'2px 7px'}}>MAJ nécessaire</span>}
                 </div>
                 <div className="tariff-row-meta" style={{marginTop:3}}>Modifié : {fmt(t.last_modified)}</div>
               </div>
@@ -14971,6 +15106,12 @@ function AdminTariffsScreen({ onEdit, onNew, onBack }) {
     </div>
     <StickyFooter row onBack={onBack}>
       <button className="btn btn-sec" style={{fontSize:13}} onClick={onNew}>+ Nouveau tarif</button>
+      <button className="btn btn-primary" style={{fontSize:13}}
+        disabled={imports?.encours} onClick={()=>fileRef.current?.click()}>
+        {imports?.encours ? `Lecture ${imports.fait + 1}/${imports.total}…` : '📄 Importer des PDF'}
+      </button>
+      <input ref={fileRef} type="file" accept="application/pdf" multiple style={{display:'none'}}
+        onChange={e => { importer(e.target.files); e.target.value = ''; }}/>
     </StickyFooter>
     </>
   );
