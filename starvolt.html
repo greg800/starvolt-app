@@ -426,12 +426,12 @@
     .auto4 .a4-ico  { flex: 0 0 auto; padding: 12px 11px; }
     .auto4 .a4-grow { flex: 1 1 0; min-width: 0; }
     .auto4 svg { flex: 0 0 auto; }
-    /* Retour et mode manuel : vert foncé. Le picto on/off = « je décide ». */
-    .auto4 .a4-dark  { background: var(--green-dark); color: #d8f5c4; border-color: rgba(125,217,64,.35); }
-    /* En savoir + : vert clair, c'est le chemin qu'on propose. */
-    .auto4 .a4-light { background: var(--green); color: #1a4500; font-weight: 800; }
-    /* Levier suivant : flèche blanche, neutre — on avance sans rien engager. */
-    .auto4 .a4-next  { background: rgba(255,255,255,.10); color: #fff; border-color: rgba(255,255,255,.22); }
+    /* Deux niveaux seulement, et un seul accent : le vert clair désigne LE
+       chemin qu'on propose (« en savoir davantage »). Tout le reste — retour,
+       mode manuel, levier suivant — partage un style neutre : ce sont des
+       sorties de rang égal, aucune ne mérite d'attirer l'œil plus qu'une autre. */
+    .auto4 .a4-light  { background: var(--green); color: #1a4500; font-weight: 800; }
+    .auto4 .a4-neutre { background: rgba(255,255,255,.10); color: #fff; border-color: rgba(255,255,255,.22); }
     .auto4 .a4-lg { display: none; }
     @media (min-width: 768px) {
       /* Les libellés longs prennent la largeur de leur texte plutôt que de se
@@ -16667,7 +16667,7 @@ function AutoLevierFooter({ onBack, onSavoirPlus, onManuel, onSuivant, dernier =
   return (
     <StickyFooter wide>
       <div className="auto4">
-        <button className="a4-dark a4-ico" onClick={onBack} aria-label="Retour" title="Retour">
+        <button className="a4-neutre a4-ico" onClick={onBack} aria-label="Retour" title="Retour">
           <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round">
             <line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/>
@@ -16679,15 +16679,15 @@ function AutoLevierFooter({ onBack, onSavoirPlus, onManuel, onSuivant, dernier =
           <span className="a4-lg">Je veux en savoir davantage</span>
         </button>
 
-        <button className="a4-dark a4-grow" onClick={onManuel}>
+        <button className="a4-neutre a4-grow" onClick={onManuel}>
           <span style={{width:16,height:16,display:'inline-flex',flexShrink:0}}>
-            <IconPower color="#d8f5c4" strokeWidth={8}/>
+            <IconPower color="#fff" strokeWidth={8}/>
           </span>
           <span className="a4-sm">Manuel</span>
           <span className="a4-lg">Je préfère analyser moi-même</span>
         </button>
 
-        <button className="a4-next a4-ico" onClick={onSuivant}
+        <button className="a4-neutre a4-ico" onClick={onSuivant}
           aria-label={dernier ? 'Terminer' : 'Voir le levier suivant'}
           title={dernier ? 'Terminer' : 'Voir le levier suivant'}>
           <span className="a4-lg" style={{fontWeight:700}}>{dernier ? 'Terminer' : 'Voir le levier suivant'}</span>
