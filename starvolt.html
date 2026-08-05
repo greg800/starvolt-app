@@ -7419,6 +7419,11 @@ const AUTO_TYPE_SCREEN = {
 };
 const offrePrimaryType = (o) => (o?.types_offre || []).find(t => AUTO_TYPE_SCREEN[t]) || null;
 
+// Libellé complet d'un tarif pour l'utilisateur. Fournisseur et offre sont deux
+// colonnes distinctes (la recherche interroge les deux séparément), mais à
+// l'écran « Tarif Bleu » seul n'identifie rien : on recompose.
+const tarifLabel = (t) => !t ? '' : (t.fournisseur ? `${t.fournisseur} ${t.nom}` : t.nom);
+
 // ─── Grille de tarifs : brouillons issus de l'OCR ────────────────────────────
 // Une seule grille (tarifs_electricite). Un tarif lu sur une facture y entre
 // avec statut='brouillon' : il sert UNIQUEMENT à calculer la facture de celui
@@ -7641,7 +7646,7 @@ async function computeSavingsByType(user) {
       const cur = site.tarif_id ? ranked.find(r => r.t.id === site.tarif_id) : null;
       const saving = cur ? Math.round(cur.result.total - ranked[0].result.total) : null;
       out.savings.optimisation_fournisseur = saving;
-      if (saving > 0) out.bestTariffName = ranked[0].t.nom;
+      if (saving > 0) out.bestTariffName = tarifLabel(ranked[0].t);
 
       const curTariff = site.tarif_id ? tariffs.find(t => t.id === site.tarif_id) : null;
       const curBill = cur?.result?.total || (kwh_total * 0.18);
@@ -8357,7 +8362,7 @@ function OptimisationScreen({ user, userProfile, onBack, onPanier, onMonSite, on
           <div className="card" style={{ padding:'16px', marginBottom:12, textAlign:'center', border:'1.5px solid rgba(125,217,64,.4)' }}>
             <div style={{ fontSize:11, color:'rgba(255,255,255,.45)', textTransform:'uppercase', letterSpacing:'.5px', marginBottom:4 }}>Économies estimées</div>
             <div style={{ fontSize:36, fontWeight:900, color:'#7dd940', lineHeight:1 }}>-{heroSaving.toLocaleString('fr-FR')} €<span style={{fontSize:18}}>/an</span></div>
-            {ranked[0] && <div style={{ fontSize:12, color:'rgba(255,255,255,.45)', marginTop:6 }}>En passant sur le tarif <strong style={{color:'#7dd940'}}>{ranked[0].t.nom}</strong></div>}
+            {ranked[0] && <div style={{ fontSize:12, color:'rgba(255,255,255,.45)', marginTop:6 }}>En passant sur le tarif <strong style={{color:'#7dd940'}}>{tarifLabel(ranked[0].t)}</strong></div>}
           </div>
         )}
         <div className="card" style={{ padding:'14px 16px', border:'1px solid rgba(125,217,64,.2)' }}>
@@ -8395,7 +8400,7 @@ function OptimisationScreen({ user, userProfile, onBack, onPanier, onMonSite, on
           localStorage.setItem('starvolt_optimisation_chosen','true');
           localStorage.setItem('starvolt_optimisation_tariff_id', effectiveSelectedId);
           localStorage.setItem('starvolt_optimisation_saving', String(heroSaving));
-          if (selectedRanked) localStorage.setItem('starvolt_optimisation_tariff_nom', selectedRanked.t.nom);
+          if (selectedRanked) localStorage.setItem('starvolt_optimisation_tariff_nom', tarifLabel(selectedRanked.t));
           localStorage.removeItem('starvolt_baisse_facture');
           if (onCartUpdate) onCartUpdate();
         }}>
@@ -8438,7 +8443,7 @@ function OptimisationScreen({ user, userProfile, onBack, onPanier, onMonSite, on
             <div style={{ background:'rgba(255,255,255,.06)', borderRadius:10, padding:'11px 14px', marginBottom:10, display:'flex', justifyContent:'space-between', alignItems:'center', gap:8 }}>
               <div style={{ fontSize:11, color:'rgba(255,255,255,.4)', fontWeight:600, textTransform:'uppercase', letterSpacing:'.3px', flexShrink:0 }}>Fournisseur actuel</div>
               <div style={{ fontSize:15, fontWeight:900, color:'white', textAlign:'right' }}>
-                {currentRanked ? currentRanked.t.nom : <span style={{color:'rgba(255,200,50,.6)'}}>Non défini</span>}
+                {currentRanked ? tarifLabel(currentRanked.t) : <span style={{color:'rgba(255,200,50,.6)'}}>Non défini</span>}
               </div>
             </div>
 
@@ -8492,8 +8497,8 @@ function OptimisationScreen({ user, userProfile, onBack, onPanier, onMonSite, on
             <div className="card" style={{ padding:'18px 16px', marginBottom:14, border:'2px solid rgba(125,217,64,.4)' }}>
               <div style={{ fontSize:12, color:'rgba(125,217,64,.75)', fontWeight:700, textTransform:'uppercase', letterSpacing:'.5px', marginBottom:8 }}>Notre conseil</div>
               <div style={{ fontSize:16, color:'white', lineHeight:1.6 }}>
-                Passer de <span style={{color:'white', fontWeight:700}}>{currentRanked.t.nom}</span> à{' '}
-                <span style={{color:'#7dd940', fontWeight:700}}>{ranked[0].t.nom}</span> — ce qui vous ferait gagner{' '}
+                Passer de <span style={{color:'white', fontWeight:700}}>{tarifLabel(currentRanked.t)}</span> à{' '}
+                <span style={{color:'#7dd940', fontWeight:700}}>{tarifLabel(ranked[0].t)}</span> — ce qui vous ferait gagner{' '}
                 <span style={{color:'#7dd940', fontWeight:900, fontSize:18}}>{heroSaving.toLocaleString('fr-FR')} € TTC</span> par an,
                 sans aucune perte de confort et en un clic.
               </div>
@@ -8531,7 +8536,7 @@ function OptimisationScreen({ user, userProfile, onBack, onPanier, onMonSite, on
                     <div style={{ flex:1, minWidth:0 }}>
                       <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:4 }}>
                         <span style={{ fontSize:20 }}>{rank}</span>
-                        <div style={{ fontWeight:800, fontSize:16, color:'white' }}>{t.nom}</div>
+                        <div style={{ fontWeight:800, fontSize:16, color:'white' }}>{tarifLabel(t)}</div>
                       </div>
                       <div style={{ fontSize:15, color: result.is_dynamic ? 'rgba(125,217,64,.6)' : 'rgba(255,255,255,.4)', lineHeight:1.4 }}>
                         <div>{result.is_dynamic ? 'Tarif dynamique' : result.is_base ? 'Tarif à prix fixe' : 'Tarif HC/HP'}</div>
@@ -12665,7 +12670,7 @@ function AdminFacturesScreen({ onBack }) {
 
   const th = { textAlign:'left', padding:'8px 10px', color:'rgba(255,255,255,.4)', fontWeight:600,
     borderBottom:'1px solid rgba(255,255,255,.08)', whiteSpace:'nowrap', fontSize:12 };
-  const td = { padding:'10px', borderBottom:'1px solid rgba(255,255,255,.06)', whiteSpace:'nowrap' };
+  const td = { padding:'10px', borderBottom:'1px solid rgba(255,255,255,.06)', whiteSpace:'nowrap', color:'#fff' };
   const champ = (l, k, type='text') => (
     <div className="inp-group" style={{marginBottom:8}}>
       <label className="inp-label" style={{fontSize:11}}>{l}</label>
@@ -14944,7 +14949,9 @@ function AdminTariffsScreen({ onEdit, onNew, onBack }) {
           {tariffs.map(t => (
             <div key={t.id} className="tariff-row-item" onClick={()=>onEdit(t)}>
               <div style={{flex:1}}>
-                <div className="tariff-row-name">{t.nom}</div>
+                <div className="tariff-row-name">
+                  {t.fournisseur ? <span style={{color:'#7dd940'}}>{t.fournisseur} · </span> : null}{t.nom}
+                </div>
                 <div className="tariff-row-meta">
                   Abo : {t.abo_annuel ? `${t.abo_annuel} €/an` : '—'}
                   {t.prix_hp ? ` · HP : ${t.prix_hp} €` : ''}
@@ -15010,6 +15017,7 @@ function AdminTariffEditScreen({ tariff, onSave, onDelete, onBack }) {
 
   const [f, setF] = useState({
     nom:                       tariff?.nom || '',
+    fournisseur:               tariff?.fournisseur || '',
     abo_annuel:                tariff?.abo_annuel ?? '',
     type_tarif:                getInitType(tariff),
     prix_hp:                   tariff?.prix_hp ?? '',
@@ -15058,6 +15066,7 @@ function AdminTariffEditScreen({ tariff, onSave, onDelete, onBack }) {
     const isDyn = f.type_tarif === 'dynamique';
     const payload = {
       nom:              f.nom.trim(),
+      fournisseur:      f.fournisseur.trim() || null,
       abo_annuel:       n(f.abo_annuel),
       type_tarif:       f.type_tarif,
       tarif_dynamique:  isDyn,
@@ -15094,7 +15103,10 @@ function AdminTariffEditScreen({ tariff, onSave, onDelete, onBack }) {
           <h1 className="welcome-title">{isNew ? 'Nouveau' : 'Modifier'}<br/><span className="accent">tarif</span></h1>
         </div>
         <div className="form-card">
-          <TariffField label="Nom du tarif *" fkey="nom" value={f.nom} onChange={upd} placeholder="EDF TRV HC HP"/>
+          {/* Fournisseur et offre sont deux champs distincts : la recherche
+             interroge les deux, et l'admin retrouve l'un sans fouiller l'autre. */}
+         <TariffField label="Fournisseur" fkey="fournisseur" value={f.fournisseur} onChange={upd} placeholder="EDF"/>
+         <TariffField label="Nom de l'offre *" fkey="nom" value={f.nom} onChange={upd} placeholder="Tarif Bleu HC/HP"/>
           <TariffField label="Abonnement annuel (€/an)" fkey="abo_annuel" type="number" value={String(f.abo_annuel)} onChange={upd} placeholder="237.72"/>
 
           {/* Type de tarif */}
@@ -16063,7 +16075,7 @@ function AdminSitesScreen({ onBack, onEdit }) {
   const cols = ['Propriétaire', 'Site', 'Conso', 'Chauffage élec', 'ECS élec', 'Propriétaire', 'Collectif', 'Surface', ''];
   const th = { textAlign:'left', padding:'8px 10px', color:'rgba(255,255,255,.4)', fontWeight:600,
     borderBottom:'1px solid rgba(255,255,255,.08)', whiteSpace:'nowrap', fontSize:12 };
-  const td = { padding:'10px', borderBottom:'1px solid rgba(255,255,255,.06)', whiteSpace:'nowrap' };
+  const td = { padding:'10px', borderBottom:'1px solid rgba(255,255,255,.06)', whiteSpace:'nowrap', color:'#fff' };
 
   return (
     <>
