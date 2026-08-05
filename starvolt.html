@@ -2539,7 +2539,7 @@ function AuthSignupScreen({ onGoToLogin, onSignedUp, onSuccessDone }) {
           adresse_ligne1: adresse.trim(),
           code_postal:    codePostal.trim(),
           ville:          ville.trim(),
-          tarif_id:       '5f805745-8e02-46bc-bbda-caaa28390370',
+          tarif_id:       await tarifParDefautId(),
         }).select().single();
         newSite = ns;
         if (newSite) {
@@ -3389,9 +3389,22 @@ function SiteEnedisDetail({ site, tariffs=[], onBack }){
 }
 
 // ─── SiteFormCard ─────────────────────────────
-const EDF_TRV_ID = '5f805745-8e02-46bc-bbda-caaa28390370';
+// Tarif de repli, désigné dans l'admin (colonne par_defaut). Remplace
+// l'identifiant EDF qui était codé en dur ici : changer de grille de repli ne
+// demande plus un déploiement.
+async function tarifParDefautId() {
+  try {
+    const { data } = await sb.from('tarifs_electricite')
+      .select('id').eq('par_defaut', true).maybeSingle();
+    return data?.id || null;
+  } catch { return null; }
+}
 
 function SiteFormCard({initial={},onSave,onCancel}){
+  // onSave est appelé depuis un onClick synchrone : le tarif de repli est donc
+  // résolu au montage plutôt qu'au moment de l'enregistrement.
+  const[tarifDefaut,setTarifDefaut]=React.useState(null);
+  React.useEffect(()=>{ tarifParDefautId().then(setTarifDefaut); },[]);
   const[nom,setNom]=React.useState(initial.nom||'');
   const[prenom,setPrenom]=React.useState(initial.titulaire_prenom||'');
   const[nomTit,setNomTit]=React.useState(initial.titulaire_nom||'');
@@ -3460,7 +3473,7 @@ function SiteFormCard({initial={},onSave,onCancel}){
               titulaire_nom:nomTit.trim()||null,
               adresse_ligne1:adr,code_postal:cp,ville,
               pdl:pdl.trim()||null,
-              tarif_id: initial.tarif_id || EDF_TRV_ID,
+              tarif_id: initial.tarif_id || tarifDefaut,
               hc_debut1:hc1s||null,hc_fin1:hc1e||null,
               hc_debut2:hc2s||null,hc_fin2:hc2e||null,
               heure_debut_hc1:hc1s||null,heure_fin_hc1:hc1e||null,
@@ -15179,6 +15192,7 @@ function AdminTariffEditScreen({ tariff, onSave, onDelete, onBack }) {
   const [f, setF] = useState({
     nom:                       tariff?.nom || '',
     fournisseur:               tariff?.fournisseur || '',
+    par_defaut:                !!tariff?.par_defaut,
     abo_annuel:                tariff?.abo_annuel ?? '',
     type_tarif:                getInitType(tariff),
     prix_hp:                   tariff?.prix_hp ?? '',
@@ -15240,17 +15254,36 @@ function AdminTariffEditScreen({ tariff, onSave, onDelete, onBack }) {
       bat_virtuelle: false, surcout_abonnement: null, acheminement_hp: null, acheminement_hc: null,
       last_modified: new Date().toISOString(),
     };
-    let err;
-    if (isNew) ({ error: err } = await sb.from('tarifs_electricite').insert(payload));
-    else       ({ error: err } = await sb.from('tarifs_electricite').update(payload).eq('id', tariff.id));
+    let err, id = tariff?.id;
+    if (isNew) {
+      const { data, error } = await sb.from('tarifs_electricite').insert(payload).select('id').single();
+      err = error; id = data?.id;
+    } else {
+      ({ error: err } = await sb.from('tarifs_electricite').update(payload).eq('id', tariff.id));
+    }
+    if (!err && id && f.par_defaut && !tariff?.par_defaut) {
+      // Bascule atomique côté base : retire l'ancien défaut avant de poser
+      // celui-ci. Deux updates séparés violeraient l'index unique partiel.
+      const { error: e2 } = await sb.rpc('set_tarif_defaut', { p_id: id });
+      if (e2) err = e2;
+    }
     setLoading(false);
     if (err) { setError(err.message); return; }
     onSave();
   };
 
-  const handleDelete = async () => {
-    if (!confirm(`Supprimer "${tariff.nom}" ?`)) return;
-    await sb.from('tarifs_electricite').delete().eq('id', tariff.id);
+  // On n'efface plus un tarif : on l'archive. Une grille supprimée rendrait
+  // inexplicables tous les chiffrages passés qui s'appuyaient dessus.
+  const handleArchive = async () => {
+    if (!confirm(`Archiver « ${tariff.nom} » ?\n\nIl disparaîtra des listes et des comparatifs, mais restera en base avec sa date de fin. Les sites qui l'utilisent basculeront sur le tarif par défaut.`)) return;
+    setLoading(true); setError(null);
+    const { data, error: err } = await sb.rpc('archiver_tarif', { p_id: tariff.id });
+    setLoading(false);
+    if (err) { setError(err.message); return; }
+    const r = Array.isArray(data) ? data[0] : data;
+    if (r?.sites_reaffectes > 0) {
+      alert(`Tarif archivé. ${r.sites_reaffectes} site(s) basculé(s) sur le tarif par défaut.`);
+    }
     onDelete();
   };
 
@@ -15267,6 +15300,31 @@ function AdminTariffEditScreen({ tariff, onSave, onDelete, onBack }) {
           {/* Fournisseur et offre sont deux champs distincts : la recherche
              interroge les deux, et l'admin retrouve l'un sans fouiller l'autre. */}
          <TariffField label="Fournisseur" fkey="fournisseur" value={f.fournisseur} onChange={upd} placeholder="EDF"/>
+         {/* Grille de repli quand le tarif réel du client est inconnu.
+             Un seul tarif peut la porter : l'activer ici la retire de l'autre. */}
+         <div className="inp-group">
+           <label
+             onClick={() => { if (!f.par_defaut) upd('par_defaut', true); }}
+             style={{display:'flex',alignItems:'flex-start',gap:11,padding:'11px 14px',borderRadius:10,
+               cursor: f.par_defaut ? 'default' : 'pointer', border:'1px solid',
+               borderColor: f.par_defaut ? 'var(--green)' : 'rgba(255,255,255,.12)',
+               background: f.par_defaut ? 'rgba(125,217,64,.1)' : 'rgba(255,255,255,.04)'}}>
+             <span style={{width:18,height:18,borderRadius:'50%',flexShrink:0,marginTop:1,border:'1.5px solid',
+               borderColor: f.par_defaut ? 'var(--green)' : 'rgba(255,255,255,.3)',
+               display:'flex',alignItems:'center',justifyContent:'center'}}>
+               {f.par_defaut && <span style={{width:9,height:9,borderRadius:'50%',background:'var(--green)'}}/>}
+             </span>
+             <span style={{minWidth:0}}>
+               <span style={{display:'block',fontSize:13,color: f.par_defaut ? '#fff' : 'rgba(255,255,255,.7)',fontWeight:700}}>
+                 Tarif affecté par défaut
+               </span>
+               <span style={{display:'block',fontSize:11,color:'rgba(255,255,255,.45)',marginTop:3,lineHeight:1.45}}>
+                 Appliqué quand le client ne connaît pas son offre, que sa facture est illisible,
+                 ou que son tarif vient d'être archivé. Un seul tarif à la fois : l'activer ici le retire de l'actuel.
+               </span>
+             </span>
+           </label>
+         </div>
          <TariffField label="Nom de l'offre *" fkey="nom" value={f.nom} onChange={upd} placeholder="Tarif Bleu HC/HP"/>
           <TariffField label="Abonnement annuel (€/an)" fkey="abo_annuel" type="number" value={String(f.abo_annuel)} onChange={upd} placeholder="237.72"/>
 
@@ -15336,10 +15394,15 @@ function AdminTariffEditScreen({ tariff, onSave, onDelete, onBack }) {
 
           {error && <div className="auth-error">{error}</div>}
         </div>
-        {!isNew && (
-          <button className="btn-link" style={{color:'rgba(255,100,100,.55)',marginTop:8}} onClick={handleDelete}>
-            Supprimer ce tarif
+        {!isNew && !f.par_defaut && (
+          <button className="btn-link" style={{color:'rgba(255,180,80,.7)',marginTop:8}} onClick={handleArchive}>
+            Archiver ce tarif
           </button>
+        )}
+        {!isNew && f.par_defaut && (
+          <div style={{marginTop:8,fontSize:11.5,color:'rgba(255,255,255,.4)',textAlign:'center',lineHeight:1.5}}>
+            Le tarif par défaut ne peut pas être archivé — désignez-en un autre d'abord.
+          </div>
         )}
       </div>
       <StickyFooter>

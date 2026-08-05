@@ -108,7 +108,11 @@ Deno.serve(async (req) => {
   //    détachés (ils repartent sans tarif plutôt qu'avec un faux).
   if (action === "rejeter") {
     if (ext.tarif_id) {
-      await db.from("sites").update({ tarif_id: null }).eq("tarif_id", ext.tarif_id);
+      // Sans tarif du tout, le site n'a plus de facture calculable : on le
+      // rattache à la grille de repli plutôt que de le laisser vide.
+      const { data: parDefaut } = await db.from("tarifs_electricite")
+        .select("id").eq("par_defaut", true).maybeSingle();
+      await db.from("sites").update({ tarif_id: parDefaut?.id ?? null }).eq("tarif_id", ext.tarif_id);
       await db.from("tarifs_electricite").delete().eq("id", ext.tarif_id).eq("statut", "brouillon");
     }
     await db.from("factures_extractions").update({
