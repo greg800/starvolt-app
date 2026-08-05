@@ -6573,22 +6573,10 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
               </div>
             )}
 
-            {/* ── Tuile Votre bilan en clair : uniquement le CTA « Voir le conseil du pro » ── */}
-            {site.conso_annuelle_kwh>0&&can('submenus','bilan_clair')&&(site.bilan_ia||bilanGenerating)&&(
-              (bilanGenerating||bilanUpdating) ? (
-                <div className="card" style={{padding:'14px',marginBottom:8,display:'flex',justifyContent:'center'}}>
-                  <StarSpinner size={20} color="rgba(240,160,80,.95)" label={bilanUpdating?'Mise à jour du conseil…':'Analyse de votre consommation…'} labelColor="rgba(255,255,255,.6)"/>
-                </div>
-              ) : (
-                <button
-                  onClick={regenBilan}
-                  style={{width:'100%',marginBottom:8,display:'flex',alignItems:'center',justifyContent:'center',gap:10,background:'transparent',border:'1px solid rgba(255,255,255,.28)',color:'#fff',fontSize:14,fontWeight:800,cursor:'pointer',padding:'13px',borderRadius:14}}
-                >
-                  <span style={{width:22,height:22,display:'inline-block',flexShrink:0}}><IconHeadCheck color="#fff"/></span>
-                  Voir le conseil du pro
-                </button>
-              )
-            )}
+            {/* Le CTA « Voir le conseil du pro » vivait ici. Supprimé : les
+                conseils se lancent désormais depuis la tête de robot du pied de
+                page, qui est leur picto. Celui-ci portait la tête validée, le
+                picto de « Comprendre ». */}
 
             {/* ── Tuile Ma conso ── */}
             {can('submenus','ma_conso')&&<div className="card" style={{padding:0,marginBottom:8,overflow:'hidden'}}>
