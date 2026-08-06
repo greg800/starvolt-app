@@ -3596,7 +3596,7 @@ function computeStorageOptimization(consoProfile, tariff, baseTariff, site, batK
             const marge = (t.marge_fournisseur_ceur_kwh||0)/100, accise = (globalVars?.accise||0)/100;
             p = (spotMap[`${m}_${d}_${h}`]||0) + getTurpeRate(m,h,globalVars,hcWinCommon) + accise + marge;
           } else if (t.type_tarif === 'multi' && t.periodes?.length > 0) {
-            p = getPrixMulti(m, d, h, t.periodes);
+            p = getPrixMulti(m, d, h, t.periodes, t.calendrier);
           } else if (t.prix_hc != null && t.prix_hc !== t.prix_hp && hcWinCommon.length > 0) {
             p = isHcHour(h, hcWinCommon) ? t.prix_hc : t.prix_hp;
           } else {
@@ -3750,7 +3750,7 @@ function computeStorageOptimization(consoProfile, tariff, baseTariff, site, batK
   } else if (isMulti) {
     // Utilise la moyenne journalière réelle comme seuil (même logique que le mode dynamique)
     // Les prix dans periodes sont déjà TTC → pas de TVA supplémentaire
-    const getPrice   = (m, d, h) => getPrixMulti(m, d, h, tariff.periodes);
+    const getPrice   = (m, d, h) => getPrixMulti(m, d, h, tariff.periodes, tariff.calendrier);
     const getDailyAvg = (m, d) => { let s = 0; for (let h = 0; h < 24; h++) s += getPrice(m, d, h); return s / 24; };
     const {varCostHT_with} = runLoop(getPrice, getDailyAvg, seuil);
     billWithStorage = Math.round(varCostHT_with + (tariff.abo_annuel || 0));
@@ -3837,7 +3837,7 @@ function computeCombinedOptimization(consoProfile, prodNorm, pvKwc, batKwh, ther
       return (m, d, h) => (spotMap[`${m}_${d}_${h}`] || 0) + getTurpeRate(m, h, globalVars, hcWinArr) + accise + marge;
     }
     if (t.type_tarif === 'multi' && t.periodes?.length > 0) {
-      return (m, d, h) => getPrixMulti(m, d, h, t.periodes);
+      return (m, d, h) => getPrixMulti(m, d, h, t.periodes, t.calendrier);
     }
     if (t.prix_hc != null && t.prix_hc !== t.prix_hp && hcWinArr.length > 0) {
       return (m, d, h) => isHcHour(h, hcWinArr) ? t.prix_hc : t.prix_hp;
@@ -3876,7 +3876,7 @@ function computeCombinedOptimization(consoProfile, prodNorm, pvKwc, batKwh, ther
     localSeuil  = seuil;
   } else if (isMultiPeriod) {
     // Multi-période : la moyenne journalière varie selon le jour — utilise le prix réel
-    getDailyAvg = (m, d) => { let s = 0; for (let h = 0; h < 24; h++) s += getPrixMulti(m, d, h, tariff.periodes); return s / 24; };
+    getDailyAvg = (m, d) => { let s = 0; for (let h = 0; h < 24; h++) s += getPrixMulti(m, d, h, tariff.periodes, tariff.calendrier); return s / 24; };
     localSeuil  = seuil; // Permet au stockage de se positionner sur les heures bon marché
   } else if (hasHC_fixed) {
     let hcCount = 0;
@@ -4201,7 +4201,7 @@ function buildReconstructedBalance({ site, prodProfil, tariff, baseTariff, globa
       const accise = (globalVars?.accise || 0) / 100;
       return (m, d, h) => (spotMap[`${m}_${d}_${h}`] || 0) + getTurpeRate(m, h, globalVars, hcWinArr) + accise + marge;
     }
-    if (t.type_tarif === 'multi' && t.periodes?.length > 0) return (m, d, h) => getPrixMulti(m, d, h, t.periodes);
+    if (t.type_tarif === 'multi' && t.periodes?.length > 0) return (m, d, h) => getPrixMulti(m, d, h, t.periodes, t.calendrier);
     if (t.prix_hc != null && t.prix_hc !== t.prix_hp && hcWinArr.length > 0) return (m, d, h) => isHcHour(h, hcWinArr) ? t.prix_hc : t.prix_hp;
     const flat = t.prix_hp || 0;
     return () => flat;
@@ -6254,7 +6254,7 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onComprendre,
       const aboHT=aboKwh/(1+tvaAbo);
       for(let m=1;m<=12;m++) for(let d=1;d<=PROF_DAYS[m-1];d++) for(let h=0;h<24;h++){
         const idx=profIdx(m,d,h);
-        const comTTC=getPrixMulti(m,d,h,periodes); // prix commercial TTC
+        const comTTC=getPrixMulti(m,d,h,periodes,effectiveTariff.calendrier); // prix commercial TTC
         arr[idx]=comTTC+aboKwh;
         elArr[idx]=comTTC/(1+tva)-getTurpeRate(m,h,globalVars)-acciseNat; // électron HT résiduel
         aboArr[idx]=aboHT;
@@ -8217,7 +8217,7 @@ function calcTariffCost(tariff, kwh_hc, kwh_hp, dynamicCtx = null) {
     if (!consoProfile) return null;
     let varCost = 0;
     for (let m=1;m<=12;m++) for(let d=1;d<=PROF_DAYS[m-1];d++) for(let h=0;h<24;h++)
-      varCost += (consoProfile[profIdx(m,d,h)]||0)/1000 * getPrixMulti(m,d,h,tariff.periodes);
+      varCost += (consoProfile[profIdx(m,d,h)]||0)/1000 * getPrixMulti(m,d,h,tariff.periodes,tariff.calendrier);
     return { total: Math.round((tariff.abo_annuel||0) + varCost), abo: tariff.abo_annuel||0, is_base: false };
   }
   const abo = tariff.abo_annuel || 0;
@@ -8232,10 +8232,105 @@ function isInDateRange(m, d, sm, sd, em, ed) {
   const cur=m*100+d, s=sm*100+sd, e=em*100+ed;
   return s<=e?(cur>=s&&cur<=e):(cur>=s||cur<=e);
 }
-function getPrixMulti(m, d, h, periodes) {
+// ─── Calendrier de l'année type ────────────────
+// Le profil annuel (8 784 h) n'est rattaché à aucune année réelle : prix_spot est
+// clé sur (mois, jour, heure). Pour exprimer un tarif week-end ou un calendrier
+// Tempo il faut un jour de semaine — on ancre l'année type sur 2024, bissextile
+// comme PROF_DAYS. Le décalage réel des week-ends d'une année sur l'autre est
+// sans effet mesurable sur un coût annuel.
+const ANNEE_REF = 2024;
+const JOURS_ABBR = ['L','M','M','J','V','S','D'];   // index 0 = lundi
+// 1 = lundi … 7 = dimanche (getDay() renvoie 0 pour dimanche)
+function dowOf(m, d) { const j = new Date(ANNEE_REF, m-1, d).getDay(); return j === 0 ? 7 : j; }
+function dayIdx(m, d) { let o = 0; for (let i = 1; i < m; i++) o += PROF_DAYS[i-1]; return o + d - 1; }
+
+// Fériés légaux français : 8 dates fixes + 3 mobiles calées sur Pâques (Butcher).
+function joursFeries(annee) {
+  const f = new Set(['1_1','5_1','5_8','7_14','8_15','11_1','11_11','12_25']);
+  const a=annee%19, b=Math.floor(annee/100), c=annee%100;
+  const q=Math.floor(b/4), e=b%4, r=Math.floor((b+8)/25), g=Math.floor((b-r+1)/3);
+  const hh=(19*a+b-q-g+15)%30, i=Math.floor(c/4), k=c%4;
+  const l=(32+2*e+2*i-hh-k)%7, n=Math.floor((a+11*hh+22*l)/451);
+  const paques = new Date(annee, Math.floor((hh+l-7*n+114)/31)-1, ((hh+l-7*n+114)%31)+1);
+  [1, 39, 50].forEach(off => {   // lundi de Pâques, Ascension, lundi de Pentecôte
+    const x = new Date(paques); x.setDate(x.getDate()+off);
+    f.add(`${x.getMonth()+1}_${x.getDate()}`);
+  });
+  return f;
+}
+
+// Le calendrier est stocké sur le tarif sous forme d'une chaîne de 366 codes
+// (1 par jour) — ~400 octets, lecture O(1) au moment de chiffrer un client.
+const CODE_COULEUR = { B:'bleu', W:'blanc', R:'rouge' };
+const COULEUR_HEX  = { bleu:'#3b82f6', blanc:'#e5e7eb', rouge:'#ef4444' };
+function getCouleurJour(cal, m, d) {
+  if (!cal?.jours) return null;
+  return CODE_COULEUR[cal.jours[dayIdx(m, d)]] || null;
+}
+
+// Tempo : 22 jours rouges, 43 blancs, le reste bleu. Les jours sont classés par
+// coût spot décroissant, puis filtrés par les contraintes EDF — sans elles
+// l'algorithme placerait des jours rouges en juillet, ce qui n'arrive jamais.
+const TEMPO_ROUGE = 22, TEMPO_BLANC = 43;
+function genererCalendrierTempo(spotMap) {
+  const feries = joursFeries(ANNEE_REF);
+  const jours = [];
+  for (let m = 1; m <= 12; m++) for (let d = 1; d <= PROF_DAYS[m-1]; d++) {
+    // Une journée Tempo court de 6 h à 6 h le lendemain, pas de minuit à minuit.
+    let s = 0, n = 0;
+    for (let k = 6; k < 30; k++) {
+      let mm = m, dd = d;
+      if (k >= 24) { dd = d + 1; if (dd > PROF_DAYS[m-1]) { dd = 1; mm = m === 12 ? 1 : m + 1; } }
+      const v = spotMap[`${mm}_${dd}_${k%24}`];
+      if (v == null || isNaN(v)) continue;
+      s += v; n++;
+    }
+    jours.push({ m, d, cout: n ? s/n : -Infinity, dow: dowOf(m, d), ferie: feries.has(`${m}_${d}`) });
+  }
+  const tri = [...jours].sort((a, b) => b.cout - a.cout);
+  const couleur = new Map();
+  let nR = 0, nW = 0;
+  for (const j of tri) {                       // rouges : jours ouvrés, 1er nov → 31 mars
+    if (nR >= TEMPO_ROUGE) break;
+    if (j.dow >= 6 || j.ferie || !(j.m >= 11 || j.m <= 3)) continue;
+    couleur.set(`${j.m}_${j.d}`, 'R'); nR++;
+  }
+  for (const j of tri) {                       // blancs : jamais le dimanche
+    if (nW >= TEMPO_BLANC) break;
+    if (couleur.has(`${j.m}_${j.d}`) || j.dow === 7) continue;
+    couleur.set(`${j.m}_${j.d}`, 'W'); nW++;
+  }
+  const chaine = jours.map(j => couleur.get(`${j.m}_${j.d}`) || 'B').join('');
+  return { type:'tempo', source:'spot', annee_ref:ANNEE_REF, jours:chaine,
+           genere_le:new Date().toISOString(),
+           compte:{ rouge:nR, blanc:nW, bleu:chaine.length - nR - nW } };
+}
+
+// Les 6 prix Tempo se disent en 6 règles, pas en 730 lignes de calendrier :
+// la couleur du jour est portée par `calendrier`, la règle ne fait que la citer.
+function reglesTempo() {
+  return ['rouge','blanc','bleu'].flatMap(c => [
+    // HC Tempo : 22 h → 6 h, fixes et nationales — ce ne sont pas les heures
+    // creuses Enedis du client, qui varient d'un département à l'autre.
+    { date_debut:'01/01', date_fin:'31/12', heure_debut:'22', heure_fin:'6',  jours:null, couleur:c, prix:'' },
+    { date_debut:'01/01', date_fin:'31/12', heure_debut:'6',  heure_fin:'22', jours:null, couleur:c, prix:'' },
+  ]);
+}
+
+function getPrixMulti(m, d, h, periodes, calendrier) {
   if (!periodes?.length) return 0;
+  const couleur = calendrier ? getCouleurJour(calendrier, m, d) : null;
+  let dow = null;
   for (const p of periodes) {
     if (!p.date_debut||!p.date_fin||p.heure_debut===''||p.heure_fin===''||p.prix==='') continue;
+    // Filtres optionnels : une règle sans `couleur` vaut pour toutes les couleurs,
+    // une règle sans `jours` vaut pour tous les jours. Les grilles saisies avant
+    // l'ajout de ces deux axes n'en ont aucun — elles matchent comme avant.
+    if (p.couleur && p.couleur !== couleur) continue;
+    if (p.jours?.length && p.jours.length < 7) {
+      if (dow === null) dow = dowOf(m, d);
+      if (!p.jours.includes(dow)) continue;
+    }
     const parts1=p.date_debut.split('/'), parts2=p.date_fin.split('/');
     if(parts1.length<2||parts2.length<2) continue;
     const [dj,dm]=[parseInt(parts1[0]),parseInt(parts1[1])];
@@ -15201,16 +15296,37 @@ function AdminTariffEditScreen({ tariff, onSave, onDelete, onBack }) {
     cta_fixe:                  tariff?.cta_fixe ?? '',
     marge_fournisseur_ceur_kwh:tariff?.marge_fournisseur_ceur_kwh ?? '',
   });
-  const [periodes, setPeriodes] = useState(() => tariff?.periodes || []);
+  const [periodes,   setPeriodes]   = useState(() => tariff?.periodes || []);
+  const [calendrier, setCalendrier] = useState(() => tariff?.calendrier || null);
+  const [genLoading, setGenLoading] = useState(false);
   const [loading,  setLoading]  = useState(false);
   const [error,    setError]    = useState(null);
 
   const upd = useCallback((k, v) => setF(p => ({...p, [k]: v})), []);
   const n   = (v) => v === '' || v === null || v === undefined ? null : parseFloat(v);
 
-  const addPeriode = () => setPeriodes(p => [...p, {date_debut:'',date_fin:'',heure_debut:'',heure_fin:'',prix:''}]);
+  const addPeriode = () => setPeriodes(p => [...p, {date_debut:'',date_fin:'',heure_debut:'',heure_fin:'',jours:null,couleur:null,prix:''}]);
   const delPeriode = (i) => setPeriodes(p => p.filter((_,idx)=>idx!==i));
   const updPeriode = (i,k,v) => setPeriodes(p => p.map((row,idx)=>idx===i?{...row,[k]:v}:row));
+  // Un jour décoché retire son numéro de la liste ; les 7 cochés = null (tous),
+  // pour qu'une règle sans restriction reste identique aux grilles existantes.
+  const toggleJour = (i,j) => setPeriodes(p => p.map((row,idx)=>{
+    if(idx!==i) return row;
+    const cur = row.jours?.length ? [...row.jours] : [1,2,3,4,5,6,7];
+    const next = cur.includes(j) ? cur.filter(x=>x!==j) : [...cur,j].sort();
+    return {...row, jours: next.length===7 ? null : next};
+  }));
+
+  // Les 8 784 prix spot ne sont chargés qu'au clic : ils ne servent qu'ici.
+  const genererTempo = async (avecRegles) => {
+    setGenLoading(true); setError(null);
+    const { data, error: err } = await sb.rpc('get_spot_json');
+    setGenLoading(false);
+    if (err || !data?.length) { setError('Prix spot indisponibles — importez-les depuis l\'écran Prix spot.'); return; }
+    const cal = genererCalendrierTempo(buildSpotMap(data));
+    setCalendrier(cal);
+    if (avecRegles) setPeriodes(reglesTempo());
+  };
 
   // Compteur d'heures couvertes
   const { covered, remaining } = useMemo(() => {
@@ -15227,12 +15343,16 @@ function AdminTariffEditScreen({ tariff, onSave, onDelete, onBack }) {
       for(let m=1;m<=12;m++) for(let d=1;d<=PROF_DAYS[m-1];d++){
         const cur=m*100+d,s=dm*100+dj,e=fm*100+fj;
         if(!(s<=e?(cur>=s&&cur<=e):(cur>=s||cur<=e))) continue;
+        // Mêmes filtres qu'au chiffrage, sinon le compteur annoncerait couvertes
+        // des heures qu'aucune règle ne facturerait réellement.
+        if(p.couleur && p.couleur!==getCouleurJour(calendrier,m,d)) continue;
+        if(p.jours?.length && p.jours.length<7 && !p.jours.includes(dowOf(m,d))) continue;
         for(let h=0;h<24;h++) if(overnight?(h>=hD||h<hF):(h>=hD&&h<hF)) covSet.add(profIdx(m,d,h));
       }
     }
     const totalH=PROF_DAYS.reduce((s,d)=>s+d,0)*24;
     return { covered:covSet.size, remaining:totalH-covSet.size, totalH };
-  }, [periodes]);
+  }, [periodes, calendrier]);
 
   const handleSave = async () => {
     if (!f.nom.trim()) { setError('Le nom est obligatoire.'); return; }
@@ -15248,6 +15368,7 @@ function AdminTariffEditScreen({ tariff, onSave, onDelete, onBack }) {
       prix_hp:          (f.type_tarif==='fixe'||f.type_tarif==='hchp') ? n(f.prix_hp) : null,
       prix_hc:          f.type_tarif==='hchp' ? n(f.prix_hc) : null,
       periodes:         f.type_tarif==='multi' ? periodes : null,
+      calendrier:       f.type_tarif==='multi' ? calendrier : null,
       turpe_fixe:       isDyn ? n(f.turpe_fixe) : null,
       cta_fixe:         isDyn ? n(f.cta_fixe)   : null,
       marge_fournisseur_ceur_kwh: isDyn ? n(f.marge_fournisseur_ceur_kwh) : null,
@@ -15363,6 +15484,51 @@ function AdminTariffEditScreen({ tariff, onSave, onDelete, onBack }) {
               <div style={{fontSize:11,color:'rgba(255,255,255,.4)',marginBottom:8}}>
                 Dates : JJ/MM · Heures : 0–23 · Le total doit atteindre 8 784 h/an (année bissextile)
               </div>
+
+              {/* Assistant Tempo : le calendrier des couleurs se déduit des prix
+                  spot, les 6 prix restent à saisir. Sans lui, un tarif Tempo
+                  demanderait 730 lignes — une par jour coloré et par plage. */}
+              {!calendrier ? (
+                <button onClick={()=>genererTempo(periodes.length===0)} disabled={genLoading} style={{fontSize:12,background:'rgba(255,179,64,.1)',border:'1px solid rgba(255,179,64,.3)',borderRadius:8,color:'#ffb340',cursor:'pointer',padding:'8px 14px',fontFamily:'inherit',marginBottom:10,width:'100%'}}>
+                  {genLoading ? 'Calcul en cours…' : '⚡ Assistant Tempo — générer le calendrier des jours'}
+                </button>
+              ) : (
+                <div style={{marginBottom:10,padding:'9px 11px',borderRadius:8,background:'rgba(255,179,64,.07)',border:'1px solid rgba(255,179,64,.22)'}}>
+                  <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:8,flexWrap:'wrap'}}>
+                    <span style={{fontSize:12,color:'#ffb340',fontWeight:700}}>Calendrier Tempo</span>
+                    <span style={{fontSize:10.5,color:'rgba(255,255,255,.4)'}}>
+                      {calendrier.compte?.rouge} rouges · {calendrier.compte?.blanc} blancs · {calendrier.compte?.bleu} bleus
+                    </span>
+                  </div>
+                  {/* Une ligne par mois : l'admin vérifie d'un coup d'œil que les
+                      rouges tombent bien en hiver et jamais le week-end. */}
+                  <div style={{marginTop:7}}>
+                    {Array.from({length:12},(_,mi)=>(
+                      <div key={mi} style={{display:'flex',alignItems:'center',gap:3,marginBottom:2}}>
+                        <span style={{fontSize:9,color:'rgba(255,255,255,.3)',width:22,flexShrink:0}}>{MOIS_ABBR[mi]}</span>
+                        {Array.from({length:PROF_DAYS[mi]},(_,di)=>{
+                          const c = getCouleurJour(calendrier, mi+1, di+1);
+                          return <span key={di} title={`${di+1} ${MOIS_ABBR[mi]} — ${c}`} style={{flex:1,height:8,borderRadius:1,background:COULEUR_HEX[c]||'#333',opacity:c==='bleu'?.5:1}}/>;
+                        })}
+                      </div>
+                    ))}
+                  </div>
+                  <div style={{display:'flex',gap:10,marginTop:7}}>
+                    <button onClick={()=>genererTempo(false)} disabled={genLoading} style={{fontSize:11,background:'none',border:'none',color:'rgba(255,255,255,.5)',cursor:'pointer',padding:0,fontFamily:'inherit',textDecoration:'underline'}}>
+                      {genLoading?'Calcul…':'Recalculer'}
+                    </button>
+                    {periodes.length===0 && (
+                      <button onClick={()=>setPeriodes(reglesTempo())} style={{fontSize:11,background:'none',border:'none',color:'#7dd940',cursor:'pointer',padding:0,fontFamily:'inherit',textDecoration:'underline'}}>
+                        Créer les 6 lignes Tempo
+                      </button>
+                    )}
+                    <button onClick={()=>setCalendrier(null)} style={{fontSize:11,background:'none',border:'none',color:'rgba(248,113,113,.6)',cursor:'pointer',padding:0,fontFamily:'inherit',textDecoration:'underline'}}>
+                      Retirer
+                    </button>
+                  </div>
+                </div>
+              )}
+
               {/* En-têtes */}
               <div style={{display:'grid',gridTemplateColumns:'68px 68px 52px 52px 1fr 30px',gap:4,marginBottom:4}}>
                 {['Deb. date','Fin date','H.deb.','H.fin','€/kWh TTC',''].map((h,i)=>(
@@ -15371,13 +15537,38 @@ function AdminTariffEditScreen({ tariff, onSave, onDelete, onBack }) {
               </div>
               {/* Lignes */}
               {periodes.map((p,i)=>(
-                <div key={i} style={{display:'grid',gridTemplateColumns:'68px 68px 52px 52px 1fr 30px',gap:4,marginBottom:5,alignItems:'center'}}>
-                  <input style={iS} placeholder="01/04" value={p.date_debut}   onChange={e=>updPeriode(i,'date_debut',  e.target.value)}/>
-                  <input style={iS} placeholder="30/10" value={p.date_fin}     onChange={e=>updPeriode(i,'date_fin',    e.target.value)}/>
-                  <input style={iS} type="number" min="0" max="23" placeholder="0"  value={p.heure_debut} onChange={e=>updPeriode(i,'heure_debut',e.target.value)}/>
-                  <input style={iS} type="number" min="0" max="24" placeholder="24" value={p.heure_fin}   onChange={e=>updPeriode(i,'heure_fin',  e.target.value)}/>
-                  <input style={iS} type="number" step="0.0001" placeholder="0.0987" value={p.prix}       onChange={e=>updPeriode(i,'prix',        e.target.value)}/>
-                  <button onClick={()=>delPeriode(i)} style={{background:'rgba(248,113,113,.15)',border:'1px solid rgba(248,113,113,.3)',borderRadius:7,color:'#f87171',cursor:'pointer',padding:'5px 0',fontSize:15,lineHeight:1,width:'100%'}}>−</button>
+                <div key={i} style={{marginBottom:7,paddingBottom:6,borderBottom:'1px solid rgba(255,255,255,.06)'}}>
+                  <div style={{display:'grid',gridTemplateColumns:'68px 68px 52px 52px 1fr 30px',gap:4,alignItems:'center'}}>
+                    <input style={iS} placeholder="01/04" value={p.date_debut}   onChange={e=>updPeriode(i,'date_debut',  e.target.value)}/>
+                    <input style={iS} placeholder="30/10" value={p.date_fin}     onChange={e=>updPeriode(i,'date_fin',    e.target.value)}/>
+                    <input style={iS} type="number" min="0" max="23" placeholder="0"  value={p.heure_debut} onChange={e=>updPeriode(i,'heure_debut',e.target.value)}/>
+                    <input style={iS} type="number" min="0" max="24" placeholder="24" value={p.heure_fin}   onChange={e=>updPeriode(i,'heure_fin',  e.target.value)}/>
+                    <input style={iS} type="number" step="0.0001" placeholder="0.0987" value={p.prix}       onChange={e=>updPeriode(i,'prix',        e.target.value)}/>
+                    <button onClick={()=>delPeriode(i)} style={{background:'rgba(248,113,113,.15)',border:'1px solid rgba(248,113,113,.3)',borderRadius:7,color:'#f87171',cursor:'pointer',padding:'5px 0',fontSize:15,lineHeight:1,width:'100%'}}>−</button>
+                  </div>
+                  {/* Second axe de la règle : jours de semaine (tarif week-end)
+                      et couleur du jour (Tempo). Vides = la règle s'applique
+                      partout, comportement des grilles d'origine. */}
+                  <div style={{display:'flex',alignItems:'center',gap:4,marginTop:4,flexWrap:'wrap'}}>
+                    {JOURS_ABBR.map((lbl,ji)=>{
+                      const j=ji+1, on=!p.jours?.length||p.jours.includes(j);
+                      return (
+                        <button key={ji} onClick={()=>toggleJour(i,j)} title={`Jour ${j}`} style={{
+                          width:20,height:20,borderRadius:5,fontSize:10,fontFamily:'inherit',cursor:'pointer',padding:0,
+                          border:`1px solid ${on?'rgba(125,217,64,.4)':'rgba(255,255,255,.1)'}`,
+                          background:on?'rgba(125,217,64,.14)':'rgba(255,255,255,.03)',
+                          color:on?'#7dd940':'rgba(255,255,255,.25)'}}>{lbl}</button>
+                      );
+                    })}
+                    {calendrier && (
+                      <select value={p.couleur||''} onChange={e=>updPeriode(i,'couleur',e.target.value||null)} style={{...iS,width:'auto',padding:'3px 5px',fontSize:11,marginLeft:4}}>
+                        <option value="">Toutes couleurs</option>
+                        <option value="bleu">Bleu</option>
+                        <option value="blanc">Blanc</option>
+                        <option value="rouge">Rouge</option>
+                      </select>
+                    )}
+                  </div>
                 </div>
               ))}
               <button onClick={addPeriode} style={{fontSize:12,background:'rgba(125,217,64,.08)',border:'1px solid rgba(125,217,64,.25)',borderRadius:8,color:'#7dd940',cursor:'pointer',padding:'6px 14px',fontFamily:'inherit',marginTop:4}}>
