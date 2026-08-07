@@ -46,6 +46,11 @@
   <!-- Supabase -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 
+  <!-- Cloudflare Turnstile — anti-bot des écrans d'authentification.
+       Rendu EXPLICITE (pas d'auto-render sur .cf-turnstile) : React démonte et
+       remonte les noeuds, l'auto-render dupliquerait le widget. -->
+  <script src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit" async defer></script>
+
   <style>
     /* =============================================
        RESET & ROOT
@@ -1294,6 +1299,69 @@
 <script type="text/babel" data-presets="react-classic">
 const { useState, useEffect, useRef, useCallback, useMemo } = React;
 
+// ─── Turnstile (Cloudflare) — anti-bot des écrans d'authentification ─────────
+// Le jeton produit ici n'est PAS vérifié par le client : c'est Supabase qui
+// l'envoie à Cloudflare avant de créer la session. Tant que « Enable Captcha
+// protection » n'est pas coché dans le dashboard Supabase, le jeton est ignoré
+// et ce composant n'a aucun effet sur le parcours — d'où un déploiement sans
+// risque, l'activation restant un interrupteur côté dashboard.
+const TURNSTILE_SITE_KEY = '0x4AAAAAAEJbRyxO58cgAWUL'; // clé PUBLIQUE (le secret vit chez Supabase)
+
+function useTurnstile() {
+  const [token, setToken] = useState(null);
+  const containerRef = useRef(null);
+  const widgetIdRef  = useRef(null);
+
+  useEffect(() => {
+    let stopped = false, timer = null;
+    const mount = () => {
+      if (stopped || widgetIdRef.current !== null) return true;
+      if (!containerRef.current || !window.turnstile) return false; // script CDN pas encore arrivé
+      widgetIdRef.current = window.turnstile.render(containerRef.current, {
+        sitekey: TURNSTILE_SITE_KEY,
+        theme: 'dark',
+        callback: setToken,
+        'expired-callback': () => setToken(null),
+        'error-callback':   () => setToken(null),
+      });
+      return true;
+    };
+    if (!mount()) timer = setInterval(() => { if (mount()) { clearInterval(timer); timer = null; } }, 200);
+    return () => {
+      stopped = true;
+      if (timer) clearInterval(timer);
+      if (window.turnstile && widgetIdRef.current !== null) {
+        try { window.turnstile.remove(widgetIdRef.current); } catch {}
+      }
+      widgetIdRef.current = null;
+    };
+  }, []);
+
+  // À rappeler dans CHAQUE branche d'erreur : le jeton est à USAGE UNIQUE. Sans
+  // ce reset, la 2e tentative (mot de passe retapé, par exemple) est rejetée par
+  // Cloudflare avec un message incompréhensible pour l'utilisateur.
+  const reset = useCallback(() => {
+    setToken(null);
+    if (window.turnstile && widgetIdRef.current !== null) {
+      try { window.turnstile.reset(widgetIdRef.current); } catch {}
+    }
+  }, []);
+
+  const widget = <div ref={containerRef} style={{display:'flex',justifyContent:'center',margin:'12px 0 4px'}}/>;
+  return { token, reset, widget };
+}
+
+// Supabase renvoie les refus de captcha en anglais et sans contexte
+// (« captcha protection: request disallowed »). Cas réel : bloqueur de pub ou
+// proxy d'entreprise qui filtre challenges.cloudflare.com → l'utilisateur n'a
+// jamais obtenu de jeton et ne peut pas deviner pourquoi on le refuse.
+function authErrMsg(msg) {
+  if (/captcha/i.test(msg || '')) {
+    return "La vérification anti-robot n'a pas abouti. Rechargez la page, et si le problème persiste, désactivez votre bloqueur de publicités le temps de vous connecter.";
+  }
+  return msg;
+}
+
 // ─── Supabase client ──────────────────────────
 const sb = supabase.createClient(
   'https://hkxkhwegqkapdbsisxwv.supabase.co',
@@ -2439,6 +2507,7 @@ function AuthSignupScreen({ onGoToLogin, onSignedUp, onSuccessDone }) {
   const [hint,          setHint]          = useState(null); // champ manquant signalé gentiment
   // Après inscription réussie
   const [successData,   setSuccessData]   = useState(null); // { email, firstName, consentUrl, userId }
+  const turnstile = useTurnstile();
 
   const isEntreprise = accountType === 'entreprise';
 
@@ -2495,8 +2564,11 @@ function AuthSignupScreen({ onGoToLogin, onSignedUp, onSuccessDone }) {
      'starvolt_optimisation_tariff_nom','starvolt_acc_chosen','starvolt_acc_saving','starvolt_baisse_facture',
      'starvolt_solar_defaults'].forEach(k=>localStorage.removeItem(k));
 
-    const { data, error: err } = await sb.auth.signUp({ email: email.trim(), password: pwd });
-    if (err) { setError(err.message); setLoading(false); return; }
+    const { data, error: err } = await sb.auth.signUp({
+      email: email.trim(), password: pwd,
+      options: { captchaToken: turnstile.token },
+    });
+    if (err) { setError(authErrMsg(err.message)); turnstile.reset(); setLoading(false); return; }
 
     let consentUrl = null;
     let requestId  = null;
@@ -2793,6 +2865,7 @@ function AuthSignupScreen({ onGoToLogin, onSignedUp, onSuccessDone }) {
             </span>
           </label>
           {error&&<div className="auth-error">{error}</div>}
+          {turnstile.widget}
         </form>
         <button className="btn-link" onClick={onGoToLogin}>Déjà membre ? Se connecter</button>
       </div>
@@ -2830,12 +2903,16 @@ function AuthLoginScreen({ onGoToSignup }) {
   const [forgot,  setForgot]  = useState(false);
   const [resetOk, setResetOk] = useState(false);
   const [showPwd, setShowPwd] = useState(false);
+  const turnstile = useTurnstile();
 
   const handleLogin = async () => {
     if (!email.trim() || !pwd) { setError('Email et mot de passe requis.'); return; }
     setLoading(true); setError(null);
-    const { error: err } = await sb.auth.signInWithPassword({ email: email.trim(), password: pwd });
-    if (err) setError(err.message);
+    const { error: err } = await sb.auth.signInWithPassword({
+      email: email.trim(), password: pwd,
+      options: { captchaToken: turnstile.token },
+    });
+    if (err) { setError(authErrMsg(err.message)); turnstile.reset(); } // jeton consommé → régénérer avant le 2e essai
     setLoading(false);
   };
 
@@ -2845,8 +2922,9 @@ function AuthLoginScreen({ onGoToSignup }) {
     const appUrl = window.location.origin + window.location.pathname;
     const { error: err } = await sb.auth.resetPasswordForEmail(email.trim(), {
       redirectTo: appUrl,
+      captchaToken: turnstile.token,
     });
-    if (err) { setError(err.message); setLoading(false); return; }
+    if (err) { setError(authErrMsg(err.message)); turnstile.reset(); setLoading(false); return; }
     setResetOk(true); setLoading(false);
   };
 
@@ -2895,6 +2973,7 @@ function AuthLoginScreen({ onGoToSignup }) {
             </div>
           )}
           {error && <div className="auth-error">{error}</div>}
+          {turnstile.widget}
         </div>
         {!forgot
           ? <button className="btn-link" onClick={()=>setForgot(true)}>Mot de passe oublié ?</button>
