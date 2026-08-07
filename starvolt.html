@@ -7295,11 +7295,14 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onOnboardingQ
 
       {/* ── Les 3 sorties de « Mon site », charte commune (voir .ctabar) ──
           Vert clair = ce qu'on attend en priorité : lancer les conseils.
-          Vert foncé = les deux autres chemins. */}
+          Vert foncé = les deux autres chemins.
+          Sans le menu « Passer à l'action », les deux sorties mènent vers des
+          écrans interdits (parcours guidé, catalogue d'offres) : il ne reste
+          que le retour. */}
       <StickyFooter wide>
         <div className="ctabar">
           <BackButton onClick={onBack}/>
-          {consoPrete !== false && <button className="cta cta-primary cta-grow" onClick={onParcoursAuto}
+          {can('menus','passer_action') && consoPrete !== false && <button className="cta cta-primary cta-grow" onClick={onParcoursAuto}
             aria-label="Les conseils du pro" title="Les conseils du pro">
             <span style={{width:22,height:22,display:'inline-flex',flexShrink:0}}>
               <IconRobot color="#1a4500"/>
@@ -7308,7 +7311,7 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onOnboardingQ
           </button>}
           {/* Le catalogue complet des offres n'était plus atteignable depuis
               « Mon site » : le parcours guidé les déroule une par une. */}
-          <button className={`cta cta-grow ${consoPrete === false ? 'cta-primary' : 'cta-second'}`} onClick={onSimulations}
+          {can('menus','passer_action') && <button className={`cta cta-grow ${consoPrete === false ? 'cta-primary' : 'cta-second'}`} onClick={onSimulations}
             aria-label="Toutes les offres" title="Toutes les offres">
             {/* Un poil plus grand que les autres pictos : le tracé est fin et
                 le dessin laisse du vide en haut à droite. */}
@@ -7317,7 +7320,7 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onOnboardingQ
             </span>
             <span className="lbl-sm">Offres</span>
             <span className="lbl-lg">Toutes les offres</span>
-          </button>
+          </button>}
         </div>
       </StickyFooter>
     </>
@@ -17172,7 +17175,7 @@ function AutoFooter({ ctaLabel, onCta, ctaDisabled = false, altLabel, onAlt, onM
         <button className="btn btn-auto-alt" style={{width:'100%'}} onClick={onAlt}>{altLabel}</button>
       )}
       <button className="btn btn-manual" style={{width:'100%',fontSize:13}} onClick={onManuel}>
-        🔧 Je préfère analyser moi-même
+        📈 Voir ma courbe de conso
       </button>
     </StickyFooter>
   );
@@ -17197,8 +17200,8 @@ function AutoLevierFooter({ onBack, onSavoirPlus, onManuel, onSuivant, dernier =
           <span style={{width:16,height:16,display:'inline-flex',flexShrink:0}}>
             <IconPower color="#fff" strokeWidth={8}/>
           </span>
-          <span className="lbl-sm">Manuel</span>
-          <span className="lbl-lg">Je préfère analyser moi-même</span>
+          <span className="lbl-sm">Ma conso</span>
+          <span className="lbl-lg">Voir ma courbe de conso</span>
         </button>
 
         <button className="cta cta-second cta-ico" onClick={onSuivant}
@@ -17696,8 +17699,11 @@ function ComprendreHomeScreen({ user, rolePerms, onGroup, onAction, onBack }) {
         </>
       )}
     </div>
+    {/* « Passer à l'action » n'a pas de sens ici : ce CTA a toujours mené à la
+        courbe de conso, et les rôles sans le menu Action n'ont même pas ce
+        chemin. On garde donc partout le bouton « analyse manuelle ». */}
     <StickyFooter row onBack={onBack}>
-      <button className="btn btn-primary" style={{fontSize:13}} onClick={onAction}>Passer à l'action →</button>
+      <button className="btn btn-manual" style={{fontSize:13}} onClick={onAction}>📈 Voir ma courbe de conso</button>
     </StickyFooter>
     </>
   );
@@ -17742,7 +17748,7 @@ function ComprendreGroupScreen({ user, group, onSubject, onRevision, onAction, o
         <button className="btn btn-yes" style={{width:'100%'}} onClick={() => onRevision(group.revisionSubjectIds)}>Démarrer la révision →</button>
       </div>
       <StickyFooter row onBack={onBack}>
-        <button className="btn btn-primary" style={{fontSize:13}} onClick={onAction}>Passer à l'action →</button>
+        <button className="btn btn-manual" style={{fontSize:13}} onClick={onAction}>📈 Voir ma courbe de conso</button>
       </StickyFooter>
       </>
     );
@@ -17779,7 +17785,7 @@ function ComprendreGroupScreen({ user, group, onSubject, onRevision, onAction, o
       )}
     </div>
     <StickyFooter row onBack={onBack}>
-      <button className="btn btn-primary" style={{fontSize:13}} onClick={onAction}>Passer à l'action →</button>
+      <button className="btn btn-manual" style={{fontSize:13}} onClick={onAction}>📈 Voir ma courbe de conso</button>
     </StickyFooter>
     </>
   );
@@ -18743,7 +18749,12 @@ function App() {
     autoSetState(st); setAutoSt(st);
   }, []);
   // Fin de l'intégration : on passe par l'étape bilan avant les leviers.
-  const autoStart = useCallback(() => { autoArm(); goTo('AUTO_BILAN'); }, [autoArm, goTo]);
+  // Sans le menu « Passer à l'action », le tapis roulant est hors sujet (il ne
+  // propose que des leviers à souscrire) : on renvoie sur la courbe de conso.
+  const autoStart = useCallback(() => {
+    if (!can('menus','passer_action')) { goTo('MA_CONSO'); return; }
+    autoArm(); goTo('AUTO_BILAN');
+  }, [autoArm, goTo, can]);
 
   // Retour d'un écran de simulation : le levier validé est au panier, il sort de
   // la liste des éligibles — le tapis reprend donc tout seul au levier suivant.
@@ -18753,6 +18764,16 @@ function App() {
     autoClearState(); setAutoSt(null);
     if (dest) goTo(dest, updates || {});
   }, [goTo]);
+
+  // Un parcours resté en cours survit au rechargement (voir autoGetState dans
+  // l'écran initial). Si le rôle n'a pas / plus le menu « Passer à l'action »,
+  // cette reprise le déposerait sur le tapis roulant : on l'en sort dès que les
+  // permissions sont connues (rolePerms non nul ⇒ plus de fail-open).
+  useEffect(() => {
+    if (!rolePerms || can('menus','passer_action')) return;
+    if (!['AUTO_BILAN','AUTO_LEVIER','AUTO_FIN'].includes(state.screen)) return;
+    autoExit('MA_CONSO');
+  }, [rolePerms, can, state.screen, autoExit]);
 
   // Props communes aux écrans de simulation quand ils sont traversés en mode auto.
   const autoSimProps = autoSt
