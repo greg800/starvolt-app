@@ -5955,6 +5955,10 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onOnboardingQ
   // Statut effectif pour le suivi par étapes : si une session d'import est en
   // cours on l'utilise ; sinon, un site déjà complet est affiché comme « done ».
   const effectiveLinkyStatus = linkyStatus || (siteHasFullHourly ? 'done' : null);
+  // Collecte en cours : ni terminée ni en erreur. Les tuiles de données sont
+  // vides ou trompeuses tant qu'ENEDIS n'a pas répondu → on l'annonce en clair
+  // en tête de page plutôt que de laisser l'utilisateur devant un écran muet.
+  const linkyBusy = !!linkyStatus && linkyStatus !== 'done' && linkyStatus !== 'error';
 
   // ── Repli inscription : au retour de la création de compte, si aucune collecte
   //    n'a démarré (le lancement post-signup est silencieux et peut échouer), on la
@@ -6458,6 +6462,21 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onOnboardingQ
               </div>
             ):(
               <SiteFormCard initial={site} onSave={async d=>{await updateSite(d);setEditMode(false);}} onCancel={()=>setEditMode(false)}/>
+            )}
+
+            {/* ── Collecte ENEDIS en cours : rien à visualiser encore ── */}
+            {linkyBusy&&(
+              <div className="card" style={{marginBottom:8,padding:'22px 18px',textAlign:'center',border:'1px solid rgba(247,201,72,.35)',background:'rgba(247,201,72,.07)'}}>
+                <div style={{display:'flex',justifyContent:'center',marginBottom:12}}>
+                  <StarSpinner size={54} color="#f7c948"/>
+                </div>
+                <div style={{fontSize:15,fontWeight:800,color:'#f7c948',lineHeight:1.4,marginBottom:6}}>
+                  Collecte des données chez ENEDIS en cours
+                </div>
+                <div style={{fontSize:13,color:'rgba(255,255,255,.7)',lineHeight:1.55}}>
+                  Merci de patienter pour pouvoir visualiser vos données.
+                </div>
+              </div>
             )}
 
             {/* ── Tuile Consommation annuelle (graphique + stats) ── */}
