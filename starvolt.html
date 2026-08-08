@@ -3270,6 +3270,13 @@ function SiteEnedisDetail({ site, tariffs=[], onBack }){
   const filledDays  = g ? g.filled_days : null;
   const unfilledDays= g ? g.unfilled_days : null;
   const srcQualSuffix = site.conso_source==='loadcurve' ? ' — précis (pas 30 min)' : site.conso_source==='daily' ? ' — approximatif (journalier)' : '';
+  // Période RÉELLEMENT servie par ENEDIS : un contrat de moins d'un an ne couvre pas
+  // 12 mois, et les mois absents sont extrapolés (cf. completeYear côté collecte).
+  const fmtJ = s => { const d = s ? new Date(s) : null; return d && !isNaN(d) ? d.toLocaleDateString('fr-FR') : null; };
+  const periodeLbl = (g && fmtJ(g.periode_debut) && fmtJ(g.periode_fin))
+    ? `${fmtJ(g.periode_debut)} → ${fmtJ(g.periode_fin)}${g.pct_annee_mesuree!=null ? ` (${g.pct_annee_mesuree} % de l'année)` : ''}` : null;
+  const moisSimulesLbl = Array.isArray(g?.mois_simules) && g.mois_simules.length
+    ? g.mois_simules.map(m=>MOIS_FULL[m-1]).filter(Boolean).join(', ') : null;
 
   // ── Production (injection réseau) ──
   const hasInjection = site.injection_annuelle_kwh!=null || site.injection_coverage!=null || (Array.isArray(site.injection_profil) && site.injection_profil.length>0);
@@ -3375,7 +3382,15 @@ function SiteEnedisDetail({ site, tariffs=[], onBack }){
         </Card>
 
         <Card title="Consommation collectée" emoji="📊">
-          <Row label="Consommation annuelle">{val(site.conso_annuelle_kwh ? `${Math.round(site.conso_annuelle_kwh).toLocaleString('fr-FR')} kWh/an` : null)}</Row>
+          <Row label="Consommation annuelle">{val(site.conso_annuelle_kwh ? `${Math.round(site.conso_annuelle_kwh).toLocaleString('fr-FR')} kWh/an${g && g.annee_complete===false ? ' (estimée)' : ''}` : null)}</Row>
+          <Row label="Période mesurée">{val(periodeLbl)}</Row>
+          {g && g.annee_complete===false && (
+            <Row label="Mois simulés">
+              <span style={{fontSize:14,color:'#ffb340',fontWeight:600}}>
+                {moisSimulesLbl || 'aucun'}{g.kwh_simules!=null ? ` — ${g.kwh_simules.toLocaleString('fr-FR')} kWh extrapolés` : ''}
+              </span>
+            </Row>
+          )}
           <Row label="Source des données">{val(sourceLbl ? `${sourceLbl}${srcQualSuffix}` : null)}</Row>
           <Row label="Qualité / couverture">{val(covPct!=null ? `${qual(site.conso_coverage)} — ${covPct} % de l'année` : null)}</Row>
           <Row label="Trous dans les données">
@@ -4633,6 +4648,40 @@ async function fetchQuizSummary(userId) {
   return { stars, errorPct, ftTotal };
 }
 
+// ── Couverture des données ENEDIS ────────────────────────────────────────────
+// Un contrat ENEDIS de moins d'un an ne remonte pas 12 mois : si le compteur a été
+// mis en service en janvier, septembre à décembre sont vides. Les mois jamais mesurés
+// sont reconstruits par extrapolation SAISONNIÈRE à la collecte (edge switchgrid-v0,
+// completeYear) : conso_annuelle_kwh est donc toujours un ordre de grandeur annuel.
+// Mais l'IA doit savoir ce qui est mesuré et ce qui est estimé — féliciter un foyer
+// pour une « faible conso » qui n'est qu'une année incomplète est un contresens.
+function buildCoverageFacts(site) {
+  const g = (site?.conso_gaps && typeof site.conso_gaps === 'object' && !Array.isArray(site.conso_gaps)) ? site.conso_gaps : null;
+  const covPct = site?.conso_coverage != null ? Math.round(Number(site.conso_coverage) * 100) : null;
+  const pctMesure = g?.pct_annee_mesuree ?? covPct;
+  if (pctMesure == null) return null; // site collecté avant cette version : couverture inconnue
+  const nomMois = arr => Array.isArray(arr) ? arr.map(m => MOIS_FULL[m - 1]).filter(Boolean) : null;
+  const moisSimules = nomMois(g?.mois_simules);
+  const complete = g?.annee_complete ?? (pctMesure >= 90);
+  return {
+    periode_mesuree_debut: g?.periode_debut || null,
+    periode_mesuree_fin: g?.periode_fin || null,
+    jours_mesures: g?.jours_mesures ?? null,
+    pct_annee_mesuree: pctMesure,
+    annee_complete: complete,
+    mois_mesures: nomMois(g?.mois_mesures),
+    mois_simules: moisSimules,
+    kwh_mesures: g?.kwh_mesures ?? null,
+    kwh_simules: g?.kwh_simules ?? null,
+    fiabilite_estimation: g?.fiabilite ?? null,
+    methode_simulation: g?.methode ?? null,
+    avertissement: complete ? null
+      : "conso_annuelle_kwh est une ESTIMATION : le contrat ENEDIS couvre moins de 12 mois"
+        + (moisSimules?.length ? ` (mois reconstruits : ${moisSimules.join(', ')})` : '')
+        + ". Ne JAMAIS féliciter le foyer pour une consommation faible sur cette base : la sobriété apparente peut n'être qu'un emménagement récent. Dire en une phrase que l'estimation sera affinée quand une année complète sera disponible.",
+  };
+}
+
 function buildBilanFacts({ site, tariffs, globalVars, prodProfil, quiz }) {
   if (!site?.conso_profil || !(site.conso_annuelle_kwh > 0)) return null;
   const cp = site.conso_profil;
@@ -4717,6 +4766,7 @@ function buildBilanFacts({ site, tariffs, globalVars, prodProfil, quiz }) {
     : null;
 
   return {
+    donnees_enedis: buildCoverageFacts(site),
     conso_annuelle_kwh: consoAnnuelle,
     facture_actuelle_eur: factureActuelle,
     prix_moyen_ceur_kwh: prixMoyen,
@@ -14370,9 +14420,16 @@ function AdminBilanDataScreen({ onBack }) {
 
   const factRows = (f) => {
     if (!f) return [];
-    const r = f.repartition_horaire_pct || {}, s = f.saisonnalite_pct || {};
+    const r = f.repartition_horaire_pct || {}, s = f.saisonnalite_pct || {}, e = f.donnees_enedis || null;
     return [
-      ['Consommation annuelle', f.conso_annuelle_kwh != null ? f.conso_annuelle_kwh + ' kWh' : '—'],
+      ['Données ENEDIS — période mesurée', e?.periode_mesuree_debut && e?.periode_mesuree_fin
+        ? `${new Date(e.periode_mesuree_debut).toLocaleDateString('fr-FR')} → ${new Date(e.periode_mesuree_fin).toLocaleDateString('fr-FR')}` : '—'],
+      ['Données ENEDIS — part de l’année mesurée', e?.pct_annee_mesuree != null ? `${e.pct_annee_mesuree} %${e.jours_mesures != null ? ` (${e.jours_mesures} j)` : ''}` : '—'],
+      ['Données ENEDIS — année complète', e ? (e.annee_complete ? 'oui' : 'non') : '—'],
+      ['Données ENEDIS — mois simulés', e?.mois_simules?.length ? e.mois_simules.join(', ') : (e ? 'aucun' : '—')],
+      ['Données ENEDIS — kWh mesurés / simulés', (e?.kwh_mesures != null || e?.kwh_simules != null) ? `${e.kwh_mesures ?? '?'} / ${e.kwh_simules ?? '?'} kWh` : '—'],
+      ['Données ENEDIS — fiabilité de l’estimation', e?.fiabilite_estimation || '—'],
+      ['Consommation annuelle', f.conso_annuelle_kwh != null ? f.conso_annuelle_kwh + ' kWh' + (e && e.annee_complete === false ? ' (estimée)' : '') : '—'],
       ['Facture actuelle estimée', f.facture_actuelle_eur != null ? f.facture_actuelle_eur + ' €/an' : '—'],
       ['Prix moyen', f.prix_moyen_ceur_kwh != null ? f.prix_moyen_ceur_kwh + ' c€/kWh' : '—'],
       ['Type de tarif', f.type_tarif || '—'],

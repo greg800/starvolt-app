@@ -52,47 +52,177 @@ const zeros = ()=>new Array(TOTAL_HOURS).fill(0);
 function isWeekendDay(dayIdx) {
   return dayIdx % 7 >= 5;
 }
-// Rebouche chaque JOUR entièrement absent en moyennant les jours du même type
-// (semaine vs week-end) les plus proches qui ont des données.
-function fillMissingDays(profile, dayHasData) {
-  const MAX_SAMPLES = 3;
-  let filled = 0, unfilled = 0;
-  for(let d = 0; d < 366; d++){
-    if (dayHasData[d]) continue;
-    const wantWeekend = isWeekendDay(d);
-    let samples = [];
-    for(let delta = 1; delta < 366 && samples.length < MAX_SAMPLES; delta++){
-      for (const cand of [
-        d - delta,
-        d + delta
-      ]){
-        if (cand < 0 || cand > 365 || !dayHasData[cand]) continue;
-        if (isWeekendDay(cand) !== wantWeekend) continue;
-        samples.push(cand);
-        if (samples.length >= MAX_SAMPLES) break;
-      }
-    }
-    if (samples.length === 0) {
-      for(let delta = 1; delta < 366 && samples.length < MAX_SAMPLES; delta++){
-        for (const cand of [
-          d - delta,
-          d + delta
-        ]){
-          if (cand < 0 || cand > 365 || !dayHasData[cand]) continue;
-          samples.push(cand);
-          if (samples.length >= MAX_SAMPLES) break;
-        }
-      }
-    }
-    if (samples.length === 0) { unfilled++; continue; }
-    for(let h = 0; h < 24; h++){
-      let sum = 0;
-      for (const s of samples)sum += profile[s * 24 + h];
-      profile[d * 24 + h] = Math.round(sum / samples.length);
-    }
-    filled++;
+// Mois (1-12) de chaque jour du calendrier générique.
+const DAY_MONTH = (()=>{
+  const a = [];
+  for(let m = 0; m < 12; m++)for(let i = 0; i < PROF_DAYS[m]; i++)a.push(m + 1);
+  return a;
+})();
+// Indice saisonnier de référence de la conso électrique résidentielle française
+// (base 1 = moyenne annuelle). Il donne la FORME de la saisonnalité ; son AMPLITUDE
+// est recalibrée sur les mois réellement mesurés (cf. completeYear) — un logement
+// tout-électrique varie beaucoup plus qu'un logement chauffé au gaz.
+const SEASON_IDX = (()=>{
+  const raw = [1.34, 1.26, 1.10, 0.92, 0.78, 0.66, 0.62, 0.63, 0.72, 0.90, 1.12, 1.29];
+  const mean = raw.reduce((a, b)=>a + b, 0) / 12;
+  return raw.map((v)=>v / mean);
+})();
+// Jour générique du milieu de chaque mois (départage les donneurs à indice égal).
+const MONTH_MID = (()=>{
+  const a = [];
+  let acc = 0;
+  for (const n of PROF_DAYS){
+    a.push(acc + Math.floor(n / 2));
+    acc += n;
   }
-  return { filled, unfilled };
+  return a;
+})();
+// ── Complétion des mois manquants (contrat ENEDIS de moins d'un an) ──────────
+// Un compteur posé en janvier ne remonte rien de septembre à décembre : sommer la
+// courbe telle quelle donnerait une conso annuelle très sous-évaluée, et l'IA
+// féliciterait le foyer pour une sobriété qui n'existe pas. On reconstruit donc les
+// jours absents à partir des jours MESURÉS DE SAISON COMPARABLE :
+//   1. niveau attendu du mois manquant = régression pondérée conso_moy_jour(m)
+//      = base + amplitude × (indice_saisonnier[m] − 1), calibrée sur les mois connus ;
+//   2. forme horaire = moyenne de 3 jours mesurés du même type (semaine / week-end)
+//      dans les mois d'indice saisonnier le plus proche ;
+//   3. la forme est remise à l'échelle du niveau attendu, en conservant le contraste
+//      semaine / week-end observé sur l'année.
+// Un mois PARTIELLEMENT mesuré se cale sur sa propre moyenne (plus fiable que le modèle).
+function completeYear(profile, dayHasData) {
+  const dayTotal = new Array(366).fill(0);
+  for(let d = 0; d < 366; d++){
+    let s = 0;
+    for(let h = 0; h < 24; h++)s += profile[d * 24 + h];
+    dayTotal[d] = s;
+  }
+  // Un jour "mesuré" mais entièrement nul n'apporte aucune forme exploitable.
+  const measured = [];
+  for(let d = 0; d < 366; d++)if (dayHasData[d] && dayTotal[d] > 0) measured.push(d);
+  const monthDays = new Array(13).fill(0), monthWh = new Array(13).fill(0);
+  let kwhMeasured = 0;
+  for (const d of measured){
+    monthDays[DAY_MONTH[d]]++;
+    monthWh[DAY_MONTH[d]] += dayTotal[d];
+    kwhMeasured += dayTotal[d];
+  }
+  const monthsMeasured = [], monthsPartial = [], monthsSimulated = [];
+  for(let m = 1; m <= 12; m++){
+    if (monthDays[m] === 0) monthsSimulated.push(m);
+    else {
+      monthsMeasured.push(m);
+      if (monthDays[m] < PROF_DAYS[m - 1]) monthsPartial.push(m);
+    }
+  }
+  const stats = {
+    filled: 0,
+    unfilled: 366 - measured.length,
+    measured_days: measured.length,
+    months_measured: monthsMeasured,
+    months_partial: monthsPartial,
+    months_simulated: monthsSimulated,
+    kwh_measured: kwhMeasured,
+    kwh_simulated: 0,
+    amplitude_calibree: false
+  };
+  if (measured.length === 0 || measured.length === 366) return stats;
+  // 1) Régression pondérée du niveau mensuel sur l'indice saisonnier.
+  let sw = 0, sx = 0, sy = 0;
+  for(let m = 1; m <= 12; m++){
+    if (!monthDays[m]) continue;
+    const w = monthDays[m];
+    sw += w;
+    sx += w * (SEASON_IDX[m - 1] - 1);
+    sy += w * (monthWh[m] / monthDays[m]);
+  }
+  const xbar = sx / sw, ybar = sy / sw;
+  let sxx = 0, sxy = 0;
+  for(let m = 1; m <= 12; m++){
+    if (!monthDays[m]) continue;
+    const w = monthDays[m], x = SEASON_IDX[m - 1] - 1, y = monthWh[m] / monthDays[m];
+    sxx += w * (x - xbar) * (x - xbar);
+    sxy += w * (x - xbar) * (y - ybar);
+  }
+  // Repli (un seul mois mesuré, ou mois d'indices trop voisins) : forme de référence
+  // pure, pred(m) = k × indice[m], soit base = amplitude = k.
+  const kRef = ybar / (xbar + 1);
+  let base = kRef, amp = kRef;
+  if (sxx > 1e-9 && monthsMeasured.length >= 2) {
+    // L'amplitude mesurée n'est crédible qu'à hauteur de l'étendue saisonnière
+    // COUVERTE : quatre mois d'été tous voisins en indice donnent une pente très mal
+    // conditionnée, qu'extrapoler jusqu'en janvier est hasardeux. On amortit donc vers
+    // l'amplitude de référence au prorata de r = étendue couverte / étendue d'une année
+    // complète (r = 1 → régression pure ; r → 0 → forme de référence).
+    const sxxFull = 366 / 12 * SEASON_IDX.reduce((a, s)=>a + (s - 1) * (s - 1), 0);
+    const r = Math.min(1, sxx / sxxFull);
+    // Garde-fous : jamais d'amplitude négative (hiver moins consommateur que l'été
+    // serait aberrant) ni plus du double de la référence (extrapolation trop agressive).
+    amp = Math.max(0, Math.min(sxy / sxx * r + kRef * (1 - r), 2 * kRef));
+    base = ybar - amp * xbar;
+    stats.amplitude_calibree = true;
+  }
+  const floor = 0.2 * ybar;
+  const MIN_OBS_DAYS = 7; // au-delà, la moyenne propre du mois bat le modèle
+  const monthTarget = (m)=>monthDays[m] >= MIN_OBS_DAYS ? monthWh[m] / monthDays[m] : Math.max(floor, base + amp * (SEASON_IDX[m - 1] - 1));
+  // 2) Contraste semaine / week-end mesuré sur l'année (à préserver dans les jours simulés).
+  let weWh = 0, weN = 0, wkWh = 0, wkN = 0;
+  for (const d of measured){
+    if (isWeekendDay(d)) { weWh += dayTotal[d]; weN++; } else { wkWh += dayTotal[d]; wkN++; }
+  }
+  const allMean = (weWh + wkWh) / measured.length;
+  const ratioWe = weN > 0 && allMean > 0 ? weWh / weN / allMean : 1;
+  const ratioWk = wkN > 0 && allMean > 0 ? wkWh / wkN / allMean : 1;
+  // 3) Donneurs classés par proximité SAISONNIÈRE (puis calendaire), par type de jour.
+  const circDist = (a, b)=>{
+    const x = Math.abs(a - b);
+    return Math.min(x, 366 - x);
+  };
+  const donorCache = {};
+  const donorPool = (m, wantWeekend)=>{
+    const key = `${m}_${wantWeekend ? 1 : 0}`;
+    if (donorCache[key]) return donorCache[key];
+    const same = measured.filter((d)=>isWeekendDay(d) === wantWeekend);
+    const pool = same.length ? same : measured;
+    const ref = SEASON_IDX[m - 1], mid = MONTH_MID[m - 1];
+    const sorted = [
+      ...pool
+    ].sort((a, b)=>{
+      const da = Math.abs(SEASON_IDX[DAY_MONTH[a] - 1] - ref);
+      const db = Math.abs(SEASON_IDX[DAY_MONTH[b] - 1] - ref);
+      if (Math.abs(da - db) > 1e-9) return da - db;
+      return circDist(a, mid) - circDist(b, mid);
+    });
+    donorCache[key] = sorted;
+    return sorted;
+  };
+  const seen = {}; // n-ième jour simulé d'un couple (mois, type) → décale les donneurs
+  let kwhAfter = 0;
+  for(let d = 0; d < 366; d++){
+    if (dayHasData[d] && dayTotal[d] > 0) { kwhAfter += dayTotal[d]; continue; }
+    const m = DAY_MONTH[d], we = isWeekendDay(d);
+    const pool = donorPool(m, we);
+    if (!pool.length) continue;
+    const key = `${m}_${we ? 1 : 0}`;
+    const rank = seen[key] = (seen[key] ?? 0) + 1;
+    // Décalage dans la liste triée : les jours simulés d'un même mois ne sont pas
+    // tous identiques (on garde de la variété tout en restant proche en saison).
+    const donors = [];
+    for(let k = 0; k < 3 && k < pool.length; k++)donors.push(pool[((rank - 1) * 3 + k) % pool.length]);
+    const shape = new Array(24).fill(0);
+    let shapeTotal = 0;
+    for (const s of donors)for(let h = 0; h < 24; h++){
+      shape[h] += profile[s * 24 + h];
+      shapeTotal += profile[s * 24 + h];
+    }
+    if (shapeTotal <= 0) continue;
+    const target = monthTarget(m) * (we ? ratioWe : ratioWk);
+    for(let h = 0; h < 24; h++)profile[d * 24 + h] = Math.round(shape[h] * target / shapeTotal);
+    kwhAfter += target;
+    stats.filled++;
+    stats.unfilled--;
+  }
+  stats.kwh_simulated = Math.max(0, kwhAfter - kwhMeasured);
+  return stats;
 }
 // ── Analyse des bascules HC/HP (détection du contacteur jour/nuit) ───────────
 // À l'instant exact où le Linky bascule HP→HC, un contacteur asservi enclenche le
@@ -252,14 +382,19 @@ function periodMs(period) {
   if (s.includes("1H")) return 3600000;
   return 3600000;
 }
-// Renvoie { profile, dayHasData, coverage, daysPresent, hasAny }.
+// Renvoie { profile, dayHasData, coverage, daysPresent, hasAny, firstTs, lastTs }.
+// firstTs/lastTs = bornes RÉELLES (ms) des données servies par ENEDIS : le profil est
+// projeté sur un calendrier générique, qui perd l'année — or c'est justement cette
+// période qui dit si l'on dispose ou non de 12 mois de mesure.
 function buildProfileV0(lc) {
   const empty = {
     profile: zeros(),
     dayHasData: new Array(366).fill(false),
     coverage: 0,
     daysPresent: 0,
-    hasAny: false
+    hasAny: false,
+    firstTs: null,
+    lastTs: null
   };
   if (!lc || !Array.isArray(lc.values) || !lc.values.length || !lc.startsAt) return empty;
   const step = periodMs(lc.period);
@@ -301,7 +436,9 @@ function buildProfileV0(lc) {
     dayHasData,
     coverage: daysPresent / 366,
     daysPresent,
-    hasAny: true
+    hasAny: true,
+    firstTs: entries[0][0] * 3600000,
+    lastTs: entries[entries.length - 1][0] * 3600000
   };
 }
 // ── C68 (données techniques / contractuelles : HC/HP, puissance, option) ─────
@@ -413,75 +550,79 @@ function collectDailyGroups(raw) {
   }
   return groups;
 }
+function emptyDaily() {
+  return {
+    profile: zeros(),
+    total: 0,
+    daysPresent: 0,
+    dayHasData: new Array(366).fill(false),
+    hasAny: false,
+    firstTs: null,
+    lastTs: null
+  };
+}
 function parseDaily(raw) {
   const groups = collectDailyGroups(raw);
   const allPts = groups.flat();
-  if (!allPts.length) return {
-    profile: zeros(),
-    total: 0,
-    daysPresent: 0
-  };
+  if (!allPts.length) return emptyDaily();
   // Unité : R65 = énergie quotidienne ; médiane < 1000 → données en kWh → ×1000.
   const vals = allPts.map((p)=>parseFloat(p.v) || 0).filter((v)=>v > 0).sort((a, b)=>a - b);
   const median = vals.length ? vals[Math.floor(vals.length / 2)] : 0;
   const toWh = median > 0 && median < 1000 ? 1000 : 1;
   // Somme par jour calendaire ABSOLU (cumule les grandeurs d'un même jour : HP+HC+…).
+  // Clé = minuit UTC en ms, pour un tri chronologique correct (un tri de chaînes
+  // "2026-10-1" / "2026-2-1" plaçait octobre avant février).
   const absDay = new Map();
   for (const p of allPts){
     const dayWh = (parseFloat(p.v) || 0) * toWh;
     if (dayWh <= 0) continue;
     const dt = new Date(p.d);
     if (isNaN(dt.getTime())) continue;
-    const key = `${dt.getUTCFullYear()}-${dt.getUTCMonth() + 1}-${dt.getUTCDate()}`;
+    const key = Date.UTC(dt.getUTCFullYear(), dt.getUTCMonth(), dt.getUTCDate());
     absDay.set(key, (absDay.get(key) ?? 0) + dayWh);
   }
-  if (absDay.size === 0) return {
-    profile: zeros(),
-    total: 0,
-    daysPresent: 0
-  };
+  if (absDay.size === 0) return emptyDaily();
   // Projection sur le calendrier générique (mois_jour) ; la date la plus récente gagne.
+  // Les jours ABSENTS restent à zéro : c'est completeYear qui les reconstruit, en
+  // tenant compte de la saison (les reboucher ici par la moyenne annuelle lissait
+  // l'hiver et l'été à l'identique).
   const sortedKeys = [
     ...absDay.keys()
-  ].sort();
+  ].sort((a, b)=>a - b);
   const genMap = new Map();
   for (const key of sortedKeys){
-    const [, m, d] = key.split("-").map(Number);
-    genMap.set(`${m}_${d}`, absDay.get(key));
+    const dt = new Date(key);
+    genMap.set(`${dt.getUTCMonth() + 1}_${dt.getUTCDate()}`, absDay.get(key));
   }
-  let sum = 0;
-  for (const wh of genMap.values())sum += wh;
-  const mean = sum / genMap.size;
   const profile = zeros();
+  const dayHasData = new Array(366).fill(false);
   for(let m = 1; m <= 12; m++){
     for(let d = 1; d <= PROF_DAYS[m - 1]; d++){
-      const dayWh = genMap.get(`${m}_${d}`) ?? mean;
+      const dayWh = genMap.get(`${m}_${d}`);
+      if (dayWh == null || dayWh <= 0) continue;
       const per = Math.round(dayWh / 24);
       for(let h = 0; h < 24; h++){
         const idx = profIdx(m, d, h);
         if (idx >= 0 && idx < TOTAL_HOURS) profile[idx] = per;
       }
+      dayHasData[Math.floor(profIdx(m, d, 0) / 24)] = true;
     }
   }
   return {
     profile,
     total: profile.reduce((a, b)=>a + b, 0),
-    daysPresent: Math.min(genMap.size, 366)
+    daysPresent: Math.min(genMap.size, 366),
+    dayHasData,
+    hasAny: true,
+    firstTs: sortedKeys[0],
+    lastTs: sortedKeys[sortedKeys.length - 1]
   };
 }
 // Repli R65 via l'endpoint data v0 ({ period:'1d', startsAt, values }).
 function parseDailyV0(j) {
-  if (!j || !Array.isArray(j.values) || !j.startsAt) return {
-    profile: zeros(),
-    total: 0,
-    daysPresent: 0
-  };
+  if (!j || !Array.isArray(j.values) || !j.startsAt) return emptyDaily();
   const start = new Date(j.startsAt).getTime();
-  if (!Number.isFinite(start)) return {
-    profile: zeros(),
-    total: 0,
-    daysPresent: 0
-  };
+  if (!Number.isFinite(start)) return emptyDaily();
   const points = [];
   for(let i = 0; i < j.values.length; i++){
     const v = j.values[i];
@@ -585,11 +726,7 @@ async function fetchDaily(r65Req) {
       if (r.ok) return parseDailyV0(await r.json());
     } catch  {}
   }
-  return {
-    profile: zeros(),
-    total: 0,
-    daysPresent: 0
-  };
+  return emptyDaily();
 }
 async function applyC68(c68Req, siteUpdate) {
   const url = reqDataUrl(c68Req);
@@ -608,6 +745,47 @@ async function applyC68(c68Req, siteUpdate) {
     } catch  {}
   }
 }
+// ── Description de la couverture (stockée dans sites.conso_gaps) ─────────────
+const ISO_DATE_PARIS = new Intl.DateTimeFormat("en-CA", {
+  timeZone: "Europe/Paris",
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit"
+});
+const isoDateParis = (ms)=>ms == null ? null : ISO_DATE_PARIS.format(new Date(ms));
+// Complète les mois manquants du profil ET décrit ce qui a été mesuré / simulé.
+// Ce descriptif remonte tel quel jusqu'au JSON du bilan IA : sans lui, une année
+// incomplète passerait pour un foyer sobre.
+function completeAndDescribe(built) {
+  const res = completeYear(built.profile, built.dayHasData);
+  const pct = Math.round(res.measured_days / 366 * 100);
+  const anneeComplete = res.months_simulated.length === 0 && pct >= 90;
+  const fiabilite = anneeComplete ? "complete"
+    : pct >= 75 && res.months_simulated.length <= 1 ? "bonne"
+    : pct >= 50 ? "moyenne" : "faible";
+  return {
+    // champs historiques (affichés dans l'admin)
+    missing_days: 366 - res.measured_days,
+    filled_days: res.filled,
+    unfilled_days: res.unfilled,
+    // période réellement servie par ENEDIS
+    periode_debut: isoDateParis(built.firstTs),
+    periode_fin: isoDateParis(built.lastTs),
+    jours_mesures: res.measured_days,
+    pct_annee_mesuree: pct,
+    mois_mesures: res.months_measured,
+    mois_partiels: res.months_partial,
+    mois_simules: res.months_simulated,
+    kwh_mesures: Math.round(res.kwh_measured / 1000),
+    kwh_simules: Math.round(res.kwh_simulated / 1000),
+    annee_complete: anneeComplete,
+    amplitude_saisonniere_calibree: res.amplitude_calibree,
+    fiabilite,
+    methode: res.filled > 0
+      ? "Mois manquants reconstruits par extrapolation saisonnière : niveau attendu déduit des mois mesurés de saison comparable, forme horaire copiée de jours réels du même type (semaine / week-end)."
+      : null
+  };
+}
 // Construit le profil d'INJECTION (surplus revendu au réseau) 8784 h, best-effort.
 // R63 (courbe de charge injection) prioritaire, repli R65 (journalier injection).
 // Renvoie { profile, coverage, source } ou null si aucune donnée exploitable
@@ -617,13 +795,14 @@ async function buildInjectionProfile(r63Inj, r65Inj, pdl) {
     const lc = await fetchR63Curve(r63Inj, pdl);
     const built = buildProfileV0(lc);
     if (built.hasAny && built.coverage >= 0.70) {
-      fillMissingDays(built.profile, built.dayHasData);
+      completeYear(built.profile, built.dayHasData);
       return { profile: built.profile, coverage: built.coverage, source: "loadcurve" };
     }
   }
   if (r65Inj?.status === "SUCCESS") {
     const d = await fetchDaily(r65Inj);
     if (d.daysPresent >= MIN_DAILY_DAYS) {
+      completeYear(d.profile, d.dayHasData);
       return { profile: d.profile, coverage: d.daysPresent / 366, source: "daily" };
     }
   }
@@ -978,13 +1157,12 @@ async function finalizeRec(rec) {
         r63Curve = lc;
         r63Built = buildProfileV0(lc);
         if (r63Built.hasAny && r63Built.coverage >= 0.70) {
-          const fillRes = fillMissingDays(r63Built.profile, r63Built.dayHasData);
           candidate = {
             source: "loadcurve",
             coverage: r63Built.coverage,
             profile: r63Built.profile,
             note: null,
-            gaps: { missing_days: 366 - r63Built.daysPresent, filled_days: fillRes.filled, unfilled_days: fillRes.unfilled }
+            gaps: completeAndDescribe(r63Built)
           };
         }
       }
@@ -999,18 +1177,21 @@ async function finalizeRec(rec) {
             coverage: d.daysPresent / 366,
             profile: d.profile,
             note: "Courbe de charge indisponible ou partielle chez ENEDIS — données journalières (approximatives) utilisées.",
-            gaps: { missing_days: 366 - d.daysPresent, filled_days: 0, unfilled_days: 366 - d.daysPresent }
+            gaps: completeAndDescribe(d)
           };
         }
       }
       // Dernier recours : courbe partielle marquée approximative (rien d'autre en attente).
+      // C'est le cas typique d'un contrat de moins d'un an (emménagement récent) :
+      // les mois jamais mesurés sont extrapolés, sans quoi la conso annuelle serait
+      // amputée d'un trimestre entier.
       if (!candidate && !anyPending && r63Built && r63Built.hasAny) {
         candidate = {
           source: "daily",
           coverage: r63Built.coverage,
           profile: r63Built.profile,
           note: "Courbe de charge partielle chez ENEDIS — estimation approximative.",
-          gaps: { missing_days: 366 - r63Built.daysPresent, filled_days: 0, unfilled_days: 366 - r63Built.daysPresent }
+          gaps: completeAndDescribe(r63Built)
         };
       }
       if (candidate) {
