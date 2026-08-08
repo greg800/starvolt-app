@@ -58,11 +58,12 @@ const DAY_MONTH = (()=>{
   for(let m = 0; m < 12; m++)for(let i = 0; i < PROF_DAYS[m]; i++)a.push(m + 1);
   return a;
 })();
-// Indice saisonnier de référence de la conso électrique résidentielle française
-// (base 1 = moyenne annuelle). Il donne la FORME de la saisonnalité ; son AMPLITUDE
-// est recalibrée sur les mois réellement mesurés (cf. completeYear) — un logement
+// Indice saisonnier GÉNÉRIQUE de la conso électrique résidentielle française
+// (base 1 = moyenne annuelle). Repli quand la cohorte du foyer est trop petite
+// (cf. fetchSeasonIndex). Il donne la FORME de la saisonnalité ; son AMPLITUDE est
+// recalibrée sur les mois réellement mesurés (cf. completeYear) — un logement
 // tout-électrique varie beaucoup plus qu'un logement chauffé au gaz.
-const SEASON_IDX = (()=>{
+const GENERIC_SEASON_IDX = (()=>{
   const raw = [1.34, 1.26, 1.10, 0.92, 0.78, 0.66, 0.62, 0.63, 0.72, 0.90, 1.12, 1.29];
   const mean = raw.reduce((a, b)=>a + b, 0) / 12;
   return raw.map((v)=>v / mean);
@@ -89,7 +90,12 @@ const MONTH_MID = (()=>{
 //   3. la forme est remise à l'échelle du niveau attendu, en conservant le contraste
 //      semaine / week-end observé sur l'année.
 // Un mois PARTIELLEMENT mesuré se cale sur sa propre moyenne (plus fiable que le modèle).
-function completeYear(profile, dayHasData) {
+// `refIdx` : indice saisonnier de référence. Par défaut la courbe générique ; on lui
+// préfère celle de la COHORTE du foyer (mêmes équipements de chauffage) quand elle est
+// disponible — un logement chauffé au gaz a une courbe bien plus plate, et le générique
+// surestimait son hiver de +34 % sur nos essais.
+function completeYear(profile, dayHasData, refIdx) {
+  const SEASON_IDX = Array.isArray(refIdx) && refIdx.length === 12 ? refIdx : GENERIC_SEASON_IDX;
   const dayTotal = new Array(366).fill(0);
   for(let d = 0; d < 366; d++){
     let s = 0;
@@ -195,31 +201,52 @@ function completeYear(profile, dayHasData) {
     donorCache[key] = sorted;
     return sorted;
   };
-  const seen = {}; // n-ième jour simulé d'un couple (mois, type) → décale les donneurs
-  let kwhAfter = 0;
+  // Un jour simulé = UN jour donneur réel, transposé. Moyenner trois donneurs lissait
+  // toute la dispersion : dans un mois entièrement simulé, les 31 jours sortaient
+  // identiques (deux valeurs en tout, semaine et week-end) — visible à l'œil nu sur le
+  // graphe mensuel. On garde donc l'écart PROPRE du jour donneur (semaine creuse,
+  // week-end chargé, journée atypique) et on ne recale que le NIVEAU du mois.
+  const missingByMonth = {};
   for(let d = 0; d < 366; d++){
-    if (dayHasData[d] && dayTotal[d] > 0) { kwhAfter += dayTotal[d]; continue; }
-    const m = DAY_MONTH[d], we = isWeekendDay(d);
-    const pool = donorPool(m, we);
-    if (!pool.length) continue;
-    const key = `${m}_${we ? 1 : 0}`;
-    const rank = seen[key] = (seen[key] ?? 0) + 1;
-    // Décalage dans la liste triée : les jours simulés d'un même mois ne sont pas
-    // tous identiques (on garde de la variété tout en restant proche en saison).
-    const donors = [];
-    for(let k = 0; k < 3 && k < pool.length; k++)donors.push(pool[((rank - 1) * 3 + k) % pool.length]);
-    const shape = new Array(24).fill(0);
-    let shapeTotal = 0;
-    for (const s of donors)for(let h = 0; h < 24; h++){
-      shape[h] += profile[s * 24 + h];
-      shapeTotal += profile[s * 24 + h];
+    if (dayHasData[d] && dayTotal[d] > 0) continue;
+    (missingByMonth[DAY_MONTH[d]] ??= []).push(d);
+  }
+  let kwhAfter = 0;
+  for (const d of measured)kwhAfter += dayTotal[d];
+  for(let m = 1; m <= 12; m++){
+    const days = missingByMonth[m];
+    if (!days) continue;
+    const picks = [];
+    const seen = {};
+    for (const d of days){
+      const we = isWeekendDay(d);
+      const pool = donorPool(m, we);
+      if (!pool.length) continue;
+      const rank = seen[we ? 1 : 0] = (seen[we ? 1 : 0] ?? 0) + 1;
+      // Décalage par mois : sans lui, deux mois entièrement simulés puisent les mêmes
+      // donneurs dans le même ordre et se ressemblent trait pour trait.
+      picks.push({ d, donor: pool[(rank - 1 + m * 7) % pool.length], we });
     }
-    if (shapeTotal <= 0) continue;
-    const target = monthTarget(m) * (we ? ratioWe : ratioWk);
-    for(let h = 0; h < 24; h++)profile[d * 24 + h] = Math.round(shape[h] * target / shapeTotal);
-    kwhAfter += target;
-    stats.filled++;
-    stats.unfilled--;
+    if (!picks.length) continue;
+    // Normalisation : la moyenne des niveaux relatifs tirés doit retomber sur le mélange
+    // semaine / week-end attendu, sinon le niveau du mois dérive avec les donneurs tirés.
+    const relOf = (dn)=>dayTotal[dn] / (monthWh[DAY_MONTH[dn]] / monthDays[DAY_MONTH[dn]]);
+    let relSum = 0, mixSum = 0;
+    for (const p of picks){
+      relSum += relOf(p.donor);
+      mixSum += p.we ? ratioWe : ratioWk;
+    }
+    const relMean = relSum / picks.length;
+    const k = relMean > 0 ? mixSum / picks.length / relMean : 1;
+    const tgt = monthTarget(m);
+    for (const p of picks){
+      const dm = DAY_MONTH[p.donor];
+      const f = tgt * k / (monthWh[dm] / monthDays[dm]);
+      for(let h = 0; h < 24; h++)profile[p.d * 24 + h] = Math.round(profile[p.donor * 24 + h] * f);
+      kwhAfter += dayTotal[p.donor] * f;
+      stats.filled++;
+      stats.unfilled--;
+    }
   }
   stats.kwh_simulated = Math.max(0, kwhAfter - kwhMeasured);
   return stats;
@@ -753,11 +780,40 @@ const ISO_DATE_PARIS = new Intl.DateTimeFormat("en-CA", {
   day: "2-digit"
 });
 const isoDateParis = (ms)=>ms == null ? null : ISO_DATE_PARIS.format(new Date(ms));
+// Indice saisonnier de la COHORTE du foyer : moyenne, mois par mois, des sites ayant le
+// MÊME type de chauffage et une année complète mesurée (RPC get_season_index, agrégat
+// seul — aucune donnée individuelle n'en sort). En-dessous de MIN_COHORT_SITES, la
+// moyenne serait dictée par un ou deux foyers atypiques : on garde alors le générique.
+const MIN_COHORT_SITES = 3;
+const CHAUFFAGE_LBL = { elec: "chauffage électrique", pac: "pompe à chaleur", autre: "chauffage non électrique" };
+async function fetchSeasonIndex(siteId) {
+  const fallback = { idx: null, source: "courbe générique (référence nationale)" };
+  try {
+    const rows = await sbGet("sites", `id=eq.${siteId}&select=flex_chauffage`);
+    const chauffage = rows?.[0]?.flex_chauffage ?? null;
+    if (!chauffage) return fallback;
+    const r = await fetch(`${SUPABASE_URL}/rest/v1/rpc/get_season_index`, {
+      method: "POST",
+      headers: sbHeaders(),
+      body: JSON.stringify({ p_chauffage: chauffage })
+    });
+    if (!r.ok) return fallback;
+    const data = await r.json();
+    if (!Array.isArray(data) || data.length !== 12) return fallback;
+    const n = Number(data[0]?.nb_sites ?? 0);
+    if (n < MIN_COHORT_SITES) return fallback;
+    const idx = data.sort((a, b)=>a.mois - b.mois).map((x)=>Number(x.indice));
+    if (idx.some((v)=>!Number.isFinite(v) || v <= 0)) return fallback;
+    return { idx, source: `cohorte ${CHAUFFAGE_LBL[chauffage] ?? chauffage} (${n} sites)` };
+  } catch (_) {
+    return fallback; // l'extrapolation ne doit jamais échouer faute de cohorte
+  }
+}
 // Complète les mois manquants du profil ET décrit ce qui a été mesuré / simulé.
 // Ce descriptif remonte tel quel jusqu'au JSON du bilan IA : sans lui, une année
 // incomplète passerait pour un foyer sobre.
-function completeAndDescribe(built) {
-  const res = completeYear(built.profile, built.dayHasData);
+function completeAndDescribe(built, season) {
+  const res = completeYear(built.profile, built.dayHasData, season?.idx);
   const pct = Math.round(res.measured_days / 366 * 100);
   const anneeComplete = res.months_simulated.length === 0 && pct >= 90;
   const fiabilite = anneeComplete ? "complete"
@@ -780,9 +836,10 @@ function completeAndDescribe(built) {
     kwh_simules: Math.round(res.kwh_simulated / 1000),
     annee_complete: anneeComplete,
     amplitude_saisonniere_calibree: res.amplitude_calibree,
+    reference_saisonniere: res.filled > 0 ? (season?.source ?? null) : null,
     fiabilite,
     methode: res.filled > 0
-      ? "Mois manquants reconstruits par extrapolation saisonnière : niveau attendu déduit des mois mesurés de saison comparable, forme horaire copiée de jours réels du même type (semaine / week-end)."
+      ? "Mois manquants reconstruits par extrapolation saisonnière : niveau attendu déduit des mois mesurés de saison comparable, chaque jour simulé étant la transposition d'un jour réel du même type (semaine / week-end) — la variabilité d'un jour à l'autre est donc préservée."
       : null
   };
 }
@@ -1149,6 +1206,8 @@ async function finalizeRec(rec) {
       const r63Soft = isPending(r63) && reqAgeMs > SOFT_MS;
       const r65Ok = r65?.status === "SUCCESS";
       // Construire le meilleur candidat disponible.
+      // Référence saisonnière du foyer, résolue une seule fois pour toutes les branches.
+      const season = await fetchSeasonIndex(rec.site_id);
       let candidate = null;
       let r63Built = null;
       let r63Curve = null; // courbe brute conservée pour l'analyse des bascules HC/HP
@@ -1162,7 +1221,7 @@ async function finalizeRec(rec) {
             coverage: r63Built.coverage,
             profile: r63Built.profile,
             note: null,
-            gaps: completeAndDescribe(r63Built)
+            gaps: completeAndDescribe(r63Built, season)
           };
         }
       }
@@ -1177,7 +1236,7 @@ async function finalizeRec(rec) {
             coverage: d.daysPresent / 366,
             profile: d.profile,
             note: "Courbe de charge indisponible ou partielle chez ENEDIS — données journalières (approximatives) utilisées.",
-            gaps: completeAndDescribe(d)
+            gaps: completeAndDescribe(d, season)
           };
         }
       }
@@ -1196,7 +1255,7 @@ async function finalizeRec(rec) {
           coverage: r63Built.coverage,
           profile: r63Built.profile,
           note: "Courbe de charge partielle chez ENEDIS : les mois non mesurés ont été estimés.",
-          gaps: completeAndDescribe(r63Built)
+          gaps: completeAndDescribe(r63Built, season)
         };
       }
       if (candidate) {

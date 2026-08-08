@@ -4674,6 +4674,7 @@ function buildCoverageFacts(site) {
     kwh_mesures: g?.kwh_mesures ?? null,
     kwh_simules: g?.kwh_simules ?? null,
     fiabilite_estimation: g?.fiabilite ?? null,
+    reference_saisonniere: g?.reference_saisonniere ?? null,
     methode_simulation: g?.methode ?? null,
     avertissement: complete ? null
       : "conso_annuelle_kwh est une ESTIMATION : le contrat ENEDIS couvre moins de 12 mois"
@@ -14436,6 +14437,7 @@ function AdminBilanDataScreen({ onBack }) {
       ['Données ENEDIS — mois simulés', e?.mois_simules?.length ? e.mois_simules.join(', ') : (e ? 'aucun' : '—')],
       ['Données ENEDIS — kWh mesurés / simulés', (e?.kwh_mesures != null || e?.kwh_simules != null) ? `${e.kwh_mesures ?? '?'} / ${e.kwh_simules ?? '?'} kWh` : '—'],
       ['Données ENEDIS — fiabilité de l’estimation', e?.fiabilite_estimation || '—'],
+      ['Données ENEDIS — référence saisonnière', e?.reference_saisonniere || '—'],
       ['Consommation annuelle', f.conso_annuelle_kwh != null ? f.conso_annuelle_kwh + ' kWh' + (e && e.annee_complete === false ? ' (estimée)' : '') : '—'],
       ['Facture actuelle estimée', f.facture_actuelle_eur != null ? f.facture_actuelle_eur + ' €/an' : '—'],
       ['Prix moyen', f.prix_moyen_ceur_kwh != null ? f.prix_moyen_ceur_kwh + ' c€/kWh' : '—'],
