@@ -1181,16 +1181,21 @@ async function finalizeRec(rec) {
           };
         }
       }
-      // Dernier recours : courbe partielle marquée approximative (rien d'autre en attente).
-      // C'est le cas typique d'un contrat de moins d'un an (emménagement récent) :
-      // les mois jamais mesurés sont extrapolés, sans quoi la conso annuelle serait
-      // amputée d'un trimestre entier.
+      // Dernier recours : courbe de charge de couverture insuffisante (< 70 %), aucune
+      // autre donnée en attente. C'est le cas typique d'un contrat de moins d'un an
+      // (emménagement récent) : les mois jamais mesurés sont extrapolés, sans quoi la
+      // conso annuelle serait amputée d'un trimestre entier.
+      // La source reste "loadcurve" : ces données SONT la courbe de charge R63, au pas
+      // 30 min. Les étiqueter "daily" annonçait à tort du journalier approximatif sur une
+      // mesure horaire, et faisait passer une vraie courbe pour dégradable par du R65.
+      // Ce qui est partiel ici, c'est la COUVERTURE — décrite par conso_gaps (fiabilite,
+      // mois_simules), pas la finesse de la mesure.
       if (!candidate && !anyPending && r63Built && r63Built.hasAny) {
         candidate = {
-          source: "daily",
+          source: "loadcurve",
           coverage: r63Built.coverage,
           profile: r63Built.profile,
-          note: "Courbe de charge partielle chez ENEDIS — estimation approximative.",
+          note: "Courbe de charge partielle chez ENEDIS : les mois non mesurés ont été estimés.",
           gaps: completeAndDescribe(r63Built)
         };
       }
