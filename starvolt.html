@@ -5778,9 +5778,16 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onOnboardingQ
   const[showAdd,setShowAdd]=useState(false);
   const[editMode,setEditMode]=useState(false);
   const[showDeleteConfirm,setShowDeleteConfirm]=useState(false);
-  const[pvKwc,setPvKwc]=useState(()=>{try{const d=JSON.parse(localStorage.getItem('starvolt_solar_defaults'));if(d?.pvKwc!=null)return d.pvKwc;}catch{}return!!localStorage.getItem('starvolt_solar_chosen')?'6':'0';});
-  const[batKwh,setBatKwh]=useState(()=>{try{const d=JSON.parse(localStorage.getItem('starvolt_solar_defaults'));if(d?.batKwh!=null)return d.batKwh;}catch{}return!!localStorage.getItem('starvolt_solar_chosen')?'10':'0';});
-  const[thermKwh,setThermKwh]=useState(()=>{try{const d=JSON.parse(localStorage.getItem('starvolt_solar_defaults'));if(d?.thermKwh!=null)return d.thermKwh;}catch{}const hasSol=!!localStorage.getItem('starvolt_solar_chosen');return hasSol?'10':!!localStorage.getItem('starvolt_box_chosen')?'10':'0';});
+  // Tant que RIEN n'est choisi, la cible est 0 — on ignore starvolt_solar_defaults. Le
+  // simulateur y publie ses valeurs d'exploration (6 kWc / 10 kWh) dès son affichage, sans
+  // tag siteId ; les lire ici les faisait passer pour une cible réelle, que l'effet de sync
+  // ci-dessous re-taguait avec l'id du site puis persistait en base. Résultat : un site qui
+  // n'a jamais demandé de solaire se retrouvait avec puissance_pv_kwc = 6 (45 sites sur 72).
+  // resolveCartEquipment applique déjà cette règle : on s'aligne dessus à l'initialisation.
+  const solarPicked=()=>!!localStorage.getItem('starvolt_solar_chosen');
+  const[pvKwc,setPvKwc]=useState(()=>{if(!solarPicked())return'0';try{const d=JSON.parse(localStorage.getItem('starvolt_solar_defaults'));if(d?.pvKwc!=null)return d.pvKwc;}catch{}return'6';});
+  const[batKwh,setBatKwh]=useState(()=>{if(!solarPicked())return'0';try{const d=JSON.parse(localStorage.getItem('starvolt_solar_defaults'));if(d?.batKwh!=null)return d.batKwh;}catch{}return'10';});
+  const[thermKwh,setThermKwh]=useState(()=>{const hasBox=!!localStorage.getItem('starvolt_box_chosen');if(!solarPicked()&&!hasBox)return'0';try{const d=JSON.parse(localStorage.getItem('starvolt_solar_defaults'));if(d?.thermKwh!=null)return d.thermKwh;}catch{}return'10';});
   const[prodProfilId,setProdProfilId]=useState('');
   const[prodProfilData,setProdProfilData]=useState(null);
   const[balance,setBalance]=useState(null);
