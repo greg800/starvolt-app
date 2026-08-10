@@ -4989,25 +4989,33 @@ function EnergyBalanceChart({ balance, level, selMonth, selDay, setLevel, setSel
     return barsRef.current.findIndex(b => cx >= b.slotX && cx <= b.slotX + b.slotW);
   };
 
-  const handleDblClick = (e) => {
-    if (level === 'hour') return;
+  // UN clic = zoom (année → mois → jour), DOUBLE clic = détail du prix.
+  // Un double-clic émet d'abord deux clics : si on zoomait tout de suite, viser le prix
+  // ferait plonger de deux niveaux avant d'ouvrir la bulle. Le zoom attend donc de savoir
+  // si un second clic arrive.
+  const clickTimerRef = useRef(null);
+  useEffect(() => () => clearTimeout(clickTimerRef.current), []);
+
+  const handleCanvasClick = (e) => {
+    setPriceBubble(null);
+    clearTimeout(clickTimerRef.current);
+    if (level === 'hour') return;            // niveau le plus fin : plus rien à ouvrir
     const idx = barAt(e);
     if (idx === -1) return;
-    if (level === 'month') { setSelMonth(idx + 1); setLevel('day'); }
-    else if (level === 'day') { setSelDay(idx + 1); setLevel('hour'); }
+    clickTimerRef.current = setTimeout(() => {
+      if (level === 'month') { setSelMonth(idx + 1); setLevel('day'); }
+      else if (level === 'day') { setSelDay(idx + 1); setLevel('hour'); }
+    }, 260);
   };
 
-  // Clic sur une barre → bulle de décomposition électron / abonnement / TURPE / taxes.
-  // Les parts sont la moyenne sur la période de la barre, en c€/kWh, et somment au total TTC.
-  // Le clic vaut sur TOUTE la hauteur de la colonne : viser le trait blanc du prix (2 px)
-  // était une cible impossible, et personne ne devinait qu'il fallait cliquer là.
-  const handleCanvasClick = (e) => {
+  // Double-clic sur une barre → bulle de décomposition électron / abonnement / transport /
+  // taxes. Les parts sont la moyenne sur la période de la barre, en c€/kWh, et somment au
+  // total TTC. Le double-clic vaut sur TOUTE la hauteur de la colonne.
+  const handleDblClick = (e) => {
+    clearTimeout(clickTimerRef.current);     // annule le zoom armé par le 1er clic
     if (!priceData) { setPriceBubble(null); return; }
     const idx = barAt(e);
     if (idx === -1) { setPriceBubble(null); return; }
-    // Recliquer la même barre referme la bulle (elle ne capte pas les clics elle-même,
-    // sinon elle avalerait le 2e clic d'un double-clic de zoom).
-    if (priceBubble && priceBubble.idx === idx) { setPriceBubble(null); return; }
     const bar = barsRef.current[idx];
     if (bar.py == null) { setPriceBubble(null); return; }
     const line     = priceData[idx] || 0;                          // €/kWh TTC (le trait blanc)
@@ -5215,7 +5223,7 @@ function EnergyBalanceChart({ balance, level, selMonth, selDay, setLevel, setSel
     // Indice de niveau — le clic (détail du prix) n'est deviné par personne : on le dit.
     ctx.fillStyle = 'rgba(255,255,255,.35)'; ctx.font = '11px sans-serif'; ctx.textAlign = 'right';
     ctx.fillText(
-      level !== 'hour' ? 'clic : détail du prix · double-clic : zoom' : 'clic : détail du prix',
+      level !== 'hour' ? 'clic : zoom · double-clic : détail du prix' : 'double-clic : détail du prix',
       W - MR, MT + 10
     );
 
@@ -5283,7 +5291,7 @@ function EnergyBalanceChart({ balance, level, selMonth, selDay, setLevel, setSel
   const startedRef = useRef(false);
 
   const TUTO_BUBBLES = [
-    { icon:'📊', title:'Votre énergie, mois par mois', text:'Chaque barre = un mois de consommation. Vous pouvez double-cliquer sur une barre pour zoomer dans le détail (jour, puis heure par heure).' },
+    { icon:'📊', title:'Votre énergie, mois par mois', text:'Chaque barre = un mois de consommation. Cliquez sur une barre pour zoomer dans le détail (jour, puis heure par heure), double-cliquez pour voir le détail du prix.' },
     { icon:'📏', title:'Deux axes à lire', text:'À gauche : la quantité d\'électricité (les barres grises = ce que vous achetez au réseau). À droite : le prix de l\'électricité (les pointillés blancs).' },
     { icon:'✨', title:'Je vous montre', text:'Regardez : je vais explorer votre courbe pour vous. Cliquez et laissez-vous guider.' },
   ];
