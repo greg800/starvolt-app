@@ -5404,7 +5404,7 @@ function EnergyBalanceChart({ balance, level, selMonth, selDay, setLevel, setSel
             {[
               ['Électron', priceBubble.electron, '#f0a050'],
               ...(priceBubble.abo>0.00001 ? [['Abonnement', priceBubble.abo, '#c9a0ff']] : []),
-              ['TURPE', priceBubble.turpe, '#9fd0ff'],
+              ['Transport', priceBubble.turpe, '#9fd0ff'],   // TURPE, en clair pour l'usager
               ['Autres taxes', priceBubble.taxes, 'rgba(255,255,255,.75)'],
             ].map(([lbl,val,col])=>(
               <div key={lbl} style={{display:'flex', justifyContent:'space-between', gap:14, lineHeight:1.75}}>
