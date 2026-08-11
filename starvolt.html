@@ -8822,6 +8822,27 @@ function OptimisationScreen({ user, userProfile, onBack, onPanier, onMonSite, on
   const fmtE = (v) => `${fmt(v)} €`;
   const fmtPrixKwh = (total) => kwh_total > 0 ? `${(total / kwh_total * 100).toFixed(1)} c€/kWh` : null;
 
+  // ── Fournisseur mis en avant : celui de l'offre sélectionnée (au chargement,
+  // la mieux classée). Sa description alimente l'encart « Mais qui est ce
+  // fournisseur ? », qui tressaille à chaque changement.
+  // ATTENTION — ces hooks doivent rester AVANT le `return` de l'écran de
+  // confirmation ci-dessous : places après, ils n'étaient plus appelés dès que
+  // justConfirmed passait à true, et React plantait l'écran (« Rendered fewer
+  // hooks than expected ») au moment même où l'on validait le changement.
+  const selFournisseur = selectedRanked?.t?.fournisseur?.trim() || null;
+  // Changer de fournisseur replie la présentation : sinon on garde l'état ouvert
+  // du précédent et le nouveau texte s'affiche déjà déplié.
+  useEffect(() => { setDescOuverte(false); }, [selFournisseur]);
+  const selDescription = selFournisseur ? (descriptions[selFournisseur.toLowerCase()] || '') : '';
+
+  // Le conseil (ex-encart) s'ouvre en popup à l'arrivée, une seule fois.
+  const conseilTexte = heroSaving !== null && heroSaving > 0 && currentRanked && ranked[0]
+    ? { de: tarifLabel(currentRanked.t), vers: tarifLabel(ranked[0].t), gain: heroSaving }
+    : null;
+  useEffect(() => {
+    if (!loading && conseilTexte && !conseilVu) { setShowConseil(true); setConseilVu(true); }
+  }, [loading, !!conseilTexte, conseilVu]);
+
   if (justConfirmed) {
     return (
       <>
@@ -8863,23 +8884,6 @@ function OptimisationScreen({ user, userProfile, onBack, onPanier, onMonSite, on
     : null;
   const maxPuissanceKw = maxPuissanceW > 0 ? maxPuissanceW / 1000 : null;
   const puissanceSouscrite = maxPuissanceKw != null ? Math.ceil(maxPuissanceKw) : null;
-
-  // ── Fournisseur mis en avant : celui de l'offre sélectionnée (au chargement,
-  // la mieux classée). Sa description alimente l'encart « Mais qui est ce
-  // fournisseur ? », qui tressaille à chaque changement.
-  const selFournisseur = selectedRanked?.t?.fournisseur?.trim() || null;
-  // Changer de fournisseur replie la présentation : sinon on garde l'état ouvert
-  // du précédent et le nouveau texte s'affiche déjà déplié.
-  useEffect(() => { setDescOuverte(false); }, [selFournisseur]);
-  const selDescription = selFournisseur ? (descriptions[selFournisseur.toLowerCase()] || '') : '';
-
-  // Le conseil (ex-encart) s'ouvre en popup à l'arrivée, une seule fois.
-  const conseilTexte = heroSaving !== null && heroSaving > 0 && currentRanked && ranked[0]
-    ? { de: tarifLabel(currentRanked.t), vers: tarifLabel(ranked[0].t), gain: heroSaving }
-    : null;
-  useEffect(() => {
-    if (!loading && conseilTexte && !conseilVu) { setShowConseil(true); setConseilVu(true); }
-  }, [loading, !!conseilTexte, conseilVu]);
 
   return (
     <>
