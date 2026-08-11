@@ -95,7 +95,10 @@
       justify-content: center;
       padding: 76px 16px 150px;
       position: relative;
-      overflow: hidden;
+      /* clip et non hidden : « hidden » fait de .app un conteneur de défilement,
+         ce qui neutralise tout position:sticky à l'intérieur (fiche fournisseur
+         du comparatif). « clip » borne le débordement sans créer ce conteneur. */
+      overflow-x: clip;
     }
 
     .approx-banner {
@@ -474,10 +477,16 @@
     /* Le comparatif est le seul écran qui gagne à être large : des offres se
        comparent côte à côte. Partout ailleurs on garde la colonne de lecture. */
     .screen-wide { max-width: 1100px; }
-    /* En desktop, le contexte (conso actuelle) et la présentation du fournisseur
-       tiennent sur une ligne : autant de gagné avant la première offre. */
-    .opti-top { display: grid; grid-template-columns: 1fr; }
-    @media (min-width: 760px) { .opti-top { grid-template-columns: 1fr 1fr; gap: 12px; align-items: start; } }
+    /* La présentation du fournisseur suit le défilement et reste entière sous la
+       barre du haut (56 px) : on parcourt les offres, on en clique une autre, et
+       sa description est déjà sous les yeux. Fond opaque — les offres passent
+       DERRIÈRE elle, la transparence des autres cartes rendrait le texte illisible. */
+    .opti-fiche {
+      position: sticky; top: 62px; z-index: 20;
+      background: rgba(6, 62, 72, .985);
+      backdrop-filter: blur(18px);
+      -webkit-backdrop-filter: blur(18px);
+    }
 
     .offers-grid { display: grid; grid-template-columns: 1fr; gap: 8px; align-items: start; }
     @media (min-width: 760px)  { .offers-grid { grid-template-columns: repeat(2, minmax(0,1fr)); gap: 10px; } }
@@ -8745,11 +8754,17 @@ function OptimisationScreen({ user, userProfile, onBack, onPanier, onMonSite, on
   const [natParams, setNatParams] = useState(null);
   const [descriptions, setDescriptions] = useState({}); // { fournisseur: description } — saisies dans l'admin
   const [descOuverte,  setDescOuverte]  = useState(false); // présentation repliée (mobile)
+  // Tuile « Votre conso actuelle » : dépliée en desktop, repliée en mobile.
+  const [consoOuverte, setConsoOuverte] = useState(window.innerWidth >= 640);
   const [showConseil,  setShowConseil]  = useState(false); // popup d'arrivée
   const [conseilVu,    setConseilVu]    = useState(false); // ne s'ouvre qu'une fois par visite
   const [isMobile, setIsMobile] = useState(window.innerWidth < 640);
   useEffect(() => {
-    const h = () => setIsMobile(window.innerWidth < 640);
+    const h = () => {
+      const m = window.innerWidth < 640;
+      setIsMobile(m);
+      setConsoOuverte(!m);   // le repli suit la largeur, sinon on garde l'état de l'autre affichage
+    };
     window.addEventListener('resize', h);
     return () => window.removeEventListener('resize', h);
   }, []);
@@ -8938,14 +8953,35 @@ function OptimisationScreen({ user, userProfile, onBack, onPanier, onMonSite, on
 
       {!loading && site && (
         <>
-          <div className="opti-top">
           {/* ── 2. Votre conso actuelle ──
-              Contexte, pas la décision : en mobile, ce bloc occupait un écran
-              entier avant la première offre. Tout y est resserré. */}
+              Contexte, pas la décision. En mobile la tuile est repliée par
+              défaut : repliée, elle ne montre que ce qu'on vient comparer —
+              l'offre actuelle et sa facture annuelle. */}
           <div className="card" style={{ padding: isMobile ? '12px 12px' : '18px 16px', marginBottom: isMobile ? 10 : 14 }}>
-            <div style={{ fontSize: isMobile ? 10 : 12, color:'rgba(125,217,64,.75)', fontWeight:700, textTransform:'uppercase', letterSpacing:'.5px', marginBottom:3 }}>Votre conso actuelle</div>
-            <div style={{ fontSize: isMobile ? 14 : 17, fontWeight:900, color:'white', marginBottom: isMobile ? 8 : 14 }}>Site : {site.nom}</div>
+            <div onClick={isMobile ? () => setConsoOuverte(v => !v) : undefined}
+              style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:10,
+                       cursor: isMobile ? 'pointer' : 'default', userSelect:'none' }}>
+              <div style={{ minWidth:0 }}>
+                <div style={{ fontSize: isMobile ? 10 : 12, color:'rgba(125,217,64,.75)', fontWeight:700, textTransform:'uppercase', letterSpacing:'.5px', marginBottom:3 }}>Votre conso actuelle</div>
+                <div style={{ fontSize: isMobile ? 14 : 17, fontWeight:900, color:'white', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+                  {consoOuverte
+                    ? `Site : ${site.nom}`
+                    : (currentRanked ? tarifLabel(currentRanked.t) : <span style={{color:'rgba(255,200,50,.7)'}}>Fournisseur non défini</span>)}
+                </div>
+              </div>
+              {!consoOuverte && currentRanked && (
+                <div style={{ textAlign:'right', flexShrink:0 }}>
+                  <div style={{ fontSize:20, fontWeight:900, color:'#7dd940', lineHeight:1 }}>{fmtE(currentRanked.result.total)}</div>
+                  <div style={{ fontSize:10, color:'rgba(255,255,255,.4)', marginTop:2 }}>/an TTC</div>
+                </div>
+              )}
+              {isMobile && (
+                <span style={{ color:'rgba(255,255,255,.4)', fontSize:16, lineHeight:1, flexShrink:0,
+                               transition:'transform .2s', transform: consoOuverte ? 'rotate(0deg)' : 'rotate(-90deg)' }}>▾</span>
+              )}
+            </div>
 
+            {consoOuverte && <div style={{ marginTop: isMobile ? 8 : 14 }}>
             {/* Fournisseur — ligne full width */}
             <div style={{ background:'rgba(255,255,255,.06)', borderRadius:10, padding: isMobile ? '8px 11px' : '11px 14px', marginBottom: isMobile ? 7 : 10, display:'flex', justifyContent:'space-between', alignItems:'center', gap:8 }}>
               <div style={{ fontSize: isMobile ? 9.5 : 11, color:'rgba(255,255,255,.4)', fontWeight:600, textTransform:'uppercase', letterSpacing:'.3px', flexShrink:0 }}>Fournisseur actuel</div>
@@ -8997,23 +9033,31 @@ function OptimisationScreen({ user, userProfile, onBack, onPanier, onMonSite, on
                 </div>
               </div>
             )}
+            </div>}
           </div>
 
           {/* ── 3. Mais qui est ce fournisseur ? ──
               Remplace l'ancien encart « Notre conseil » (passé en popup d'arrivée).
               Le contenu suit l'offre sélectionnée ; la clé force le rejeu de
-              l'animation à chaque changement de fournisseur. */}
+              l'animation à chaque changement de fournisseur.
+              La fiche colle sous la barre du haut (.opti-fiche) : on fait défiler
+              les offres, on en clique une autre, et sa présentation est déjà là. */}
           {selFournisseur && (
-            <div key={selFournisseur} className="card shake" style={{ padding: isMobile ? '13px 14px' : '18px 16px', marginBottom:14, border:'2px solid rgba(125,217,64,.4)' }}>
+            <div key={selFournisseur} className="card shake opti-fiche" style={{ padding: isMobile ? '13px 14px' : '18px 16px', marginBottom:14, border:'2px solid rgba(125,217,64,.4)' }}>
               <div style={{ fontSize:12, color:'rgba(125,217,64,.75)', fontWeight:700, textTransform:'uppercase', letterSpacing:'.5px', marginBottom:8 }}>
                 {selFournisseur} : mais qui est ce fournisseur ?
               </div>
               {selDescription.trim() ? (
-                /* En mobile, la présentation est repliée à 4 lignes : elle ne doit
-                   pas repousser les offres sous la ligne de flottaison. */
+                /* En mobile la présentation est repliée : la fiche est collante,
+                   dépliée elle mangerait la moitié de l'écran en permanence.
+                   Repli par la hauteur et non par -webkit-line-clamp : celui-ci
+                   ne compte pas les lignes à travers un enfant de type bloc, et
+                   ne coupait donc rien du tout. */
                 <>
                   <div style={isMobile && !descOuverte
-                    ? { display:'-webkit-box', WebkitLineClamp:4, WebkitBoxOrient:'vertical', overflow:'hidden' }
+                    ? { maxHeight:96, overflow:'hidden',
+                        WebkitMaskImage:'linear-gradient(to bottom, #000 68%, transparent 100%)',
+                        maskImage:'linear-gradient(to bottom, #000 68%, transparent 100%)' }
                     : undefined}>
                     <BilanMarkdown text={selDescription} fontSize={isMobile ? 13.5 : 15}/>
                   </div>
@@ -9031,8 +9075,6 @@ function OptimisationScreen({ user, userProfile, onBack, onPanier, onMonSite, on
               )}
             </div>
           )}
-
-          </div>
 
           {/* ── 4. Notre comparatif ── */}
           <div style={{ fontSize:14, fontWeight:700, color:'rgba(255,255,255,.55)', letterSpacing:'.4px', textTransform:'uppercase', marginBottom:10, paddingLeft:2 }}>
