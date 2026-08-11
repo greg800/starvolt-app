@@ -430,23 +430,38 @@
       display: inline-flex; align-items: center; justify-content: center; gap: 6px;
       border-radius: 12px; font-family: inherit; font-weight: 700;
       font-size: 12px; line-height: 1.1; white-space: nowrap;
-      padding: 12px 8px; cursor: pointer; border: 1.5px solid transparent;
+      /* Padding vertical réduit de 12 à 9 px quand le picto est passé de 22 à
+         28 px : le bouton garde EXACTEMENT sa hauteur d'avant (49 px), c'est le
+         dessin qui prend la place, pas le vide autour. */
+      padding: 9px 8px; cursor: pointer; border: 1.5px solid transparent;
       transition: filter .15s, background .15s;
     }
     .cta:hover { filter: brightness(1.1); }
     .cta svg { flex: 0 0 auto; }
-    .cta-ico  { flex: 0 0 auto; padding: 12px 11px; }
+    .cta-ico  { flex: 0 0 auto; padding: 9px 11px; }
     .cta-grow { flex: 1 1 0; min-width: 0; }
     .cta-primary { background: var(--green); color: #1a4500; font-weight: 800; }
     .cta-second  { background: var(--green-dark); color: #d8f5c4; border-color: rgba(125,217,64,.35); }
+    /* Tous les pictos d'un CTA ont la MÊME hauteur, quel que soit le dessin :
+       sans ça le robot paraissait rachitique à côté de la main-étoile. La hauteur
+       du bouton ne bouge pas — c'est le padding qui la fixe, pas le picto. */
+    .cta-pic { width: 28px; height: 28px; display: inline-flex; flex: 0 0 auto; }
+    /* Flèches de navigation : plus larges que les autres pictos-boutons, ce sont
+       les cibles qu'on vise sans regarder. */
+    .cta-arrow { flex: 0 0 auto; padding: 12px 20px; }
     .lbl-lg { display: none; }
     .ctabar { display: flex; align-items: stretch; gap: 6px; width: 100%; }
+    /* Variante « large » : la barre des leviers, où l'action principale doit se
+       voir de loin (picto généreux, libellé toujours affiché). */
+    .ctabar-lg .cta { font-size: 15px; padding: 15px 12px; }
+    .ctabar-lg .cta-arrow { padding: 15px 22px; }
+    .ctabar-lg .cta-pic { width: 34px; height: 34px; }
     @media (min-width: 768px) {
       /* Les libellés prennent la largeur de leur texte plutôt que de se
          partager la ligne à parts égales : sinon ils sont tronqués. */
       .ctabar { gap: 9px; justify-content: center; }
-      .cta { font-size: 13.5px; padding: 13px 16px; }
-      .cta-ico  { padding: 13px 13px; }
+      .cta { font-size: 13.5px; padding: 10px 16px; }
+      .cta-ico  { padding: 10px 13px; }
       .cta-grow { flex: 0 1 auto; }
       .lbl-sm { display: none; }
       .lbl-lg { display: inline; }
@@ -536,6 +551,29 @@
     .signup-compact .inp-group { gap: 3px; }
     .signup-compact .inp { padding: 9px 13px; font-size: 14px; }
     .signup-compact .inp-label { font-size: 10px; }
+
+    /* Mobile : le clavier flottant mange la moitié de l'écran. On resserre tout
+       ce qui peut l'être pour garder un maximum de champs visibles pendant la
+       saisie — les !important passent devant les styles en ligne du formulaire.
+       16 px sur les champs reste OBLIGATOIRE : en dessous, iOS zoome à chaque
+       focus et l'utilisateur se retrouve à faire défiler horizontalement. */
+    @media (max-width: 560px) {
+      .signup-compact .auth-header { margin-bottom: 6px; }
+      .signup-compact .welcome-tag { font-size: 11px; margin-bottom: 2px; }
+      .signup-compact .welcome-title { font-size: 20px; line-height: 1.1; margin-bottom: 2px; }
+      .signup-compact .form-card { padding: 11px 12px; gap: 6px; margin-bottom: 6px; }
+      .signup-compact .inp { padding: 7px 11px; font-size: 16px; }
+      .signup-compact .inp-group { gap: 1px; }
+      .signup-compact .inp-label { font-size: 9.5px; }
+      .signup-compact .inp-row { gap: 8px; }
+      .signup-compact .signup-sec { margin: 9px 0 4px !important; font-size: 10.5px !important; }
+      .signup-compact .signup-note {
+        padding: 7px 9px !important; font-size: 11px !important;
+        line-height: 1.35 !important; margin-bottom: 9px !important;
+      }
+      .signup-compact .signup-consent { font-size: 11.5px !important; line-height: 1.35 !important; }
+      .signup-compact .signup-consent-row { padding: 7px 0 2px !important; margin-top: 2px !important; }
+    }
 
     .bill-wrap { position: relative; }
     .bill-sfx {
@@ -1588,10 +1626,13 @@ function BackButton({ onClick, label = 'Retour', style }) {
   return (
     <button type="button" onClick={onClick} aria-label={label} title={label}
       className="cta cta-second cta-ico" style={style}>
-      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-           strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round">
-        <line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/>
-      </svg>
+      {/* Même hauteur de picto que les autres CTA de la barre (voir .cta-pic). */}
+      <span className="cta-pic">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" style={{width:'100%',height:'100%'}}
+             strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round">
+          <line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/>
+        </svg>
+      </span>
       <span className="lbl-lg">{label}</span>
     </button>
   );
@@ -2734,14 +2775,14 @@ function AuthSignupScreen({ onGoToLogin, onSignedUp, onSuccessDone }) {
         <form className="form-card" id="signup-form"
           onSubmit={e=>{ e.preventDefault(); if(allFilled){ handleSignup(); } else { setHint(firstMissingMessage()); } }}>
           {/* Bandeau de cadrage — aide à la correspondance ENEDIS */}
-          <div style={{background:'rgba(247,201,72,.1)',border:'1px solid rgba(247,201,72,.28)',borderRadius:10,padding:'10px 12px',marginBottom:16,fontSize:12.5,lineHeight:1.5,color:'rgba(255,255,255,.82)'}}>
+          <div className="signup-note" style={{background:'rgba(247,201,72,.1)',border:'1px solid rgba(247,201,72,.28)',borderRadius:10,padding:'10px 12px',marginBottom:16,fontSize:12.5,lineHeight:1.5,color:'rgba(255,255,255,.82)'}}>
             {isEntreprise
               ? <>Pour récupérer vos données de consommation sans souci, attention de bien utiliser <strong style={{color:'#f7c948'}}>la raison sociale et l'adresse</strong> que vous avez utilisées pour votre abonnement d'électricité.</>
               : <>Pour récupérer vos données de consommation sans souci, veillez à utiliser <strong style={{color:'#f7c948'}}>le nom, le prénom et l'adresse</strong> exactement tels qu'ils figurent sur votre abonnement d'électricité.</>}
           </div>
 
           {/* Section A — vos identifiants */}
-          <div style={{fontSize:12,fontWeight:800,letterSpacing:.5,textTransform:'uppercase',color:'rgba(255,255,255,.45)',margin:'4px 0 10px'}}>1 · Votre compte</div>
+          <div className="signup-sec" style={{fontSize:12,fontWeight:800,letterSpacing:.5,textTransform:'uppercase',color:'rgba(255,255,255,.45)',margin:'4px 0 10px'}}>1 · Votre compte</div>
           <div className="inp-row">
             <div className="inp-group">
               <label className="inp-label">Prénom</label>
@@ -2770,7 +2811,7 @@ function AuthSignupScreen({ onGoToLogin, onSignedUp, onSuccessDone }) {
           </div>
 
           {/* Section B — compteur (+ entreprise) */}
-          <div style={{fontSize:12,fontWeight:800,letterSpacing:.5,textTransform:'uppercase',color:'rgba(255,255,255,.45)',margin:'18px 0 10px'}}>
+          <div className="signup-sec" style={{fontSize:12,fontWeight:800,letterSpacing:.5,textTransform:'uppercase',color:'rgba(255,255,255,.45)',margin:'18px 0 10px'}}>
             {isEntreprise ? '2 · Entreprise & compteur ENEDIS' : '2 · Adresse du compteur'}
           </div>
           {isEntreprise && (
@@ -2799,7 +2840,7 @@ function AuthSignupScreen({ onGoToLogin, onSignedUp, onSuccessDone }) {
           {/* Section C — signataire (entreprise uniquement) */}
           {isEntreprise && (
             <>
-              <div style={{fontSize:12,fontWeight:800,letterSpacing:.5,textTransform:'uppercase',color:'rgba(255,255,255,.45)',margin:'18px 0 4px'}}>3 · Signataire du consentement</div>
+              <div className="signup-sec" style={{fontSize:12,fontWeight:800,letterSpacing:.5,textTransform:'uppercase',color:'rgba(255,255,255,.45)',margin:'18px 0 4px'}}>3 · Signataire du consentement</div>
 
               {/* L'utilisateur est-il le gérant ? Si oui, on duplique ses infos. */}
               <label style={{display:'flex',alignItems:'center',gap:10,cursor:'pointer',padding:'8px 0 10px'}}>
@@ -2841,7 +2882,7 @@ function AuthSignupScreen({ onGoToLogin, onSignedUp, onSuccessDone }) {
             </>
           )}
 
-          <label style={{display:'flex',alignItems:'flex-start',gap:12,marginTop:8,cursor:'pointer',padding:'12px 0 4px'}}>
+          <label className="signup-consent-row" style={{display:'flex',alignItems:'flex-start',gap:12,marginTop:8,cursor:'pointer',padding:'12px 0 4px'}}>
             <span style={{position:'relative',flexShrink:0,marginTop:2}}>
               <input
                 type="checkbox"
@@ -2858,7 +2899,7 @@ function AuthSignupScreen({ onGoToLogin, onSignedUp, onSuccessDone }) {
                 {enedisConsent&&<span style={{fontSize:13,color:'#061e2a',fontWeight:900,lineHeight:1}}>✓</span>}
               </span>
             </span>
-            <span style={{fontSize:13,lineHeight:1.5,color:'rgba(255,255,255,0.75)',userSelect:'none'}}>
+            <span className="signup-consent" style={{fontSize:13,lineHeight:1.5,color:'rgba(255,255,255,0.75)',userSelect:'none'}}>
               {isEntreprise
                 ? "J'autorise Starvolt à contacter ENEDIS au nom de l'entreprise afin de récupérer les données de consommation, de comptage, la puissance souscrite et les heures pleines / heures creuses du compteur."
                 : "J'autorise Starvolt à contacter ENEDIS de ma part afin de récupérer mes données de consommation et de comptage, puissance souscrite, heures pleines / heures creuses."}
@@ -4997,9 +5038,10 @@ function EnergyBalanceChart({ balance, level, selMonth, selDay, setLevel, setSel
   useEffect(() => () => clearTimeout(clickTimerRef.current), []);
 
   const handleCanvasClick = (e) => {
-    setPriceBubble(null);
     clearTimeout(clickTimerRef.current);
-    if (level === 'hour') return;            // niveau le plus fin : plus rien à ouvrir
+    // Vue heure : plus rien à zoomer, le clic simple donne donc directement le prix.
+    if (level === 'hour') { showPriceBubble(barAt(e)); return; }
+    setPriceBubble(null);
     const idx = barAt(e);
     if (idx === -1) return;
     clickTimerRef.current = setTimeout(() => {
@@ -5013,8 +5055,11 @@ function EnergyBalanceChart({ balance, level, selMonth, selDay, setLevel, setSel
   // total TTC. Le double-clic vaut sur TOUTE la hauteur de la colonne.
   const handleDblClick = (e) => {
     clearTimeout(clickTimerRef.current);     // annule le zoom armé par le 1er clic
+    showPriceBubble(barAt(e));
+  };
+
+  const showPriceBubble = (idx) => {
     if (!priceData) { setPriceBubble(null); return; }
-    const idx = barAt(e);
     if (idx === -1) { setPriceBubble(null); return; }
     const bar = barsRef.current[idx];
     if (bar.py == null) { setPriceBubble(null); return; }
@@ -5269,11 +5314,13 @@ function EnergyBalanceChart({ balance, level, selMonth, selDay, setLevel, setSel
 
   const ctxLabel = level === 'day' ? MOIS_FULL[selMonth-1] : level === 'hour' ? `${selDay} ${MOIS_FULL[selMonth-1]}` : null;
 
+  // Rond vert inchangé (32 px) ; la flèche occupe tout l'intérieur — les « ← → »
+  // typographiques d'avant se lisaient mal sur le fond vert.
   const navBtnStyle = {
     position:'absolute', zIndex:2, background:'#5cb85c',
     border:'none', borderRadius:'50%',
     width:32, height:32, cursor:'pointer', color:'white',
-    fontSize:16, lineHeight:'30px', textAlign:'center', padding:0,
+    padding:5, display:'flex', alignItems:'center', justifyContent:'center',
     boxShadow:'0 2px 8px rgba(125,217,64,.35)'
   };
 
@@ -5398,22 +5445,24 @@ function EnergyBalanceChart({ balance, level, selMonth, selDay, setLevel, setSel
   return (
     <div ref={wrapperRef} style={{position:'relative', width:'100%'}}>
       {level !== 'month' && (
-        <button onClick={handlePrev} title="Période précédente" style={{...navBtnStyle, top:4, left:4}}>←</button>
+        <button onClick={handlePrev} title="Période précédente" aria-label="Période précédente" style={{...navBtnStyle, top:4, left:4}}><IconArrow dir="left"/></button>
       )}
       {level !== 'month' && (
-        <button onClick={handleNext} title="Période suivante" style={{...navBtnStyle, top:4, right:4}}>→</button>
+        <button onClick={handleNext} title="Période suivante" aria-label="Période suivante" style={{...navBtnStyle, top:4, right:4}}><IconArrow dir="right"/></button>
       )}
       <canvas ref={canvasRef} style={{display:'block', cursor:'pointer'}} onDoubleClick={handleDblClick} onClick={handleCanvasClick}/>
       {priceBubble && (
         <div style={{position:'absolute', left:priceBubble.left, top:priceBubble.top+(priceBubble.flip?10:-10), zIndex:12, transform:`translate(-50%,${priceBubble.flip?'0':'-100%'})`, pointerEvents:'none'}}>
           {priceBubble.flip&&<div style={{width:0, height:0, margin:'0 auto', borderLeft:'6px solid transparent', borderRight:'6px solid transparent', borderBottom:'6px solid #13212e'}}/>}
-          <div style={{background:'#13212e', border:'1px solid rgba(255,255,255,.18)', borderRadius:10, padding:'8px 10px', boxShadow:'0 8px 24px rgba(0,0,0,.5)', minWidth:158, fontSize:12}}>
+          {/* minWidth calé sur la ligne la plus longue (« Total TTC … c€/kWh ») : en
+              dessous, le total passait à la ligne. */}
+          <div style={{background:'#13212e', border:'1px solid rgba(255,255,255,.18)', borderRadius:10, padding:'8px 10px', boxShadow:'0 8px 24px rgba(0,0,0,.5)', minWidth:196, fontSize:12, whiteSpace:'nowrap'}}>
             <div style={{fontSize:10, color:'rgba(255,255,255,.5)', fontWeight:700, marginBottom:5, textTransform:'uppercase', letterSpacing:.5}}>{priceBubble.label} · prix moyen</div>
             {[
               ['Électron', priceBubble.electron, '#f0a050'],
               ...(priceBubble.abo>0.00001 ? [['Abonnement', priceBubble.abo, '#c9a0ff']] : []),
               ['Transport', priceBubble.turpe, '#9fd0ff'],   // TURPE, en clair pour l'usager
-              ['Autres taxes', priceBubble.taxes, 'rgba(255,255,255,.75)'],
+              ['Taxes', priceBubble.taxes, 'rgba(255,255,255,.75)'],
             ].map(([lbl,val,col])=>(
               <div key={lbl} style={{display:'flex', justifyContent:'space-between', gap:14, lineHeight:1.75}}>
                 <span style={{color:col}}>{lbl}</span>
@@ -5769,6 +5818,21 @@ function IconOpportunity({ color='#fff' }) {
       <path d="M118.75,50.26v-1.25h-6.17v1.25c-.33,0-.33,.5,0,.5v1.25h6.17v-1.25c.33,0,.33-.5,0-.5Z"/>
       <rect x="39.89" y="49.01" width="6.17" height="3"/>
       <path d="M104.26,43.34l-17.64-.36-5.79-16.66c-.47-1.34-2.37-1.34-2.83,0l-5.79,16.66-17.64,.36c-1.42,.03-2.01,1.84-.88,2.7l14.06,10.66-5.11,16.89c-.41,1.36,1.13,2.47,2.29,1.67l14.48-10.08c15.19,10.57,14.62,10.35,15.34,10.35,1.01,0,1.73-.97,1.44-1.93l-5.11-16.89,14.06-10.66c1.13-.86,.54-2.66-.88-2.7Zm-15.83,11.59c-.5,.38-.71,1.03-.53,1.63l4.16,13.76c-12.49-8.69-11.98-8.48-12.65-8.48s-.19-.19-12.65,8.48l4.16-13.76c.18-.6-.03-1.25-.53-1.63l-11.45-8.68,14.37-.29c.63-.01,1.18-.42,1.39-1.01l4.72-13.57,4.72,13.57c.21,.59,.76,1,1.39,1.01l14.37,.29-11.45,8.68Z"/>
+    </svg>
+  );
+}
+
+// ─── Flèche de navigation ────────────────────────────────────────────────────
+// Source : Rutmer Zijlstra / Noun Project. Comme pour le robot et l'opportunité,
+// les <text> de crédit d'auteur du fichier d'origine sont retirés. Le dessin
+// d'origine est une flèche DANS un disque : on ne garde que la flèche (le disque
+// est déjà le bouton vert), et la viewBox est resserrée sur son tracé pour qu'elle
+// remplisse le bouton. « right » = la même, retournée.
+function IconArrow({ dir = 'left', color = '#fff' }) {
+  return (
+    <svg viewBox="26.9 31.2 43.1 37.6" fill={color} xmlns="http://www.w3.org/2000/svg"
+         style={{width:'100%', height:'100%', transform: dir === 'right' ? 'scaleX(-1)' : 'none'}}>
+      <path d="m69.93 53.906h-28.07l9.3516 9.3516-5.5234 5.5234-18.781-18.781 18.781-18.781 5.5234 5.5234-9.3516 9.3516h28.07z"/>
     </svg>
   );
 }
@@ -7497,7 +7561,7 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onOnboardingQ
           <BackButton onClick={onBack}/>
           {can('menus','passer_action') && consoPrete !== false && <button className="cta cta-primary cta-grow" onClick={onParcoursAuto}
             aria-label="Les conseils du pro" title="Les conseils du pro">
-            <span style={{width:22,height:22,display:'inline-flex',flexShrink:0}}>
+            <span className="cta-pic">
               <IconRobot color="#1a4500"/>
             </span>
             <span className="lbl-lg">Les conseils du pro</span>
@@ -7506,9 +7570,7 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onOnboardingQ
               « Mon site » : le parcours guidé les déroule une par une. */}
           {can('menus','passer_action') && <button className={`cta cta-grow ${consoPrete === false ? 'cta-primary' : 'cta-second'}`} onClick={onSimulations}
             aria-label="Toutes les offres" title="Toutes les offres">
-            {/* Un poil plus grand que les autres pictos : le tracé est fin et
-                le dessin laisse du vide en haut à droite. */}
-            <span style={{width:25,height:25,display:'inline-flex',flexShrink:0}}>
+            <span className="cta-pic">
               <IconOpportunity color={consoPrete === false ? '#1a4500' : '#d8f5c4'}/>
             </span>
             <span className="lbl-sm">Offres</span>
@@ -7636,6 +7698,12 @@ const AUTO_LS_KEY = 'starvolt_auto_parcours'; // { siteId, idx } — présent �
 function autoGetState() { try { const r = localStorage.getItem(AUTO_LS_KEY); return r ? JSON.parse(r) : null; } catch { return null; } }
 function autoSetState(s) { try { localStorage.setItem(AUTO_LS_KEY, JSON.stringify(s)); } catch {} }
 function autoClearState() { try { localStorage.removeItem(AUTO_LS_KEY); } catch {} }
+// Dépile le dernier levier vu : c'est le « retour en arrière » du tapis roulant,
+// depuis l'écran de fin comme depuis un levier.
+function autoPopSeen() {
+  const st = autoGetState(); if (!st?.seen?.length) return;
+  autoSetState({ ...st, seen: st.seen.slice(0, -1) });
+}
 
 // Type « principal » d'une offre = premier type qui pilote un écran de simulation.
 const AUTO_TYPE_SCREEN = {
@@ -17367,52 +17435,57 @@ function OnboardingEvalResultScreen({ results, questions, onDone, onManuel }) {
 
 // Pied de page commun au tapis roulant : vert clair = on avance sur le chemin
 // pré-calculé, vert foncé = on sort vers l'analyse manuelle (« Mon site »).
-function AutoFooter({ ctaLabel, onCta, ctaDisabled = false, altLabel, onAlt, onManuel }) {
+function AutoFooter({ ctaLabel, onCta, ctaDisabled = false, altLabel, onAlt, onManuel,
+                     manuelLabel = '📈 Voir ma courbe de conso', onPrev }) {
   return (
     <StickyFooter>
-      <button className="btn btn-auto" style={{width:'100%',fontSize:15,padding:'13px'}}
-        onClick={onCta} disabled={ctaDisabled}>{ctaLabel}</button>
+      {/* onPrev : flèche de retour au dernier levier (écran de fin), pour revenir
+          changer ses choix sans repartir du début. */}
+      <div style={{display:'flex',gap:8,width:'100%',alignItems:'stretch'}}>
+        {onPrev && (
+          <button className="cta cta-second cta-arrow" onClick={onPrev}
+            aria-label="Revenir aux leviers" title="Revenir aux leviers">
+            <span className="cta-pic"><IconArrow dir="left" color="#d8f5c4"/></span>
+          </button>
+        )}
+        <button className="btn btn-auto" style={{flex:1,fontSize:15,padding:'13px'}}
+          onClick={onCta} disabled={ctaDisabled}>{ctaLabel}</button>
+      </div>
       {altLabel && (
         <button className="btn btn-auto-alt" style={{width:'100%'}} onClick={onAlt}>{altLabel}</button>
       )}
       <button className="btn btn-manual" style={{width:'100%',fontSize:13}} onClick={onManuel}>
-        📈 Voir ma courbe de conso
+        {manuelLabel}
       </button>
     </StickyFooter>
   );
 }
 
-// Pied de page des écrans de LEVIER : 4 actions sur une seule ligne.
-// De gauche à droite : revenir en arrière · en savoir plus sur ce levier (le
-// chemin proposé, en vert clair) · passer en analyse manuelle · levier suivant.
-// Les libellés longs sont réservés au desktop (voir .ctabar dans le <style>).
-function AutoLevierFooter({ onBack, onSavoirPlus, onManuel, onSuivant, dernier = false }) {
+// Pied de page des écrans de LEVIER : on navigue de levier en levier avec les
+// deux flèches, et l'action attendue au milieu est « Voir l'offre » (vert clair).
+// Pas de flèche gauche sur le premier levier : il n'y a rien avant. La sortie
+// « analyse manuelle » ne vit plus ici mais à la fin du parcours — pendant le
+// déroulé, on ne propose que d'avancer, de reculer, ou de prendre l'offre.
+function AutoLevierFooter({ onPrev, onSavoirPlus, onSuivant, dernier = false }) {
   return (
     <StickyFooter wide>
-      <div className="ctabar">
-        <BackButton onClick={onBack}/>
+      <div className="ctabar ctabar-lg">
+        {onPrev && (
+          <button className="cta cta-second cta-arrow" onClick={onPrev}
+            aria-label="Levier précédent" title="Levier précédent">
+            <span className="cta-pic"><IconArrow dir="left" color="#d8f5c4"/></span>
+          </button>
+        )}
 
         <button className="cta cta-primary cta-grow" onClick={onSavoirPlus}>
-          <span className="lbl-sm">En savoir +</span>
-          <span className="lbl-lg">Je veux en savoir davantage</span>
+          <span className="cta-pic"><IconOpportunity color="#1a4500"/></span>
+          Voir l’offre
         </button>
 
-        <button className="cta cta-second cta-grow" onClick={onManuel}>
-          <span style={{width:16,height:16,display:'inline-flex',flexShrink:0}}>
-            <IconPower color="#fff" strokeWidth={8}/>
-          </span>
-          <span className="lbl-sm">Ma conso</span>
-          <span className="lbl-lg">Voir ma courbe de conso</span>
-        </button>
-
-        <button className="cta cta-second cta-ico" onClick={onSuivant}
-          aria-label={dernier ? 'Terminer' : 'Voir le levier suivant'}
-          title={dernier ? 'Terminer' : 'Voir le levier suivant'}>
-          <span className="lbl-lg" style={{fontWeight:700}}>{dernier ? 'Terminer' : 'Voir le levier suivant'}</span>
-          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-               strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round">
-            <line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/>
-          </svg>
+        <button className="cta cta-second cta-arrow" onClick={onSuivant}
+          aria-label={dernier ? 'Terminer' : 'Levier suivant'}
+          title={dernier ? 'Terminer' : 'Levier suivant'}>
+          <span className="cta-pic"><IconArrow dir="right" color="#d8f5c4"/></span>
         </button>
       </div>
     </StickyFooter>
@@ -17597,7 +17670,7 @@ function ParcoursBilanScreen({ user, profile, bilanData, onNext, onManuel }) {
 // la liste des éligibles (elle est au panier), ce qui décalerait tous les index.
 // On mémorise donc les offres déjà écartées (« seen ») ; le levier courant est
 // simplement le premier éligible non encore écarté.
-function ParcoursLevierScreen({ user, profile, can = () => true, onValider, onManuel, onFini, onAucun, onBack }) {
+function ParcoursLevierScreen({ user, profile, can = () => true, onValider, onFini, onAucun }) {
   const [offres,     setOffres]     = useState(null); // éligibles, classés
   const [savings,    setSavings]    = useState({});
   const [currentBill,setCurrentBill]= useState(null);
@@ -17660,6 +17733,15 @@ function ParcoursLevierScreen({ user, profile, can = () => true, onValider, onMa
 
   const skipCurrent = (id) => {
     const next = [...seen, id];
+    setSeen(next);
+    autoSetState({ ...(autoGetState() || {}), siteId: localStorage.getItem('starvolt_active_site_id'), seen: next });
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  // Flèche gauche : on dépile le dernier levier vu, il redevient le levier courant.
+  const goPrev = () => {
+    if (!seen.length) return;
+    const next = seen.slice(0, -1);
     setSeen(next);
     autoSetState({ ...(autoGetState() || {}), siteId: localStorage.getItem('starvolt_active_site_id'), seen: next });
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -17743,9 +17825,8 @@ function ParcoursLevierScreen({ user, profile, can = () => true, onValider, onMa
     </div>
 
     <AutoLevierFooter
-      onBack={onBack}
+      onPrev={done > 0 ? goPrev : null}
       onSavoirPlus={() => onValider(o, type)}
-      onManuel={onManuel}
       onSuivant={() => skipCurrent(o.id)}
       dernier={remaining.length === 1}/>
     </>
@@ -17753,7 +17834,7 @@ function ParcoursLevierScreen({ user, profile, can = () => true, onValider, onMa
 }
 
 // ─── ParcoursFinScreen : sortie du tapis roulant ─────────────────────────────
-function ParcoursFinScreen({ onPanier, onManuel }) {
+function ParcoursFinScreen({ onPanier, onManuel, onPrev }) {
   const flags  = readCartFlags();
   const nbItems = Object.values(flags).filter(Boolean).length;
   return (
@@ -17775,6 +17856,8 @@ function ParcoursFinScreen({ onPanier, onManuel }) {
     <AutoFooter
       ctaLabel={nbItems > 0 ? '🛒 Voir mon panier →' : 'Voir mon panier →'}
       onCta={onPanier}
+      onPrev={onPrev}
+      manuelLabel="⚡ Ma conso"
       onManuel={onManuel}/>
     </>
   );
@@ -19353,8 +19436,6 @@ function App() {
             const dest = AUTO_TYPE_SCREEN[type];
             if (dest) goTo(dest); else goTo('AUTO_LEVIER');
           }}
-          onManuel={()=>autoExit('MA_CONSO')}
-          onBack={goBack}
           // Aucun levier éligible : rien à dérouler, on sort du parcours et on
           // pose l'utilisateur sur sa page énergie.
           onAucun={()=>autoExit('MA_CONSO')}
@@ -19363,6 +19444,8 @@ function App() {
       case 'AUTO_FIN':
         return <ParcoursFinScreen
           onPanier={()=>autoExit('PANIER')}
+          // Retour au dernier levier : on le dépile pour qu'il redevienne courant.
+          onPrev={()=>{ autoPopSeen(); goTo('AUTO_LEVIER'); }}
           onManuel={()=>autoExit('MA_CONSO')}/>;
 
       case 'SIMULATIONS': {
