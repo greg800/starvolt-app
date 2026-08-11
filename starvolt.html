@@ -487,6 +487,31 @@
       backdrop-filter: blur(18px);
       -webkit-backdrop-filter: blur(18px);
     }
+    /* En mobile le bandeau ne doit générer AUCUNE boîte : sinon il devient le
+       bloc conteneur de la fiche, qui ne peut alors plus coller que dans ses
+       limites — elle repartait avec le bandeau dès le premier défilement. */
+    @media (max-width: 759px) { .opti-top { display: contents; } }
+
+    /* Desktop : contexte à gauche, fournisseur à droite, et c'est le bandeau
+       ENTIER qui colle — sinon les offres apparaîtraient dans l'espace entre les
+       deux cartes. « top: 56px » colle au bas de la barre fixe, sans laisser de
+       bande transparente où l'on verrait défiler le contenu. */
+    @media (min-width: 760px) {
+      .opti-top {
+        position: sticky; top: 56px; z-index: 20;
+        display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.05fr);
+        gap: 12px; align-items: start;
+        background: rgba(6, 62, 72, .985);
+        backdrop-filter: blur(18px);
+        -webkit-backdrop-filter: blur(18px);
+        padding: 10px 0 12px;
+        box-shadow: 0 12px 26px rgba(3, 28, 34, .38);
+      }
+      /* Le bandeau colle déjà : la fiche n'a plus à coller toute seule, et ses
+         marges sortiraient du bandeau. */
+      .opti-top .opti-fiche { position: static; margin-bottom: 0 !important; }
+      .opti-top > .card { margin-bottom: 0 !important; }
+    }
 
     .offers-grid { display: grid; grid-template-columns: 1fr; gap: 8px; align-items: start; }
     @media (min-width: 760px)  { .offers-grid { grid-template-columns: repeat(2, minmax(0,1fr)); gap: 10px; } }
@@ -8741,6 +8766,22 @@ function calcDynamicCost(tariff, consoProfile, spotMap, natParams, userProfile) 
 }
 
 // ─── OptimisationScreen ───────────────────────
+// Indicateur secondaire du comparatif : du contexte, pas une décision. En
+// pastille compacte — en grille de tuiles, chacune occupait une demi-largeur
+// pour trois caractères de valeur.
+function OptiChip({ label, value, color = 'white' }) {
+  return (
+    <span style={{
+      display:'inline-flex', alignItems:'baseline', gap:5,
+      background:'rgba(255,255,255,.06)', border:'1px solid rgba(255,255,255,.08)',
+      borderRadius:8, padding:'4px 9px', whiteSpace:'nowrap',
+    }}>
+      <span style={{fontSize:9.5, fontWeight:700, letterSpacing:'.3px', textTransform:'uppercase', color:'rgba(255,255,255,.4)'}}>{label}</span>
+      <span style={{fontSize:13, fontWeight:800, color}}>{value}</span>
+    </span>
+  );
+}
+
 function OptimisationScreen({ user, userProfile, onBack, onPanier, onMonSite, onCartUpdate, nextLabel = "Mon site →" }) {
   const [sites,           setSites]           = useState(null);
   const [activeId]                            = useState(() => localStorage.getItem('starvolt_active_site_id'));
@@ -8957,6 +8998,12 @@ function OptimisationScreen({ user, userProfile, onBack, onPanier, onMonSite, on
 
       {!loading && site && (
         <>
+          {/* ── Bandeau du haut ──
+              En desktop les deux blocs tiennent sur une ligne (contexte à
+              gauche, fournisseur à droite) et le bandeau entier colle sous la
+              barre : les offres défilent DERRIÈRE lui. En mobile ils restent
+              empilés, seule la fiche colle. */}
+          <div className="opti-top">
           {/* ── 2. Votre conso actuelle ──
               Contexte, pas la décision. En mobile la tuile est repliée par
               défaut : repliée, elle ne montre que ce qu'on vient comparer —
@@ -8986,57 +9033,34 @@ function OptimisationScreen({ user, userProfile, onBack, onPanier, onMonSite, on
             </div>
 
             {consoOuverte && <div style={{ marginTop: isMobile ? 8 : 14 }}>
-            {/* Fournisseur — ligne full width */}
-            <div style={{ background:'rgba(255,255,255,.06)', borderRadius:10, padding: isMobile ? '8px 11px' : '11px 14px', marginBottom: isMobile ? 7 : 10, display:'flex', justifyContent:'space-between', alignItems:'center', gap:8 }}>
-              <div style={{ fontSize: isMobile ? 9.5 : 11, color:'rgba(255,255,255,.4)', fontWeight:600, textTransform:'uppercase', letterSpacing:'.3px', flexShrink:0 }}>Fournisseur actuel</div>
-              <div style={{ fontSize: isMobile ? 13 : 15, fontWeight:900, color:'white', textAlign:'right' }}>
-                {currentRanked ? tarifLabel(currentRanked.t) : <span style={{color:'rgba(255,200,50,.6)'}}>Non défini</span>}
-              </div>
-            </div>
-
-            {/* 4 métriques — grille 2×2 */}
-            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap: isMobile ? 6 : 8, marginBottom: isMobile ? 7 : 10 }}>
-              <div style={{ background:'rgba(255,255,255,.06)', borderRadius:10, padding: isMobile ? '8px 10px' : '12px 12px' }}>
-                <div style={{ fontSize: isMobile ? 9 : 10, color:'rgba(255,255,255,.4)', fontWeight:600, textTransform:'uppercase', letterSpacing:'.3px', marginBottom: isMobile ? 2 : 4 }}>Conso annuelle</div>
-                <div style={{ fontSize: isMobile ? 15 : 20, fontWeight:900, color:'white', lineHeight:1 }}>{kwh_total > 0 ? fmtKwh(kwh_total) : '—'}</div>
-              </div>
-              <div style={{ background:'rgba(255,255,255,.06)', borderRadius:10, padding: isMobile ? '8px 10px' : '12px 12px' }}>
-                <div style={{ fontSize: isMobile ? 9 : 10, color:'rgba(255,255,255,.4)', fontWeight:600, textTransform:'uppercase', letterSpacing:'.3px', marginBottom: isMobile ? 2 : 4 }}>Heures creuses</div>
-                <div style={{ fontSize: isMobile ? 15 : 20, fontWeight:900, color: pctHC != null ? '#5de0f5' : 'rgba(255,255,255,.3)', lineHeight:1 }}>
-                  {pctHC != null ? `${pctHC} %` : '—'}
+            {/* Fournisseur actuel + facture : les deux seules données qu'on
+                garde grosses — c'est ce qu'on vient comparer. */}
+            <div style={{ display:'grid', gridTemplateColumns: isMobile ? '1fr' : 'minmax(0,1fr) auto', gap:8, marginBottom:8 }}>
+              <div style={{ background:'rgba(255,255,255,.06)', borderRadius:10, padding:'8px 12px', minWidth:0 }}>
+                <div style={{ fontSize:9.5, color:'rgba(255,255,255,.4)', fontWeight:700, textTransform:'uppercase', letterSpacing:'.3px', marginBottom:2 }}>Fournisseur actuel</div>
+                <div style={{ fontSize: isMobile ? 14 : 16, fontWeight:900, color:'white', lineHeight:1.25 }}>
+                  {currentRanked ? tarifLabel(currentRanked.t) : <span style={{color:'rgba(255,200,50,.6)'}}>Non défini</span>}
                 </div>
-                {pctHC == null && <div style={{ fontSize:10, color:'rgba(255,200,50,.55)', marginTop:3 }}>Plages non définies</div>}
               </div>
-              <div style={{ background:'rgba(255,255,255,.06)', borderRadius:10, padding: isMobile ? '8px 10px' : '12px 12px' }}>
-                <div style={{ fontSize: isMobile ? 9 : 10, color:'rgba(255,255,255,.4)', fontWeight:600, textTransform:'uppercase', letterSpacing:'.3px', marginBottom: isMobile ? 2 : 4 }}>Facture annuelle TTC</div>
-                <div style={{ fontSize: isMobile ? 15 : 20, fontWeight:900, color:'#7dd940', lineHeight:1 }}>
+              <div style={{ background:'rgba(255,255,255,.06)', borderRadius:10, padding:'8px 14px', textAlign: isMobile ? 'left' : 'right' }}>
+                <div style={{ fontSize:9.5, color:'rgba(255,255,255,.4)', fontWeight:700, textTransform:'uppercase', letterSpacing:'.3px', marginBottom:2 }}>Facture annuelle TTC</div>
+                <div style={{ fontSize: isMobile ? 19 : 23, fontWeight:900, color:'#7dd940', lineHeight:1.15, whiteSpace:'nowrap' }}>
                   {currentRanked ? fmtE(currentRanked.result.total) : '—'}
                 </div>
               </div>
-              <div style={{ background:'rgba(255,255,255,.06)', borderRadius:10, padding: isMobile ? '8px 10px' : '12px 12px' }}>
-                <div style={{ fontSize: isMobile ? 9 : 10, color:'rgba(255,255,255,.4)', fontWeight:600, textTransform:'uppercase', letterSpacing:'.3px', marginBottom: isMobile ? 2 : 4 }}>Prix moyen TTC</div>
-                <div style={{ fontSize: isMobile ? 15 : 20, fontWeight:900, color:'rgba(255,200,80,.9)', lineHeight:1 }}>
-                  {prixMoyenKwh ? `${prixMoyenKwh}` : '—'}
-                </div>
-                {prixMoyenKwh && <div style={{ fontSize:11, color:'rgba(255,255,255,.35)', marginTop:3 }}>c€/kWh</div>}
-              </div>
             </div>
 
-            {/* Bloc puissance */}
-            {puissanceSouscrite != null && (
-              <div style={{ background:'rgba(93,224,245,.07)', border:'1px solid rgba(93,224,245,.18)', borderRadius:10, padding: isMobile ? '9px 11px' : '14px 14px', display:'flex', gap:0 }}>
-                {maxPuissanceKw != null && (
-                  <div style={{ flex:1, borderRight:'1px solid rgba(93,224,245,.15)', paddingRight:14 }}>
-                    <div style={{ fontSize: isMobile ? 9 : 10, color:'rgba(93,224,245,.55)', fontWeight:600, textTransform:'uppercase', letterSpacing:'.3px', marginBottom: isMobile ? 2 : 4 }}>Puissance max observée</div>
-                    <div style={{ fontSize: isMobile ? 15 : 20, fontWeight:900, color:'rgba(255,255,255,.75)', lineHeight:1 }}>{maxPuissanceKw.toFixed(1)} kW</div>
-                  </div>
-                )}
-                <div style={{ flex:1, paddingLeft: maxPuissanceKw != null ? 14 : 0 }}>
-                  <div style={{ fontSize: isMobile ? 9 : 10, color:'rgba(93,224,245,.55)', fontWeight:600, textTransform:'uppercase', letterSpacing:'.3px', marginBottom: isMobile ? 2 : 4 }}>Puissance souscrite nécessaire</div>
-                  <div style={{ fontSize: isMobile ? 17 : 24, fontWeight:900, color:'#5de0f5', lineHeight:1 }}>{puissanceSouscrite} kW</div>
-                </div>
-              </div>
-            )}
+            {/* Le reste en pastilles : ces valeurs tenaient chacune dans une
+                demi-largeur pour trois caractères. */}
+            <div style={{ display:'flex', flexWrap:'wrap', gap:6 }}>
+              <OptiChip label="Conso" value={kwh_total > 0 ? fmtKwh(kwh_total) : '—'}/>
+              <OptiChip label="Heures creuses" color={pctHC != null ? '#5de0f5' : 'rgba(255,255,255,.3)'}
+                value={pctHC != null ? `${pctHC} %` : 'plages non définies'}/>
+              <OptiChip label="Prix moyen" color="rgba(255,200,80,.9)"
+                value={prixMoyenKwh ? `${prixMoyenKwh} c€/kWh` : '—'}/>
+              {maxPuissanceKw != null && <OptiChip label="P. max" value={`${maxPuissanceKw.toFixed(1)} kW`}/>}
+              {puissanceSouscrite != null && <OptiChip label="P. souscrite" color="#5de0f5" value={`${puissanceSouscrite} kW`}/>}
+            </div>
             </div>}
           </div>
 
@@ -9079,6 +9103,8 @@ function OptimisationScreen({ user, userProfile, onBack, onPanier, onMonSite, on
               )}
             </div>
           )}
+
+          </div>
 
           {/* ── 4. Notre comparatif ── */}
           <div style={{ fontSize:14, fontWeight:700, color:'rgba(255,255,255,.55)', letterSpacing:'.4px', textTransform:'uppercase', marginBottom:10, paddingLeft:2 }}>
@@ -11939,7 +11965,10 @@ function SolarSimScreen({ user, userProfile, onBack, onPanier, onMonSite, onCart
 }
 
 // ─── CartItemCard ─────────────────────────────
-function CartItemCard({ emoji, imgSrc, title, subtitle, saving, investment, color, onRemove, onClick }) {
+// imgBlanc : le picto est un tracé NOIR (flex.png). Le mix-blend « screen » des
+// autres pictos rend le noir transparent — le dessin disparaissait dans le vert.
+// On le repeint en blanc, comme c'est déjà fait sur les écrans flexibilité.
+function CartItemCard({ emoji, imgSrc, imgBlanc = false, title, subtitle, saving, investment, color, onRemove, onClick }) {
   const c = color || '#7dd940';
   return (
     <div onClick={onClick} style={{
@@ -11949,7 +11978,10 @@ function CartItemCard({ emoji, imgSrc, title, subtitle, saving, investment, colo
     }}>
       <div style={{display:'flex',alignItems:'flex-start',gap:12}}>
         <div style={{flexShrink:0,width:40,height:40,display:'flex',alignItems:'center',justifyContent:'center',paddingTop:2}}>
-          {imgSrc ? <img src={imgSrc} style={{width:36,height:36,objectFit:'contain',mixBlendMode:'screen'}}/> : <span style={{fontSize:30}}>{emoji}</span>}
+          {imgSrc
+            ? <img src={imgSrc} style={{width:36,height:36,objectFit:'contain',
+                ...(imgBlanc ? {filter:'brightness(0) invert(1)'} : {mixBlendMode:'screen'})}}/>
+            : <span style={{fontSize:30}}>{emoji}</span>}
         </div>
         <div style={{flex:1,minWidth:0}}>
           <div style={{fontSize:18,fontWeight:800,color:'white',marginBottom:5}}>{title}</div>
@@ -12276,7 +12308,7 @@ function PanierScreen({ user, onBack, onGoTo, onMonSite }) {
           onClick={()=>onGoTo&&onGoTo('DIY_BOX_SIM')}/>
       )}
       {items.flexOnly && (
-        <CartItemCard imgSrc="/flex.png" title="Flexibilité activée"
+        <CartItemCard imgSrc="/flex.png" imgBlanc title="Flexibilité activée"
           subtitle={(() => {
             const g = parseInt(localStorage.getItem('starvolt_flex_only_saving')||'0') || 0;
             let names = [];
