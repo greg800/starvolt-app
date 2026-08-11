@@ -3189,7 +3189,16 @@ function clearPanierLS(){
   window.dispatchEvent(new Event('starvolt_panier_cleared'));
 }
 function fmtKwh(v){return v>=1000?`${(v/1000).toFixed(1)} MWh`:`${Math.round(v)} kWh`;}
-function fmtGrand(v){if(v==null||isNaN(v))return'–';const r=v>999?Math.round(v/100)*100:Math.round(v);return r.toLocaleString('fr-FR');}
+// Intl separe les milliers par une espace FINE insecable (U+202F), si mince que
+// « 1 891 » se lisait « 1891 ». On la remplace par une espace insecable normale.
+const espMille = (s) => String(s).replace(/\u202F/g, '\u00A0');
+function fmtGrand(v){if(v==null||isNaN(v))return'–';const r=v>999?Math.round(v/100)*100:Math.round(v);return espMille(r.toLocaleString('fr-FR'));}
+
+// Unite d'une valeur chiffree. Taille en « em » : elle suit toujours celle du
+// nombre, dans la meme proportion partout sur la page.
+function Unite({ children, ml = 3 }) {
+  return <span style={{ fontSize:'0.6em', fontWeight:600, opacity:.55, marginLeft:ml, whiteSpace:'nowrap' }}>{children}</span>;
+}
 function haversine(lat1,lon1,lat2,lon2){const R=6371,dLat=(lat2-lat1)*Math.PI/180,dLon=(lon2-lon1)*Math.PI/180,a=Math.sin(dLat/2)**2+Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLon/2)**2;return R*2*Math.asin(Math.sqrt(a));}
 function lastSunUTC(y,m0){const d=new Date(Date.UTC(y,m0+1,0,1));while(d.getUTCDay()!==0)d.setUTCDate(d.getUTCDate()-1);return d.getTime();}
 function frOff(utcMs){const y=new Date(utcMs).getUTCFullYear();return(utcMs>=lastSunUTC(y,2)&&utcMs<lastSunUTC(y,9))?2:1;}
@@ -8769,7 +8778,7 @@ function calcDynamicCost(tariff, consoProfile, spotMap, natParams, userProfile) 
 // Indicateur secondaire du comparatif : du contexte, pas une décision. En
 // pastille compacte — en grille de tuiles, chacune occupait une demi-largeur
 // pour trois caractères de valeur.
-function OptiChip({ label, value, color = 'white' }) {
+function OptiChip({ label, value, unite, color = 'white' }) {
   return (
     <span style={{
       display:'inline-flex', alignItems:'baseline', gap:5,
@@ -8777,7 +8786,7 @@ function OptiChip({ label, value, color = 'white' }) {
       borderRadius:8, padding:'4px 9px', whiteSpace:'nowrap',
     }}>
       <span style={{fontSize:9.5, fontWeight:700, letterSpacing:'.3px', textTransform:'uppercase', color:'rgba(255,255,255,.4)'}}>{label}</span>
-      <span style={{fontSize:13, fontWeight:800, color}}>{value}</span>
+      <span style={{fontSize:13, fontWeight:800, color}}>{value}{unite && <Unite ml={2}>{unite}</Unite>}</span>
     </span>
   );
 }
@@ -8859,7 +8868,7 @@ function OptimisationScreen({ user, userProfile, onBack, onPanier, onMonSite, on
   const isNewSelection = alreadyChosen && effectiveSelectedId && effectiveSelectedId !== savedTariffId;
   const showPanier = alreadyChosen && !isNewSelection;
 
-  const fmt = (v) => Math.round(v).toLocaleString('fr-FR');
+  const fmt = (v) => espMille(Math.round(v).toLocaleString('fr-FR'));
   const fmtE = (v) => `${fmt(v)} €`;
   const fmtPrixKwh = (total) => kwh_total > 0 ? `${(total / kwh_total * 100).toFixed(1)} c€/kWh` : null;
 
@@ -8958,10 +8967,10 @@ function OptimisationScreen({ user, userProfile, onBack, onPanier, onMonSite, on
         <div onClick={e=>e.stopPropagation()} className="card" style={{
           maxWidth:440, width:'100%', padding:'22px 20px',
           border:'2px solid rgba(125,217,64,.5)', boxShadow:'0 24px 64px rgba(0,0,0,.55)' }}>
-          <div style={{ fontSize:12, color:'rgba(125,217,64,.75)', fontWeight:700, textTransform:'uppercase', letterSpacing:'.5px', marginBottom:10 }}>Notre conseil</div>
+          <div style={{ fontSize:12, color:'rgba(255,255,255,.55)', fontWeight:700, textTransform:'uppercase', letterSpacing:'.5px', marginBottom:10 }}>Notre conseil</div>
           <div style={{ fontSize:16, color:'white', lineHeight:1.6, marginBottom:18 }}>
             Passer de <span style={{color:'white', fontWeight:700}}>{conseilTexte.de}</span> à{' '}
-            <span style={{color:'#7dd940', fontWeight:700}}>{conseilTexte.vers}</span> — ce qui vous ferait gagner{' '}
+            <span style={{color:'white', fontWeight:700}}>{conseilTexte.vers}</span> — ce qui vous ferait gagner{' '}
             <span style={{color:'#7dd940', fontWeight:900, fontSize:18}}>{conseilTexte.gain.toLocaleString('fr-FR')} € TTC</span> par an,
             sans aucune perte de confort et en un clic.
           </div>
@@ -8976,7 +8985,7 @@ function OptimisationScreen({ user, userProfile, onBack, onPanier, onMonSite, on
 
       {/* ── 1. Titre principal ── */}
       <div style={{ marginBottom: isMobile ? 10 : 20, marginTop:4 }}>
-        <div style={{ fontSize:9, letterSpacing:'.8px', color:'rgba(125,217,64,.85)', fontWeight:700, textTransform:'uppercase', marginBottom:4 }}>Optimisation fournisseur</div>
+        <div style={{ fontSize:9, letterSpacing:'.8px', color:'rgba(255,255,255,.5)', fontWeight:700, textTransform:'uppercase', marginBottom:4 }}>Optimisation fournisseur</div>
         {!loading && heroSaving > 0 ? (
           <div style={{ fontSize: isMobile ? 17 : 20, fontWeight:900, color:'white', lineHeight:1.2 }}>
             Gagnez <span className="accent">{heroSaving.toLocaleString('fr-FR')} €</span> par an avec{isMobile ? ' ' : <br/>}l'optimisation fournisseur Starvolt
@@ -9013,7 +9022,7 @@ function OptimisationScreen({ user, userProfile, onBack, onPanier, onMonSite, on
               style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:10,
                        cursor: isMobile ? 'pointer' : 'default', userSelect:'none' }}>
               <div style={{ minWidth:0 }}>
-                <div style={{ fontSize: isMobile ? 10 : 12, color:'rgba(125,217,64,.75)', fontWeight:700, textTransform:'uppercase', letterSpacing:'.5px', marginBottom:3 }}>Votre conso actuelle</div>
+                <div style={{ fontSize: isMobile ? 10 : 12, color:'rgba(255,255,255,.5)', fontWeight:700, textTransform:'uppercase', letterSpacing:'.5px', marginBottom:3 }}>Votre conso actuelle</div>
                 <div style={{ fontSize: isMobile ? 14 : 17, fontWeight:900, color:'white', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
                   {consoOuverte
                     ? `Site : ${site.nom}`
@@ -9025,8 +9034,8 @@ function OptimisationScreen({ user, userProfile, onBack, onPanier, onMonSite, on
                   bonne nouvelle. Sans les unités, qui reparaissent au dépliage. */}
               {!consoOuverte && currentRanked && (
                 <div style={{ textAlign:'right', flexShrink:0, lineHeight:1.15 }}>
-                  <div style={{ fontSize:24, fontWeight:900, color:'white' }}>{fmt(currentRanked.result.total)} €</div>
-                  {prixMoyenKwh && <div style={{ fontSize:18, fontWeight:800, color:'white', opacity:.85 }}>{prixMoyenKwh}</div>}
+                  <div style={{ fontSize:24, fontWeight:900, color:'white', whiteSpace:'nowrap' }}>{fmt(currentRanked.result.total)}<Unite>€/an</Unite></div>
+                  {prixMoyenKwh && <div style={{ fontSize:18, fontWeight:800, color:'white', opacity:.85, whiteSpace:'nowrap' }}>{prixMoyenKwh}<Unite>c€/kWh</Unite></div>}
                 </div>
               )}
               {isMobile && (
@@ -9049,7 +9058,7 @@ function OptimisationScreen({ user, userProfile, onBack, onPanier, onMonSite, on
                 <div style={{ fontSize:9.5, color:'rgba(255,255,255,.4)', fontWeight:700, textTransform:'uppercase', letterSpacing:'.3px', marginBottom:2 }}>Facture annuelle TTC</div>
                 {/* Blanc, pas vert : c'est la facture qu'on paie aujourd'hui. */}
                 <div style={{ fontSize: isMobile ? 19 : 23, fontWeight:900, color:'white', lineHeight:1.15, whiteSpace:'nowrap' }}>
-                  {currentRanked ? fmtE(currentRanked.result.total) : '—'}
+                  {currentRanked ? <>{fmt(currentRanked.result.total)}<Unite>€/an</Unite></> : '—'}
                 </div>
               </div>
             </div>
@@ -9057,13 +9066,15 @@ function OptimisationScreen({ user, userProfile, onBack, onPanier, onMonSite, on
             {/* Le reste en pastilles : ces valeurs tenaient chacune dans une
                 demi-largeur pour trois caractères. */}
             <div style={{ display:'flex', flexWrap:'wrap', gap:6 }}>
-              <OptiChip label="Conso" value={kwh_total > 0 ? fmtKwh(kwh_total) : '—'}/>
+              <OptiChip label="Conso"
+                value={kwh_total > 0 ? (kwh_total >= 1000 ? (kwh_total/1000).toFixed(1) : Math.round(kwh_total)) : '—'}
+                unite={kwh_total > 0 ? (kwh_total >= 1000 ? 'MWh' : 'kWh') : null}/>
               <OptiChip label="Heures creuses" color={pctHC != null ? '#5de0f5' : 'rgba(255,255,255,.3)'}
-                value={pctHC != null ? `${pctHC} %` : 'plages non définies'}/>
+                value={pctHC != null ? pctHC : 'plages non définies'} unite={pctHC != null ? '%' : null}/>
               <OptiChip label="Prix moyen" color="rgba(255,200,80,.9)"
-                value={prixMoyenKwh ? `${prixMoyenKwh} c€/kWh` : '—'}/>
-              {maxPuissanceKw != null && <OptiChip label="P. max" value={`${maxPuissanceKw.toFixed(1)} kW`}/>}
-              {puissanceSouscrite != null && <OptiChip label="P. souscrite" color="#5de0f5" value={`${puissanceSouscrite} kW`}/>}
+                value={prixMoyenKwh || '—'} unite={prixMoyenKwh ? 'c€/kWh' : null}/>
+              {maxPuissanceKw != null && <OptiChip label="P. max" value={maxPuissanceKw.toFixed(1)} unite="kW"/>}
+              {puissanceSouscrite != null && <OptiChip label="P. souscrite" color="#5de0f5" value={puissanceSouscrite} unite="kW"/>}
             </div>
             </div>}
           </div>
@@ -9078,8 +9089,8 @@ function OptimisationScreen({ user, userProfile, onBack, onPanier, onMonSite, on
             <div key={selFournisseur} className="card shake opti-fiche" style={{ padding: isMobile ? '13px 14px' : '18px 16px', marginBottom:14, border:'2px solid rgba(125,217,64,.4)' }}>
               {/* Le nom du fournisseur porte l'encart : plus gros et plus gras
                   que la question qui le suit. */}
-              <div style={{ fontSize:12, color:'rgba(125,217,64,.75)', fontWeight:700, textTransform:'uppercase', letterSpacing:'.5px', marginBottom:8 }}>
-                <span style={{ fontSize:15.5, fontWeight:900 }}>{selFournisseur}</span> : mais qui est ce fournisseur ?
+              <div style={{ fontSize:12, color:'rgba(255,255,255,.6)', fontWeight:700, textTransform:'uppercase', letterSpacing:'.5px', marginBottom:8 }}>
+                <span style={{ fontSize:15.5, fontWeight:900, color:'white' }}>{selFournisseur}</span> : mais qui est ce fournisseur ?
               </div>
               {selDescription.trim() ? (
                 /* En mobile la présentation est repliée : la fiche est collante,
@@ -9097,7 +9108,7 @@ function OptimisationScreen({ user, userProfile, onBack, onPanier, onMonSite, on
                   </div>
                   {isMobile && (
                     <span onClick={() => setDescOuverte(v => !v)}
-                      style={{ display:'inline-block', cursor:'pointer', color:'#7dd940', fontWeight:700, fontSize:12.5, marginTop:6, userSelect:'none' }}>
+                      style={{ display:'inline-block', cursor:'pointer', color:'white', fontWeight:700, fontSize:12.5, marginTop:6, userSelect:'none' }}>
                       {descOuverte ? 'Réduire ▲' : '… Lire la suite ▾'}
                     </span>
                   )}
@@ -9149,12 +9160,12 @@ function OptimisationScreen({ user, userProfile, onBack, onPanier, onMonSite, on
                         <span style={{ fontSize:19.5 }}>{rank}</span>
                         <div style={{ fontWeight:800, fontSize:18, color:'white', lineHeight:1.25 }}>{tarifLabel(t)}</div>
                       </div>
-                      <div style={{ fontSize:15, color: result.is_dynamic ? 'rgba(125,217,64,.6)' : 'rgba(255,255,255,.4)', lineHeight:1.45 }}>
+                      <div style={{ fontSize:15, color:'rgba(255,255,255,.45)', lineHeight:1.45 }}>
                         <div>{result.is_dynamic ? 'Tarif dynamique' : result.is_base ? 'Tarif à prix fixe' : 'Tarif HC/HP'}</div>
                         <div>Abonnement {fmtE(result.abo)}/an</div>
                       </div>
-                      {isCurrent && <div style={{ marginTop:4, fontSize:15, color:'rgba(125,217,64,.85)', fontWeight:700 }}>✦ Votre tarif actuel</div>}
-                      {isSelected && !isCurrent && <div style={{ marginTop:4, fontSize:15, color:'#7dd940', fontWeight:700 }}>✓ Sélectionné</div>}
+                      {isCurrent && <div style={{ marginTop:4, fontSize:15, color:'white', fontWeight:700 }}>✦ Votre tarif actuel</div>}
+                      {isSelected && !isCurrent && <div style={{ marginTop:4, fontSize:15, color:'white', fontWeight:700 }}>✓ Sélectionné</div>}
                       {saving !== null && saving > 0 && (
                         <div style={{ marginTop:4, fontSize:14.5, color:'rgba(255,255,255,.55)' }}>
                           +{fmtE(saving)}/an vs le moins cher
@@ -9168,7 +9179,7 @@ function OptimisationScreen({ user, userProfile, onBack, onPanier, onMonSite, on
                           elle ne tranche pas. */}
                       {gainVsCurrent !== null && gainVsCurrent !== 0 && (
                         <div style={{ fontSize:24, fontWeight:900, lineHeight:1, whiteSpace:'nowrap', color: gainVsCurrent > 0 ? '#7dd940' : '#fca5a5' }}>
-                          {gainVsCurrent > 0 ? `−${fmtGrand(gainVsCurrent)} €/an` : `+${fmtGrand(Math.abs(gainVsCurrent))} €/an`}
+                          {gainVsCurrent > 0 ? '−' : '+'}{fmtGrand(Math.abs(gainVsCurrent))}<Unite>€/an</Unite>
                         </div>
                       )}
                       {prixKwh && (
@@ -9179,12 +9190,11 @@ function OptimisationScreen({ user, userProfile, onBack, onPanier, onMonSite, on
                               <span style={{ fontSize: isMobile ? 12 : 14, opacity:.6, margin:'0 4px' }}>→</span>
                             </>
                           )}
-                          <span style={{ fontSize: isMobile ? 15 : 18, fontWeight:900 }}>{prixKwh}</span>
-                          <span style={{ fontSize: isMobile ? 9.5 : 11, opacity:.55, marginLeft:3 }}>c€/kWh</span>
+                          <span style={{ fontSize: isMobile ? 15 : 18, fontWeight:900 }}>{prixKwh}<Unite>c€/kWh</Unite></span>
                         </div>
                       )}
-                      <div style={{ fontSize:15, fontWeight:800, marginTop:5, color: idx === 0 ? '#7dd940' : 'rgba(255,255,255,.75)', lineHeight:1.1 }}>
-                        {fmtE(result.total)}<span style={{ fontSize:11, opacity:.6, marginLeft:3, fontWeight:400 }}>/an TTC</span>
+                      <div style={{ fontSize:15, fontWeight:800, marginTop:5, color:'rgba(255,255,255,.75)', lineHeight:1.1 }}>
+                        {fmt(result.total)}<Unite>€/an TTC</Unite>
                       </div>
                     </div>
                   </div>
@@ -9192,7 +9202,7 @@ function OptimisationScreen({ user, userProfile, onBack, onPanier, onMonSite, on
                     <div style={{ display:'flex', gap:6, marginTop:9, paddingTop:9, borderTop:'1px solid rgba(255,255,255,.08)' }}>
                       {[['☀️ Été', result.avg_ete_ceur], ['❄️ Hiver', result.avg_hiver_ceur]].filter(([,v])=>v!=null).map(([lbl,val])=>(
                         <div key={lbl} style={{ flex:1, background:'rgba(255,255,255,.05)', borderRadius:8, padding:'7px', textAlign:'center' }}>
-                          <div style={{ fontSize:16, fontWeight:800, color:'rgba(125,217,64,.9)' }}>{val.toFixed(1)} c€/kWh</div>
+                          <div style={{ fontSize:16, fontWeight:800, color:'white' }}>{val.toFixed(1)}<Unite>c€/kWh</Unite></div>
                           <div style={{ fontSize:13.5, color:'rgba(255,255,255,.4)', marginTop:1 }}>{lbl}</div>
                         </div>
                       ))}
