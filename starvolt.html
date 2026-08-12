@@ -9158,7 +9158,9 @@ function OptimisationScreen({ user, userProfile, onBack, onPanier, onMonSite, on
                     <div style={{ flex:1, minWidth:0 }}>
                       <div style={{ display:'flex', alignItems:'center', gap:6, marginBottom:3 }}>
                         <span style={{ fontSize:19.5 }}>{rank}</span>
-                        <div style={{ fontWeight:800, fontSize:18, color:'white', lineHeight:1.25 }}>{tarifLabel(t)}</div>
+                        {/* Un nom sans espace (« NOVAFIXE », « CONFORT+ ») ne doit pas
+                            imposer sa largeur a la carte : il se coupe. */}
+                        <div style={{ fontWeight:800, fontSize:18, color:'white', lineHeight:1.25, overflowWrap:'anywhere', minWidth:0 }}>{tarifLabel(t)}</div>
                       </div>
                       <div style={{ fontSize:15, color:'rgba(255,255,255,.45)', lineHeight:1.45 }}>
                         <div>{result.is_dynamic ? 'Tarif dynamique' : result.is_base ? 'Tarif à prix fixe' : 'Tarif HC/HP'}</div>
@@ -9182,20 +9184,27 @@ function OptimisationScreen({ user, userProfile, onBack, onPanier, onMonSite, on
                           {gainVsCurrent > 0 ? '−' : '+'}{fmtGrand(Math.abs(gainVsCurrent))}<Unite>€/an</Unite>
                         </div>
                       )}
+                      {/* La facture recalculee a ete retiree : l'ecart et le nouveau
+                          prix du kWh suffisent a decider. La place liberee revient au
+                          prix, aussi gros que le permet une seule ligne. */}
                       {prixKwh && (
-                        <div style={{ marginTop:4, whiteSpace:'nowrap', color:'white', lineHeight:1.15 }}>
+                        <div style={{ marginTop:5, whiteSpace:'nowrap', color:'white', lineHeight:1.15 }}>
                           {prixMoyenKwh && !isCurrent && (
                             <>
-                              <span style={{ fontSize: isMobile ? 15 : 18, fontWeight:700, textDecoration:'line-through', opacity:.6 }}>{prixMoyenKwh}</span>
-                              <span style={{ fontSize: isMobile ? 12 : 14, opacity:.6, margin:'0 4px' }}>→</span>
+                              <span style={{ fontSize: isMobile ? 13 : 18, fontWeight:700, textDecoration:'line-through', opacity:.55 }}>{prixMoyenKwh}</span>
+                              <span style={{ fontSize: isMobile ? 11 : 14, opacity:.55, margin:'0 4px' }}>→</span>
                             </>
                           )}
-                          <span style={{ fontSize: isMobile ? 15 : 18, fontWeight:900 }}>{prixKwh}<Unite>c€/kWh</Unite></span>
+                          {/* Desktop : 24 px, la taille de l'ecart — la colonne est
+                              large, rien ne s'y oppose. Mobile : 18 px, mesure a
+                              l'ecran. Au-dela, la colonne de droite s'elargit assez
+                              pour faire passer le nom de l'offre de deux a trois
+                              lignes, et la carte grandit de 30 % (146 -> 190 px) : on
+                              gagnerait deux points de police contre un tiers de
+                              defilement en plus sur chaque offre. */}
+                          <span style={{ fontSize: isMobile ? 18 : 24, fontWeight:900 }}>{prixKwh}<Unite>c€/kWh</Unite></span>
                         </div>
                       )}
-                      <div style={{ fontSize:15, fontWeight:800, marginTop:5, color:'rgba(255,255,255,.75)', lineHeight:1.1 }}>
-                        {fmt(result.total)}<Unite>€/an TTC</Unite>
-                      </div>
                     </div>
                   </div>
                   {result.is_dynamic && (result.avg_ete_ceur != null || result.avg_hiver_ceur != null) && (
