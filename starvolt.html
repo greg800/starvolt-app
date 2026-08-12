@@ -17881,9 +17881,11 @@ function AutoFooter({ ctaLabel, onCta, ctaDisabled = false, altLabel, onAlt, onM
       {altLabel && (
         <button className="btn btn-auto-alt" style={{width:'100%'}} onClick={onAlt}>{altLabel}</button>
       )}
-      <button className="btn btn-manual" style={{width:'100%',fontSize:13}} onClick={onManuel}>
-        {manuelLabel}
-      </button>
+      {onManuel && (
+        <button className="btn btn-manual" style={{width:'100%',fontSize:13}} onClick={onManuel}>
+          {manuelLabel}
+        </button>
+      )}
     </StickyFooter>
   );
 }
@@ -18264,28 +18266,42 @@ function ParcoursLevierScreen({ user, profile, can = () => true, onValider, onFi
 function ParcoursFinScreen({ onPanier, onManuel, onPrev }) {
   const flags  = readCartFlags();
   const nbItems = Object.values(flags).filter(Boolean).length;
+  // Rien de vu = aucun levier n'etait eligible : la fleche « retour » n'aurait
+  // rien a montrer, l'ecran des leviers renverrait aussitot ici.
+  const aVuDesLeviers = (autoGetState()?.seen || []).length > 0;
   return (
     <>
     <div className="screen fade-in">
       {nbItems > 0 && <Fireworks final/>}
       <div style={{textAlign:'center',marginBottom:20,marginTop:8}}>
         <div style={{fontSize:52,marginBottom:8}}>{nbItems > 0 ? '🎉' : '🧭'}</div>
-        <div style={{fontSize:22,fontWeight:900,color:'white',lineHeight:1.2,marginBottom:8}}>
-          {nbItems > 0 ? 'Votre plan d’action est prêt !' : 'Vous avez vu tous les leviers'}
-        </div>
-        <div style={{fontSize:14,color:'rgba(255,255,255,.6)',lineHeight:1.6}}>
-          {nbItems > 0
-            ? `Vous avez retenu ${nbItems} levier${nbItems > 1 ? 's' : ''} d’économie. Vérifiez votre panier : vous y verrez votre nouvelle facture et le gain sur 25 ans.`
-            : 'Aucun levier retenu pour l’instant. Vous pouvez explorer votre consommation en détail et revenir quand vous voulez.'}
-        </div>
+        {nbItems > 0 ? (
+          <>
+            <div style={{fontSize:22,fontWeight:900,color:'white',lineHeight:1.2,marginBottom:8}}>
+              Votre plan d’action est prêt !
+            </div>
+            <div style={{fontSize:15,color:'rgba(255,255,255,.75)',lineHeight:1.6}}>
+              Vous avez parcouru toutes les offres disponibles. Pour voir ce que vous avez
+              sélectionné, cliquez en haut à droite sur le panier.
+            </div>
+          </>
+        ) : (
+          // Panier vide : soit l'utilisateur a tout refuse, soit aucun levier
+          // n'etait eligible. Dans les deux cas il n'y a rien a lui proposer, et
+          // rien a aller voir dans le panier.
+          <div style={{fontSize:16,color:'rgba(255,255,255,.8)',lineHeight:1.6,maxWidth:420,margin:'0 auto'}}>
+            Désolé, nous avons analysé votre profil et nous n’avons malheureusement pas
+            d’offre à vous proposer.
+          </div>
+        )}
       </div>
     </div>
     <AutoFooter
-      ctaLabel={nbItems > 0 ? '🛒 Voir mon panier →' : 'Voir mon panier →'}
-      onCta={onPanier}
-      onPrev={onPrev}
+      ctaLabel={nbItems > 0 ? '🛒 Voir mon panier →' : '⚡ Voir ma consommation →'}
+      onCta={nbItems > 0 ? onPanier : onManuel}
+      onPrev={aVuDesLeviers ? onPrev : null}
       manuelLabel="⚡ Ma conso"
-      onManuel={onManuel}/>
+      onManuel={nbItems > 0 ? onManuel : null}/>
     </>
   );
 }
@@ -19867,9 +19883,10 @@ function App() {
             const dest = AUTO_TYPE_SCREEN[type];
             if (dest) goTo(dest); else goTo('AUTO_LEVIER');
           }}
-          // Aucun levier éligible : rien à dérouler, on sort du parcours et on
-          // pose l'utilisateur sur sa page énergie.
-          onAucun={()=>autoExit('MA_CONSO')}
+          // Aucun levier éligible : on va quand même à l'écran de fin, qui dit
+          // qu'on n'a rien à proposer. Sortir en silence sur « Mon site »
+          // laissait l'utilisateur sans explication.
+          onAucun={()=>goTo('AUTO_FIN')}
           onFini={()=>goTo('AUTO_FIN')}/>;
 
       case 'AUTO_FIN':
