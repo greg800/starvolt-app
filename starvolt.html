@@ -1393,6 +1393,130 @@
     }
     /* Coin haut-gauche : au-dessus des deux axes */
     .adm-freeze thead th.frz-col { z-index: 3; background: #0d4a58; }
+
+    /* =============================================
+       MIND VECTOR — arbre à gauche, positions à droite
+       ============================================= */
+    .mv-wrap { display: flex; flex-direction: column; gap: 16px; align-items: stretch; }
+    .mv-tree, .mv-board { width: 100%; min-width: 0; }
+    @media (min-width: 900px) {
+      .mv-wrap  { flex-direction: row; align-items: flex-start; }
+      .mv-tree  { flex: 0 0 300px; width: 300px; position: sticky; top: 16px; }
+      .mv-board { flex: 1 1 auto; }
+    }
+
+    .mv-panel {
+      background: rgba(255,255,255,.045);
+      border: 1px solid rgba(255,255,255,.10);
+      border-radius: 16px;
+      padding: 12px;
+    }
+    .mv-panel-title {
+      font-size: 10.5px; font-weight: 700; letter-spacing: .7px;
+      text-transform: uppercase; color: rgba(255,255,255,.45);
+      margin-bottom: 10px; display: flex; align-items: center; gap: 7px;
+    }
+    .mv-scroll { max-height: 70vh; overflow: auto; -webkit-overflow-scrolling: touch; padding-right: 2px; }
+    /* En colonne (mobile), l'arbre passe AVANT le tableau : sans plafond il
+       repousse la grille hors de l'écran dès une dizaine de sujets. */
+    @media (max-width: 899px) { .mv-scroll { max-height: 38vh; } }
+
+    /* La bulle : un rectangle aux coins arrondis + ses 3 pictos */
+    .mv-row    { display: flex; align-items: stretch; }
+    .mv-guide  { flex: 0 0 15px; width: 15px; margin-left: 7px; border-left: 1px solid rgba(255,255,255,.10); }
+    .mv-bubble {
+      flex: 1; min-width: 0;
+      display: flex; align-items: center; gap: 6px;
+      background: rgba(255,255,255,.07);
+      border: 1px solid rgba(255,255,255,.14);
+      border-radius: 13px;
+      padding: 7px 8px 7px 6px;
+      transition: background .18s, border-color .18s, box-shadow .18s;
+    }
+    .mv-bubble:hover { background: rgba(255,255,255,.11); border-color: rgba(255,255,255,.26); }
+    .mv-bubble.sel {
+      background: rgba(125,217,64,.14);
+      border-color: rgba(125,217,64,.55);
+      box-shadow: 0 0 0 3px rgba(125,217,64,.10);
+    }
+    /* Le libellé passe à la ligne plutôt que de s'abréger : les 3 pictos
+       mangent déjà 70 px, et un sujet tronqué en « Temps de travail he… »
+       oblige à survoler chaque bulle pour savoir ce qu'on regarde. */
+    .mv-lbl {
+      flex: 1; min-width: 0; text-align: left;
+      background: none; border: none; padding: 2px 0; margin: 0;
+      font-family: inherit; font-size: 12.5px; font-weight: 700; color: #fff;
+      cursor: pointer; line-height: 1.32;
+      white-space: normal; overflow-wrap: anywhere;
+    }
+    .mv-bubble.sel .mv-lbl { color: #d6ffb0; }
+    .mv-chev {
+      flex: 0 0 18px; width: 18px; height: 18px; padding: 0; margin: 0;
+      background: none; border: none; cursor: pointer; font-family: inherit;
+      color: rgba(255,255,255,.42); font-size: 10px; line-height: 1;
+      display: flex; align-items: center; justify-content: center;
+      transition: color .15s, transform .18s;
+    }
+    .mv-chev:hover { color: #fff; }
+    .mv-dot { flex: 0 0 18px; display: flex; align-items: center; justify-content: center; }
+    .mv-dot i { width: 4px; height: 4px; border-radius: 50%; background: rgba(255,255,255,.22); display: block; }
+
+    .mv-ico {
+      flex: 0 0 auto; width: 21px; height: 21px; padding: 0;
+      display: flex; align-items: center; justify-content: center;
+      border-radius: 8px; border: 1px solid rgba(255,255,255,.14);
+      background: rgba(255,255,255,.05); color: rgba(255,255,255,.55);
+      font-family: inherit; font-size: 12.5px; font-weight: 700; line-height: 1;
+      cursor: pointer; transition: all .15s;
+    }
+    .mv-ico:hover     { transform: translateY(-1px); }
+    .mv-ico.add:hover { background: rgba(125,217,64,.20);  border-color: rgba(125,217,64,.55);  color: #a3ed6a; }
+    .mv-ico.del:hover { background: rgba(255,96,96,.18);   border-color: rgba(255,96,96,.55);   color: #ff9090; }
+    .mv-ico.edt:hover { background: rgba(255,179,64,.18);  border-color: rgba(255,179,64,.55);  color: #ffc978; }
+
+    /* Carte d'édition d'une bulle (crayon) */
+    .mv-edit {
+      border: 1px solid rgba(255,179,64,.40);
+      background: rgba(255,179,64,.07);
+      border-radius: 13px; padding: 10px; display: flex; flex-direction: column; gap: 7px;
+    }
+    .mv-edit input {
+      width: 100%; padding: 7px 10px; border-radius: 9px;
+      border: 1.5px solid rgba(255,255,255,.20); background: rgba(0,0,0,.22);
+      color: #fff; font-family: inherit; font-size: 13px; font-weight: 600; outline: none;
+    }
+    .mv-edit input:focus { border-color: #ffb340; }
+    .mv-edit label { font-size: 9.5px; font-weight: 700; letter-spacing: .5px; text-transform: uppercase; color: rgba(255,255,255,.45); }
+
+    /* Le tableau des 5 positions */
+    .mv-freeze { max-height: 72vh; }
+    .mv-freeze .frz-col {
+      max-width: none; width: 202px; min-width: 202px;
+      overflow: visible; text-overflow: clip; white-space: normal;
+      vertical-align: top;
+    }
+    .mv-freeze td, .mv-freeze th { border-bottom: 1px solid rgba(255,255,255,.07); }
+    .mv-freeze tbody tr.sel .frz-col { background: #124b45; }
+    .mv-freeze tbody tr.sel td { background-color: rgba(125,217,64,.06); }
+    .mv-cell {
+      vertical-align: top; padding: 7px 9px; cursor: text;
+      width: 17.6%; min-width: 166px;
+      transition: background .15s, box-shadow .15s;
+    }
+    .mv-cell:hover { box-shadow: inset 0 0 0 1px rgba(255,255,255,.14); }
+    .mv-cell.edit  { cursor: default; background: #0b3f4d !important; box-shadow: inset 0 0 0 2px rgba(125,217,64,.55); }
+    .mv-empty {
+      display: block; font-size: 11.5px; font-style: italic;
+      color: rgba(255,255,255,.26); padding: 4px 0;
+    }
+    .mv-cell:hover .mv-empty { color: rgba(125,217,64,.6); }
+    .mv-cell textarea {
+      width: 100%; padding: 8px 9px; border-radius: 9px;
+      border: 1.5px solid rgba(125,217,64,.45); background: rgba(0,0,0,.28);
+      color: #fff; font-family: inherit; font-size: 12.5px; font-weight: 500;
+      line-height: 1.5; outline: none; resize: vertical; display: block;
+    }
+    .mv-cell textarea:focus { border-color: #7dd940; }
   </style>
 </head>
 <body>
@@ -13080,7 +13204,7 @@ function AdminQuizFailsScreen({ user, onBack }) {
   );
 }
 
-function AdminScreen({ onTariffs, onUsers, onRoles, onSites, onSpot, onAcc, onProduction, onGlobalVars, onFactureVars, onPrix, onOffres, onLearn, onFeedback, onFactures, onProofread, onAICosts, onAIPrompts, onCyberSecurity, onViewLogs, onViewFails, onImpersonate, onBack }) {
+function AdminScreen({ onTariffs, onUsers, onRoles, onSites, onSpot, onAcc, onProduction, onGlobalVars, onFactureVars, onPrix, onOffres, onLearn, onMindVector, onFeedback, onFactures, onProofread, onAICosts, onAIPrompts, onCyberSecurity, onViewLogs, onViewFails, onImpersonate, onBack }) {
   return (
     <>
     <div className="screen screen-admin fade-in">
@@ -13213,6 +13337,14 @@ function AdminScreen({ onTariffs, onUsers, onRoles, onSites, onSpot, onAcc, onPr
             <div className="sim-text">
               <div className="sim-title">Paramétrer le module Comprendre</div>
               <div className="sim-sub">Thèmes, sujets, contenus et quiz</div>
+            </div>
+            <span className="sim-arrow">→</span>
+          </button>
+          <button className="sim-btn" onClick={onMindVector}>
+            <span className="sim-icon">🧭</span>
+            <div className="sim-text">
+              <div className="sim-title">Mind Vector</div>
+              <div className="sim-sub">Modèles mentaux : arbre des sujets et 5 positions</div>
             </div>
             <span className="sim-arrow">→</span>
           </button>
@@ -15692,7 +15824,9 @@ function MdBtn({ onClick, children, title, style }) {
 // Écrire « ## » à la main devant la bonne ligne est un geste d'informaticien.
 // Les boutons agissent sur la sélection (ou sur la ligne du curseur) et rendent
 // la main au champ, curseur bien placé.
-function MarkdownToolbar({ areaRef, value, onChange }) {
+// `compact` masque le rappel d'usage : dans une case de tableau étroite, la
+// phrase mangeait plus de place que les boutons eux-mêmes.
+function MarkdownToolbar({ areaRef, value, onChange, compact = false }) {
   const appliquer = (transformer) => {
     const ta = areaRef.current; if (!ta) return;
     const { text, from, to } = transformer(value ?? '', ta.selectionStart, ta.selectionEnd);
@@ -15731,9 +15865,9 @@ function MarkdownToolbar({ areaRef, value, onChange }) {
       <MdBtn title="Sous-titre blanc (###)" onClick={()=>appliquer(prefixer('### '))}>Sous-titre</MdBtn>
       <MdBtn title="Gras (**…**)" onClick={()=>appliquer(entourer('**','texte'))} style={{fontWeight:900}}>G</MdBtn>
       <MdBtn title="Liste à puces (-)" onClick={()=>appliquer(prefixer('- '))}>• Puce</MdBtn>
-      <span style={{fontSize:10.5,color:'rgba(255,255,255,.35)',marginLeft:2}}>
+      {!compact && <span style={{fontSize:10.5,color:'rgba(255,255,255,.35)',marginLeft:2}}>
         agit sur la ligne du curseur ou la sélection
-      </span>
+      </span>}
     </div>
   );
 }
@@ -17498,6 +17632,7 @@ const SCREEN_LABELS = {
   ADMIN:'Admin', ADMIN_FEEDBACK:'Admin — retours', ADMIN_FACTURES:'Admin — factures à valider',
   ADMIN_ROLES_MGMT:'Admin — gestion des rôles',
   ADMIN_CYBER_SECURITY:'Admin — cyber-sécurité',
+  ADMIN_MIND_VECTOR:'Admin — Mind Vector',
 };
 const screenLabel = (s) => SCREEN_LABELS[s] || s || 'Inconnue';
 
@@ -18790,6 +18925,384 @@ function ComprendreScoreScreen({ user, subject, score, total, results, isRevisio
   );
 }
 
+// ─── Mind Vector : formaliser les modèles mentaux ─────────────────────────────
+// Un modèle mental se pose en deux gestes : dessiner l'arbre des sujets (du plus
+// général au plus précis), puis, sujet par sujet, écrire les 5 positions qui
+// glissent doucement d'une vision extrême à la vision opposée. D'où l'écran en
+// deux volets — l'arbre à gauche, la grille à droite — avec UNE LIGNE PAR BULLE
+// AFFICHÉE À GAUCHE : replier une branche retire ses lignes du tableau, si bien
+// qu'on lit toujours la structure et le contenu dans le même cadrage.
+
+const MV_POSITIONS = [
+  { n: 1, col: '#7fb2ff', tint: 'rgba(127,178,255,.055)', legende: 'un extrême' },
+  { n: 2, col: '#a8c0e6', tint: 'rgba(168,192,230,.040)', legende: 'nuancé' },
+  { n: 3, col: '#cbcbcb', tint: 'rgba(203,203,203,.035)', legende: 'équilibre' },
+  { n: 4, col: '#eec98d', tint: 'rgba(238,201,141,.040)', legende: 'nuancé' },
+  { n: 5, col: '#ffb340', tint: 'rgba(255,179,64,.055)',  legende: "l'autre extrême" },
+];
+const MV_MAX = 200;            // longueur conseillée d'une position
+const MV_DEGRADE = 'linear-gradient(90deg,#7fb2ff,#a8c0e6,#cbcbcb,#eec98d,#ffb340)';
+
+// Un nœud et toute sa descendance. La base fait déjà le ON DELETE CASCADE ; ici
+// c'est pour retirer les lignes de l'écran sans recharger.
+function mvSousArbre(liste, id) {
+  const out = [id];
+  for (let i = 0; i < out.length; i++) {
+    liste.forEach(n => { if (n.parent_id === out[i]) out.push(n.id); });
+  }
+  return out;
+}
+
+function AdminMindVectorScreen({ onBack }) {
+  const [noeuds,    setNoeuds]    = useState(null);  // liste plate des nœuds
+  const [cases,     setCases]     = useState({});    // "idNoeud:position" → texte
+  const [plies,     setPlies]     = useState({});    // idNoeud → true si replié
+  const [sel,       setSel]       = useState(null);  // nœud mis en avant
+  const [edite,     setEdite]     = useState(null);  // nœud ouvert au crayon
+  const [brouillon, setBrouillon] = useState({ label: '', g: '', d: '' });
+  const [caseEdit,  setCaseEdit]  = useState(null);  // "idNoeud:position" en saisie
+  const [enVol,     setEnVol]     = useState(0);     // écritures de cellule en cours
+  const [erreur,    setErreur]    = useState(null);
+
+  const zoneRef   = useRef(null);    // textarea de la cellule en saisie
+  const lignesRef = useRef({});      // idNoeud → <tr>, pour suivre la sélection
+  const timersRef = useRef({});      // "id:pos" → minuterie d'enregistrement différé
+  const pendRef   = useRef({});      // "id:pos" → texte pas encore écrit en base
+  const semeRef   = useRef(false);   // garde-fou : une seule création de racine auto
+
+  useEffect(() => {
+    let vivant = true;
+    Promise.all([
+      sb.from('mv_nodes').select('*').order('ordre').order('created_at'),
+      sb.from('mv_positions').select('node_id,pos,content'),
+    ]).then(async ([{ data: n, error: e1 }, { data: p, error: e2 }]) => {
+      if (!vivant) return;
+      if (e1 || e2) {
+        setErreur("Tables Mind Vector absentes : appliquez migration_mind_vector.sql.");
+        setNoeuds([]); return;
+      }
+      const c = {};
+      (p || []).forEach(r => { c[r.node_id + ':' + r.pos] = r.content || ''; });
+      setCases(c);
+      // Première ouverture : on pose la racine tout de suite. L'écran s'ouvre
+      // ainsi sur la bulle décrite (rectangle + ＋ − ✎) plutôt que sur du vide.
+      if ((n || []).length === 0 && !semeRef.current) {
+        semeRef.current = true;
+        const { data: racine, error } = await sb.from('mv_nodes')
+          .insert({ label: 'Ma vision du monde', ordre: 0 }).select().single();
+        if (!vivant) return;
+        if (error) { setErreur(error.message); setNoeuds([]); return; }
+        setNoeuds([racine]); setSel(racine.id);
+        return;
+      }
+      setNoeuds(n || []);
+      if ((n || []).length) setSel(n[0].id);
+    });
+    return () => { vivant = false; };
+  }, []);
+
+  // En quittant l'écran, on pousse ce qui n'a pas encore été écrit : sans ça,
+  // les 800 ms d'attente de la dernière frappe suffiraient à perdre une phrase.
+  useEffect(() => () => {
+    Object.values(timersRef.current).forEach(clearTimeout);
+    Object.entries(pendRef.current).forEach(([k, txt]) => {
+      const [id, pos] = k.split(':');
+      sb.from('mv_positions').upsert(
+        { node_id: id, pos: Number(pos), content: txt, updated_at: new Date().toISOString() },
+        { onConflict: 'node_id,pos' });
+    });
+  }, []);
+
+  // L'arbre aplati dans l'ordre d'affichage : c'est LA liste commune aux deux
+  // volets (bulles à gauche, lignes du tableau à droite).
+  const lignes = useMemo(() => {
+    if (!noeuds) return [];
+    const enfants = {};
+    noeuds.forEach(n => {
+      const k = n.parent_id || '_';
+      if (!enfants[k]) enfants[k] = [];
+      enfants[k].push(n);
+    });
+    const out = [];
+    const descendre = (pid, prof) => {
+      (enfants[pid || '_'] || []).forEach(n => {
+        const kids = enfants[n.id] || [];
+        out.push({ ...n, prof, nbEnfants: kids.length });
+        if (kids.length && !plies[n.id]) descendre(n.id, prof + 1);
+      });
+    };
+    descendre(null, 0);
+    return out;
+  }, [noeuds, plies]);
+
+  useEffect(() => {
+    const el = sel && lignesRef.current[sel];
+    if (el && el.scrollIntoView) el.scrollIntoView({ block: 'nearest' });
+  }, [sel]);
+
+  // ── Arborescence ──────────────────────────────────────────────────────────
+  const ouvrirEdition = (n) => {
+    setCaseEdit(null); setEdite(n.id);
+    setBrouillon({ label: n.label || '', g: n.pole_gauche || '', d: n.pole_droit || '' });
+  };
+
+  const ajouter = async (parentId) => {
+    const freres = (noeuds || []).filter(n => (n.parent_id || null) === (parentId || null));
+    const ordre = freres.length ? Math.max(...freres.map(f => f.ordre || 0)) + 1 : 0;
+    const { data, error } = await sb.from('mv_nodes')
+      .insert({ parent_id: parentId || null, label: 'Nouveau sujet', ordre }).select().single();
+    if (error) { setErreur(error.message); return; }
+    setNoeuds(l => [...l, data]);
+    if (parentId) setPlies(p => ({ ...p, [parentId]: false }));
+    setSel(data.id);
+    ouvrirEdition(data);
+  };
+
+  const enregistrerNoeud = async () => {
+    const id = edite; if (!id) return;
+    const patch = {
+      label: (brouillon.label || '').trim() || 'Sans titre',
+      pole_gauche: brouillon.g.trim() || null,
+      pole_droit:  brouillon.d.trim() || null,
+      updated_at: new Date().toISOString(),
+    };
+    setNoeuds(l => l.map(n => n.id === id ? { ...n, ...patch } : n));
+    setEdite(null);
+    const { error } = await sb.from('mv_nodes').update(patch).eq('id', id);
+    if (error) setErreur(error.message);
+  };
+
+  const supprimer = async (n) => {
+    const ids = mvSousArbre(noeuds || [], n.id);
+    const nb = ids.length - 1;
+    const question =
+      nb === 0 ? `Supprimer « ${n.label} » ?`
+      : nb === 1 ? `Supprimer « ${n.label} » et son sous-sujet ?`
+      : `Supprimer « ${n.label} » et ses ${nb} sous-sujets ?`;
+    if (!window.confirm(question)) return;
+    const { error } = await sb.from('mv_nodes').delete().eq('id', n.id);
+    if (error) { setErreur(error.message); return; }
+    setNoeuds(l => l.filter(x => !ids.includes(x.id)));
+    if (ids.includes(sel))   setSel(null);
+    if (ids.includes(edite)) setEdite(null);
+    if (caseEdit && ids.includes(caseEdit.split(':')[0])) setCaseEdit(null);
+  };
+
+  // ── Cellules ──────────────────────────────────────────────────────────────
+  const ecrireCase = (id, pos, txt) => {
+    const k = id + ':' + pos;
+    setCases(c => ({ ...c, [k]: txt }));
+    pendRef.current[k] = txt;
+    clearTimeout(timersRef.current[k]);
+    timersRef.current[k] = setTimeout(() => sauverCase(id, pos), 800);
+  };
+
+  const sauverCase = async (id, pos) => {
+    const k = id + ':' + pos;
+    clearTimeout(timersRef.current[k]);
+    if (!(k in pendRef.current)) return;      // rien de neuf depuis le dernier envoi
+    const txt = pendRef.current[k];
+    delete pendRef.current[k];
+    setEnVol(v => v + 1);
+    const { error } = await sb.from('mv_positions').upsert(
+      { node_id: id, pos: Number(pos), content: txt, updated_at: new Date().toISOString() },
+      { onConflict: 'node_id,pos' });
+    setEnVol(v => v - 1);
+    if (error) setErreur(error.message);
+  };
+
+  const fermerCase = () => {
+    if (!caseEdit) return;
+    const [id, pos] = caseEdit.split(':');
+    sauverCase(id, Number(pos));
+    setCaseEdit(null);
+  };
+
+  const selNoeud = (noeuds || []).find(n => n.id === sel) || null;
+
+  return (
+    <>
+    <div className="screen screen-wide fade-in">
+      <div className="auth-header">
+        <div className="welcome-tag" style={{color:'#7dd940'}}>Admin · Mind Vector</div>
+        <h1 className="welcome-title">Modèles<br/><span className="accent">mentaux</span></h1>
+      </div>
+
+      <div style={{padding:'11px 15px',background:'rgba(255,255,255,.045)',border:'1px solid rgba(255,255,255,.09)',borderRadius:14,marginBottom:14}}>
+        <div style={{fontSize:12.5,color:'rgba(255,255,255,.6)',lineHeight:1.6}}>
+          À gauche, l'arbre des sujets, du plus général au plus précis. À droite, pour chaque sujet,
+          <strong style={{color:'#fff'}}> 5 positions</strong> qui glissent doucement d'une vision extrême
+          à la vision opposée — environ {MV_MAX} caractères chacune.
+        </div>
+        <div style={{height:5,borderRadius:3,marginTop:10,background:MV_DEGRADE}}/>
+      </div>
+
+      {erreur && <div className="auth-error" style={{marginBottom:12}}>{erreur}</div>}
+
+      {noeuds === null ? <div style={{textAlign:'center',padding:50}}><StarSpinner size={34}/></div> : (
+        <div className="mv-wrap">
+
+          {/* ── Volet gauche : l'arborescence ────────────────────────────── */}
+          <div className="mv-tree">
+            <div className="mv-panel">
+              <div className="mv-panel-title"><span style={{fontSize:13}}>🌳</span>Arborescence</div>
+              <div className="mv-scroll" style={{display:'flex',flexDirection:'column',gap:5}}>
+                {lignes.map(n => (
+                  <div key={n.id} className="mv-row">
+                    {Array.from({length:n.prof}).map((_,i)=><span key={i} className="mv-guide"/>)}
+                    {edite === n.id ? (
+                      <div className="mv-edit" style={{flex:1,minWidth:0}}>
+                        <div>
+                          <label>Intitulé du sujet</label>
+                          <input autoFocus value={brouillon.label}
+                            placeholder="ex. Temps de travail par semaine"
+                            onChange={e=>setBrouillon(b=>({...b,label:e.target.value}))}
+                            onKeyDown={e=>{ if(e.key==='Enter') enregistrerNoeud(); if(e.key==='Escape') setEdite(null); }}/>
+                        </div>
+                        <div style={{display:'flex',gap:7}}>
+                          <div style={{flex:1,minWidth:0}}>
+                            <label style={{color:'#7fb2ff'}}>◀ Pôle 1</label>
+                            <input value={brouillon.g} placeholder="ex. Elon Musk, 94 h"
+                              onChange={e=>setBrouillon(b=>({...b,g:e.target.value}))}/>
+                          </div>
+                          <div style={{flex:1,minWidth:0}}>
+                            <label style={{color:'#ffb340'}}>Pôle 5 ▶</label>
+                            <input value={brouillon.d} placeholder="ex. Expert, 15 h"
+                              onChange={e=>setBrouillon(b=>({...b,d:e.target.value}))}/>
+                          </div>
+                        </div>
+                        {/* width:auto obligatoire : .btn est en width:100%, sans quoi
+                            « Annuler » écrase « Enregistrer » au lieu de le suivre. */}
+                        <div style={{display:'flex',gap:7,marginTop:2}}>
+                          <button className="btn btn-yes" style={{flex:'1 1 0',width:'auto',fontSize:12,padding:'8px 0'}} onClick={enregistrerNoeud}>Enregistrer</button>
+                          <button className="btn btn-no"  style={{flex:'0 0 auto',width:'auto',fontSize:12,padding:'8px 14px'}} onClick={()=>setEdite(null)}>Annuler</button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className={'mv-bubble' + (sel === n.id ? ' sel' : '')}>
+                        {n.nbEnfants
+                          ? <button className="mv-chev" title={plies[n.id]?'Déplier':'Replier'}
+                              onClick={()=>setPlies(p=>({...p,[n.id]:!p[n.id]}))}>{plies[n.id]?'▶':'▼'}</button>
+                          : <span className="mv-dot"><i/></span>}
+                        <button className="mv-lbl" title={n.label} onClick={()=>setSel(n.id)}>{n.label}</button>
+                        {n.nbEnfants > 0 && plies[n.id] &&
+                          <span style={{fontSize:9.5,fontWeight:800,color:'rgba(255,255,255,.32)',flexShrink:0}}>{n.nbEnfants}</span>}
+                        <button className="mv-ico add" title="Ajouter un sous-sujet" onClick={()=>ajouter(n.id)}>＋</button>
+                        <button className="mv-ico del" title="Supprimer ce sujet"     onClick={()=>supprimer(n)}>−</button>
+                        <button className="mv-ico edt" title="Modifier le contenu"    onClick={()=>ouvrirEdition(n)}>✎</button>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+              <button className="btn btn-no" onClick={()=>ajouter(null)}
+                style={{width:'100%',marginTop:10,fontSize:12,padding:'8px 0',color:'#a3ed6a',border:'1px dashed rgba(125,217,64,.45)'}}>
+                ＋ Nouveau sujet racine
+              </button>
+            </div>
+          </div>
+
+          {/* ── Volet droit : les 5 positions ────────────────────────────── */}
+          <div className="mv-board">
+            {lignes.length === 0 ? (
+              <div className="mv-panel" style={{textAlign:'center',padding:'40px 20px',color:'rgba(255,255,255,.35)',fontSize:13}}>
+                Créez un sujet à gauche pour ouvrir sa grille de positions.
+              </div>
+            ) : (
+            <div className="adm-freeze mv-freeze">
+              <table style={{width:'100%',minWidth:1032,borderCollapse:'separate'}}>
+                <thead>
+                  <tr>
+                    <th className="frz-col" style={{textAlign:'left',padding:'9px 11px',fontSize:10.5,fontWeight:800,letterSpacing:'.6px',textTransform:'uppercase',color:'rgba(255,255,255,.5)'}}>Sujet</th>
+                    {MV_POSITIONS.map(p => (
+                      <th key={p.n} style={{textAlign:'left',padding:'7px 9px',borderBottom:`3px solid ${p.col}`}}>
+                        <div style={{display:'flex',alignItems:'center',gap:6}}>
+                          <span style={{width:18,height:18,borderRadius:6,background:p.col,color:'#05222b',fontSize:11,fontWeight:900,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>{p.n}</span>
+                          <span style={{fontSize:10.5,fontWeight:800,color:p.col,letterSpacing:'.3px',whiteSpace:'nowrap'}}>{p.legende}</span>
+                        </div>
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {lignes.map(n => (
+                    <tr key={n.id} ref={el=>{ lignesRef.current[n.id] = el; }} className={sel === n.id ? 'sel' : ''}>
+                      <td className="frz-col" style={{padding:'9px 11px',cursor:'pointer'}} onClick={()=>setSel(n.id)}>
+                        <div style={{display:'flex',alignItems:'flex-start',gap:5}}>
+                          {n.prof > 0 && <span style={{color:'rgba(255,255,255,.2)',fontSize:11,lineHeight:1.4,flexShrink:0,marginLeft:(n.prof-1)*9}}>└</span>}
+                          <div style={{minWidth:0,flex:1}}>
+                            <div style={{fontSize:12.5,fontWeight:800,color:'#fff',lineHeight:1.35}}>{n.label}</div>
+                            <div style={{display:'flex',gap:5,marginTop:4,alignItems:'center',flexWrap:'wrap',fontSize:9.5,fontWeight:700,lineHeight:1.3}}>
+                              <span style={{color: n.pole_gauche ? '#7fb2ff' : 'rgba(127,178,255,.35)'}}>◀ {n.pole_gauche || 'pôle à nommer'}</span>
+                              <span style={{color:'rgba(255,255,255,.18)'}}>→</span>
+                              <span style={{color: n.pole_droit ? '#ffb340' : 'rgba(255,179,64,.35)'}}>{n.pole_droit || 'pôle à nommer'} ▶</span>
+                            </div>
+                          </div>
+                        </div>
+                      </td>
+                      {MV_POSITIONS.map(p => {
+                        const k = n.id + ':' + p.n;
+                        const txt = cases[k] || '';
+                        const actif = caseEdit === k;
+                        return (
+                          <td key={p.n} className={'mv-cell' + (actif ? ' edit' : '')}
+                            style={actif ? undefined : { background: p.tint }}
+                            onClick={()=>{ if (!actif) { fermerCase(); setCaseEdit(k); setSel(n.id); } }}>
+                            {actif ? (
+                              /* Pas de largeur minimale ici : elle élargirait la colonne
+                                 en saisie et décalerait toutes les autres à chaque clic.
+                                 Les boutons de mise en forme passent à la ligne. */
+                              <div onClick={e=>e.stopPropagation()}>
+                                <MarkdownToolbar compact areaRef={zoneRef} value={txt}
+                                  onChange={v=>ecrireCase(n.id, p.n, v)}/>
+                                <textarea ref={zoneRef} autoFocus rows={5} value={txt}
+                                  placeholder={`Position ${p.n} — ${p.legende}`}
+                                  onChange={e=>ecrireCase(n.id, p.n, e.target.value)}
+                                  onBlur={()=>sauverCase(n.id, p.n)}
+                                  onKeyDown={e=>{ if (e.key === 'Escape') { sauverCase(n.id, p.n); setCaseEdit(null); } }}/>
+                                <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginTop:6}}>
+                                  <span style={{fontSize:10,fontWeight:800,color: txt.length > MV_MAX ? '#ffb340' : 'rgba(255,255,255,.35)'}}>
+                                    {txt.length}/{MV_MAX}
+                                  </span>
+                                  <button className="btn btn-no" style={{width:'auto',fontSize:10.5,padding:'4px 12px'}}
+                                    onClick={()=>{ sauverCase(n.id, p.n); setCaseEdit(null); }}>Fermer</button>
+                                </div>
+                              </div>
+                            ) : txt.trim()
+                              ? <BilanMarkdown text={txt} fontSize={12}/>
+                              : <span className="mv-empty">＋ écrire la position {p.n}…</span>}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            )}
+
+            {selNoeud && (
+              <div style={{marginTop:10,fontSize:11,color:'rgba(255,255,255,.4)',lineHeight:1.6}}>
+                Sujet sélectionné : <strong style={{color:'#a3ed6a'}}>{selNoeud.label}</strong>.
+                Cliquez une case pour écrire — mise en forme <strong style={{color:'#ffb340'}}>Titre</strong>,
+                <strong style={{color:'#fff'}}> gras</strong>, <strong style={{color:'#7dd940'}}>puces</strong>,
+                enregistrement automatique.
+              </div>
+            )}
+          </div>
+
+        </div>
+      )}
+    </div>
+    <StickyFooter row wide onBack={onBack}>
+      <span style={{fontSize:11.5,fontWeight:700,color: enVol > 0 ? '#ffb340' : 'rgba(125,217,64,.85)'}}>
+        {enVol > 0 ? 'Enregistrement…' : 'Tout est enregistré ✓'}
+      </span>
+    </StickyFooter>
+    </>
+  );
+}
+
 // ─── Admin : Module Comprendre ────────────────────────────────────────────────
 function AdminLearnScreen({ onGroup, onNew, onBack }) {
   const [groups, setGroups] = useState(null);
@@ -19703,6 +20216,7 @@ function App() {
           onPrix={()=>goTo('ADMIN_PRIX_MATERIAUX')}
           onOffres={()=>goTo('ADMIN_OFFRES')}
           onLearn={()=>goTo('ADMIN_LEARN')}
+          onMindVector={()=>goTo('ADMIN_MIND_VECTOR')}
           onFeedback={()=>goTo('ADMIN_FEEDBACK')}
           onFactures={()=>goTo('ADMIN_FACTURES')}
           onProofread={()=>goTo('ADMIN_PROOFREAD')}
@@ -19737,6 +20251,9 @@ function App() {
 
       case 'ADMIN_BILAN_DATA':
         return <AdminBilanDataScreen onBack={goBack}/>;
+
+      case 'ADMIN_MIND_VECTOR':
+        return <AdminMindVectorScreen onBack={goBack}/>;
 
       case 'ADMIN_LEARN':
         return <AdminLearnScreen
