@@ -1690,6 +1690,13 @@
       color: #fff; font-family: inherit; font-size: 14px; font-weight: 600; outline: none;
     }
     .mv-dialogue input:focus { border-color: #7dd940; }
+    .mv-dialogue-zone {
+      width: 100%; padding: 9px 12px; border-radius: 10px;
+      border: 1.5px solid rgba(255,255,255,.20); background: rgba(0,0,0,.24);
+      color: #fff; font-family: inherit; font-size: 13px; font-weight: 500;
+      line-height: 1.5; outline: none; resize: vertical; display: block;
+    }
+    .mv-dialogue-zone:focus { border-color: #7dd940; }
   </style>
 </head>
 <body>
@@ -6224,6 +6231,12 @@ function IconHeadCheck({ color='#fff' }) {
 function mdInline(text){
   return String(text).split(/\*\*/).map((p,i)=> i%2===1 ? <strong key={i}>{p}</strong> : <React.Fragment key={i}>{p}</React.Fragment>);
 }
+// Un super admin recharge l'application en boucle pendant ses essais : lui
+// générer un bilan IA à chaque passage coûterait du temps et de l'argent pour
+// rien. Seules les générations AUTOMATIQUES sont coupées — les boutons
+// « mettre à jour » restent actifs, et les autres comptes ne changent pas.
+const bilanAutoCoupe = (profil) => profil?.role === 'superadmin';
+
 function BilanMarkdown({ text, fontSize = 13.5 }){
   if(!text) return null;
   const lines = String(text).replace(/\r/g,'').split('\n');
@@ -6717,6 +6730,7 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onOnboardingQ
     if(!site||!site.id) return;
     if(!(site.conso_annuelle_kwh>0)||!site.conso_profil) return;
     if(site.bilan_ia) return;                     // déjà écrit en dur → jamais rappelé
+    if(bilanAutoCoupe(userProfile)) return;       // super admin en test : pas d'appel IA automatique
     if(!tariffs?.length) return;                  // besoin des tarifs pour les faits
     if(bilanGenRef.current[site.id]) return;      // pas deux fois dans la même session
     bilanGenRef.current[site.id]=true;
@@ -6734,7 +6748,7 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onOnboardingQ
       }catch(e){ console.warn('bilan exception',e); }
       finally{ setBilanGenerating(false); }
     })();
-  },[site?.id,site?.conso_annuelle_kwh,site?.bilan_ia,tariffs,globalVars,prodProfilData]);
+  },[site?.id,site?.conso_annuelle_kwh,site?.bilan_ia,tariffs,globalVars,prodProfilData,userProfile?.role]);
 
   // Régénère « Votre bilan en clair » à la demande (bouton). Réécrit le bilan en dur.
   const regenBilan=async()=>{
@@ -14423,6 +14437,10 @@ function slugifyMd(label) {
   return s + '.md';
 }
 
+// Ces prompts se règlent sur LEUR propre page (Cyber-sécurité). Les répéter ici
+// donnait deux endroits pour la même valeur, donc deux vérités possibles.
+const AI_PROMPTS_AILLEURS = ['cyber_security', 'cyber_security_code'];
+
 function AdminAIPromptsScreen({ onBack, onBilanData }) {
   const [rows, setRows] = useState(null);       // [{feature,label,system_prompt,updated_at,updated_by}]
   const [drafts, setDrafts] = useState({});     // {feature: texte en cours d'édition}
@@ -14430,12 +14448,32 @@ function AdminAIPromptsScreen({ onBack, onBilanData }) {
   const [msg, setMsg] = useState(null);         // {feature, type:'ok'|'err', text}
   const [files, setFiles] = useState([]);       // [{id,feature,label,content,updated_at,updated_by}] — données métier éditables
   const [edit, setEdit] = useState(null);       // {id, feature, label, content, draft, saving, deleting} — modale d'édition d'un fichier
+  const [rescan, setRescan] = useState({ busy:false, msg:null, type:null });
+
+  // Relit tout Mind Vector et réécrit le prompt de remplissage à partir de la
+  // manière de faire observée. La fonction edge enregistre elle-même le résultat
+  // dans ai_prompts : on recharge pour l'afficher.
+  const rescanMindVector = async () => {
+    setRescan({ busy:true, msg:null, type:null });
+    const { data, error } = await sb.functions.invoke('mind-vector', { body: { action: 'rescan' } });
+    if (error || data?.error) {
+      setRescan({ busy:false, type:'err',
+        msg: data?.message || error?.message || 'Rescan impossible.' });
+      return;
+    }
+    load();
+    const eur = data?.cost?.eur;
+    setRescan({ busy:false, type:'ok',
+      msg: `Prompt réécrit à partir de ${data.scanned} sujet${data.scanned > 1 ? 's' : ''}`
+           + (eur ? ` · ${eur.toFixed(3)} €` : '') + '.' });
+  };
 
   const load = () => {
     sb.rpc('get_ai_prompts').then(({ data, error }) => {
       if (error) { console.error('get_ai_prompts', error); setRows([]); return; }
-      setRows(data || []);
-      const d = {}; (data || []).forEach(r => { d[r.feature] = r.system_prompt; });
+      const visibles = (data || []).filter(r => !AI_PROMPTS_AILLEURS.includes(r.feature));
+      setRows(visibles);
+      const d = {}; visibles.forEach(r => { d[r.feature] = r.system_prompt; });
       setDrafts(d);
     });
     sb.rpc('get_prompt_files').then(({ data, error }) => {
@@ -14560,6 +14598,25 @@ function AdminAIPromptsScreen({ onBack, onBilanData }) {
                 <div style={{marginTop:8, fontSize:12.5, fontWeight:600, color: msg.type==='ok' ? '#5fd38a' : '#ff8080'}}>
                   {msg.text}
                 </div>
+              )}
+              {r.feature==='mind_vector_fill' && (
+                <>
+                  <button onClick={rescanMindVector} disabled={rescan.busy}
+                    style={{marginTop:12, width:'100%', background:'rgba(125,217,64,.12)', border:'1px solid rgba(125,217,64,.4)', borderRadius:10, color:'#a3ed6a', fontSize:13, fontWeight:800, padding:'10px 14px', cursor: rescan.busy?'default':'pointer', fontFamily:'inherit', opacity: rescan.busy?.6:1}}>
+                    {rescan.busy
+                      ? <><StarSpinner size={14} color="#a3ed6a"/> Lecture de Mind Vector…</>
+                      : '🔄 Rescanner pour mettre à jour le prompt'}
+                  </button>
+                  <div style={{marginTop:6, fontSize:11, color:'rgba(255,255,255,.4)', lineHeight:1.5}}>
+                    Relit tous les sujets déjà rédigés dans Mind Vector et réécrit ce prompt
+                    à partir de leur manière de faire. Le prompt ci-dessus sera remplacé.
+                  </div>
+                  {rescan.msg && (
+                    <div style={{marginTop:6, fontSize:12.5, fontWeight:600, color: rescan.type==='ok' ? '#5fd38a' : '#ff8080'}}>
+                      {rescan.msg}
+                    </div>
+                  )}
+                </>
               )}
               {r.feature==='bilan' && (
                 <button onClick={onBilanData}
@@ -18307,6 +18364,15 @@ function ParcoursBilanScreen({ user, profile, bilanData, onNext, onManuel }) {
           return;
         }
 
+        // Super admin en test : jamais d'appel IA automatique. On montre le
+        // dernier bilan écrit s'il en existe un, même s'il a un peu vieilli.
+        if (bilanAutoCoupe(profile)) {
+          if (site.bilan_ia) setFallback(f => f || { collected: true, errored: false, errorMsg: null,
+            bilanText: site.bilan_ia,
+            consoKwh: site.conso_annuelle_kwh ? Math.round(site.conso_annuelle_kwh) : null });
+          return;
+        }
+
         setRegen(true);
         const { data, error } = await sb.functions.invoke('bilan', { body: { facts } });
         if (!alive) return;
@@ -19231,7 +19297,9 @@ function AdminMindVectorScreen({ onBack }) {
   const [taillePos, setTaillePos] = useState(MV_TXT_MAX);  // taille commune aux 5
   const [debordent, setDebordent] = useState({});  // position → true si coupée
   const [feuille,  setFeuille]  = useState(null);  // petit écran : { type:'menu'|'actions', prof }
-  const [dialogue, setDialogue] = useState(null);  // { mode:'ajout'|'edition', parentId, id, label, g, d }
+  const [dialogue, setDialogue] = useState(null);  // { mode:'ajout'|'edition', parentId, id, label, description }
+  const [remplissage, setRemplissage] = useState(false);  // rédaction IA des 5 positions en cours
+  const [msgAuto,  setMsgAuto]  = useState(null);  // { type:'ok'|'err', texte } affiché dans le dialogue
   const [glisse,   setGlisse]   = useState(null);  // id de la branche en cours de déplacement
   const [cible,    setCible]    = useState(null);  // id survolé comme destination ('_' = racine)
   const [enVol,    setEnVol]    = useState(0);     // écritures de position en cours
@@ -19518,17 +19586,83 @@ function AdminMindVectorScreen({ onBack }) {
   });
 
   // ── Créer / modifier / supprimer / déplacer ───────────────────────────────
-  const ouvrirAjout   = (parentId) => setDialogue({ mode:'ajout', parentId: parentId || null, label:'' });
+  const ouvrirAjout   = (parentId) => { setMsgAuto(null); setDialogue({ mode:'ajout', parentId: parentId || null, label:'', description:'' }); };
   const ouvrirEdition = (id) => {
     const n = parId[id]; if (!n) return;
-    setDialogue({ mode:'edition', id, label: n.label || '' });
+    setMsgAuto(null);
+    setDialogue({ mode:'edition', id, label: n.label || '', description: n.description || '' });
+  };
+
+  // ── Remplissage automatique des 5 positions ───────────────────────────────
+  // Le sujet doit exister avant de porter ses positions : on le crée (ou on
+  // l'enregistre), puis l'IA rédige, puis on écrit les 5 lignes d'un coup.
+  const remplirAuto = async () => {
+    const d = dialogue; if (!d || remplissage) return;
+    const label = (d.label || '').trim();
+    if (!label) { setMsgAuto({ type:'err', texte:"Donnez d'abord un intitulé au sujet." }); return; }
+    const description = (d.description || '').trim();
+    setRemplissage(true); setMsgAuto(null);
+    try {
+      let id = d.id;
+      let liste = noeuds || [];
+      const champs = { label, description: description || null };
+      if (d.mode === 'ajout') {
+        const freres = liste.filter(n => (n.parent_id || null) === (d.parentId || null));
+        const ordre = freres.length ? Math.max(...freres.map(f => f.ordre || 0)) + 1 : 0;
+        const { data, error } = await sb.from('mv_nodes')
+          .insert({ ...champs, parent_id: d.parentId || null, ordre }).select().single();
+        if (error) throw error;
+        id = data.id; liste = [...liste, data];
+        setNoeuds(liste);
+        // Le sujet existe désormais : si l'IA échoue derrière, le dialogue ne
+        // doit plus proposer « Créer » — sinon un second essai ferait un doublon.
+        setDialogue(dd => dd ? { ...dd, mode:'edition', id } : dd);
+      } else {
+        const patch = { ...champs, updated_at: new Date().toISOString() };
+        liste = liste.map(n => n.id === id ? { ...n, ...patch } : n);
+        setNoeuds(liste);
+        const { error } = await sb.from('mv_nodes').update(patch).eq('id', id);
+        if (error) throw error;
+      }
+
+      const { data, error } = await sb.functions.invoke('mind-vector', { body: { label, description } });
+      if (error || data?.error) throw new Error(data?.message || error?.message || 'Remplissage impossible.');
+
+      const lignes = (data.positions || [])
+        .filter(p => (p.contenu || '').trim() || (p.titre || '').trim())
+        .map(p => ({
+          node_id: id, pos: p.pos,
+          content: (p.contenu || '').trim(),
+          titre: (p.titre || '').trim() || null,
+          updated_at: new Date().toISOString(),
+        }));
+      if (lignes.length) {
+        const { error: e2 } = await sb.from('mv_positions').upsert(lignes, { onConflict: 'node_id,pos' });
+        if (e2) throw e2;
+        setCases(c => { const n = { ...c }; lignes.forEach(l => { n[l.node_id + ':' + l.pos] = l.content; }); return n; });
+        setTitres(t => {
+          const n = { ...t };
+          lignes.forEach(l => { if (l.titre) n[l.node_id + ':' + l.pos] = l.titre; else delete n[l.node_id + ':' + l.pos]; });
+          return n;
+        });
+      }
+      setDialogue(null); setMsgAuto(null);
+      choisir(id, liste);
+    } catch (e) {
+      setMsgAuto({ type:'err', texte: e?.message || String(e) });
+    } finally {
+      setRemplissage(false);
+    }
   };
 
   const validerDialogue = async () => {
     const d = dialogue; if (!d) return;
     // Le dialogue ne porte plus que l'intitulé : les noms des 5 positions se
     // saisissent sur les cases elles-mêmes, une seule source de vérité.
-    const champs = { label: (d.label || '').trim() || 'Sans titre' };
+    const champs = {
+      label: (d.label || '').trim() || 'Sans titre',
+      description: (d.description || '').trim() || null,
+    };
     setDialogue(null);
     if (d.mode === 'ajout') {
       const freres = (noeuds || []).filter(n => (n.parent_id || null) === (d.parentId || null));
@@ -19782,15 +19916,36 @@ function AdminMindVectorScreen({ onBack }) {
               onChange={e => setDialogue(d => ({ ...d, label: e.target.value }))}
               onKeyDown={e => { if (e.key === 'Enter') validerDialogue(); if (e.key === 'Escape') setDialogue(null); }}/>
           </div>
+          <div>
+            <label>Description de ce thème <span style={{textTransform:'none',letterSpacing:0,fontWeight:600}}>(facultatif)</span></label>
+            <textarea className="mv-dialogue-zone" rows={3} value={dialogue.description || ''}
+              placeholder="Ce que ce titre évoque : de quoi parle-t-on exactement, sur quel axe se situe le désaccord ?"
+              onChange={e => setDialogue(d => ({ ...d, description: e.target.value }))}
+              onKeyDown={e => { if (e.key === 'Escape') setDialogue(null); }}/>
+          </div>
           <div style={{fontSize:10.5,color:'rgba(255,255,255,.35)',lineHeight:1.5}}>
             Les noms des 5 positions se saisissent directement sur les cases, en cliquant
             leur intitulé.
           </div>
-          <div style={{display:'flex',gap:9}}>
+          {msgAuto && (
+            <div style={{fontSize:12,fontWeight:700,lineHeight:1.5,color: msgAuto.type === 'ok' ? '#5fd38a' : '#ff8a8a'}}>
+              {msgAuto.texte}
+            </div>
+          )}
+          <div style={{display:'flex',gap:9,flexWrap:'wrap'}}>
             <button className="btn btn-yes" style={{flex:'1 1 0',width:'auto',fontSize:13,padding:'10px 0'}}
-              onClick={validerDialogue}>{dialogue.mode === 'ajout' ? 'Créer' : 'Enregistrer'}</button>
+              disabled={remplissage} onClick={validerDialogue}>
+              {dialogue.mode === 'ajout' ? 'Créer' : 'Enregistrer'}
+            </button>
+            {/* Crée le sujet PUIS fait rédiger ses 5 positions par l'IA, à partir
+                de l'intitulé et de la description saisis juste au-dessus. */}
+            <button className="btn btn-no" style={{flex:'1 1 0',width:'auto',fontSize:13,padding:'10px 8px'}}
+              disabled={remplissage} title="Faire rédiger les 5 positions par l'IA"
+              onClick={remplirAuto}>
+              {remplissage ? <><StarSpinner size={14} color="#d8f5c4"/> Rédaction…</> : '🤖 Remplissage auto'}
+            </button>
             <button className="btn btn-no" style={{flex:'0 0 auto',width:'auto',fontSize:13,padding:'10px 16px'}}
-              onClick={() => setDialogue(null)}>Annuler</button>
+              disabled={remplissage} onClick={() => setDialogue(null)}>Annuler</button>
           </div>
         </div>
       </div>
