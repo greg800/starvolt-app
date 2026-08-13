@@ -1445,9 +1445,15 @@
       color: rgba(255,255,255,.5); overflow-wrap: anywhere; transition: color .18s;
     }
     .mvt-poles { font-size: 9.5px; font-weight: 700; color: rgba(255,255,255,.3); line-height: 1.3; }
-    .mvt-noeud.chemin { border-color: rgba(255,255,255,.45); background: rgba(255,255,255,.12); }
-    .mvt-noeud.chemin .mvt-nom   { color: #fff; }
-    .mvt-noeud.chemin .mvt-poles { color: rgba(255,255,255,.55); }
+    /* Les parents du sujet retenu sont blancs eux aussi : le chemin se suit d'un
+       coup d'œil de la racine jusqu'en bas. Ils portent un texte sombre — le vert
+       reste la marque du seul sujet retenu. */
+    .mvt-noeud.chemin {
+      background: #fff; border-color: #fff;
+      box-shadow: 0 4px 14px rgba(0,0,0,.20);
+    }
+    .mvt-noeud.chemin .mvt-nom   { color: #123640; }
+    .mvt-noeud.chemin .mvt-poles { color: rgba(18,54,64,.5); }
     /* La fiche retenue : carte blanche, texte vert — c'est elle qui déplie ses 5 positions */
     .mvt-noeud.sel {
       background: #fff; border-color: #fff;
@@ -1494,14 +1500,17 @@
       font-family: inherit; font-size: 12px; font-weight: 800; line-height: 1;
       cursor: pointer; transition: all .15s;
     }
-    .mvt-noeud.sel .mv-ico { border-color: rgba(31,122,31,.28); background: rgba(31,122,31,.08); color: #2e8b2e; }
+    /* Sur carte blanche (sujet retenu ET ses parents), les pictos passent en sombre. */
+    .mvt-noeud.sel .mv-ico    { border-color: rgba(31,122,31,.28);  background: rgba(31,122,31,.08);  color: #2e8b2e; }
+    .mvt-noeud.chemin .mv-ico { border-color: rgba(18,54,64,.22);   background: rgba(18,54,64,.06);   color: #3d6470; }
     .mv-ico:hover     { transform: translateY(-1px); }
     .mv-ico.add:hover { background: rgba(125,217,64,.22); border-color: rgba(125,217,64,.6); color: #4a9b1e; }
     .mv-ico.del:hover { background: rgba(255,96,96,.20);  border-color: rgba(255,96,96,.6);  color: #d43a3a; }
     .mv-ico.edt:hover { background: rgba(255,179,64,.20); border-color: rgba(255,179,64,.6); color: #c07a10; }
-    .mvt-noeud:not(.sel) .mv-ico.add:hover { color: #a3ed6a; }
-    .mvt-noeud:not(.sel) .mv-ico.del:hover { color: #ff9090; }
-    .mvt-noeud:not(.sel) .mv-ico.edt:hover { color: #ffc978; }
+    /* Sur fond sombre, il faut au contraire des teintes claires. */
+    .mvt-noeud:not(.sel):not(.chemin) .mv-ico.add:hover { color: #a3ed6a; }
+    .mvt-noeud:not(.sel):not(.chemin) .mv-ico.del:hover { color: #ff9090; }
+    .mvt-noeud:not(.sel):not(.chemin) .mv-ico.edt:hover { color: #ffc978; }
 
     /* ── Les 5 positions ────────────────────────────────────────────────── */
     /* Elles se partagent toute la place restante : cinq colonnes sur grand
@@ -1533,7 +1542,23 @@
       display: flex; align-items: center; justify-content: center;
       font-size: 11px; font-weight: 900; color: #05222b;
     }
-    .mv-pos-leg { font-size: 10px; font-weight: 800; letter-spacing: .3px; }
+    .mv-pos-leg {
+      flex: 1; min-width: 0; text-align: left;
+      background: none; border: none; padding: 1px 3px; margin: 0;
+      font-family: inherit; font-size: 10px; font-weight: 800; letter-spacing: .3px;
+      border-radius: 5px; cursor: text;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      transition: background .15s;
+    }
+    .mv-pos-leg:hover { background: rgba(255,255,255,.10); }
+    .mv-pos-leg.defaut { opacity: .6; font-style: italic; }
+    .mv-pos-leg-saisie {
+      flex: 1; min-width: 0;
+      background: rgba(0,0,0,.28); border: 1.5px solid;
+      border-radius: 6px; padding: 2px 6px; margin: 0;
+      font-family: inherit; font-size: 10px; font-weight: 800; letter-spacing: .3px;
+      outline: none;
+    }
     .mv-pos-corps { flex: 1 1 auto; min-height: 0; overflow: hidden; }
     .mv-pos.libre .mv-pos-corps { overflow: visible; }
     /* Texte coupé : on l'estompe plutôt que de trancher une ligne en deux. */
@@ -19109,17 +19134,36 @@ function mvChemin(liste, id) {
 // Purement présentatif : la taille du texte est décidée en haut, pour les cinq à
 // la fois (c'est la case la plus chargée qui la fixe), et transmise ici.
 function MvPosition({
-  p, texte, pole, actif, ouvert, taille, deborde, longueurMax,
+  p, texte, titre, renomme, brouillonTitre, actif, ouvert, taille, deborde, longueurMax,
   zoneRef, refCorps, onOuvrir, onBasculer, onEcrire, onSauver, onFermer,
+  onRenommer, onTitre, onValiderTitre, onAnnulerTitre,
 }) {
   const libre = ouvert || actif;
   return (
     <div className={'mv-pos' + (actif ? ' edit' : '') + (libre ? ' libre' : '')}
       style={actif ? undefined : { background: p.tint }}
       onClick={() => { if (!actif) onOuvrir(); }}>
-      <div className="mv-pos-tete">
+      {/* Le titre de la position se nomme sur place, les cinq de la même façon :
+          « nuancé » ou « équilibre » ne disent rien du sujet, alors qu'un mot
+          choisi (« centralisé », « 50-50 ») fait lire la nuance d'un coup d'œil. */}
+      <div className="mv-pos-tete" onClick={e => e.stopPropagation()}>
         <span className="mv-pos-num" style={{ background: p.col }}>{p.n}</span>
-        <span className="mv-pos-leg" style={{ color: p.col }}>{pole || p.legende}</span>
+        {renomme ? (
+          <input className="mv-pos-leg-saisie" autoFocus value={brouillonTitre}
+            style={{ color: p.col, borderColor: p.col }}
+            placeholder={p.legende}
+            onChange={e => onTitre(e.target.value)}
+            onBlur={onValiderTitre}
+            onKeyDown={e => {
+              if (e.key === 'Enter')  { e.preventDefault(); onValiderTitre(); }
+              if (e.key === 'Escape') onAnnulerTitre();
+            }}/>
+        ) : (
+          <button className={'mv-pos-leg' + (titre ? '' : ' defaut')} style={{ color: p.col }}
+            title="Renommer cette position" onClick={onRenommer}>
+            {titre || p.legende}
+          </button>
+        )}
       </div>
       <div className={'mv-pos-corps' + (deborde && !libre ? ' coupe' : '')} ref={refCorps}>
         {actif ? (
@@ -19154,6 +19198,9 @@ function MvPosition({
 function AdminMindVectorScreen({ onBack }) {
   const [noeuds,   setNoeuds]   = useState(null);  // liste plate des nœuds
   const [cases,    setCases]    = useState({});    // "idNoeud:position" → texte
+  const [titres,   setTitres]   = useState({});    // "idNoeud:position" → nom de la position
+  const [renomme,  setRenomme]  = useState(null);  // 1..5, position dont on saisit le nom
+  const [brouillonTitre, setBrouillonTitre] = useState('');
   const [chemin,   setChemin]   = useState([]);    // ids, racine → profond : ce qui est déplié
   const [sel,      setSel]      = useState(null);  // nœud dont on écrit les 5 positions
   const [posEdit,  setPosEdit]  = useState(null);  // 1..5, position en cours de saisie
@@ -19175,6 +19222,7 @@ function AdminMindVectorScreen({ onBack }) {
   const corpsRefs  = useRef({});     // position → div du texte, pour mesurer
   const timersRef  = useRef({});     // "id:pos" → minuterie d'enregistrement différé
   const pendRef    = useRef({});     // "id:pos" → texte pas encore écrit en base
+  const titresRef  = useRef({});     // miroir des titres, lisible au démontage
   const semeRef    = useRef(false);  // garde-fou : une seule création de racine auto
   const memoireRef = useRef({});     // idParent ('_' pour la racine) → dernier enfant choisi
   const appuiRef   = useRef({ timer: null, long: false });
@@ -19184,16 +19232,19 @@ function AdminMindVectorScreen({ onBack }) {
     let vivant = true;
     Promise.all([
       sb.from('mv_nodes').select('*').order('ordre').order('created_at'),
-      sb.from('mv_positions').select('node_id,pos,content'),
+      sb.from('mv_positions').select('node_id,pos,content,titre'),
     ]).then(async ([{ data: n, error: e1 }, { data: p, error: e2 }]) => {
       if (!vivant) return;
       if (e1 || e2) {
         setErreur("Tables Mind Vector absentes : appliquez migration_mind_vector.sql.");
         setNoeuds([]); return;
       }
-      const c = {};
-      (p || []).forEach(r => { c[r.node_id + ':' + r.pos] = r.content || ''; });
-      setCases(c);
+      const c = {}, t = {};
+      (p || []).forEach(r => {
+        c[r.node_id + ':' + r.pos] = r.content || '';
+        if ((r.titre || '').trim()) t[r.node_id + ':' + r.pos] = r.titre.trim();
+      });
+      setCases(c); setTitres(t);
       // Première ouverture : on pose la racine tout de suite, pour que l'écran
       // s'ouvre sur un sujet à renommer plutôt que sur du vide.
       if ((n || []).length === 0 && !semeRef.current) {
@@ -19255,12 +19306,16 @@ function AdminMindVectorScreen({ onBack }) {
     Object.entries(pendRef.current).forEach(([k, txt]) => {
       const [id, pos] = k.split(':');
       sb.from('mv_positions').upsert(
-        { node_id: id, pos: Number(pos), content: txt, updated_at: new Date().toISOString() },
+        { node_id: id, pos: Number(pos), content: txt, titre: titresRef.current[k] || null, updated_at: new Date().toISOString() },
         { onConflict: 'node_id,pos' });
     });
   }, []);
 
   // ── Lecture de l'arbre ────────────────────────────────────────────────────
+  // Le nettoyage au démontage ne s'exécute qu'une fois : sans ce miroir il ne
+  // verrait que les titres du premier rendu.
+  titresRef.current = titres;
+
   const parId = useMemo(() => {
     const m = {}; (noeuds || []).forEach(n => { m[n.id] = n; }); return m;
   }, [noeuds]);
@@ -19352,8 +19407,11 @@ function AdminMindVectorScreen({ onBack }) {
     const txt = pendRef.current[k];
     delete pendRef.current[k];
     setEnVol(v => v + 1);
+    // On réécrit AUSSI le titre, tel qu'on l'a en mémoire. Contenu et titre
+    // partagent la même ligne : n'en envoyer qu'un reviendrait à parier sur le
+    // fait que l'upsert ne touche pas aux colonnes absentes de la charge.
     const { error } = await sb.from('mv_positions').upsert(
-      { node_id: id, pos: Number(pos), content: txt, updated_at: new Date().toISOString() },
+      { node_id: id, pos: Number(pos), content: txt, titre: titres[k] || null, updated_at: new Date().toISOString() },
       { onConflict: 'node_id,pos' });
     setEnVol(v => v - 1);
     if (error) setErreur(error.message);
@@ -19362,6 +19420,33 @@ function AdminMindVectorScreen({ onBack }) {
   const fermerPos = () => {
     if (posEdit != null && sel) sauverCase(sel, posEdit);
     setPosEdit(null);
+  };
+
+  // ── Nommer une position ───────────────────────────────────────────────────
+  const ouvrirRenommage = (pos) => {
+    setBrouillonTitre(titres[sel + ':' + pos] || '');
+    setRenomme(pos);
+  };
+
+  const validerTitre = async () => {
+    const pos = renomme; if (pos == null || !sel) { setRenomme(null); return; }
+    const k = sel + ':' + pos;
+    const valeur = (brouillonTitre || '').trim();
+    const avant = titres[k] || '';
+    setRenomme(null);
+    if (valeur === avant) return;
+    setTitres(t => {
+      const n = { ...t };
+      if (valeur) n[k] = valeur; else delete n[k];
+      return n;
+    });
+    setEnVol(v => v + 1);
+    // Le contenu part avec, pour la même raison (voir sauverCase).
+    const { error } = await sb.from('mv_positions').upsert(
+      { node_id: sel, pos, titre: valeur || null, content: cases[k] || '', updated_at: new Date().toISOString() },
+      { onConflict: 'node_id,pos' });
+    setEnVol(v => v - 1);
+    if (error) setErreur(error.message);
   };
 
   // ── Une seule taille de texte pour les 5 cases ────────────────────────────
@@ -19410,19 +19495,17 @@ function AdminMindVectorScreen({ onBack }) {
   });
 
   // ── Créer / modifier / supprimer / déplacer ───────────────────────────────
-  const ouvrirAjout   = (parentId) => setDialogue({ mode:'ajout', parentId: parentId || null, label:'', g:'', d:'' });
+  const ouvrirAjout   = (parentId) => setDialogue({ mode:'ajout', parentId: parentId || null, label:'' });
   const ouvrirEdition = (id) => {
     const n = parId[id]; if (!n) return;
-    setDialogue({ mode:'edition', id, label: n.label || '', g: n.pole_gauche || '', d: n.pole_droit || '' });
+    setDialogue({ mode:'edition', id, label: n.label || '' });
   };
 
   const validerDialogue = async () => {
     const d = dialogue; if (!d) return;
-    const champs = {
-      label: (d.label || '').trim() || 'Sans titre',
-      pole_gauche: (d.g || '').trim() || null,
-      pole_droit:  (d.d || '').trim() || null,
-    };
+    // Le dialogue ne porte plus que l'intitulé : les noms des 5 positions se
+    // saisissent sur les cases elles-mêmes, une seule source de vérité.
+    const champs = { label: (d.label || '').trim() || 'Sans titre' };
     setDialogue(null);
     if (d.mode === 'ajout') {
       const freres = (noeuds || []).filter(n => (n.parent_id || null) === (d.parentId || null));
@@ -19521,7 +19604,13 @@ function AdminMindVectorScreen({ onBack }) {
       {MV_POSITIONS.map(p => (
         <MvPosition key={p.n} p={p} longueurMax={MV_MAX}
           texte={cases[sel + ':' + p.n] || ''}
-          pole={p.n === 1 ? selNoeud.pole_gauche : p.n === 5 ? selNoeud.pole_droit : null}
+          titre={titres[sel + ':' + p.n] || ''}
+          renomme={renomme === p.n}
+          brouillonTitre={brouillonTitre}
+          onRenommer={() => ouvrirRenommage(p.n)}
+          onTitre={setBrouillonTitre}
+          onValiderTitre={validerTitre}
+          onAnnulerTitre={() => setRenomme(null)}
           actif={posEdit === p.n}
           ouvert={!!ouvertes[p.n]}
           taille={taillePos}
@@ -19562,8 +19651,8 @@ function AdminMindVectorScreen({ onBack }) {
                   onDragLeave={() => setCible(c => c === n.id ? null : c)}
                   onDrop={e => { e.preventDefault(); e.stopPropagation(); deplacer(glisse || e.dataTransfer.getData('text/plain'), n.id); }}>
                   <div className="mvt-nom">{n.label}</div>
-                  {(n.pole_gauche || n.pole_droit) && (
-                    <div className="mvt-poles">◀ {n.pole_gauche || '—'} · {n.pole_droit || '—'} ▶</div>
+                  {(titres[n.id + ':1'] || titres[n.id + ':5']) && (
+                    <div className="mvt-poles">◀ {titres[n.id + ':1'] || '—'} · {titres[n.id + ':5'] || '—'} ▶</div>
                   )}
                   {pictos(n)}
                 </div>
@@ -19620,9 +19709,9 @@ function AdminMindVectorScreen({ onBack }) {
                     onClick={() => { choisir(n.id); setFeuille(null); }}>
                     <span style={{flex:1,minWidth:0}}>
                       {n.label}
-                      {(n.pole_gauche || n.pole_droit) && (
+                      {(titres[n.id + ':1'] || titres[n.id + ':5']) && (
                         <span style={{display:'block',fontSize:10,fontWeight:700,color:'rgba(255,255,255,.4)',marginTop:2}}>
-                          ◀ {n.pole_gauche || '—'} · {n.pole_droit || '—'} ▶
+                          ◀ {titres[n.id + ':1'] || '—'} · {titres[n.id + ':5'] || '—'} ▶
                         </span>
                       )}
                     </span>
@@ -19670,20 +19759,9 @@ function AdminMindVectorScreen({ onBack }) {
               onChange={e => setDialogue(d => ({ ...d, label: e.target.value }))}
               onKeyDown={e => { if (e.key === 'Enter') validerDialogue(); if (e.key === 'Escape') setDialogue(null); }}/>
           </div>
-          <div style={{display:'flex',gap:10}}>
-            <div style={{flex:1,minWidth:0}}>
-              <label style={{color:'#7fb2ff'}}>◀ Pôle 1</label>
-              <input value={dialogue.g} placeholder="ex. Elon Musk, 94 h"
-                onChange={e => setDialogue(d => ({ ...d, g: e.target.value }))}/>
-            </div>
-            <div style={{flex:1,minWidth:0}}>
-              <label style={{color:'#ffb340'}}>Pôle 5 ▶</label>
-              <input value={dialogue.d} placeholder="ex. Expert, 15 h"
-                onChange={e => setDialogue(d => ({ ...d, d: e.target.value }))}/>
-            </div>
-          </div>
           <div style={{fontSize:10.5,color:'rgba(255,255,255,.35)',lineHeight:1.5}}>
-            Les deux pôles nomment les visions extrêmes : ils titrent les positions 1 et 5.
+            Les noms des 5 positions se saisissent directement sur les cases, en cliquant
+            leur intitulé.
           </div>
           <div style={{display:'flex',gap:9}}>
             <button className="btn btn-yes" style={{flex:'1 1 0',width:'auto',fontSize:13,padding:'10px 0'}}
