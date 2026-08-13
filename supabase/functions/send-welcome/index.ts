@@ -4,18 +4,18 @@
 //   RESEND_API_KEY        → clé API Resend (ex: re_xxxxxxxxxxxx)
 //   EMAIL_FROM            → adresse expéditeur (ex: Starvolt <hello@starvolt.app>)
 //   APP_URL               → URL de l'app (ex: https://app.starvolt.fr)
-//   WELCOME_INTERNAL_TOKEN → token pour appels serveur-serveur
 //
-// Auth acceptée :
-//   1) Bearer WELCOME_INTERNAL_TOKEN  (appels internes depuis switchgrid)
-//   2) Bearer <user_jwt> + apikey: <anon_key>  (appels depuis le frontend)
+// Auth : Bearer <user_jwt> vérifié auprès de /auth/v1/user.
+// Le destinataire est TOUJOURS l'email du compte appelant : c'est un email de
+// bienvenue, il n'a aucune raison de partir ailleurs. (Avant, l'auth se
+// contentait de `apikey === ANON_KEY && token.length > 50` — deux valeurs
+// publiques — et l'adresse venait du body : n'importe quel compte pouvait
+// faire envoyer un courriel « Starvolt » à n'importe qui, depuis notre domaine.)
 
+const SUPABASE_URL     = Deno.env.get("SUPABASE_URL")           ?? "";
 const RESEND_API_KEY   = Deno.env.get("RESEND_API_KEY")         ?? "";
 const EMAIL_FROM       = Deno.env.get("EMAIL_FROM")             ?? "Starvolt <noreply@starvolt.fr>";
 const APP_URL          = Deno.env.get("APP_URL")                ?? "https://app.starvolt.fr";
-const INTERNAL_TOKEN   = Deno.env.get("WELCOME_INTERNAL_TOKEN") ?? "";
-// Clé anon publique — acceptée pour les appels frontend légitimes
-const ANON_KEY         = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhreGtod2VncWthcGRic2lzeHd2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc0MjY4NjksImV4cCI6MjA5MzAwMjg2OX0.9-_oHRJfwXZkl3bRYDMb5K56UzB8O1NOfa5QfrXFfkQ";
 
 const CORS = {
   "Access-Control-Allow-Origin":  "*",
@@ -100,13 +100,22 @@ Deno.serve(async (req: Request) => {
   if (req.method !== "POST")
     return new Response(JSON.stringify({ error: "Method not allowed" }), { status: 405, headers: CORS });
 
-  // Auth : token interne (server→server) OU JWT utilisateur + anon key (frontend)
-  const auth    = req.headers.get("Authorization") ?? "";
-  const token   = auth.replace("Bearer ", "");
-  const apikey  = req.headers.get("apikey") ?? "";
-  const isInternal = INTERNAL_TOKEN && token === INTERNAL_TOKEN;
-  const isFrontend = apikey === ANON_KEY && token.length > 50; // JWT Supabase = ~200 chars
-  if (!isInternal && !isFrontend) {
+  // Auth : le JWT est réellement vérifié, et c'est lui qui donne le destinataire.
+  const token = (req.headers.get("Authorization") ?? "").replace(/^Bearer\s+/i, "");
+  if (!token) {
+    return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers: CORS });
+  }
+  let callerEmail = "";
+  try {
+    const who = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
+      headers: { Authorization: `Bearer ${token}`, apikey: token },
+    });
+    if (!who.ok) throw new Error("invalid token");
+    callerEmail = ((await who.json()) as Record<string, string>).email ?? "";
+  } catch (_) {
+    return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers: CORS });
+  }
+  if (!callerEmail) {
     return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers: CORS });
   }
 
@@ -115,13 +124,12 @@ Deno.serve(async (req: Request) => {
     return new Response(JSON.stringify({ ok: true, skipped: true }), { status: 200, headers: CORS });
   }
 
-  const { email, firstName, appUrl } = await req.json() as Record<string,string>;
-  if (!email) {
-    return new Response(JSON.stringify({ error: "Missing email" }), { status: 400, headers: CORS });
-  }
+  const { firstName } = await req.json().catch(() => ({})) as Record<string,string>;
 
-  const effectiveAppUrl = appUrl || APP_URL;
-  const html = emailHtml(firstName || "là", email, effectiveAppUrl);
+  // `appUrl` n'est plus lu depuis le body : le lien du bouton doit venir de la
+  // configuration, pas de l'appelant, sinon l'email devient un support de
+  // hameçonnage signé par notre domaine.
+  const html = emailHtml(firstName || "là", callerEmail, APP_URL);
 
   const resendResp = await fetch("https://api.resend.com/emails", {
     method: "POST",
@@ -131,7 +139,7 @@ Deno.serve(async (req: Request) => {
     },
     body: JSON.stringify({
       from:    EMAIL_FROM,
-      to:      [email],
+      to:      [callerEmail],
       subject: `Bienvenue dans la constellation Starvolt ✦`,
       html,
     }),
