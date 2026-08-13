@@ -1510,6 +1510,7 @@
        chargée qui la fixe, sinon on lirait cinq typographies différentes. */
     .mv-grille { flex: 1 1 auto; min-height: 0; display: flex; gap: 10px; align-items: stretch; }
     .mv-pos {
+      position: relative;                         /* ancre du bouton « voir + » */
       flex: 1 1 0; min-width: 0; min-height: 0;
       display: flex; flex-direction: column;
       border-radius: 14px; padding: 9px 11px;
@@ -1537,8 +1538,8 @@
     .mv-pos.libre .mv-pos-corps { overflow: visible; }
     /* Texte coupé : on l'estompe plutôt que de trancher une ligne en deux. */
     .mv-pos-corps.coupe {
-      -webkit-mask-image: linear-gradient(to bottom, #000 58%, transparent 100%);
-              mask-image: linear-gradient(to bottom, #000 58%, transparent 100%);
+      -webkit-mask-image: linear-gradient(to bottom, #000 74%, transparent 100%);
+              mask-image: linear-gradient(to bottom, #000 74%, transparent 100%);
     }
     .mv-empty { display: block; font-size: 11.5px; font-style: italic; color: rgba(255,255,255,.26); }
     .mv-pos:hover .mv-empty { color: rgba(125,217,64,.6); }
@@ -1549,10 +1550,14 @@
       line-height: 1.5; outline: none; resize: vertical; display: block;
     }
     .mv-pos textarea:focus { border-color: #7dd940; }
+    /* Hors du flux : posé sur le dégradé d'estompe plutôt qu'en dessous du
+       texte, sinon il volerait 24 px de lecture à la case déjà la plus serrée. */
     .mv-plus {
-      flex: 0 0 auto; align-self: flex-start; margin-top: 3px; padding: 2px 8px;
-      border-radius: 7px; border: 1px solid rgba(255,255,255,.18);
-      background: rgba(255,255,255,.07); color: rgba(255,255,255,.6);
+      position: absolute; right: 9px; bottom: 6px; z-index: 2;
+      padding: 2px 8px;
+      border-radius: 7px; border: 1px solid rgba(255,255,255,.22);
+      background: rgba(8,52,64,.82); color: rgba(255,255,255,.7);
+      -webkit-backdrop-filter: blur(3px); backdrop-filter: blur(3px);
       font-family: inherit; font-size: 10px; font-weight: 800; cursor: pointer;
     }
     .mv-plus:hover { color: #fff; border-color: rgba(255,255,255,.35); }
@@ -19070,7 +19075,10 @@ const MV_MAX = 200;            // longueur conseillée d'une position
 const MV_DEGRADE = 'linear-gradient(90deg,#7fb2ff,#a8c0e6,#cbcbcb,#eec98d,#ffb340)';
 
 // Bornes de la mise à l'échelle du texte des cases.
-const MV_TXT_MIN = 12;   // en dessous ça ne se lit plus
+// Plancher de lisibilité : on ne descend PAS en dessous pour faire entrer un
+// texte trop long. Passé ce seuil, la case la plus chargée est estompée et
+// propose « voir + » — plutôt que d'entraîner les quatre autres vers l'illisible.
+const MV_TXT_MIN = 14;
 const MV_TXT_MAX = 26;   // au dessus trois mots mangent toute la case
 const MV_TXT_LIBRE = 14; // case dépliée : plus de hauteur imposée, donc plus de
                          // mise à l'échelle — une taille de lecture fixe
@@ -19363,6 +19371,16 @@ function AdminMindVectorScreen({ onBack }) {
   // La boucle ne peut que décroître : elle s'arrête donc toujours.
   useEffect(() => { setTaillePos(MV_TXT_MAX); setDebordent({}); setOuvertes({}); }, [sel]);
   useEffect(() => { setTaillePos(MV_TXT_MAX); setDebordent({}); }, [posEdit, ouvertes, compact]);
+
+  // Poppins est chargée en « swap » : sur un affichage à froid, le calcul peut
+  // tomber sur les métriques de la police de secours, puis la vraie police
+  // arrive et change la hauteur du texte sans que rien ne rejoue la mesure.
+  useEffect(() => {
+    if (!document.fonts || !document.fonts.ready) return;
+    let vivant = true;
+    document.fonts.ready.then(() => { if (vivant) { setTaillePos(MV_TXT_MAX); setDebordent({}); } });
+    return () => { vivant = false; };
+  }, []);
 
   useEffect(() => {
     const el = grilleRef.current;
