@@ -1433,12 +1433,41 @@
       padding: 62px 20px calc(94px + env(safe-area-inset-bottom, 0px));
     }
     .mv-plein.compact { padding-left: 12px; padding-right: 12px; }
+    /* Titre de la page, puis le sujet retenu et ce qu'il recouvre, sur la même
+       ligne — le tout centré tant que ça tient, et à la ligne quand c'est serré. */
+    .mv-entete {
+      flex: 0 0 auto;
+      display: flex; align-items: baseline; justify-content: center;
+      gap: 12px; margin-bottom: 7px; min-width: 0;
+    }
     .mv-titre-court {
       flex: 0 0 auto; text-align: center;
       font-size: 19px; font-weight: 900; line-height: 1.1;
-      color: #fff; margin: 0 0 7px;
+      color: #fff; margin: 0;
     }
     .mv-titre-court .accent { color: var(--green); }
+    .mv-sujet {
+      min-width: 0; text-align: left;
+      padding-left: 12px; border-left: 1px solid rgba(255,255,255,.18);
+    }
+    .mv-sujet-nom {
+      font-size: 14.5px; font-weight: 800; color: #fff; line-height: 1.25;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    /* La description est bornée à deux lignes : elle explique, elle ne doit pas
+       manger la hauteur des 5 cases qui sont l'objet de l'écran. */
+    .mv-sujet-desc {
+      font-size: 11px; font-weight: 500; color: rgba(255,255,255,.5);
+      line-height: 1.35; margin-top: 1px;
+      display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+    @media (max-width: 899px) {
+      .mv-entete   { gap: 9px; }
+      .mv-sujet    { padding-left: 9px; }
+      .mv-sujet-nom  { font-size: 13px; }
+      .mv-sujet-desc { font-size: 10.5px; -webkit-line-clamp: 2; }
+    }
 
     /* ── Bandeau d'arborescence (grand écran) ───────────────────────────── */
     .mv-bandeau {
@@ -19786,7 +19815,17 @@ function AdminMindVectorScreen({ onBack }) {
   return (
     <>
     <div className={'mv-plein fade-in' + (compact ? ' compact' : '')}>
-      <div className="mv-titre-court">Mind <span className="accent">Vector</span></div>
+      {/* Le sujet retenu et ce qu'il recouvre, à côté du titre : c'est le seul
+          endroit où la description se lit, et elle cadre la lecture des 5 cases. */}
+      <div className="mv-entete">
+        <div className="mv-titre-court">Mind <span className="accent">Vector</span></div>
+        {selNoeud && (
+          <div className="mv-sujet">
+            <div className="mv-sujet-nom">{selNoeud.label}</div>
+            {selNoeud.description && <div className="mv-sujet-desc">{selNoeud.description}</div>}
+          </div>
+        )}
+      </div>
 
       {erreur && <div className="auth-error" style={{marginBottom:8,flex:'0 0 auto'}}>{erreur}</div>}
 
