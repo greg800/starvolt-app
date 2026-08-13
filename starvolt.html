@@ -1583,11 +1583,56 @@
     }
     .mv-dialogue input:focus { border-color: #7dd940; }
 
-    /* ── Empilement sur petit écran ─────────────────────────────────────── */
+    /* ── Petit écran : les 5 positions tiennent dans l'écran ────────────────
+       Pas de mode d'emploi, un titre discret, et la hauteur restante coupée en
+       cinq parts égales : les 5 états se lisent d'un coup d'œil, sans défiler.
+       Le texte de chaque case est agrandi jusqu'à remplir sa part (voir
+       MvPosition) ; s'il ne rentre toujours pas, « voir + » le déplie. */
     @media (max-width: 899px) {
       .mv-grille { flex-direction: column; }      /* position 1 en haut, 5 en bas */
       .mv-pos-corps { min-height: 0; }
     }
+    .mv-plein {
+      position: fixed; inset: 0; z-index: 1;
+      display: flex; flex-direction: column;
+      padding: 8px 12px calc(96px + env(safe-area-inset-bottom, 0px));
+    }
+    .mv-titre-court {
+      flex: 0 0 auto; text-align: center;
+      font-size: 21px; font-weight: 900; line-height: 1.1;
+      color: #fff; margin: 0 0 8px;
+    }
+    .mv-titre-court .accent { color: var(--green); }
+    .mv-plein .mv-grille {
+      flex: 1 1 auto; min-height: 0; gap: 7px;
+      overflow-y: auto; -webkit-overflow-scrolling: touch;
+    }
+    .mv-plein .mv-pos {
+      flex: 1 1 0;                                /* chacune un cinquième */
+      /* …mais jamais écrasée : quand une case se déplie, les autres s'arrêtent
+         à cette hauteur et c'est la colonne qui se met à défiler. */
+      min-height: 96px;
+      overflow: hidden; padding: 7px 10px;
+    }
+    /* Case dépliée ou en saisie : elle reprend sa hauteur naturelle et la
+       colonne se met à défiler — les quatre autres gardent leur part. */
+    .mv-plein .mv-pos.libre { flex: 0 0 auto; min-height: 0; overflow: visible; }
+    .mv-plein .mv-pos-tete { margin-bottom: 5px; padding-bottom: 4px; }
+    .mv-plein .mv-pos-corps { overflow: hidden; }
+    .mv-plein .mv-pos.libre .mv-pos-corps { overflow: visible; }
+    /* Texte coupé : on l'estompe plutôt que de trancher une ligne en deux —
+       le dégradé dit « il y en a encore », le bouton « voir + » le confirme. */
+    .mv-plein .mv-pos-corps.coupe {
+      -webkit-mask-image: linear-gradient(to bottom, #000 58%, transparent 100%);
+              mask-image: linear-gradient(to bottom, #000 58%, transparent 100%);
+    }
+    .mv-plus {
+      flex: 0 0 auto; align-self: flex-start; margin-top: 3px; padding: 2px 8px;
+      border-radius: 7px; border: 1px solid rgba(255,255,255,.18);
+      background: rgba(255,255,255,.07); color: rgba(255,255,255,.6);
+      font-family: inherit; font-size: 10px; font-weight: 800; cursor: pointer;
+    }
+    .mv-plus:hover { color: #fff; border-color: rgba(255,255,255,.35); }
   </style>
 </head>
 <body>
@@ -18539,7 +18584,7 @@ function GroupDescription({ text }) {
 }
 
 // ─── ComprendreHomeScreen ─────────────────────────────────────────────────────
-function ComprendreHomeScreen({ user, rolePerms, onGroup, onAction, onBack }) {
+function ComprendreHomeScreen({ user, rolePerms, onGroup, onAction, onMindVector, onBack }) {
   const [groups, setGroups] = useState([]);
   const [progress, setProgress] = useState({});
   const [revisions, setRevisions] = useState([]);
@@ -18637,6 +18682,9 @@ function ComprendreHomeScreen({ user, rolePerms, onGroup, onAction, onBack }) {
         chemin. On garde donc partout le bouton « analyse manuelle ». */}
     <StickyFooter row onBack={onBack}>
       <button className="btn btn-manual" style={{fontSize:13}} onClick={onAction}>📈 Voir ma courbe de conso</button>
+      {/* Raccourci super admin : Mind Vector se travaille depuis les thèmes,
+          sans repasser par le menu admin. */}
+      {onMindVector && <button className="btn btn-no" style={{fontSize:13}} onClick={onMindVector}>🧭 Mind Vector</button>}
     </StickyFooter>
     </>
   );
@@ -19022,6 +19070,99 @@ const MV_DEGRADE = 'linear-gradient(90deg,#7fb2ff,#a8c0e6,#cbcbcb,#eec98d,#ffb34
 // Vocabulaire de Greg : la racine est le niveau n, ses fils n-1, et ainsi de suite.
 const mvRang = (prof) => prof === 0 ? 'n' : 'n-' + prof;
 
+// Bornes de la mise à l'échelle du texte d'une case (mode plein écran).
+const MV_TXT_MIN = 12;   // en dessous ça ne se lit plus
+const MV_TXT_MAX = 26;   // au dessus trois mots mangent toute la case
+const MV_TXT_LIBRE = 14; // case dépliée : plus de contrainte de hauteur, donc
+                         // plus de mise à l'échelle — une taille de lecture fixe
+
+// ─── Une des 5 positions ──────────────────────────────────────────────────────
+// En plein écran (mobile), chaque case reçoit un cinquième de la hauteur : le
+// texte doit donc s'adapter à SA case. On part de la plus grande taille et on
+// descend d'un point tant que ça déborde — la boucle ne peut que décroître, elle
+// s'arrête donc toujours, en pratique en deux ou trois rendus. Si même au plus
+// petit le texte dépasse, « voir + » déplie la case.
+function MvPosition({
+  p, texte, pole, actif, plein, longueurMax,
+  zoneRef, onOuvrir, onEcrire, onSauver, onFermer,
+}) {
+  const [ouvert,  setOuvert]  = useState(false);
+  const [taille,  setTaille]  = useState(MV_TXT_MAX);
+  const [deborde, setDeborde] = useState(false);
+  const corpsRef   = useRef(null);
+  const hauteurRef = useRef(0);
+
+  const libre = ouvert || actif;
+
+  // Nouveau texte (ou changement de présentation) : on repart du plus grand,
+  // sinon la case resterait à la taille calculée pour l'ancien contenu.
+  useEffect(() => { setTaille(MV_TXT_MAX); setDeborde(false); setOuvert(false); }, [texte, plein]);
+
+  // La part de hauteur change (rotation, clavier, une autre case qui se déplie) :
+  // on refait le calcul. Sauf si la case est libre — elle n'a alors plus de
+  // hauteur imposée, et remettre la taille au maximum la ferait enfler.
+  useEffect(() => {
+    const el = corpsRef.current;
+    if (!el || !plein || libre || !window.ResizeObserver) return;
+    const ro = new ResizeObserver(() => {
+      if (Math.abs(el.clientHeight - hauteurRef.current) > 4) {
+        hauteurRef.current = el.clientHeight;
+        setTaille(MV_TXT_MAX); setDeborde(false);
+      }
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [plein, libre]);
+
+  // En se refermant, la case retrouve sa part : on refait la mise à l'échelle.
+  useEffect(() => { if (!libre) { setTaille(MV_TXT_MAX); setDeborde(false); } }, [libre]);
+
+  React.useLayoutEffect(() => {
+    const el = corpsRef.current;
+    if (!el || !plein || libre || !texte.trim()) return;
+    const trop = el.scrollHeight > el.clientHeight + 1;
+    if (trop && taille > MV_TXT_MIN) { setTaille(t => t - 1); return; }
+    if (trop !== deborde) setDeborde(trop);
+  });
+
+  return (
+    <div className={'mv-pos' + (actif ? ' edit' : '') + (libre ? ' libre' : '')}
+      style={actif ? undefined : { background: p.tint }}
+      onClick={() => { if (!actif) onOuvrir(); }}>
+      <div className="mv-pos-tete">
+        <span className="mv-pos-num" style={{ background: p.col }}>{p.n}</span>
+        <span className="mv-pos-leg" style={{ color: p.col }}>{pole || p.legende}</span>
+      </div>
+      <div className={'mv-pos-corps' + (plein && deborde && !libre ? ' coupe' : '')} ref={corpsRef}>
+        {actif ? (
+          <div onClick={e => e.stopPropagation()}>
+            <MarkdownToolbar compact areaRef={zoneRef} value={texte} onChange={onEcrire}/>
+            <textarea ref={zoneRef} autoFocus rows={plein ? 4 : 6} value={texte}
+              placeholder={`Position ${p.n} — ${p.legende}`}
+              onChange={e => onEcrire(e.target.value)}
+              onBlur={onSauver}
+              onKeyDown={e => { if (e.key === 'Escape') onFermer(); }}/>
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginTop:6}}>
+              <span style={{fontSize:10,fontWeight:800,color: texte.length > longueurMax ? '#ffb340' : 'rgba(255,255,255,.35)'}}>
+                {texte.length}/{longueurMax}
+              </span>
+              <button className="btn btn-no" style={{width:'auto',fontSize:10.5,padding:'4px 12px'}}
+                onClick={onFermer}>Fermer</button>
+            </div>
+          </div>
+        ) : texte.trim()
+          ? <BilanMarkdown text={texte} fontSize={!plein ? 12.5 : libre ? MV_TXT_LIBRE : taille}/>
+          : <span className="mv-empty">＋ écrire la position {p.n}…</span>}
+      </div>
+      {plein && !actif && (deborde || ouvert) && (
+        <button className="mv-plus" onClick={e => { e.stopPropagation(); setOuvert(o => !o); }}>
+          {ouvert ? 'voir −' : 'voir +'}
+        </button>
+      )}
+    </div>
+  );
+}
+
 // Un nœud et toute sa descendance. La base fait déjà le ON DELETE CASCADE ; ici
 // c'est pour retirer les lignes de l'écran sans recharger.
 function mvSousArbre(liste, id) {
@@ -19115,6 +19256,15 @@ function AdminMindVectorScreen({ onBack }) {
       if (ro) ro.disconnect();
     };
   }, []);
+
+  // En plein cadre, la page ne défile pas : c'est la colonne des 5 positions qui
+  // défile, et seulement si l'une d'elles est dépliée.
+  useEffect(() => {
+    if (!compact) return;
+    const avant = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => { document.body.style.overflow = avant; };
+  }, [compact]);
 
   // En quittant l'écran, on pousse ce qui n'a pas encore été écrit : sans ça,
   // les 800 ms d'attente de la dernière frappe suffiraient à perdre une phrase.
@@ -19330,49 +19480,40 @@ function AdminMindVectorScreen({ onBack }) {
 
   const grillePositions = () => (
     <div className="mv-grille">
-      {MV_POSITIONS.map(p => {
-        const k = sel + ':' + p.n;
-        const txt = cases[k] || '';
-        const actif = posEdit === p.n;
-        const pole = p.n === 1 ? selNoeud.pole_gauche : p.n === 5 ? selNoeud.pole_droit : null;
-        return (
-          <div key={p.n} className={'mv-pos' + (actif ? ' edit' : '')}
-            style={actif ? undefined : { background: p.tint }}
-            onClick={() => { if (!actif) { fermerPos(); setPosEdit(p.n); } }}>
-            <div className="mv-pos-tete">
-              <span className="mv-pos-num" style={{ background: p.col }}>{p.n}</span>
-              <span className="mv-pos-leg" style={{ color: p.col }}>{pole || p.legende}</span>
-            </div>
-            <div className="mv-pos-corps">
-              {actif ? (
-                <div onClick={e => e.stopPropagation()}>
-                  <MarkdownToolbar compact areaRef={zoneRef} value={txt}
-                    onChange={v => ecrireCase(sel, p.n, v)}/>
-                  <textarea ref={zoneRef} autoFocus rows={compact ? 4 : 6} value={txt}
-                    placeholder={`Position ${p.n} — ${p.legende}`}
-                    onChange={e => ecrireCase(sel, p.n, e.target.value)}
-                    onBlur={() => sauverCase(sel, p.n)}
-                    onKeyDown={e => { if (e.key === 'Escape') { sauverCase(sel, p.n); setPosEdit(null); } }}/>
-                  <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginTop:6}}>
-                    <span style={{fontSize:10,fontWeight:800,color: txt.length > MV_MAX ? '#ffb340' : 'rgba(255,255,255,.35)'}}>
-                      {txt.length}/{MV_MAX}
-                    </span>
-                    <button className="btn btn-no" style={{width:'auto',fontSize:10.5,padding:'4px 12px'}}
-                      onClick={() => { sauverCase(sel, p.n); setPosEdit(null); }}>Fermer</button>
-                  </div>
-                </div>
-              ) : txt.trim()
-                ? <BilanMarkdown text={txt} fontSize={12.5}/>
-                : <span className="mv-empty">＋ écrire la position {p.n}…</span>}
-            </div>
-          </div>
-        );
-      })}
+      {MV_POSITIONS.map(p => (
+        <MvPosition key={sel + ':' + p.n} p={p} plein={compact} longueurMax={MV_MAX}
+          texte={cases[sel + ':' + p.n] || ''}
+          pole={p.n === 1 ? selNoeud.pole_gauche : p.n === 5 ? selNoeud.pole_droit : null}
+          actif={posEdit === p.n}
+          zoneRef={zoneRef}
+          onOuvrir={() => { fermerPos(); setPosEdit(p.n); }}
+          onEcrire={(v) => ecrireCase(sel, p.n, v)}
+          onSauver={() => sauverCase(sel, p.n)}
+          onFermer={() => { sauverCase(sel, p.n); setPosEdit(null); }}/>
+      ))}
     </div>
+  );
+
+  const messageVide = (texte) => (
+    <div style={{flex:1,display:'flex',alignItems:'center',justifyContent:'center',textAlign:'center',
+                 color:'rgba(255,255,255,.35)',fontSize:13,padding:'0 24px'}}>{texte}</div>
   );
 
   return (
     <>
+    {compact ? (
+      /* Petit écran : plein cadre et pas de mode d'emploi. Le titre en haut, la
+         navigation dans la barre du bas, et entre les deux les 5 positions à
+         hauteur égale — les cinq états se lisent d'un coup d'œil. */
+      <div className="mv-plein fade-in">
+        <div className="mv-titre-court">Mind <span className="accent">Vector</span></div>
+        {erreur && <div className="auth-error" style={{marginBottom:8}}>{erreur}</div>}
+        {noeuds === null
+          ? <div style={{flex:1,display:'flex',alignItems:'center',justifyContent:'center'}}><StarSpinner size={34}/></div>
+          : selNoeud ? grillePositions()
+          : messageVide('Choisissez un sujet avec les boutons du bas.')}
+      </div>
+    ) : (
     <div className="screen screen-wide fade-in">
       <div className="auth-header">
         <div className="welcome-tag" style={{color:'#7dd940'}}>Admin · Comprendre</div>
@@ -19381,12 +19522,9 @@ function AdminMindVectorScreen({ onBack }) {
 
       <div style={{padding:'11px 15px',background:'rgba(255,255,255,.045)',border:'1px solid rgba(255,255,255,.09)',borderRadius:14,marginBottom:14}}>
         <div style={{fontSize:12.5,color:'rgba(255,255,255,.6)',lineHeight:1.6}}>
-          {compact
-            ? <>Les trois boutons du bas parcourent l'arbre, de la racine (<strong style={{color:'#fff'}}>n</strong>) au sujet
-                le plus précis — faites-les glisser pour remonter. Appui court : choisir ; appui long : ＋ − ✎.</>
-            : <>L'arbre des sujets, de la racine (<strong style={{color:'#fff'}}>n</strong>) au plus précis. Le sujet retenu passe
-                en blanc et déplie ses <strong style={{color:'#fff'}}>5 positions</strong>, qui glissent d'une vision extrême à la
-                vision opposée — environ {MV_MAX} caractères chacune. Une fiche se glisse sur une autre pour changer de branche.</>}
+          L'arbre des sujets, de la racine (<strong style={{color:'#fff'}}>n</strong>) au plus précis. Le sujet retenu passe
+          en blanc et déplie ses <strong style={{color:'#fff'}}>5 positions</strong>, qui glissent d'une vision extrême à la
+          vision opposée — environ {MV_MAX} caractères chacune. Une fiche se glisse sur une autre pour changer de branche.
         </div>
         <div style={{height:5,borderRadius:3,marginTop:10,background:MV_DEGRADE}}/>
       </div>
@@ -19395,57 +19533,55 @@ function AdminMindVectorScreen({ onBack }) {
 
       {noeuds === null ? <div style={{textAlign:'center',padding:50}}><StarSpinner size={34}/></div> : (
         <>
-          {/* ── Bandeau d'arborescence (desktop) ───────────────────────────── */}
-          {!compact && (
-            <div style={{background:'rgba(255,255,255,.045)',border:'1px solid rgba(255,255,255,.10)',borderRadius:16,padding:'6px 12px',marginBottom:14}}>
-              {niveaux.map(niv => (
-                <div key={niv.prof} className="mvt-niveau"
-                  onDragOver={niv.prof === 0 ? (e => { if (glisse) { e.preventDefault(); } }) : undefined}>
-                  <span className="mvt-rang">{mvRang(niv.prof)}</span>
-                  {niv.items.map(n => (
-                    <div key={n.id} draggable
-                      className={'mvt-noeud'
-                        + (sel === n.id ? ' sel' : chemin.includes(n.id) ? ' chemin' : '')
-                        + (glisse === n.id ? ' glisse' : '')
-                        + (cible === n.id ? ' cible' : '')}
-                      onClick={() => choisir(n.id)}
-                      onDragStart={e => { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', n.id); setGlisse(n.id); }}
-                      onDragEnd={() => { setGlisse(null); setCible(null); }}
-                      onDragOver={e => { if (glisse && glisse !== n.id) { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; setCible(n.id); } }}
-                      onDragLeave={() => setCible(c => c === n.id ? null : c)}
-                      onDrop={e => { e.preventDefault(); e.stopPropagation(); deplacer(glisse || e.dataTransfer.getData('text/plain'), n.id); }}>
-                      <div className="mvt-nom">{n.label}</div>
-                      {(n.pole_gauche || n.pole_droit) && (
-                        <div className="mvt-poles">◀ {n.pole_gauche || '—'} · {n.pole_droit || '—'} ▶</div>
-                      )}
-                      {pictos(n)}
-                    </div>
-                  ))}
-                  {/* La zone racine n'apparaît que pendant un glissement : le reste
-                      du temps c'est un rectangle vide de plus à lire. */}
-                  {niv.prof === 0 && glisse && (
-                    <div className={'mvt-racine' + (cible === '_' ? ' cible' : '')}
-                      onDragOver={e => { if (glisse) { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; setCible('_'); } }}
-                      onDragLeave={() => setCible(c => c === '_' ? null : c)}
-                      onDrop={e => { e.preventDefault(); deplacer(glisse || e.dataTransfer.getData('text/plain'), null); }}>
-                      ↥ déposer ici pour en faire une racine
-                    </div>
-                  )}
-                  <button className="btn btn-no" style={{width:'auto',flex:'0 0 auto',alignSelf:'center',fontSize:11,padding:'6px 12px',color:'#a3ed6a',border:'1px dashed rgba(125,217,64,.45)'}}
-                    onClick={() => ouvrirAjout(niv.parent)}>
-                    ＋ sujet en {mvRang(niv.prof)}
-                  </button>
-                </div>
-              ))}
-              {niveaux.length === 0 && (
-                <div className="mvt-niveau">
-                  <span className="mvt-vide">Aucun sujet.</span>
-                  <button className="btn btn-no" style={{width:'auto',fontSize:11,padding:'6px 12px',color:'#a3ed6a',border:'1px dashed rgba(125,217,64,.45)'}}
-                    onClick={() => ouvrirAjout(null)}>＋ créer la racine</button>
-                </div>
-              )}
-            </div>
-          )}
+        {/* ── Bandeau d'arborescence (desktop) ───────────────────────────── */}
+          <div style={{background:'rgba(255,255,255,.045)',border:'1px solid rgba(255,255,255,.10)',borderRadius:16,padding:'6px 12px',marginBottom:14}}>
+            {niveaux.map(niv => (
+              <div key={niv.prof} className="mvt-niveau"
+                onDragOver={niv.prof === 0 ? (e => { if (glisse) { e.preventDefault(); } }) : undefined}>
+                <span className="mvt-rang">{mvRang(niv.prof)}</span>
+                {niv.items.map(n => (
+                  <div key={n.id} draggable
+                    className={'mvt-noeud'
+                      + (sel === n.id ? ' sel' : chemin.includes(n.id) ? ' chemin' : '')
+                      + (glisse === n.id ? ' glisse' : '')
+                      + (cible === n.id ? ' cible' : '')}
+                    onClick={() => choisir(n.id)}
+                    onDragStart={e => { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', n.id); setGlisse(n.id); }}
+                    onDragEnd={() => { setGlisse(null); setCible(null); }}
+                    onDragOver={e => { if (glisse && glisse !== n.id) { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; setCible(n.id); } }}
+                    onDragLeave={() => setCible(c => c === n.id ? null : c)}
+                    onDrop={e => { e.preventDefault(); e.stopPropagation(); deplacer(glisse || e.dataTransfer.getData('text/plain'), n.id); }}>
+                    <div className="mvt-nom">{n.label}</div>
+                    {(n.pole_gauche || n.pole_droit) && (
+                      <div className="mvt-poles">◀ {n.pole_gauche || '—'} · {n.pole_droit || '—'} ▶</div>
+                    )}
+                    {pictos(n)}
+                  </div>
+                ))}
+                {/* La zone racine n'apparaît que pendant un glissement : le reste
+                    du temps c'est un rectangle vide de plus à lire. */}
+                {niv.prof === 0 && glisse && (
+                  <div className={'mvt-racine' + (cible === '_' ? ' cible' : '')}
+                    onDragOver={e => { if (glisse) { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; setCible('_'); } }}
+                    onDragLeave={() => setCible(c => c === '_' ? null : c)}
+                    onDrop={e => { e.preventDefault(); deplacer(glisse || e.dataTransfer.getData('text/plain'), null); }}>
+                    ↥ déposer ici pour en faire une racine
+                  </div>
+                )}
+                <button className="btn btn-no" style={{width:'auto',flex:'0 0 auto',alignSelf:'center',fontSize:11,padding:'6px 12px',color:'#a3ed6a',border:'1px dashed rgba(125,217,64,.45)'}}
+                  onClick={() => ouvrirAjout(niv.parent)}>
+                  ＋ sujet en {mvRang(niv.prof)}
+                </button>
+              </div>
+            ))}
+            {niveaux.length === 0 && (
+              <div className="mvt-niveau">
+                <span className="mvt-vide">Aucun sujet.</span>
+                <button className="btn btn-no" style={{width:'auto',fontSize:11,padding:'6px 12px',color:'#a3ed6a',border:'1px dashed rgba(125,217,64,.45)'}}
+                  onClick={() => ouvrirAjout(null)}>＋ créer la racine</button>
+              </div>
+            )}
+          </div>
 
           {/* ── Les 5 positions du sujet retenu ────────────────────────────── */}
           {selNoeud ? (
@@ -19468,6 +19604,7 @@ function AdminMindVectorScreen({ onBack }) {
         </>
       )}
     </div>
+    )}
 
     {/* ── Mobile : feuille du bas (liste d'un niveau, ou actions) ─────────── */}
     {feuille && (() => {
@@ -20415,7 +20552,8 @@ function App() {
         return <HomeChoiceScreen profile={profile} user={user} onComprendre={()=>goTo('COMPRENDRE_HOME')} onAction={autoStart} onCollecte={()=>{ try{localStorage.setItem('starvolt_focus_enedis','1');}catch{} goTo('MA_CONSO'); }} consoPrete={consoPrete} can={can}/>;
 
       case 'COMPRENDRE_HOME':
-        return <ComprendreHomeScreen user={user} rolePerms={rolePerms} onGroup={(g)=>goTo('COMPRENDRE_GROUP',{learnGroup:g})} onAction={()=>goTo('MA_CONSO')} onBack={()=>goTo('HOME_CHOICE')}/>;
+        return <ComprendreHomeScreen user={user} rolePerms={rolePerms} onGroup={(g)=>goTo('COMPRENDRE_GROUP',{learnGroup:g})} onAction={()=>goTo('MA_CONSO')}
+          onMindVector={isSuperadmin ? (()=>goTo('ADMIN_MIND_VECTOR')) : null} onBack={()=>goTo('HOME_CHOICE')}/>;
 
       case 'COMPRENDRE_GROUP': {
         const g = state.learnGroup;
