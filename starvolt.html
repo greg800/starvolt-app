@@ -1458,7 +1458,7 @@
     }
     .mv-mode:hover { background: rgba(255,255,255,.20); }
     .mv-mode.oeil  { background: rgba(125,217,64,.16); border-color: rgba(125,217,64,.5); }
-    .mv-mode-ico   { font-size: 14px; line-height: 1; }
+    .mv-mode-ico   { display: flex; align-items: center; color: #fff; }
     .mv-mode-qui   { max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     @media (max-width: 899px) { .mv-mode-qui { max-width: 96px; } }
 
@@ -1509,10 +1509,16 @@
       border-radius: 16px; padding: 4px 10px; margin-bottom: 10px;
     }
     .mvt-niveau {
-      display: flex; align-items: stretch; justify-content: center; gap: 9px;
+      display: flex; align-items: stretch; gap: 9px;
       padding: 6px 2px; overflow-x: auto; overflow-y: hidden;
       -webkit-overflow-scrolling: touch; scrollbar-width: thin;
     }
+    /* Centrer SANS rendre le débordement de gauche inatteignable. Avec
+       justify-content:center, ce qui dépasse à gauche sort de la zone défilable
+       (scrollLeft ne peut pas devenir négatif) : les premiers sujets d'une
+       rangée bien remplie devenaient impossibles à atteindre. Deux marges
+       automatiques centrent tant qu'il reste de la place, et s'effacent sinon. */
+    .mvt-niveau::before, .mvt-niveau::after { content: ''; margin: auto; }
     .mvt-niveau + .mvt-niveau { border-top: 1px dashed rgba(255,255,255,.09); }
     .mvt-noeud {
       flex: 0 0 auto; min-width: 128px; max-width: 210px;
@@ -19505,6 +19511,25 @@ const MV_POSITIONS = [
 const MV_MAX = 200;            // longueur conseillée d'une position
 const MV_DEGRADE = 'linear-gradient(90deg,#7fb2ff,#a8c0e6,#cbcbcb,#eec98d,#ffb340)';
 
+// Pictos de mode, en SVG monochrome : les émojis équivalents sont rendus en
+// couleur par le système et deviennent illisibles sur fond sombre.
+const MV_PICTO = {
+  crayon: (
+    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor"
+      strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M4 20h4L18.5 9.5a2.83 2.83 0 0 0-4-4L4 16v4Z"/>
+      <path d="M13.5 6.5 17.5 10.5"/>
+    </svg>
+  ),
+  oeil: (
+    <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor"
+      strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M1.8 12S5.4 5.8 12 5.8 22.2 12 22.2 12 18.6 18.2 12 18.2 1.8 12 1.8 12Z"/>
+      <circle cx="12" cy="12" r="3.1"/>
+    </svg>
+  ),
+};
+
 // Bornes de la mise à l'échelle du texte des cases.
 // Plancher de lisibilité : on ne descend PAS en dessous pour faire entrer un
 // texte trop long. Passé ce seuil, la case la plus chargée est estompée et
@@ -19646,12 +19671,24 @@ function AdminMindVectorScreen({ user, profile, onBack }) {
   const pisteRef   = useRef(null);   // rail des boutons de niveau
   const grilleRef  = useRef(null);   // conteneur des 5 cases
   const corpsRefs  = useRef({});     // position → div du texte, pour mesurer
+  const fichesRefs = useRef({});     // idNoeud → fiche du bandeau, pour la ramener à l'écran
   const timersRef  = useRef({});     // "id:pos" → minuterie d'enregistrement différé
   const pendRef    = useRef({});     // "id:pos" → texte pas encore écrit en base
   const titresRef  = useRef({});     // miroir des titres, lisible au démontage
   const semeRef    = useRef(false);  // garde-fou : une seule création de racine auto
   const memoireRef = useRef({});     // idParent ('_' pour la racine) → dernier enfant choisi
   const appuiRef   = useRef({ timer: null, long: false });
+
+  // Reprend une personne mémorisée : sa fiche puis ses réponses. Si la fiche
+  // n'existe plus, on rouvre le choix plutôt que de saisir dans le vide.
+  const reprendrePersonne = async (id) => {
+    const { data } = await sb.from('mv_personnes').select('*').eq('id', id).maybeSingle();
+    if (!data) { setPopupQui(true); return; }
+    setPersonne(data);
+    const { data: rep } = await sb.from('mv_reponses').select('node_id,pos').eq('personne_id', id);
+    const m = {}; (rep || []).forEach(r => { m[r.node_id] = r.pos; });
+    setReponses(m);
+  };
 
   // ── Chargement ────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -19690,7 +19727,13 @@ function AdminMindVectorScreen({ user, profile, onBack }) {
         const memo = JSON.parse(localStorage.getItem(MV_CLE) || 'null');
         if (memo && memo.memoire) memoireRef.current = memo.memoire;
         if (memo && memo.sel && liste.some(x => x.id === memo.sel)) repris = memo.sel;
-        if (memo && memo.mode === 'reponse') { setMode('reponse'); setPopupQui(true); }
+        if (memo && memo.mode === 'reponse') {
+          setMode('reponse');
+          // On reprend la personne quittée plutôt que de redemander à chaque
+          // ouverture ; si sa fiche a disparu entre-temps, on repose la question.
+          if (memo.personne) reprendrePersonne(memo.personne);
+          else setPopupQui(true);
+        }
       } catch {}
       const depart = repris || (liste.find(x => !x.parent_id) || {}).id || null;
       if (depart) { setChemin(prolongerAvec(liste, mvChemin(liste, depart))); setSel(depart); }
@@ -19781,11 +19824,28 @@ function AdminMindVectorScreen({ user, profile, onBack }) {
     return () => clearTimeout(t);
   }, [niveaux.length, compact]);
 
+  // Une rangée bien remplie déborde : on ramène la fiche retenue au centre de
+  // SA rangée, sinon on la cherche à la main à chaque changement de branche.
+  useEffect(() => {
+    if (compact) return;
+    const t = setTimeout(() => {
+      chemin.forEach(id => {
+        const el = fichesRefs.current[id];
+        if (el && el.scrollIntoView) el.scrollIntoView({ block: 'nearest', inline: 'center' });
+      });
+    }, 60);
+    return () => clearTimeout(t);
+  }, [chemin, compact]);
+
   // On retient le dernier sujet visité pour la prochaine ouverture de l'écran.
   useEffect(() => {
     if (!sel) return;
-    try { localStorage.setItem(MV_CLE, JSON.stringify({ sel, mode, memoire: memoireRef.current })); } catch {}
-  }, [sel, chemin, mode]);
+    try {
+      localStorage.setItem(MV_CLE, JSON.stringify({
+        sel, mode, personne: personne?.id || null, memoire: memoireRef.current,
+      }));
+    } catch {}
+  }, [sel, chemin, mode, personne]);
 
   // ── Navigation ────────────────────────────────────────────────────────────
   // Prolonge un chemin vers le bas avec les derniers choix mémorisés : revenir
@@ -20253,7 +20313,7 @@ function AdminMindVectorScreen({ user, profile, onBack }) {
           title={mode === 'saisie'
             ? 'Rédaction des questions — cliquer le titre pour saisir des réponses'
             : 'Saisie des réponses — cliquer pour changer de personne'}>
-          <span className="mv-mode-ico">{mode === 'saisie' ? '✎' : '👁'}</span>
+          <span className="mv-mode-ico">{mode === 'saisie' ? MV_PICTO.crayon : MV_PICTO.oeil}</span>
           {mode === 'reponse' && (
             <span className="mv-mode-qui">
               {personne ? `${personne.prenom} ${personne.nom}` : 'choisir qui répond'}
@@ -20276,7 +20336,7 @@ function AdminMindVectorScreen({ user, profile, onBack }) {
           {niveaux.map(niv => (
             <div key={niv.prof} className="mvt-niveau">
               {niv.items.map(n => (
-                <div key={n.id} draggable
+                <div key={n.id} draggable ref={el => { fichesRefs.current[n.id] = el; }}
                   className={'mvt-noeud'
                     + (sel === n.id ? ' sel' : chemin.includes(n.id) ? ' chemin' : '')
                     + (glisse === n.id ? ' glisse' : '')
@@ -21036,6 +21096,7 @@ function App() {
   const pendingProfileRef            = useRef(null);
   const justSignedUpRef              = useRef(false); // empêche la nav auto pendant l'écran de succès signup
   const inRecoveryRef                = useRef(false); // empêche la nav auto pendant la réinitialisation de mot de passe
+  const connuRef                     = useRef(null);  // uid déjà connecté : distingue une vraie connexion d'une simple revalidation de session
   const updateCart = () => setCartVersion(v => v + 1);
   // Vérificateur de permission du rôle courant (bypass admin/superadmin + fail-open).
   const can = React.useMemo(() => makePermChecker(profile?.role, rolePerms), [profile?.role, rolePerms]);
@@ -21122,6 +21183,7 @@ function App() {
       if (initialHash.includes('type=recovery')) return;
       if (session?.user) {
         window.__trackUserId = session.user.id; // init tracker pour sessions persistées
+        connuRef.current = session.user.id;     // voir onAuthStateChange plus bas
         setUser(session.user);
         fetchProfile(session.user.id).then(screen => {
           setState(s => ({ ...s, screen }));
@@ -21151,6 +21213,16 @@ function App() {
         setUser(session.user);
         // Stocker l'uid pour le tracking (évite un appel réseau à chaque clic)
         window.__trackUserId = session.user.id;
+
+        // supabase-js réémet SIGNED_IN à chaque fois que la session est
+        // revalidée : retour sur l'onglet, jeton rafraîchi, réveil de la
+        // machine. Ce n'est PAS une nouvelle connexion. Naviguer dans ce cas
+        // éjectait l'utilisateur vers l'accueil au milieu de sa saisie, et
+        // enregistrait au passage une fausse « Connexion » dans user_events.
+        const dejaConnu = connuRef.current === session.user.id;
+        connuRef.current = session.user.id;
+        if (dejaConnu) return;
+
         // Logger la connexion dans user_events (sauf en mode debug admin)
         if (!window.__impersonating) {
           sb.from('user_events').insert({ user_id: session.user.id, event_type: 'login', label: 'Connexion', screen: 'AUTH_LOGIN' })
@@ -21170,6 +21242,7 @@ function App() {
       }
       if (event === 'SIGNED_OUT') {
         window.__trackUserId = null;
+        connuRef.current = null;
         setUser(null); setProfile(null);
         setHistory([]); setState(INIT);
         localStorage.removeItem('starvolt_active_site_id');
