@@ -1684,7 +1684,11 @@
 
     /* Petit écran : les 5 s'empilent, la 1 en haut et la 5 en bas. */
     .mv-plein.compact .mv-grille { flex-direction: column; gap: 7px; overflow-y: auto; -webkit-overflow-scrolling: touch; }
-    .mv-plein.compact .mv-pos { min-height: 96px; padding: 7px 10px; }
+    /* 84 px et non 96 : au-delà, les 5 cases dépassent la hauteur disponible dès
+       qu'un écran descend sous ~720 px, la grille se met à défiler en
+       permanence, et les glissés verticaux (changer d'étage) sont alors
+       neutralisés au profit du défilement. */
+    .mv-plein.compact .mv-pos { min-height: 84px; padding: 7px 10px; }
     .mv-plein.compact .mv-pos-tete { margin-bottom: 5px; padding-bottom: 4px; }
 
     /* ── Fil de navigation (petit écran) : 3 boutons de niveau, glissables ─ */
@@ -19994,16 +19998,33 @@ function AdminMindVectorScreen({ user, profile, onBack }) {
     setDialogue({ mode:'edition', id, label: n.label || '', description: n.description || '' });
   };
 
-  // ── Glissé latéral : passer d'un sujet à son voisin (petit écran) ──────────
-  // Les frères, c'est-à-dire les sujets qui partagent le même parent. Éviter
-  // d'avoir à rouvrir la liste du niveau pour avancer d'un cran.
+  // ── Parcourir l'arbre au doigt (petit écran) ──────────────────────────────
+  // Horizontalement on longe le niveau, verticalement on change d'étage : les
+  // quatre gestes suffisent à visiter tout l'arbre sans rouvrir une seule liste.
+
+  // Les frères : les sujets qui partagent le même parent. En boucle — arrivé au
+  // bout, on repart de l'autre côté plutôt que de buter dans le vide.
   const versFrere = (pas) => {
     if (!sel) return;
     const n = parId[sel]; if (!n) return;
     const freres = enfantsDe[n.parent_id || '_'] || [];
+    if (freres.length < 2) return;
     const i = freres.findIndex(f => f.id === sel);
-    const suivant = i >= 0 ? freres[i + pas] : null;
-    if (suivant) choisir(suivant.id);
+    if (i < 0) return;
+    choisir(freres[(i + pas + freres.length) % freres.length].id);
+  };
+
+  const versParent = () => {
+    const n = parId[sel];
+    if (n && n.parent_id) choisir(n.parent_id);
+  };
+
+  const versEnfant = () => {
+    const kids = enfantsDe[sel] || [];
+    if (!kids.length) return;
+    // On redescend là où on était déjà allé dans cette branche.
+    const memo = kids.find(k => k.id === memoireRef.current[sel]);
+    choisir((memo || kids[0]).id);
   };
 
   const tactRef = useRef(null);
@@ -20018,9 +20039,22 @@ function AdminMindVectorScreen({ user, profile, onBack }) {
     const t = e.changedTouches && e.changedTouches[0];
     if (!t) return;
     const dx = t.clientX - d.x, dy = t.clientY - d.y;
-    // Franchement horizontal, sinon c'est un défilement vertical.
-    if (Math.abs(dx) < 60 || Math.abs(dx) < Math.abs(dy) * 1.6) return;
-    versFrere(dx > 0 ? 1 : -1);
+    const ax = Math.abs(dx), ay = Math.abs(dy);
+
+    if (ax > ay * 1.4) {                       // franchement horizontal
+      if (ax < 60) return;
+      versFrere(dx > 0 ? -1 : 1);              // vers la droite = sujet précédent
+      return;
+    }
+    if (ay > ax * 1.4) {                       // franchement vertical
+      if (ay < 70) return;
+      // Si une case est dépliée, la colonne défile : le doigt sert à ça.
+      const g = grilleRef.current;
+      if (g && g.scrollHeight > g.clientHeight + 2) return;
+      if (dy > 0) versParent();                // vers le bas = remonter d'un niveau
+      else        versEnfant();                // vers le haut = entrer dans le niveau suivant
+    }
+    // Trop en diagonale : on ne devine pas l'intention.
   };
 
   // ── Mode « réponses » : pour qui, et quelle position ───────────────────────
