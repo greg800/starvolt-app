@@ -2651,6 +2651,160 @@ function LinkyProgress({ status, errorStep, consoSource }) {
   );
 }
 
+// ─── EnedisDemandeModal : « Où en est ma demande ? » ─────────────────────────
+// Lit la dernière demande du site DIRECTEMENT EN BASE, et non depuis localStorage.
+// C'est le point important : le suivi par étapes de la zone ENEDIS est restauré
+// depuis `starvolt_linky_<siteId>`, donc un usager qui change d'appareil, vide son
+// cache ou revient des semaines plus tard ne voit plus rien du tout et n'a aucun
+// moyen de savoir où sa collecte est coincée. Cette fenêtre répond toujours.
+const DEMANDE_SITUATIONS = {
+  pending: {
+    etape: 1, couleur: '#f7c948',
+    titre: "En attente de la signature du consentement",
+    texte: "Le compteur a été identifié chez ENEDIS. La collecte ne démarrera pas tant que le titulaire du contrat n'aura pas signé l'autorisation d'accès aux données.",
+  },
+  ordering: {
+    etape: 2, couleur: '#f7c948',
+    titre: "ENEDIS prépare vos données",
+    texte: "Le consentement est signé et la demande est partie chez ENEDIS. Les consommations journalières arrivent en quelques minutes ; la courbe de charge détaillée peut demander plusieurs heures.",
+  },
+  done: {
+    etape: 3, couleur: '#7dd940',
+    titre: "Collecte terminée",
+    texte: "Les données de consommation ont bien été récupérées pour ce compteur.",
+  },
+  error: {
+    etape: null, couleur: '#ff6b6b',
+    titre: "Demande interrompue",
+    texte: "La collecte n'a pas abouti. Le détail renvoyé par ENEDIS est indiqué ci-dessous.",
+  },
+};
+
+function EnedisDemandeModal({ site, onClose }) {
+  const [loading, setLoading] = useState(true);
+  const [demande, setDemande] = useState(null);
+
+  useEffect(() => {
+    if (!site?.id) { setLoading(false); return; }
+    let alive = true;
+    sb.from('switchgrid_requests')
+      .select('id,status,pdl,error_message,created_at,last_polled_at')
+      .eq('site_id', site.id).order('created_at', { ascending: false }).limit(1).maybeSingle()
+      .then(({ data }) => { if (alive) { setDemande(data || null); setLoading(false); } });
+    return () => { alive = false; };
+  }, [site?.id]);
+
+  const fmtDate = (s) => {
+    if (!s) return null;
+    try { return new Date(s).toLocaleString('fr-FR', { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit' }); }
+    catch (_) { return s; }
+  };
+  // Ancienneté en clair : « bloquée depuis 3 jours » se lit d'un coup d'œil,
+  // là où une date brute oblige à faire la soustraction de tête.
+  const depuis = (s) => {
+    if (!s) return null;
+    const ms = Date.now() - new Date(s).getTime();
+    if (isNaN(ms) || ms < 0) return null;
+    const min = Math.floor(ms / 60000);
+    if (min < 60) return `${min} min`;
+    const h = Math.floor(min / 60);
+    if (h < 48) return `${h} h`;
+    return `${Math.floor(h / 24)} jours`;
+  };
+
+  const isEnt = (site?.account_type || 'particulier') === 'entreprise';
+  const titulaire = isEnt
+    ? (site?.raison_sociale || '').trim()
+    : [site?.titulaire_prenom, site?.titulaire_nom].filter(Boolean).join(' ').trim();
+  const adresse = [site?.adresse_ligne1, [site?.code_postal, site?.ville].filter(Boolean).join(' ').trim()]
+    .filter(Boolean).join(', ');
+  const situ = demande ? (DEMANDE_SITUATIONS[demande.status] || null) : null;
+  const age = demande ? depuis(demande.created_at) : null;
+  // Le PDL de la demande peut différer de celui saisi depuis : la conso affichée
+  // ne vient alors pas du compteur actuellement déclaré. Cas vu en production.
+  const pdlDiverge = demande?.pdl && site?.pdl && demande.pdl !== site.pdl;
+
+  const ligne = (label, valeur) => valeur ? (
+    <div style={{ display:'flex', gap:10, padding:'6px 0', borderBottom:'1px solid rgba(255,255,255,.06)' }}>
+      <div style={{ flex:'0 0 96px', fontSize:11, color:'rgba(255,255,255,.45)', fontWeight:700 }}>{label}</div>
+      <div style={{ flex:1, fontSize:12, color:'rgba(255,255,255,.9)', lineHeight:1.4, wordBreak:'break-word' }}>{valeur}</div>
+    </div>
+  ) : null;
+
+  return (
+    <div onClick={onClose} style={{ position:'fixed', inset:0, background:'rgba(0,0,0,.72)', backdropFilter:'blur(4px)', WebkitBackdropFilter:'blur(4px)', zIndex:10001, display:'flex', alignItems:'center', justifyContent:'center', padding:16 }}>
+      <div onClick={e=>e.stopPropagation()} className="fade-in" style={{ background:'#13212e', border:'1px solid rgba(247,201,72,.35)', borderRadius:16, padding:'18px 16px', maxWidth:440, width:'100%', maxHeight:'88vh', overflowY:'auto', boxShadow:'0 18px 50px rgba(0,0,0,.5)' }}>
+
+        <div style={{ fontWeight:900, fontSize:16, color:'white', marginBottom:12 }}>
+          🔎 Où en est ma demande ENEDIS ?
+        </div>
+
+        {loading && <div style={{ fontSize:12, color:'rgba(255,255,255,.5)' }}>Lecture de la demande…</div>}
+
+        {!loading && !demande && (
+          <div style={{ fontSize:12.5, lineHeight:1.55, color:'rgba(255,255,255,.8)' }}>
+            Aucune demande ENEDIS n'a encore été lancée pour ce site.
+          </div>
+        )}
+
+        {!loading && demande && situ && (
+          <>
+            <div style={{ background:`${situ.couleur}1a`, border:`1px solid ${situ.couleur}66`, borderRadius:10, padding:'10px 12px', marginBottom:12 }}>
+              <div style={{ color:situ.couleur, fontWeight:800, fontSize:12.5, marginBottom:4 }}>
+                {demande.status === 'done' ? '✅' : demande.status === 'error' ? '⚠️' : '⏳'} {situ.titre}
+                {situ.etape != null && demande.status !== 'done' && (
+                  <span style={{ fontWeight:600, opacity:.8 }}> — étape {situ.etape + 1} sur 4</span>
+                )}
+              </div>
+              {situ.etape != null && demande.status !== 'done' && (
+                <div style={{ color:'rgba(255,255,255,.75)', fontSize:11.5, fontWeight:700, marginBottom:5 }}>
+                  « {LINKY_STEP_LABELS[situ.etape]} »
+                </div>
+              )}
+              <div style={{ color:'rgba(255,255,255,.72)', fontSize:11.5, lineHeight:1.5 }}>{situ.texte}</div>
+              {demande.error_message && (
+                <div style={{ marginTop:8, padding:'7px 9px', background:'rgba(0,0,0,.25)', borderRadius:7, fontSize:11, color:'rgba(255,210,190,.95)', whiteSpace:'pre-wrap' }}>
+                  {demande.error_message}
+                </div>
+              )}
+            </div>
+
+            <div style={{ marginBottom:12 }}>
+              {ligne('Demande du', <>{fmtDate(demande.created_at)}{age && demande.status !== 'done' ? <span style={{ color:'rgba(255,255,255,.5)' }}> — il y a {age}</span> : null}</>)}
+              {ligne('Dernier point', fmtDate(demande.last_polled_at) || 'jamais vérifiée depuis')}
+              {ligne('Compteur', demande.pdl || site?.pdl || '—')}
+              {ligne(isEnt ? 'Raison sociale' : 'Titulaire', titulaire || <span style={{ color:'#ff9090' }}>non renseigné</span>)}
+              {ligne('Adresse', adresse || <span style={{ color:'#ff9090' }}>non renseignée</span>)}
+            </div>
+
+            {pdlDiverge && (
+              <div style={{ marginBottom:12, padding:'9px 11px', background:'rgba(247,201,72,.1)', border:'1px solid rgba(247,201,72,.35)', borderRadius:9, fontSize:11.5, lineHeight:1.5, color:'rgba(255,255,255,.8)' }}>
+                ⚠️ Cette demande porte sur le compteur <strong style={{ color:'#fff' }}>{demande.pdl}</strong>, alors que le PDL enregistré pour ce site est <strong style={{ color:'#fff' }}>{site.pdl}</strong>. Vérifiez lequel correspond vraiment à votre contrat.
+              </div>
+            )}
+          </>
+        )}
+
+        {!loading && (
+          <>
+            <div style={{ padding:'10px 12px', background:'rgba(125,217,64,.08)', border:'1px solid rgba(125,217,64,.3)', borderRadius:10, fontSize:11.5, lineHeight:1.55, color:'rgba(255,255,255,.82)', marginBottom:10 }}>
+              📄 <strong style={{ color:'#fff' }}>Le nom et l'adresse doivent correspondre exactement à votre contrat d'électricité en cours.</strong> ENEDIS refuse la demande si le titulaire déclaré n'est pas celui du contrat, ou si l'adresse du compteur diffère de celle enregistrée chez eux.
+            </div>
+
+            <div style={{ padding:'10px 12px', background:'rgba(255,255,255,.04)', border:'1px solid rgba(255,255,255,.12)', borderRadius:10, fontSize:11.5, lineHeight:1.55, color:'rgba(255,255,255,.75)', marginBottom:14 }}>
+              Pour refaire une demande avec un autre nom, une autre adresse ou un autre numéro de PDL : fermez cette fenêtre, <strong style={{ color:'#fff' }}>modifiez les informations</strong> juste au-dessus, puis cliquez sur <strong style={{ color:'#f7c948' }}>« 🔁 Refaire une demande ENEDIS avec ces données »</strong>.
+            </div>
+          </>
+        )}
+
+        <button className="btn" onClick={onClose} style={{ width:'100%', background:'rgba(255,255,255,.08)', border:'1px solid rgba(255,255,255,.2)', borderRadius:9, color:'#fff', fontSize:13, fontWeight:700, padding:'10px', cursor:'pointer' }}>
+          Fermer
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function InstallBanner() {
   const [show,    setShow]    = useState(false);
   const [isIOS,   setIsIOS]   = useState(false);
@@ -6327,6 +6481,7 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onOnboardingQ
   const[showFlexForm,setShowFlexForm]=useState(false);
   const[showBilanResult,setShowBilanResult]=useState(false); // boîte pleine page du bilan après « Mettre à jour les conseils »
   const[showEnedis,setShowEnedis]=useState(false); // fiche « infos compteur ENEDIS »
+  const[showDemande,setShowDemande]=useState(false); // fenêtre « Où en est ma demande ? »
   const[linkyStatus,setLinkyStatus]=useState(null); // null | 'loading' | 'pending' | 'ordering' | 'done' | 'error'
   const[linkyUserUrl,setLinkyUserUrl]=useState(null);
   const[linkyRequestId,setLinkyRequestId]=useState(null);
@@ -7419,10 +7574,12 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onOnboardingQ
                         <TxtInput value={site.signer_email||''} placeholder="email@entreprise.fr" onSave={v=>updateSite({signer_email:v.trim()||null})}/>
                       </div>
                     )}
-                    {/* Bouton : visible seulement au départ et sur erreur (pour réessayer).
-                        Masqué dès que le processus est lancé, le consentement signé,
-                        OU que le site dispose déjà de la totalité des données heure par heure. */}
-                    {((!linkyStatus&&!siteHasFullHourly)||linkyStatus==='error')&&(
+                    {/* Bouton de PREMIÈRE collecte : uniquement tant qu'aucune demande n'a
+                        jamais été lancée. Le cas « erreur » ne passe plus par ici : il est
+                        couvert par « 🔁 Refaire une demande ENEDIS avec ces données » plus bas,
+                        qui fait exactement la même chose sous un libellé qui dit à l'usager
+                        ce qu'il doit corriger avant de cliquer. */}
+                    {(!linkyStatus&&!siteHasFullHourly)&&(
                       <div style={{display:'flex',gap:8,alignItems:'center',flexWrap:'wrap',marginTop:8}}>
                         <button
                           onClick={()=>handleLinkyImport(site)}
@@ -7438,27 +7595,32 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onOnboardingQ
                       </div>
                     )}
 
-                    {/* Bouton de mise à jour : visible quand le site possède déjà des données ENEDIS
-                        et qu'aucune demande n'est en cours. Permet de relancer une collecte
-                        (nouvelle version d'API) ; les nouvelles données n'écrasent les anciennes
-                        que si elles sont de meilleure qualité (côté Edge Function). */}
-                    {(siteHasFullHourly||site.conso_source)&&(!linkyStatus||linkyStatus==='done')&&(
-                      <div style={{display:'flex',gap:8,alignItems:'center',flexWrap:'wrap',marginTop:8}}>
-                        <button
-                          onClick={()=>handleLinkyImport(site)}
-                          style={{
-                            background:'rgba(125,217,64,.12)',
-                            border:'1px solid rgba(125,217,64,.4)',
-                            borderRadius:8, color:'#7dd940',
-                            fontSize:12, fontWeight:700, padding:'8px 12px', cursor:'pointer', whiteSpace:'nowrap',
-                          }}
-                        >
-                          🔄 Mettre à jour les données ENEDIS
-                        </button>
-                        <span style={{fontSize:10,color:'rgba(255,255,255,.4)',lineHeight:1.4}}>
-                          Relance une collecte ENEDIS. Les nouvelles données ne remplacent les actuelles que si elles sont plus complètes.
-                        </span>
-                      </div>
+                    {/* Suivi et relance : TOUJOURS accessibles dès qu'une collecte a été lancée
+                        une fois, y compris pendant qu'une demande est en cours. Le bouton de
+                        première collecte ci-dessus se masque dès que le processus démarre — un
+                        usager dont la collecte traîne (mauvais titulaire, mauvaise adresse,
+                        mauvais PDL) n'avait alors plus aucune prise : ni pour savoir où ça
+                        coince, ni pour repartir sur d'autres informations.
+                        Ce bloc remplace l'ancien « 🔄 Mettre à jour les données ENEDIS » :
+                        même appel, mais un seul bouton de relance au lieu de deux. */}
+                    {!(!linkyStatus&&!siteHasFullHourly)&&(
+                      <>
+                        <div style={{display:'flex',gap:8,alignItems:'center',flexWrap:'wrap',marginTop:8}}>
+                          <button type="button" onClick={()=>setShowDemande(true)}
+                            style={{background:'rgba(255,255,255,.06)',border:'1px solid rgba(255,255,255,.22)',borderRadius:8,
+                              color:'rgba(255,255,255,.85)',fontSize:12,fontWeight:700,padding:'8px 12px',cursor:'pointer',whiteSpace:'nowrap'}}>
+                            🔎 Où en est ma demande ?
+                          </button>
+                          <button type="button" onClick={()=>handleLinkyImport(site)}
+                            style={{background:'rgba(247,201,72,.15)',border:'1px solid rgba(247,201,72,.5)',borderRadius:8,
+                              color:'#f7c948',fontSize:12,fontWeight:700,padding:'8px 12px',cursor:'pointer'}}>
+                            🔁 Refaire une demande ENEDIS avec ces données
+                          </button>
+                        </div>
+                        <div style={{fontSize:10,color:'rgba(255,255,255,.4)',lineHeight:1.45,marginTop:5}}>
+                          Avant de relancer, vérifiez que le titulaire et l'adresse ci-dessus correspondent à votre contrat d'électricité en cours. Les nouvelles données ne remplacent les actuelles que si elles sont plus complètes.
+                        </div>
+                      </>
                     )}
 
                     {/* Suivi par étapes du processus ENEDIS */}
@@ -7937,6 +8099,9 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onOnboardingQ
             </div>
           )}
         </div>
+      )}
+      {showDemande&&site&&(
+        <EnedisDemandeModal site={site} onClose={()=>setShowDemande(false)}/>
       )}
       {powerModal&&(
         <div onClick={()=>setPowerModal(null)} style={{position:'fixed',inset:0,zIndex:9000,background:'rgba(3,12,18,.82)',backdropFilter:'blur(4px)',WebkitBackdropFilter:'blur(4px)',display:'flex',alignItems:'center',justifyContent:'center',padding:16}}>
