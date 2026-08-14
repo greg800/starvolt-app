@@ -1416,6 +1416,11 @@ Deno.serve(async (req)=>{
       }
     }
     const inputPdl = (pdl ?? "").trim();
+    // L'usager a explicitement choisi de garder SON numéro plutôt que celui
+    // proposé par ENEDIS (réponse à CONFIRM_PDL côté client). On ne retombe
+    // alors jamais sur la recherche par adresse, qui est précisément ce qui
+    // écrasait sa saisie.
+    const forcePdl = body.force_pdl === true;
     const isEntreprise = account_type === "entreprise";
     const testEnv = isTestPdl(inputPdl);
     // Nom utilisé pour la recherche ENEDIS (titulaire du contrat).
@@ -1532,7 +1537,7 @@ Deno.serve(async (req)=>{
       prm: inputPdl,
       testEnv
     });
-    if (results.length === 0 && fullAddress) {
+    if (results.length === 0 && fullAddress && !forcePdl) {
       // Recherche par adresse. ENEDIS/Switchgrid fait un match FLOU sur le nom
       // de famille et peut renvoyer le compteur d'un homonyme à une AUTRE adresse.
       // 1er essai : nom tel que saisi (prénom nom).
@@ -1568,6 +1573,17 @@ Deno.serve(async (req)=>{
       results = kept;
     }
     if (results.length === 0) {
+      // Cas « je force mon numéro » : on ne peut pas aller plus loin. Créer un
+      // consentement exige `contracts:[uuid]`, un identifiant que SEULE la
+      // recherche renvoie — il n'existe aucun moyen de demander un consentement
+      // sur un PRM qu'ENEDIS ne rattache pas à ce nom. On le dit franchement au
+      // lieu de laisser croire que le forçage a marché.
+      if (forcePdl) {
+        return jsonResp({
+          error: "PDL_UNKNOWN",
+          message: `ENEDIS ne reconnaît pas le compteur ${inputPdl} au nom de « ${searchName} ». Un consentement ne peut pas être demandé sur ce numéro. Vérifiez le nom exact du titulaire tel qu'il figure sur la facture d'électricité, puis relancez.`
+        }, 400);
+      }
       return jsonResp({
         error: "Aucun contrat ENEDIS trouvé pour ce nom et cette adresse. Vérifiez l'orthographe du nom et l'adresse."
       }, 400);
@@ -1589,7 +1605,29 @@ Deno.serve(async (req)=>{
     const contractUuid = results[0].id;
     const foundPdl = results[0].prm;
     const nomContrat = results[0].nomClientFinalOuDenominationSociale;
+    const adresseContrat = [
+      results[0].adresseInstallationNormalisee?.ligne4,
+      results[0].adresseInstallationNormalisee?.ligne6
+    ].filter(Boolean).join(", ");
     const pdlChanged = foundPdl !== inputPdl;
+    // Le PDL saisi à la main ne doit JAMAIS être remplacé en silence. Avant, un
+    // écart entre la saisie et la réponse d'ENEDIS déclenchait un `update sites`
+    // immédiat : l'usager corrigeait son numéro, cliquait, et le voyait revenir
+    // à l'ancienne valeur sans un mot d'explication (constaté en production le
+    // 2026-08-14, trois fois de suite sur le même compte). On rend la main à
+    // l'usager avec de quoi trancher : le titulaire et l'adresse du contrat
+    // qu'ENEDIS a trouvé. Il répond en relançant, soit avec `pdl = found_pdl`
+    // (il suit ENEDIS), soit avec `force_pdl: true` (il garde son numéro).
+    // Une saisie vide n'entre pas dans ce cas : il n'y a rien à écraser.
+    if (pdlChanged && inputPdl && !forcePdl) {
+      return jsonResp({
+        error: "CONFIRM_PDL",
+        input_pdl: inputPdl,
+        found_pdl: foundPdl,
+        nom_contrat: nomContrat,
+        adresse_contrat: adresseContrat
+      }, 400);
+    }
     if (pdlChanged && site_id) {
       await sbUpdate("sites", `id=eq.${site_id}`, {
         pdl: foundPdl

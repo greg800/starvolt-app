@@ -2805,6 +2805,66 @@ function EnedisDemandeModal({ site, onClose }) {
   );
 }
 
+// ─── PdlConflictModal : ENEDIS propose un compteur différent de la saisie ────
+// Avant, l'écart déclenchait un `update sites` immédiat et muet : l'usager
+// corrigeait son PDL, cliquait, et le voyait revenir à l'ancienne valeur sans
+// explication. On lui rend la décision, avec de quoi trancher — le titulaire et
+// l'adresse du contrat trouvé. Si le titulaire affiché n'est pas lui, ce n'est
+// pas son PDL qui est faux mais l'adresse du site.
+function PdlConflictModal({ conflict, onAccept, onForce, onCancel }) {
+  if (!conflict) return null;
+  const { inputPdl, foundPdl, nomContrat, adresseContrat } = conflict;
+  return (
+    <div style={{position:'fixed',inset:0,zIndex:10002,background:'rgba(3,12,18,.84)',backdropFilter:'blur(4px)',WebkitBackdropFilter:'blur(4px)',display:'flex',alignItems:'center',justifyContent:'center',padding:16}}>
+      <div className="fade-in" style={{background:'#13212e',border:'1px solid rgba(247,201,72,.4)',borderRadius:16,padding:'18px 16px',maxWidth:440,width:'100%',maxHeight:'88vh',overflowY:'auto',boxShadow:'0 18px 50px rgba(0,0,0,.5)'}}>
+        <div style={{fontWeight:900,fontSize:16,color:'white',marginBottom:6}}>
+          ⚠️ ENEDIS propose un autre compteur
+        </div>
+        <div style={{fontSize:12.5,lineHeight:1.55,color:'rgba(255,255,255,.78)',marginBottom:12}}>
+          Le numéro que vous avez saisi ne correspond pas à celui qu'ENEDIS rattache à ce titulaire et à cette adresse. <strong style={{color:'#fff'}}>Rien n'a été modifié</strong> : c'est vous qui choisissez.
+        </div>
+
+        <div style={{background:'rgba(125,217,64,.08)',border:'1px solid rgba(125,217,64,.35)',borderRadius:10,padding:'10px 12px',marginBottom:8}}>
+          <div style={{fontSize:10,color:'rgba(125,217,64,.9)',fontWeight:800,letterSpacing:'.5px',marginBottom:5}}>CE QU'ENEDIS A TROUVÉ</div>
+          <div style={{fontSize:13,color:'#fff',fontWeight:800,letterSpacing:'.3px'}}>{foundPdl}</div>
+          {nomContrat&&(
+            <div style={{fontSize:12,color:'rgba(255,255,255,.85)',marginTop:4}}>
+              <span style={{color:'rgba(255,255,255,.45)'}}>Titulaire du contrat : </span>{nomContrat}
+            </div>
+          )}
+          {adresseContrat&&(
+            <div style={{fontSize:12,color:'rgba(255,255,255,.85)',marginTop:2}}>
+              <span style={{color:'rgba(255,255,255,.45)'}}>Adresse du compteur : </span>{adresseContrat}
+            </div>
+          )}
+        </div>
+
+        <div style={{background:'rgba(255,255,255,.04)',border:'1px solid rgba(255,255,255,.14)',borderRadius:10,padding:'10px 12px',marginBottom:12}}>
+          <div style={{fontSize:10,color:'rgba(255,255,255,.4)',fontWeight:800,letterSpacing:'.5px',marginBottom:5}}>VOTRE SAISIE</div>
+          <div style={{fontSize:13,color:'rgba(255,255,255,.9)',fontWeight:800,letterSpacing:'.3px'}}>{inputPdl}</div>
+        </div>
+
+        <div style={{fontSize:11,lineHeight:1.5,color:'rgba(255,255,255,.55)',marginBottom:14}}>
+          Si le titulaire affiché ci-dessus n'est pas vous, c'est l'adresse du site qui est probablement erronée — corrigez-la plutôt que de forcer.
+        </div>
+
+        <button type="button" onClick={onAccept}
+          style={{width:'100%',background:'#7dd940',border:'none',borderRadius:9,color:'#061e2a',fontSize:13,fontWeight:800,padding:'11px',cursor:'pointer',marginBottom:8}}>
+          ✓ Utiliser le compteur d'ENEDIS
+        </button>
+        <button type="button" onClick={onForce}
+          style={{width:'100%',background:'transparent',border:'1px solid rgba(247,201,72,.5)',borderRadius:9,color:'#f7c948',fontSize:13,fontWeight:700,padding:'11px',cursor:'pointer',marginBottom:8}}>
+          Garder mon numéro ({inputPdl})
+        </button>
+        <button type="button" onClick={onCancel}
+          style={{width:'100%',background:'transparent',border:'1px solid rgba(255,255,255,.18)',borderRadius:9,color:'rgba(255,255,255,.7)',fontSize:12.5,fontWeight:700,padding:'10px',cursor:'pointer'}}>
+          Annuler
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function InstallBanner() {
   const [show,    setShow]    = useState(false);
   const [isIOS,   setIsIOS]   = useState(false);
@@ -6482,6 +6542,7 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onOnboardingQ
   const[showBilanResult,setShowBilanResult]=useState(false); // boîte pleine page du bilan après « Mettre à jour les conseils »
   const[showEnedis,setShowEnedis]=useState(false); // fiche « infos compteur ENEDIS »
   const[showDemande,setShowDemande]=useState(false); // fenêtre « Où en est ma demande ? »
+  const[pdlConflict,setPdlConflict]=useState(null); // {inputPdl,foundPdl,nomContrat,adresseContrat} — ENEDIS propose un autre compteur
   const[linkyStatus,setLinkyStatus]=useState(null); // null | 'loading' | 'pending' | 'ordering' | 'done' | 'error'
   const[linkyUserUrl,setLinkyUserUrl]=useState(null);
   const[linkyRequestId,setLinkyRequestId]=useState(null);
@@ -6618,7 +6679,8 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onOnboardingQ
     return ()=>clearInterval(linkyPollRef.current);
   },[linkyRequestId,linkyStatus]);
 
-  const handleLinkyImport=async(site,pdlOverride)=>{
+  const handleLinkyImport=async(site,pdlOverride,opts)=>{
+    const forcePdl = opts?.force === true;
     if(!site) return;
 
     const pdl         = (pdlOverride ?? site.pdl ?? '').trim();
@@ -6655,7 +6717,7 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onOnboardingQ
     }
 
     // ── Appel Switchgrid ─────────────────────────────────────────────────────
-    setLinkyStatus('loading'); setLinkyError(null); setLinkyErrorStep(null); setLinkyUserUrl(null); setLinkyRequestId(null); setMeterCandidates(null);
+    setLinkyStatus('loading'); setLinkyError(null); setLinkyErrorStep(null); setLinkyUserUrl(null); setLinkyRequestId(null); setMeterCandidates(null); setPdlConflict(null);
     try{
       const { data:{session} } = await sb.auth.getSession();
       if(!session) throw new Error('Non connecté');
@@ -6674,9 +6736,30 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onOnboardingQ
           signer_prenom:  site.signer_prenom || null,
           signer_nom:     site.signer_nom || null,
           signer_email:   site.signer_email || null,
+          force_pdl:      forcePdl || undefined,
         }),
       });
       const d=await res.json();
+
+      // ENEDIS propose un compteur différent de celui saisi à la main → on NE
+      // remplace RIEN sans l'accord de l'usager. On lui montre le titulaire et
+      // l'adresse du contrat trouvé, et c'est lui qui tranche.
+      if(d.error==='CONFIRM_PDL'){
+        setLinkyStatus(null); setLinkyError(null); setLinkyErrorStep(null);
+        setPdlConflict({
+          inputPdl: d.input_pdl, foundPdl: d.found_pdl,
+          nomContrat: d.nom_contrat || null, adresseContrat: d.adresse_contrat || null,
+        });
+        return;
+      }
+
+      // PDL forcé qu'ENEDIS ne rattache pas à ce nom : aucun consentement n'est
+      // possible dessus (l'ask exige l'UUID de contrat renvoyé par la recherche).
+      if(d.error==='PDL_UNKNOWN'){
+        setLinkyStatus('error'); setLinkyErrorStep(0);
+        setLinkyError(d.message||"ENEDIS ne reconnaît pas ce numéro de PDL sous ce nom.");
+        return;
+      }
 
       // Compteur(s) à confirmer → l'utilisateur doit valider avant toute extraction.
       // Aucune collecte n'est lancée côté serveur tant qu'un PDL exact n'est pas confirmé.
@@ -8102,6 +8185,14 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onOnboardingQ
       )}
       {showDemande&&site&&(
         <EnedisDemandeModal site={site} onClose={()=>setShowDemande(false)}/>
+      )}
+      {pdlConflict&&site&&(
+        <PdlConflictModal
+          conflict={pdlConflict}
+          onAccept={()=>{ const f=pdlConflict.foundPdl; setPdlConflict(null); updateSite({pdl:f}); handleLinkyImport(site,f); }}
+          onForce={()=>{ const f=pdlConflict.inputPdl; setPdlConflict(null); handleLinkyImport(site,f,{force:true}); }}
+          onCancel={()=>setPdlConflict(null)}
+        />
       )}
       {powerModal&&(
         <div onClick={()=>setPowerModal(null)} style={{position:'fixed',inset:0,zIndex:9000,background:'rgba(3,12,18,.82)',backdropFilter:'blur(4px)',WebkitBackdropFilter:'blur(4px)',display:'flex',alignItems:'center',justifyContent:'center',padding:16}}>
