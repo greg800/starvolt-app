@@ -1444,8 +1444,39 @@
       flex: 0 0 auto; text-align: right;
       font-size: 17px; font-weight: 900; line-height: 1.02;
       color: #fff; margin: 0;
+      background: none; border: none; padding: 0;
+      font-family: inherit; cursor: pointer;
     }
     .mv-titre-court .accent { color: var(--green); }
+    /* Picto de mode : ✎ rédaction, 👁 saisie des réponses (avec le nom de qui). */
+    .mv-mode {
+      flex: 0 0 auto; display: flex; align-items: center; gap: 6px;
+      background: rgba(255,255,255,.10); border: 1px solid rgba(255,255,255,.28);
+      border-radius: 20px; padding: 4px 10px;
+      color: #fff; font-family: inherit; font-size: 11.5px; font-weight: 800;
+      cursor: pointer; transition: background .15s, border-color .15s;
+    }
+    .mv-mode:hover { background: rgba(255,255,255,.20); }
+    .mv-mode.oeil  { background: rgba(125,217,64,.16); border-color: rgba(125,217,64,.5); }
+    .mv-mode-ico   { font-size: 14px; line-height: 1; }
+    .mv-mode-qui   { max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    @media (max-width: 899px) { .mv-mode-qui { max-width: 96px; } }
+
+    /* La position retenue par la personne : carte blanche, texte vert. */
+    .mv-pos.repondu {
+      background: #fff !important; border-color: #fff;
+      box-shadow: 0 6px 22px rgba(0,0,0,.28);
+    }
+    /* BilanMarkdown pose ses couleurs en style inline (titres, gras, puces) :
+       sur fond blanc il faut les reprendre, d'où le !important — borné à cette
+       seule case, il ne déborde sur rien d'autre. */
+    .mv-pos.repondu .mv-pos-corps,
+    .mv-pos.repondu .mv-pos-corps * { color: #1f7a1f !important; }
+    .mv-pos.repondu .mv-empty      { color: rgba(31,122,31,.5) !important; }
+    .mv-pos.repondu .mv-pos-tete   { border-bottom-color: rgba(31,122,31,.22); }
+    .mv-pos.repondu .mv-plus {
+      background: rgba(31,122,31,.10); border-color: rgba(31,122,31,.3); color: #1f7a1f;
+    }
     .mv-sujet {
       min-width: 0; text-align: left;
       padding-left: 13px; border-left: 1px solid rgba(255,255,255,.18);
@@ -19510,13 +19541,14 @@ function mvChemin(liste, id) {
 // la fois (c'est la case la plus chargée qui la fixe), et transmise ici.
 function MvPosition({
   p, texte, titre, renomme, brouillonTitre, actif, ouvert, taille, deborde, longueurMax,
+  repondu, lecture,
   zoneRef, refCorps, onOuvrir, onBasculer, onEcrire, onSauver, onFermer,
   onRenommer, onTitre, onValiderTitre, onAnnulerTitre,
 }) {
   const libre = ouvert || actif;
   return (
-    <div className={'mv-pos' + (actif ? ' edit' : '') + (libre ? ' libre' : '')}
-      style={actif ? undefined : { background: p.tint }}
+    <div className={'mv-pos' + (actif ? ' edit' : '') + (libre ? ' libre' : '') + (repondu ? ' repondu' : '')}
+      style={actif || repondu ? undefined : { background: p.tint }}
       onClick={() => { if (!actif) onOuvrir(); }}>
       {/* Le titre de la position se nomme sur place, les cinq de la même façon :
           « nuancé » ou « équilibre » ne disent rien du sujet, alors qu'un mot
@@ -19533,6 +19565,11 @@ function MvPosition({
               if (e.key === 'Enter')  { e.preventDefault(); onValiderTitre(); }
               if (e.key === 'Escape') onAnnulerTitre();
             }}/>
+        ) : lecture ? (
+          <span className={'mv-pos-leg' + (titre ? '' : ' defaut')}
+            style={{ color: repondu ? '#1f7a1f' : p.col, cursor:'default' }}>
+            {titre || p.legende}
+          </span>
         ) : (
           <button className={'mv-pos-leg' + (titre ? '' : ' defaut')} style={{ color: p.col }}
             title="Renommer cette position" onClick={onRenommer}>
@@ -19559,7 +19596,7 @@ function MvPosition({
           </div>
         ) : texte.trim()
           ? <BilanMarkdown text={texte} fontSize={libre ? MV_TXT_LIBRE : taille}/>
-          : <span className="mv-empty">＋ écrire la position {p.n}…</span>}
+          : <span className="mv-empty">{lecture ? '(position non rédigée)' : `＋ écrire la position ${p.n}…`}</span>}
       </div>
       {!actif && (deborde || ouvert) && (
         <button className="mv-plus" onClick={e => { e.stopPropagation(); onBasculer(); }}>
@@ -19570,7 +19607,7 @@ function MvPosition({
   );
 }
 
-function AdminMindVectorScreen({ onBack }) {
+function AdminMindVectorScreen({ user, profile, onBack }) {
   const [noeuds,   setNoeuds]   = useState(null);  // liste plate des nœuds
   const [cases,    setCases]    = useState({});    // "idNoeud:position" → texte
   const [titres,   setTitres]   = useState({});    // "idNoeud:position" → nom de la position
@@ -19585,6 +19622,18 @@ function AdminMindVectorScreen({ onBack }) {
   const [feuille,  setFeuille]  = useState(null);  // petit écran : { type:'menu'|'actions', prof }
   const [dialogue, setDialogue] = useState(null);  // { mode:'ajout'|'edition', parentId, id, label, description }
   const [remplissage, setRemplissage] = useState(false);  // rédaction IA des 5 positions en cours
+  // ── Deux façons d'utiliser l'écran : on rédige les questions (✎) ou on saisit
+  //    les réponses de quelqu'un (👁). Le mode est retenu d'une visite à l'autre.
+  const [mode,     setMode]     = useState('saisie');   // 'saisie' | 'reponse'
+  const [personne, setPersonne] = useState(null);       // fiche mv_personnes en cours de saisie
+  const [reponses, setReponses] = useState({});         // idNoeud → position retenue (1..5)
+  const [popupQui, setPopupQui] = useState(false);
+  const [usagers,  setUsagers]  = useState(null);       // comptes Starvolt (get_all_users)
+  const [fiches,   setFiches]   = useState([]);         // fiches mv_personnes déjà créées
+  const [selQui,   setSelQui]   = useState('');         // valeur du menu déroulant
+  const [formQui,  setFormQui]  = useState(null);       // { prenom, nom, email, commentaire }
+  const [busyQui,  setBusyQui]  = useState(false);
+  const [errQui,   setErrQui]   = useState(null);
   const [msgAuto,  setMsgAuto]  = useState(null);  // { type:'ok'|'err', texte } affiché dans le dialogue
   const [glisse,   setGlisse]   = useState(null);  // id de la branche en cours de déplacement
   const [cible,    setCible]    = useState(null);  // id survolé comme destination ('_' = racine)
@@ -19641,6 +19690,7 @@ function AdminMindVectorScreen({ onBack }) {
         const memo = JSON.parse(localStorage.getItem(MV_CLE) || 'null');
         if (memo && memo.memoire) memoireRef.current = memo.memoire;
         if (memo && memo.sel && liste.some(x => x.id === memo.sel)) repris = memo.sel;
+        if (memo && memo.mode === 'reponse') { setMode('reponse'); setPopupQui(true); }
       } catch {}
       const depart = repris || (liste.find(x => !x.parent_id) || {}).id || null;
       if (depart) { setChemin(prolongerAvec(liste, mvChemin(liste, depart))); setSel(depart); }
@@ -19734,8 +19784,8 @@ function AdminMindVectorScreen({ onBack }) {
   // On retient le dernier sujet visité pour la prochaine ouverture de l'écran.
   useEffect(() => {
     if (!sel) return;
-    try { localStorage.setItem(MV_CLE, JSON.stringify({ sel, memoire: memoireRef.current })); } catch {}
-  }, [sel, chemin]);
+    try { localStorage.setItem(MV_CLE, JSON.stringify({ sel, mode, memoire: memoireRef.current })); } catch {}
+  }, [sel, chemin, mode]);
 
   // ── Navigation ────────────────────────────────────────────────────────────
   // Prolonge un chemin vers le bas avec les derniers choix mémorisés : revenir
@@ -19879,6 +19929,113 @@ function AdminMindVectorScreen({ onBack }) {
     setDialogue({ mode:'edition', id, label: n.label || '', description: n.description || '' });
   };
 
+  // ── Mode « réponses » : pour qui, et quelle position ───────────────────────
+  const basculerMode = () => {
+    fermerPos();
+    if (mode === 'saisie') { setMode('reponse'); setPopupQui(true); }
+    else { setMode('saisie'); setPersonne(null); setReponses({}); setPopupQui(false); }
+  };
+
+  // La liste ne se charge qu'à l'ouverture du popup : inutile de tirer tous les
+  // comptes tant qu'on rédige des questions.
+  useEffect(() => {
+    if (!popupQui) return;
+    setErrQui(null);
+    sb.rpc('get_all_users').then(({ data }) => setUsagers(data || []));
+    sb.from('mv_personnes').select('*').order('nom').then(({ data }) => setFiches(data || []));
+  }, [popupQui]);
+
+  const activer = async (fiche) => {
+    setPersonne(fiche);
+    setPopupQui(false); setFormQui(null); setSelQui('');
+    const { data } = await sb.from('mv_reponses').select('node_id,pos').eq('personne_id', fiche.id);
+    const m = {}; (data || []).forEach(r => { m[r.node_id] = r.pos; });
+    setReponses(m);
+  };
+
+  // Un compte Starvolt n'a qu'une fiche : on la retrouve, sinon on la crée.
+  const ficheDuCompte = async (u) => {
+    const dejala = fiches.find(f => f.user_id === u.id);
+    if (dejala) return dejala;
+    const { data, error } = await sb.from('mv_personnes').insert({
+      user_id: u.id,
+      prenom: (u.prenom || u.pseudo || '').trim() || '—',
+      nom:    (u.nom || '').trim() || '—',
+      email:  u.email || '',
+      created_by: user?.email || null,
+    }).select().single();
+    if (error) throw error;
+    setFiches(l => [...l, data]);
+    return data;
+  };
+
+  const choisirDansListe = async () => {
+    if (!selQui) return;
+    setBusyQui(true); setErrQui(null);
+    try {
+      if (selQui.startsWith('f:')) {
+        const f = fiches.find(x => x.id === selQui.slice(2));
+        if (f) await activer(f);
+      } else {
+        const u = (usagers || []).find(x => x.id === selQui.slice(2));
+        if (u) await activer(await ficheDuCompte(u));
+      }
+    } catch (e) { setErrQui(e?.message || String(e)); }
+    finally { setBusyQui(false); }
+  };
+
+  const choisirMoi = async () => {
+    if (!user?.id) { setErrQui('Aucun compte connecté.'); return; }
+    setBusyQui(true); setErrQui(null);
+    try {
+      await activer(await ficheDuCompte({
+        id: user.id, prenom: profile?.prenom, nom: profile?.nom,
+        pseudo: profile?.pseudo, email: user.email,
+      }));
+    } catch (e) { setErrQui(e?.message || String(e)); }
+    finally { setBusyQui(false); }
+  };
+
+  const creerPersonne = async () => {
+    const f = formQui; if (!f) return;
+    const prenom = (f.prenom || '').trim();
+    const nom    = (f.nom || '').trim();
+    const email  = (f.email || '').trim();
+    if (!prenom || !nom || !email) { setErrQui('Prénom, nom et e-mail sont obligatoires.'); return; }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { setErrQui("Cette adresse e-mail n'a pas l'air valide."); return; }
+    setBusyQui(true); setErrQui(null);
+    const { data, error } = await sb.from('mv_personnes').insert({
+      prenom, nom, email,
+      commentaire: (f.commentaire || '').trim() || null,
+      created_by: user?.email || null,
+    }).select().single();
+    setBusyQui(false);
+    if (error) { setErrQui(error.message); return; }
+    setFiches(l => [...l, data]);
+    await activer(data);
+  };
+
+  // Un seul choix par sujet : la clé primaire (personne, sujet) s'en charge en
+  // base, et recliquer la case blanche efface la réponse plutôt que d'en poser
+  // une vide — « cette personne n'a rien choisi » se lit alors comme tel.
+  const repondre = async (pos) => {
+    if (!personne || !sel) return;
+    const efface = reponses[sel] === pos;
+    setReponses(r => {
+      const n = { ...r };
+      if (efface) delete n[sel]; else n[sel] = pos;
+      return n;
+    });
+    setEnVol(v => v + 1);
+    const { error } = efface
+      ? await sb.from('mv_reponses').delete().eq('personne_id', personne.id).eq('node_id', sel)
+      : await sb.from('mv_reponses').upsert(
+          { personne_id: personne.id, node_id: sel, pos, updated_at: new Date().toISOString(), updated_by: user?.email || null },
+          { onConflict: 'personne_id,node_id' });
+    setEnVol(v => v - 1);
+    if (error) setErreur(error.message);
+  };
+
   // ── Remplissage automatique des 5 positions ───────────────────────────────
   // Le sujet doit exister avant de porter ses positions : on le crée (ou on
   // l'enregistre), puis l'IA rédige, puis on écrit les 5 lignes d'un coup.
@@ -20013,6 +20170,7 @@ function AdminMindVectorScreen({ onBack }) {
   // le clic qui suit retombait sur le fond noir tout juste posé et la refermait
   // aussitôt — d'où l'impression qu'un appui bref ne faisait rien.
   const debutAppui = (prof) => {
+    if (mode === 'reponse') return;          // pas d'édition pendant la saisie des réponses
     appuiRef.current.long = false;
     clearTimeout(appuiRef.current.timer);
     appuiRef.current.timer = setTimeout(() => {
@@ -20054,13 +20212,20 @@ function AdminMindVectorScreen({ onBack }) {
           onTitre={setBrouillonTitre}
           onValiderTitre={validerTitre}
           onAnnulerTitre={() => setRenomme(null)}
-          actif={posEdit === p.n}
+          actif={mode === 'saisie' && posEdit === p.n}
           ouvert={!!ouvertes[p.n]}
           taille={taillePos}
           deborde={!!debordent[p.n]}
+          lecture={mode === 'reponse'}
+          repondu={mode === 'reponse' && reponses[sel] === p.n}
           zoneRef={zoneRef}
           refCorps={el => { corpsRefs.current[p.n] = el; }}
-          onOuvrir={() => { fermerPos(); setPosEdit(p.n); }}
+          onOuvrir={() => {
+            // En mode réponses, cliquer une case retient cette position pour la
+            // personne en cours — on n'ouvre pas l'éditeur de texte.
+            if (mode === 'reponse') { if (personne) repondre(p.n); else setPopupQui(true); return; }
+            fermerPos(); setPosEdit(p.n);
+          }}
           onBasculer={() => setOuvertes(o => ({ ...o, [p.n]: !o[p.n] }))}
           onEcrire={(v) => ecrireCase(sel, p.n, v)}
           onSauver={() => sauverCase(sel, p.n)}
@@ -20077,7 +20242,24 @@ function AdminMindVectorScreen({ onBack }) {
       <div className="mv-entete">
         {/* Sur deux lignes : le titre de la page tient dans une colonne étroite
             et rend la largeur au sujet, qui est ce qu'on vient vraiment lire. */}
-        <div className="mv-titre-court">Mind<br/><span className="accent">Vector</span></div>
+        <button className="mv-titre-court" onClick={basculerMode}
+          title="Cliquer pour passer de la rédaction des questions à la saisie des réponses">
+          Mind<br/><span className="accent">Vector</span>
+        </button>
+        {/* Le picto dit où l'on est : ✎ on rédige les questions, 👁 on recueille
+            les réponses de quelqu'un — et il rappelle alors de qui il s'agit. */}
+        <button className={'mv-mode' + (mode === 'reponse' ? ' oeil' : '')}
+          onClick={() => mode === 'reponse' ? setPopupQui(true) : basculerMode()}
+          title={mode === 'saisie'
+            ? 'Rédaction des questions — cliquer le titre pour saisir des réponses'
+            : 'Saisie des réponses — cliquer pour changer de personne'}>
+          <span className="mv-mode-ico">{mode === 'saisie' ? '✎' : '👁'}</span>
+          {mode === 'reponse' && (
+            <span className="mv-mode-qui">
+              {personne ? `${personne.prenom} ${personne.nom}` : 'choisir qui répond'}
+            </span>
+          )}
+        </button>
         {selNoeud && (
           <div className="mv-sujet">
             <div className="mv-sujet-nom">{selNoeud.label}</div>
@@ -20109,7 +20291,7 @@ function AdminMindVectorScreen({ onBack }) {
                   {(titres[n.id + ':1'] || titres[n.id + ':5']) && (
                     <div className="mvt-poles">◀ {titres[n.id + ':1'] || '—'} · {titres[n.id + ':5'] || '—'} ▶</div>
                   )}
-                  {pictos(n)}
+                  {mode === 'saisie' && pictos(n)}
                 </div>
               ))}
               {/* La zone racine n'apparaît que pendant un glissement : le reste
@@ -20122,8 +20304,10 @@ function AdminMindVectorScreen({ onBack }) {
                   ↥ déposer ici pour en faire une racine
                 </div>
               )}
-              <button className="mvt-ajout" title="Ajouter un sujet à ce niveau"
-                onClick={() => ouvrirAjout(niv.parent)}>＋</button>
+              {mode === 'saisie' && (
+                <button className="mvt-ajout" title="Ajouter un sujet à ce niveau"
+                  onClick={() => ouvrirAjout(niv.parent)}>＋</button>
+              )}
             </div>
           ))}
           {niveaux.length === 0 && (
@@ -20199,6 +20383,95 @@ function AdminMindVectorScreen({ onBack }) {
         </div>
       );
     })()}
+
+    {/* ── Pour qui saisit-on les réponses ? ───────────────────────────────── */}
+    {popupQui && (
+      <div style={{position:'fixed',inset:0,zIndex:9600,background:'rgba(3,12,18,.82)',backdropFilter:'blur(4px)',WebkitBackdropFilter:'blur(4px)',display:'flex',alignItems:'center',justifyContent:'center',padding:16}}
+        onClick={() => { if (!busyQui) { setPopupQui(false); setFormQui(null); if (!personne) { setMode('saisie'); } } }}>
+        <div className="mv-dialogue" onClick={e => e.stopPropagation()}>
+          <div style={{fontSize:16,fontWeight:900,color:'#fff'}}>Pour qui saisit-on les réponses ?</div>
+
+          {formQui ? (
+            <>
+              <div>
+                <label>Prénom *</label>
+                <input autoFocus value={formQui.prenom || ''}
+                  onChange={e => setFormQui(f => ({ ...f, prenom: e.target.value }))}/>
+              </div>
+              <div>
+                <label>Nom *</label>
+                <input value={formQui.nom || ''}
+                  onChange={e => setFormQui(f => ({ ...f, nom: e.target.value }))}/>
+              </div>
+              <div>
+                <label>E-mail *</label>
+                <input type="email" value={formQui.email || ''}
+                  onChange={e => setFormQui(f => ({ ...f, email: e.target.value }))}/>
+              </div>
+              <div>
+                <label>Commentaire <span style={{textTransform:'none',letterSpacing:0,fontWeight:600}}>(facultatif)</span></label>
+                <textarea className="mv-dialogue-zone" rows={2} value={formQui.commentaire || ''}
+                  placeholder="Contexte : d'où vient cette personne, pourquoi son avis nous intéresse…"
+                  onChange={e => setFormQui(f => ({ ...f, commentaire: e.target.value }))}/>
+              </div>
+              {errQui && <div style={{fontSize:12,fontWeight:700,color:'#ff8a8a'}}>{errQui}</div>}
+              <div style={{display:'flex',gap:9}}>
+                <button className="btn btn-yes" style={{flex:'1 1 0',width:'auto',fontSize:13,padding:'10px 0'}}
+                  disabled={busyQui} onClick={creerPersonne}>
+                  {busyQui ? <><StarSpinner size={14} color="#1a4500"/> Création…</> : 'Créer et saisir'}
+                </button>
+                <button className="btn btn-no" style={{flex:'0 0 auto',width:'auto',fontSize:13,padding:'10px 16px'}}
+                  disabled={busyQui} onClick={() => { setFormQui(null); setErrQui(null); }}>Retour</button>
+              </div>
+            </>
+          ) : (
+            <>
+              <div style={{display:'flex',gap:8,alignItems:'stretch'}}>
+                <select className="inp" style={{flex:'1 1 0',minWidth:0,fontSize:13,padding:'10px 12px'}}
+                  value={selQui} onChange={e => setSelQui(e.target.value)}>
+                  <option value="" style={{background:'#0d2430'}}>— choisir une personne —</option>
+                  {fiches.filter(f => !f.user_id).length > 0 && (
+                    <optgroup label="Personnes ajoutées à la main" style={{background:'#0d2430'}}>
+                      {fiches.filter(f => !f.user_id).map(f => (
+                        <option key={f.id} value={'f:' + f.id} style={{background:'#0d2430'}}>
+                          {f.prenom} {f.nom} — {f.email}
+                        </option>
+                      ))}
+                    </optgroup>
+                  )}
+                  <optgroup label="Comptes Starvolt" style={{background:'#0d2430'}}>
+                    {(usagers || []).map(u => (
+                      <option key={u.id} value={'u:' + u.id} style={{background:'#0d2430'}}>
+                        {(u.prenom || u.pseudo || '—')} {u.nom || ''} — {u.email}
+                      </option>
+                    ))}
+                  </optgroup>
+                </select>
+                <button className="btn btn-no" title="Ajouter une personne qui n'a pas de compte"
+                  style={{flex:'0 0 auto',width:'auto',fontSize:17,fontWeight:900,padding:'0 14px'}}
+                  onClick={() => { setErrQui(null); setFormQui({ prenom:'', nom:'', email:'', commentaire:'' }); }}>＋</button>
+              </div>
+
+              <div style={{display:'flex',gap:9}}>
+                <button className="btn btn-yes" style={{flex:'1 1 0',width:'auto',fontSize:13,padding:'10px 0'}}
+                  disabled={busyQui || !selQui} onClick={choisirDansListe}>
+                  {busyQui ? <><StarSpinner size={14} color="#1a4500"/> …</> : 'Saisir pour cette personne'}
+                </button>
+                <button className="btn btn-no" style={{flex:'0 0 auto',width:'auto',fontSize:13,padding:'10px 16px'}}
+                  disabled={busyQui} onClick={choisirMoi}>Moi-même</button>
+              </div>
+
+              {usagers === null && <div style={{fontSize:11.5,color:'rgba(255,255,255,.4)'}}>Chargement des comptes…</div>}
+              {errQui && <div style={{fontSize:12,fontWeight:700,color:'#ff8a8a'}}>{errQui}</div>}
+              <div style={{fontSize:10.5,color:'rgba(255,255,255,.35)',lineHeight:1.5}}>
+                Les réponses sont enregistrées au nom de cette personne. Fermer sans choisir
+                revient à la rédaction des questions.
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    )}
 
     {/* ── Boîte de dialogue : créer ou modifier un sujet ──────────────────── */}
     {dialogue && (
@@ -21228,7 +21501,7 @@ function App() {
         return <AdminBilanDataScreen onBack={goBack}/>;
 
       case 'ADMIN_MIND_VECTOR':
-        return <AdminMindVectorScreen onBack={goBack}/>;
+        return <AdminMindVectorScreen user={user} profile={profile} onBack={goBack}/>;
 
       case 'ADMIN_LEARN':
         return <AdminLearnScreen
