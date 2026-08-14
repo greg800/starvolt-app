@@ -1461,7 +1461,15 @@ Deno.serve(async (req)=>{
       try {
         const recentRows = await sbGet("switchgrid_requests", `site_id=eq.${site_id}&order=created_at.desc&limit=1&select=*`);
         const last = recentRows[0];
-        if (last) {
+        // Une demande antérieure ne vaut reprise que si elle porte sur LE MÊME
+        // compteur que celui demandé maintenant. Sans ce test, corriger le PDL puis
+        // relancer ne servait à rien : on renvoyait (ou on ressuscitait) la demande
+        // posée sur l'ANCIEN compteur, et le site continuait de collecter la conso
+        // d'un compteur qui n'était plus le sien. Cas constaté en production le
+        // 2026-08-14. Si aucun PDL n'est saisi (recherche par adresse), on garde
+        // l'ancien comportement.
+        const sameMeter = !inputPdl || !last?.pdl || last.pdl === inputPdl;
+        if (last && sameMeter) {
           const ageMs = Date.now() - new Date(last.created_at).getTime();
           const st = last.status;
           if (st === "pending" || st === "ordering") {
