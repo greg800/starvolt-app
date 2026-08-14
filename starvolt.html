@@ -1437,12 +1437,16 @@
        ligne — le tout centré tant que ça tient, et à la ligne quand c'est serré. */
     .mv-entete {
       flex: 0 0 auto;
-      display: flex; align-items: center; justify-content: center;
+      display: flex; align-items: center; justify-content: flex-start;
       gap: 13px; margin-bottom: 7px; min-width: 0;
     }
+    .mv-marque {
+      flex: 0 0 auto; display: flex; flex-direction: column;
+      align-items: flex-start; gap: 4px;
+    }
     .mv-titre-court {
-      flex: 0 0 auto; text-align: right;
-      font-size: 17px; font-weight: 900; line-height: 1.02;
+      flex: 0 0 auto; text-align: left; white-space: nowrap;
+      font-size: 15.5px; font-weight: 900; line-height: 1.05;
       color: #fff; margin: 0;
       background: none; border: none; padding: 0;
       font-family: inherit; cursor: pointer;
@@ -1495,10 +1499,11 @@
     }
     @media (max-width: 899px) {
       .mv-entete   { gap: 10px; }
-      .mv-titre-court { font-size: 15px; }
+      .mv-titre-court { font-size: 13.5px; }
       .mv-sujet    { padding-left: 10px; }
       .mv-sujet-nom  { font-size: 16px; }
       .mv-sujet-desc { font-size: 12px; }
+      .mv-mode     { padding: 3px 8px; font-size: 10.5px; }
     }
 
     /* ── Bandeau d'arborescence (grand écran) ───────────────────────────── */
@@ -19989,6 +19994,35 @@ function AdminMindVectorScreen({ user, profile, onBack }) {
     setDialogue({ mode:'edition', id, label: n.label || '', description: n.description || '' });
   };
 
+  // ── Glissé latéral : passer d'un sujet à son voisin (petit écran) ──────────
+  // Les frères, c'est-à-dire les sujets qui partagent le même parent. Éviter
+  // d'avoir à rouvrir la liste du niveau pour avancer d'un cran.
+  const versFrere = (pas) => {
+    if (!sel) return;
+    const n = parId[sel]; if (!n) return;
+    const freres = enfantsDe[n.parent_id || '_'] || [];
+    const i = freres.findIndex(f => f.id === sel);
+    const suivant = i >= 0 ? freres[i + pas] : null;
+    if (suivant) choisir(suivant.id);
+  };
+
+  const tactRef = useRef(null);
+  const debutTact = (e) => {
+    if (!e.touches || e.touches.length !== 1) { tactRef.current = null; return; }
+    tactRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+  };
+  const finTact = (e) => {
+    const d = tactRef.current; tactRef.current = null;
+    // Pendant une saisie de texte, le doigt sert à placer le curseur.
+    if (!d || posEdit != null) return;
+    const t = e.changedTouches && e.changedTouches[0];
+    if (!t) return;
+    const dx = t.clientX - d.x, dy = t.clientY - d.y;
+    // Franchement horizontal, sinon c'est un défilement vertical.
+    if (Math.abs(dx) < 60 || Math.abs(dx) < Math.abs(dy) * 1.6) return;
+    versFrere(dx > 0 ? 1 : -1);
+  };
+
   // ── Mode « réponses » : pour qui, et quelle position ───────────────────────
   const basculerMode = () => {
     fermerPos();
@@ -20261,7 +20295,9 @@ function AdminMindVectorScreen({ user, profile, onBack }) {
   );
 
   const grillePositions = () => (
-    <div className="mv-grille" ref={grilleRef}>
+    <div className="mv-grille" ref={grilleRef}
+      onTouchStart={compact ? debutTact : undefined}
+      onTouchEnd={compact ? finTact : undefined}>
       {MV_POSITIONS.map(p => (
         <MvPosition key={p.n} p={p} longueurMax={MV_MAX}
           texte={cases[sel + ':' + p.n] || ''}
@@ -20302,24 +20338,27 @@ function AdminMindVectorScreen({ user, profile, onBack }) {
       <div className="mv-entete">
         {/* Sur deux lignes : le titre de la page tient dans une colonne étroite
             et rend la largeur au sujet, qui est ce qu'on vient vraiment lire. */}
-        <button className="mv-titre-court" onClick={basculerMode}
-          title="Cliquer pour passer de la rédaction des questions à la saisie des réponses">
-          Mind<br/><span className="accent">Vector</span>
-        </button>
-        {/* Le picto dit où l'on est : ✎ on rédige les questions, 👁 on recueille
-            les réponses de quelqu'un — et il rappelle alors de qui il s'agit. */}
-        <button className={'mv-mode' + (mode === 'reponse' ? ' oeil' : '')}
-          onClick={() => mode === 'reponse' ? setPopupQui(true) : basculerMode()}
-          title={mode === 'saisie'
-            ? 'Rédaction des questions — cliquer le titre pour saisir des réponses'
-            : 'Saisie des réponses — cliquer pour changer de personne'}>
-          <span className="mv-mode-ico">{mode === 'saisie' ? MV_PICTO.crayon : MV_PICTO.oeil}</span>
-          {mode === 'reponse' && (
-            <span className="mv-mode-qui">
-              {personne ? `${personne.prenom} ${personne.nom}` : 'choisir qui répond'}
-            </span>
-          )}
-        </button>
+        {/* Titre sur une ligne, et le mode juste dessous : empilés, ils tiennent
+            dans une colonne étroite et rendent la largeur au sujet — c'est lui
+            et son commentaire qu'on vient lire, surtout sur petit écran. */}
+        <div className="mv-marque">
+          <button className="mv-titre-court" onClick={basculerMode}
+            title="Cliquer pour passer de la rédaction des questions à la saisie des réponses">
+            Mind <span className="accent">Vector</span>
+          </button>
+          <button className={'mv-mode' + (mode === 'reponse' ? ' oeil' : '')}
+            onClick={() => mode === 'reponse' ? setPopupQui(true) : basculerMode()}
+            title={mode === 'saisie'
+              ? 'Rédaction des questions — cliquer le titre pour saisir des réponses'
+              : 'Saisie des réponses — cliquer pour changer de personne'}>
+            <span className="mv-mode-ico">{mode === 'saisie' ? MV_PICTO.crayon : MV_PICTO.oeil}</span>
+            {mode === 'reponse' && (
+              <span className="mv-mode-qui">
+                {personne ? `${personne.prenom} ${personne.nom}` : 'choisir qui répond'}
+              </span>
+            )}
+          </button>
+        </div>
         {selNoeud && (
           <div className="mv-sujet">
             <div className="mv-sujet-nom">{selNoeud.label}</div>
