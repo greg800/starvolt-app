@@ -263,6 +263,10 @@ async function rescan(email: string): Promise<Response> {
 async function generer(body: any, email: string): Promise<Response> {
   const label = String(body?.label || "").trim();
   const description = String(body?.description || "").trim();
+  // Documentation de fond du sujet, si l'auteur en a rédigé une : c'est la
+  // matière la plus solide dont on dispose (chiffres, contexte), et elle borne
+  // ce que le modèle peut avancer.
+  const contenu = String(body?.contenu || "").trim().slice(0, 12000);
   if (!label) return json({ error: "bad_request", message: "Intitulé manquant." }, 400);
 
   let systemPrompt = DEFAULT_SYSTEM_PROMPT;
@@ -295,9 +299,19 @@ async function generer(body: any, email: string): Promise<Response> {
     },
   };
 
+  // La consigne d'usage de la documentation vit ICI et non dans le prompt
+  // système : celui-ci est réécrit par « rescanner », et une consigne qui n'y
+  // survivrait pas serait perdue au premier rescan.
   const userContent =
     `SUJET : ${label}` +
     (description ? `\n\nCE QUE CE SUJET RECOUVRE :\n${description}` : "") +
+    (contenu
+      ? `\n\n=== DOCUMENTATION DE FOND RÉDIGÉE PAR L'AUTEUR ===\n${contenu}\n=== FIN DE LA DOCUMENTATION ===\n\n` +
+        `Appuie-toi sur cette documentation : c'est la matière de référence. Les chiffres,` +
+        ` faits et repères que tu emploies doivent en venir — n'en invente pas d'autres et` +
+        ` n'écris rien qui la contredise. Elle décrit le sujet, pas une position : chacune` +
+        ` des 5 positions reste à formuler, en s'appuyant sur ces éléments.`
+      : "") +
     `\n\nProduis les 5 positions.`;
 
   const { ok, jsonRes } = await askClaude(systemPrompt, userContent, [tool]);

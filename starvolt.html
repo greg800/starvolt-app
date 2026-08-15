@@ -20238,7 +20238,11 @@ function AdminMindVectorScreen({ user, profile, onBack }) {
         if (error) throw error;
       }
 
-      const { data, error } = await sb.functions.invoke('mind-vector', { body: { label, description } });
+      // La documentation de fond part avec : c'est la matière la plus solide
+      // dont dispose l'IA pour écrire des positions qui tiennent debout.
+      const { data, error } = await sb.functions.invoke('mind-vector', {
+        body: { label, description, contenu: champs.contenu || '' },
+      });
       if (error || data?.error) throw new Error(data?.message || error?.message || 'Remplissage impossible.');
 
       const lignes = (data.positions || [])
