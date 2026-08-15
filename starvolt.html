@@ -1489,6 +1489,29 @@
       font-size: 19px; font-weight: 800; color: #fff; line-height: 1.2;
       overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     }
+    /* Intitulé cliquable : il n'a cette allure QUE s'il y a de quoi lire. */
+    .mv-sujet-lien {
+      display: flex; align-items: center; gap: 7px; max-width: 100%;
+      background: none; border: none; padding: 0; margin: 0;
+      font-family: inherit; text-align: left; cursor: pointer;
+    }
+    .mv-sujet-lien:hover { color: var(--green); }
+    .mv-livre { flex: 0 0 auto; display: flex; align-items: center; color: var(--green); }
+
+    /* Fiche documentaire du sujet */
+    .mv-fiche {
+      width: 100%; max-width: 640px; max-height: 86vh;
+      display: flex; flex-direction: column;
+      background: #0b3441; border: 1px solid rgba(255,255,255,.15);
+      border-radius: 18px; padding: 18px;
+      box-shadow: 0 18px 50px rgba(0,0,0,.5);
+    }
+    .mv-fiche-corps {
+      flex: 1 1 auto; min-height: 0; overflow-y: auto;
+      margin-top: 12px; padding-top: 12px;
+      border-top: 1px solid rgba(255,255,255,.12);
+      -webkit-overflow-scrolling: touch;
+    }
     /* La description est bornée à deux lignes : elle explique, elle ne doit pas
        manger la hauteur des 5 cases qui sont l'objet de l'écran. */
     .mv-sujet-desc {
@@ -2241,6 +2264,10 @@ const PERMISSION_ZONES = [
   { key: 'menus',    title: 'Menus accessibles', items: [
     ['admin', 'Admin'], ['passer_action', "Passer à l'action"],
     ['comprendre', 'Comprendre'], ['panier', 'Panier'],
+    // Semée à false partout sauf admin/superadmin (migration_mind_vector_role_menu.sql)
+    // car le vérificateur est fail-open : sans seed, la clé absente ouvrirait
+    // Mind Vector à tout le monde.
+    ['mind_vector', 'Mind Vector'],
   ]},
   { key: 'submenus', title: 'Sous-menus accessibles', items: [
     ['selecteur_site', 'Sélecteur de site'],
@@ -19530,6 +19557,13 @@ const MV_PICTO = {
       <path d="M13.5 6.5 17.5 10.5"/>
     </svg>
   ),
+  livre: (
+    <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor"
+      strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M3 4.8h5.2A3.4 3.4 0 0 1 12 8v11a2.6 2.6 0 0 0-2.6-2.2H3Z"/>
+      <path d="M21 4.8h-5.2A3.4 3.4 0 0 0 12 8v11a2.6 2.6 0 0 1 2.6-2.2H21Z"/>
+    </svg>
+  ),
   oeil: (
     <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor"
       strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -19656,6 +19690,9 @@ function AdminMindVectorScreen({ user, profile, onBack }) {
   const [feuille,  setFeuille]  = useState(null);  // petit écran : { type:'menu'|'actions', prof }
   const [dialogue, setDialogue] = useState(null);  // { mode:'ajout'|'edition', parentId, id, label, description }
   const [remplissage, setRemplissage] = useState(false);  // rédaction IA des 5 positions en cours
+  const [imgEnCours,  setImgEnCours]  = useState(false);  // envoi de l'illustration
+  const [docOuvert,   setDocOuvert]   = useState(false);  // fiche documentaire du sujet
+  const docRef = useRef(null);                            // textarea du contenu documentaire
   // ── Deux façons d'utiliser l'écran : on rédige les questions (✎) ou on saisit
   //    les réponses de quelqu'un (👁). Le mode est retenu d'une visite à l'autre.
   const [mode,     setMode]     = useState('saisie');   // 'saisie' | 'reponse'
@@ -19991,11 +20028,12 @@ function AdminMindVectorScreen({ user, profile, onBack }) {
   });
 
   // ── Créer / modifier / supprimer / déplacer ───────────────────────────────
-  const ouvrirAjout   = (parentId) => { setMsgAuto(null); setDialogue({ mode:'ajout', parentId: parentId || null, label:'', description:'' }); };
+  const ouvrirAjout   = (parentId) => { setMsgAuto(null); setDialogue({ mode:'ajout', parentId: parentId || null, label:'', description:'', contenu:'', image_url:'' }); };
   const ouvrirEdition = (id) => {
     const n = parId[id]; if (!n) return;
     setMsgAuto(null);
-    setDialogue({ mode:'edition', id, label: n.label || '', description: n.description || '' });
+    setDialogue({ mode:'edition', id, label: n.label || '', description: n.description || '',
+                  contenu: n.contenu || '', image_url: n.image_url || '' });
   };
 
   // ── Parcourir l'arbre au doigt (petit écran) ──────────────────────────────
@@ -20176,7 +20214,11 @@ function AdminMindVectorScreen({ user, profile, onBack }) {
     try {
       let id = d.id;
       let liste = noeuds || [];
-      const champs = { label, description: description || null };
+      const champs = {
+        label, description: description || null,
+        contenu: (d.contenu || '').trim() || null,
+        image_url: (d.image_url || '').trim() || null,
+      };
       if (d.mode === 'ajout') {
         const freres = liste.filter(n => (n.parent_id || null) === (d.parentId || null));
         const ordre = freres.length ? Math.max(...freres.map(f => f.ordre || 0)) + 1 : 0;
@@ -20233,6 +20275,8 @@ function AdminMindVectorScreen({ user, profile, onBack }) {
     const champs = {
       label: (d.label || '').trim() || 'Sans titre',
       description: (d.description || '').trim() || null,
+      contenu: (d.contenu || '').trim() || null,
+      image_url: (d.image_url || '').trim() || null,
     };
     setDialogue(null);
     if (d.mode === 'ajout') {
@@ -20393,12 +20437,25 @@ function AdminMindVectorScreen({ user, profile, onBack }) {
             )}
           </button>
         </div>
-        {selNoeud && (
-          <div className="mv-sujet">
-            <div className="mv-sujet-nom">{selNoeud.label}</div>
-            {selNoeud.description && <div className="mv-sujet-desc">{selNoeud.description}</div>}
-          </div>
-        )}
+        {selNoeud && (() => {
+          // Le livre ne s'affiche que s'il y a vraiment quelque chose à lire —
+          // sinon c'est une promesse vide. Vaut dans les deux modes.
+          const documente = !!(selNoeud.contenu || selNoeud.image_url);
+          return (
+            <div className="mv-sujet">
+              {documente ? (
+                <button className="mv-sujet-nom mv-sujet-lien" onClick={() => setDocOuvert(true)}
+                  title="Lire la documentation de ce sujet">
+                  {selNoeud.label}
+                  <span className="mv-livre">{MV_PICTO.livre}</span>
+                </button>
+              ) : (
+                <div className="mv-sujet-nom">{selNoeud.label}</div>
+              )}
+              {selNoeud.description && <div className="mv-sujet-desc">{selNoeud.description}</div>}
+            </div>
+          );
+        })()}
       </div>
 
       {erreur && <div className="auth-error" style={{marginBottom:8,flex:'0 0 auto'}}>{erreur}</div>}
@@ -20517,6 +20574,38 @@ function AdminMindVectorScreen({ user, profile, onBack }) {
       );
     })()}
 
+    {/* ── Fiche documentaire du sujet ─────────────────────────────────────── */}
+    {docOuvert && selNoeud && (
+      <div style={{position:'fixed',inset:0,zIndex:9600,background:'rgba(3,12,18,.86)',backdropFilter:'blur(4px)',WebkitBackdropFilter:'blur(4px)',display:'flex',alignItems:'center',justifyContent:'center',padding:16}}
+        onClick={() => setDocOuvert(false)}>
+        <div className="mv-fiche" onClick={e => e.stopPropagation()}>
+          <div style={{display:'flex',alignItems:'flex-start',gap:12,marginBottom:4}}>
+            <div style={{flex:1,minWidth:0}}>
+              <div style={{fontSize:19,fontWeight:900,color:'#fff',lineHeight:1.2}}>{selNoeud.label}</div>
+              {selNoeud.description && (
+                <div style={{fontSize:12.5,color:'rgba(255,255,255,.55)',lineHeight:1.45,marginTop:3}}>
+                  {selNoeud.description}
+                </div>
+              )}
+            </div>
+            <button className="btn btn-no" style={{flex:'0 0 auto',width:'auto',fontSize:13,padding:'7px 13px'}}
+              onClick={() => setDocOuvert(false)}>Fermer</button>
+          </div>
+          <div className="mv-fiche-corps">
+            {selNoeud.image_url && (
+              <img src={selNoeud.image_url} alt=""
+                style={{width:'100%',borderRadius:12,display:'block',marginBottom:12}}/>
+            )}
+            {selNoeud.contenu
+              ? <BilanMarkdown text={selNoeud.contenu} fontSize={14}/>
+              : <div style={{fontSize:13,color:'rgba(255,255,255,.4)',fontStyle:'italic'}}>
+                  Pas encore de texte pour ce sujet.
+                </div>}
+          </div>
+        </div>
+      </div>
+    )}
+
     {/* ── Pour qui saisit-on les réponses ? ───────────────────────────────── */}
     {popupQui && (
       <div style={{position:'fixed',inset:0,zIndex:9600,background:'rgba(3,12,18,.82)',backdropFilter:'blur(4px)',WebkitBackdropFilter:'blur(4px)',display:'flex',alignItems:'center',justifyContent:'center',padding:16}}
@@ -20626,6 +20715,41 @@ function AdminMindVectorScreen({ user, profile, onBack }) {
               placeholder="Ce que ce titre évoque : de quoi parle-t-on exactement, sur quel axe se situe le désaccord ?"
               onChange={e => setDialogue(d => ({ ...d, description: e.target.value }))}
               onKeyDown={e => { if (e.key === 'Escape') setDialogue(null); }}/>
+          </div>
+          {/* Documentation de fond : elle ne sert pas à poser la question mais à
+              l'expliquer. Consultable ensuite en cliquant l'intitulé du sujet. */}
+          <div>
+            <label>Documenter ce sujet <span style={{textTransform:'none',letterSpacing:0,fontWeight:600}}>(facultatif)</span></label>
+            <MarkdownToolbar compact areaRef={docRef} value={dialogue.contenu || ''}
+              onChange={v => setDialogue(d => ({ ...d, contenu: v }))}/>
+            <textarea className="mv-dialogue-zone" rows={5} ref={docRef} value={dialogue.contenu || ''}
+              placeholder={"Chiffres, contexte, repères… tout ce qui aide à se faire un avis éclairé.\nEx :\n## Ce que disent les chiffres\n- 12 % de la production en 2024"}
+              onChange={e => setDialogue(d => ({ ...d, contenu: e.target.value }))}/>
+          </div>
+          <div>
+            <label>Illustration <span style={{textTransform:'none',letterSpacing:0,fontWeight:600}}>(facultatif)</span></label>
+            {dialogue.image_url ? (
+              <div style={{display:'flex',gap:9,alignItems:'flex-start'}}>
+                <img src={dialogue.image_url} alt=""
+                  style={{width:88,height:66,objectFit:'cover',borderRadius:9,border:'1px solid rgba(255,255,255,.2)'}}/>
+                <button className="btn btn-no" style={{width:'auto',fontSize:12,padding:'7px 12px'}}
+                  onClick={() => setDialogue(d => ({ ...d, image_url: '' }))}>Retirer</button>
+              </div>
+            ) : (
+              <label className="btn btn-no" style={{width:'100%',fontSize:12.5,padding:'9px 0',cursor: imgEnCours ? 'default' : 'pointer'}}>
+                {imgEnCours ? <><StarSpinner size={14} color="#d8f5c4"/> Envoi…</> : '🖼 Choisir une image'}
+                <input type="file" accept="image/*" style={{display:'none'}} disabled={imgEnCours}
+                  onChange={async e => {
+                    const f = e.target.files && e.target.files[0]; if (!f) return;
+                    setImgEnCours(true); setMsgAuto(null);
+                    try {
+                      const url = await uploadLearnImage(f);
+                      setDialogue(d => d ? { ...d, image_url: url } : d);
+                    } catch (err) { setMsgAuto({ type:'err', texte: "Envoi de l'image impossible : " + (err?.message || err) }); }
+                    finally { setImgEnCours(false); e.target.value = ''; }
+                  }}/>
+              </label>
+            )}
           </div>
           <div style={{fontSize:10.5,color:'rgba(255,255,255,.35)',lineHeight:1.5}}>
             Les noms des 5 positions se saisissent directement sur les cases, en cliquant
@@ -21520,7 +21644,7 @@ function App() {
 
       case 'COMPRENDRE_HOME':
         return <ComprendreHomeScreen user={user} rolePerms={rolePerms} onGroup={(g)=>goTo('COMPRENDRE_GROUP',{learnGroup:g})} onAction={()=>goTo('MA_CONSO')}
-          onMindVector={isSuperadmin ? (()=>goTo('ADMIN_MIND_VECTOR')) : null} onBack={()=>goTo('HOME_CHOICE')}/>;
+          onMindVector={can('menus','mind_vector') ? (()=>goTo('ADMIN_MIND_VECTOR')) : null} onBack={()=>goTo('HOME_CHOICE')}/>;
 
       case 'COMPRENDRE_GROUP': {
         const g = state.learnGroup;
