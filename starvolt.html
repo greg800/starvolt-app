@@ -20107,12 +20107,30 @@ function AdminMindVectorScreen({ user, profile, onBack }) {
     const n = parId[sel];
     if (!n || !n.parent_id) return;
     if (!compact) { choisir(n.parent_id); return; }
-    // Remonter sur un titre de groupe renverrait aussitôt vers le bas : on
-    // cherche le premier ancêtre qui porte lui-même des positions.
-    let cur = parId[n.parent_id];
-    for (let g = 0; cur && g < 40; g++) {
-      if (aDesPositions(cur.id)) { choisir(cur.id); return; }
-      cur = cur.parent_id ? parId[cur.parent_id] : null;
+
+    const p = parId[n.parent_id];
+    if (!p) return;
+    // Le parent porte lui-même des positions : c'est un sujet, on s'y arrête.
+    if (aDesPositions(p.id)) { choisir(p.id); return; }
+
+    // Sinon c'est un titre de groupe : s'y poser n'afficherait rien, et y
+    // redescendre nous ramènerait d'où l'on vient — le rebond sans fin. On file
+    // donc au groupe voisin, et on entre dedans s'il est vide à son tour.
+    //
+    // Si ce niveau n'offre aucun voisin utilisable — cas courant du groupe
+    // enfant unique — on monte d'un cran et on recommence, jusqu'à trouver du
+    // contenu ailleurs dans l'arbre. Sans cela le geste mourait en silence alors
+    // qu'il restait des sujets à voir sous une autre branche.
+    let courant = p;
+    for (let etage = 0; courant && etage < 40; etage++) {
+      const freres = enfantsDe[courant.parent_id || '_'] || [];
+      const i = freres.findIndex(f => f.id === courant.id);
+      for (let k = 1; i >= 0 && k < freres.length; k++) {
+        const voisin = freres[(i + k) % freres.length];
+        // choisir() se charge de descendre si le voisin est lui-même un groupe.
+        if (aDesPositions(voisin.id) || premierRempli(voisin.id)) { choisir(voisin.id); return; }
+      }
+      courant = courant.parent_id ? parId[courant.parent_id] : null;
     }
   };
 
