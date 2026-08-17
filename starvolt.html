@@ -1481,6 +1481,13 @@
     .mv-pos.repondu .mv-plus {
       background: rgba(31,122,31,.10); border-color: rgba(31,122,31,.3); color: #1f7a1f;
     }
+    /* Auto-diagnostic de la personne évaluée — visible du seul super admin, et
+       en CADRE blanc : l'aplat blanc reste au classement de l'observateur, pour
+       qu'on distingue d'un coup d'œil « ce que j'en pense » de « ce qu'elle en
+       dit ». Quand les deux coïncident, le cadre passe en vert : sur une carte
+       déjà blanche, un cadre blanc ne se verrait pas. */
+    .mv-pos.encadre         { box-shadow: inset 0 0 0 2.5px #fff; border-color: rgba(255,255,255,.55); }
+    .mv-pos.repondu.encadre { box-shadow: 0 6px 22px rgba(0,0,0,.28), inset 0 0 0 2.5px #1f7a1f; }
     .mv-sujet {
       min-width: 0; text-align: left;
       padding-left: 13px; border-left: 1px solid rgba(255,255,255,.18);
@@ -19609,13 +19616,14 @@ function mvChemin(liste, id) {
 // la fois (c'est la case la plus chargée qui la fixe), et transmise ici.
 function MvPosition({
   p, texte, titre, renomme, brouillonTitre, actif, ouvert, taille, deborde, longueurMax,
-  repondu, lecture,
+  repondu, encadre, lecture,
   zoneRef, refCorps, onOuvrir, onBasculer, onEcrire, onSauver, onFermer,
   onRenommer, onTitre, onValiderTitre, onAnnulerTitre,
 }) {
   const libre = ouvert || actif;
   return (
-    <div className={'mv-pos' + (actif ? ' edit' : '') + (libre ? ' libre' : '') + (repondu ? ' repondu' : '')}
+    <div className={'mv-pos' + (actif ? ' edit' : '') + (libre ? ' libre' : '')
+        + (repondu ? ' repondu' : '') + (encadre ? ' encadre' : '')}
       style={actif || repondu ? undefined : { background: p.tint }}
       onClick={() => { if (!actif) onOuvrir(); }}>
       {/* Le titre de la position se nomme sur place, les cinq de la même façon :
@@ -19697,7 +19705,8 @@ function AdminMindVectorScreen({ user, profile, onBack }) {
   //    les réponses de quelqu'un (👁). Le mode est retenu d'une visite à l'autre.
   const [mode,     setMode]     = useState('saisie');   // 'saisie' | 'reponse'
   const [personne, setPersonne] = useState(null);       // fiche mv_personnes en cours de saisie
-  const [reponses, setReponses] = useState({});         // idNoeud → position retenue (1..5)
+  const [reponses, setReponses] = useState({});         // idNoeud → MA position retenue (1..5)
+  const [autoDiag, setAutoDiag] = useState({});         // idNoeud → ce que la personne a dit d'elle-même
   const [popupQui, setPopupQui] = useState(false);
   const [usagers,  setUsagers]  = useState(null);       // comptes Starvolt (get_all_users)
   const [fiches,   setFiches]   = useState([]);         // fiches mv_personnes déjà créées
@@ -19725,15 +19734,48 @@ function AdminMindVectorScreen({ user, profile, onBack }) {
   const memoireRef = useRef({});     // idParent ('_' pour la racine) → dernier enfant choisi
   const appuiRef   = useRef({ timer: null, long: false });
 
+  // Un nœud dont aucune des 5 positions n'est rédigée est un titre de groupe.
+  // Sur petit écran il n'y aurait rien à lire ni à classer : on descend jusqu'au
+  // premier sujet réellement rempli.
+  const aDesPositions = (id, c) => MV_POSITIONS.some(p => ((c || cases)[id + ':' + p.n] || '').trim());
+
+  const premierRempli = (id, liste, c) => {
+    const enf = {};
+    (liste || noeuds || []).forEach(n => {
+      const k = n.parent_id || '_';
+      if (!enf[k]) enf[k] = [];
+      enf[k].push(n);
+    });
+    const pile = (enf[id] || []).slice();
+    for (let g = 0; pile.length && g < 500; g++) {
+      const n = pile.shift();
+      if (aDesPositions(n.id, c)) return n.id;
+      pile.unshift(...(enf[n.id] || []));
+    }
+    return null;
+  };
+
   // Reprend une personne mémorisée : sa fiche puis ses réponses. Si la fiche
   // n'existe plus, on rouvre le choix plutôt que de saisir dans le vide.
   const reprendrePersonne = async (id) => {
     const { data } = await sb.from('mv_personnes').select('*').eq('id', id).maybeSingle();
     if (!data) { setPopupQui(true); return; }
     setPersonne(data);
-    const { data: rep } = await sb.from('mv_reponses').select('node_id,pos').eq('personne_id', id);
-    const m = {}; (rep || []).forEach(r => { m[r.node_id] = r.pos; });
-    setReponses(m);
+    chargerReponses(data);
+  };
+
+  // Deux jeux distincts : ce que J'AI classé, et ce que la personne a dit
+  // d'elle-même. La base ne renvoie le second qu'à un super admin (policy
+  // « mv_reponses lecture ») — inutile de le refiltrer ici.
+  const chargerReponses = async (fiche) => {
+    const { data } = await sb.from('mv_reponses')
+      .select('node_id,pos,auteur_id').eq('personne_id', fiche.id);
+    const miennes = {}, auto = {};
+    (data || []).forEach(r => {
+      if (r.auteur_id === user?.id) miennes[r.node_id] = r.pos;
+      if (fiche.user_id && r.auteur_id === fiche.user_id) auto[r.node_id] = r.pos;
+    });
+    setReponses(miennes); setAutoDiag(auto);
   };
 
   // ── Chargement ────────────────────────────────────────────────────────────
@@ -19781,8 +19823,12 @@ function AdminMindVectorScreen({ user, profile, onBack }) {
           else setPopupQui(true);
         }
       } catch {}
+      // Même règle qu'à la navigation : sur petit écran on n'ouvre jamais sur un
+      // titre de groupe, on descend au premier sujet réellement rédigé. Les
+      // textes viennent d'être chargés dans `c`, l'état n'est pas encore posé :
+      // on les passe explicitement.
       const depart = repris || (liste.find(x => !x.parent_id) || {}).id || null;
-      if (depart) { setChemin(prolongerAvec(liste, mvChemin(liste, depart))); setSel(depart); }
+      if (depart) choisir(depart, liste, c);
     });
     return () => { vivant = false; };
   }, []);
@@ -19915,13 +19961,18 @@ function AdminMindVectorScreen({ user, profile, onBack }) {
   }
 
   // Règle unique, grand comme petit écran : ce qu'on désigne est ce qu'on édite.
-  const choisir = (id, liste) => {
+  const choisir = (id, liste, c) => {
     const l = liste || noeuds || [];
-    const n = l.find(x => x.id === id); if (!n) return;
+    let cible = id;
+    if (compact && !aDesPositions(id, c)) {
+      const rempli = premierRempli(id, l, c);
+      if (rempli) cible = rempli;
+    }
+    const n = l.find(x => x.id === cible); if (!n) return;
     fermerPos();
-    memoireRef.current[n.parent_id || '_'] = id;
-    setChemin(prolongerAvec(l, mvChemin(l, id)));
-    setSel(id);
+    memoireRef.current[n.parent_id || '_'] = cible;
+    setChemin(prolongerAvec(l, mvChemin(l, cible)));
+    setSel(cible);
   };
 
   // ── Écriture des positions ────────────────────────────────────────────────
@@ -20054,7 +20105,15 @@ function AdminMindVectorScreen({ user, profile, onBack }) {
 
   const versParent = () => {
     const n = parId[sel];
-    if (n && n.parent_id) choisir(n.parent_id);
+    if (!n || !n.parent_id) return;
+    if (!compact) { choisir(n.parent_id); return; }
+    // Remonter sur un titre de groupe renverrait aussitôt vers le bas : on
+    // cherche le premier ancêtre qui porte lui-même des positions.
+    let cur = parId[n.parent_id];
+    for (let g = 0; cur && g < 40; g++) {
+      if (aDesPositions(cur.id)) { choisir(cur.id); return; }
+      cur = cur.parent_id ? parId[cur.parent_id] : null;
+    }
   };
 
   const versEnfant = () => {
@@ -20114,9 +20173,7 @@ function AdminMindVectorScreen({ user, profile, onBack }) {
   const activer = async (fiche) => {
     setPersonne(fiche);
     setPopupQui(false); setFormQui(null); setSelQui('');
-    const { data } = await sb.from('mv_reponses').select('node_id,pos').eq('personne_id', fiche.id);
-    const m = {}; (data || []).forEach(r => { m[r.node_id] = r.pos; });
-    setReponses(m);
+    chargerReponses(fiche);
   };
 
   // Un compte Starvolt n'a qu'une fiche : on la retrouve, sinon on la crée.
@@ -20192,12 +20249,23 @@ function AdminMindVectorScreen({ user, profile, onBack }) {
       if (efface) delete n[sel]; else n[sel] = pos;
       return n;
     });
+    // Si je me classe moi-même, ce classement EST l'auto-diagnostic : les deux
+    // jeux doivent rester cohérents à l'écran.
+    if (personne.user_id && personne.user_id === user?.id) {
+      setAutoDiag(r => {
+        const n = { ...r };
+        if (efface) delete n[sel]; else n[sel] = pos;
+        return n;
+      });
+    }
     setEnVol(v => v + 1);
     const { error } = efface
-      ? await sb.from('mv_reponses').delete().eq('personne_id', personne.id).eq('node_id', sel)
+      ? await sb.from('mv_reponses').delete()
+          .eq('personne_id', personne.id).eq('node_id', sel).eq('auteur_id', user?.id)
       : await sb.from('mv_reponses').upsert(
-          { personne_id: personne.id, node_id: sel, pos, updated_at: new Date().toISOString(), updated_by: user?.email || null },
-          { onConflict: 'personne_id,node_id' });
+          { personne_id: personne.id, node_id: sel, pos, auteur_id: user?.id,
+            updated_at: new Date().toISOString(), updated_by: user?.email || null },
+          { onConflict: 'personne_id,node_id,auteur_id' });
     setEnVol(v => v - 1);
     if (error) setErreur(error.message);
   };
@@ -20396,6 +20464,7 @@ function AdminMindVectorScreen({ user, profile, onBack }) {
           deborde={!!debordent[p.n]}
           lecture={mode === 'reponse'}
           repondu={mode === 'reponse' && reponses[sel] === p.n}
+          encadre={mode === 'reponse' && autoDiag[sel] === p.n}
           zoneRef={zoneRef}
           refCorps={el => { corpsRefs.current[p.n] = el; }}
           onOuvrir={() => {
