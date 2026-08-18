@@ -19707,6 +19707,9 @@ function AdminMindVectorScreen({ user, profile, onBack }) {
   const [personne, setPersonne] = useState(null);       // fiche mv_personnes en cours de saisie
   const [reponses, setReponses] = useState({});         // idNoeud → MA position retenue (1..5)
   const [autoDiag, setAutoDiag] = useState({});         // idNoeud → ce que la personne a dit d'elle-même
+  const [restantes,  setRestantes]  = useState(false);  // « ne montrer que ce qui reste à renseigner »
+  const [portrait,   setPortrait]   = useState(null);   // { texte } ou { erreur }
+  const [portraitEnCours, setPortraitEnCours] = useState(false);
   const [popupQui, setPopupQui] = useState(false);
   const [usagers,  setUsagers]  = useState(null);       // comptes Starvolt (get_all_users)
   const [fiches,   setFiches]   = useState([]);         // fiches mv_personnes déjà créées
@@ -19738,22 +19741,6 @@ function AdminMindVectorScreen({ user, profile, onBack }) {
   // Sur petit écran il n'y aurait rien à lire ni à classer : on descend jusqu'au
   // premier sujet réellement rempli.
   const aDesPositions = (id, c) => MV_POSITIONS.some(p => ((c || cases)[id + ':' + p.n] || '').trim());
-
-  const premierRempli = (id, liste, c) => {
-    const enf = {};
-    (liste || noeuds || []).forEach(n => {
-      const k = n.parent_id || '_';
-      if (!enf[k]) enf[k] = [];
-      enf[k].push(n);
-    });
-    const pile = (enf[id] || []).slice();
-    for (let g = 0; pile.length && g < 500; g++) {
-      const n = pile.shift();
-      if (aDesPositions(n.id, c)) return n.id;
-      pile.unshift(...(enf[n.id] || []));
-    }
-    return null;
-  };
 
   // Reprend une personne mémorisée : sa fiche puis ses réponses. Si la fiche
   // n'existe plus, on rouvre le choix plutôt que de saisir dans le vide.
@@ -19828,7 +19815,7 @@ function AdminMindVectorScreen({ user, profile, onBack }) {
       // textes viennent d'être chargés dans `c`, l'état n'est pas encore posé :
       // on les passe explicitement.
       const depart = repris || (liste.find(x => !x.parent_id) || {}).id || null;
-      if (depart) choisir(depart, liste, c);
+      if (depart) choisir(depart, liste);
     });
     return () => { vivant = false; };
   }, []);
@@ -19908,6 +19895,33 @@ function AdminMindVectorScreen({ user, profile, onBack }) {
     return out;
   }, [enfantsDe, chemin]);
 
+  // L'arbre à plat, en profondeur d'abord : racines dans l'ordre, et sous chacune
+  // toute sa descendance avant de passer à la suivante. C'est le fil que suit le
+  // glissé latéral.
+  const ordreParcours = useMemo(() => {
+    const out = [];
+    const descendre = (pid) => {
+      (enfantsDe[pid || '_'] || []).forEach(n => { out.push(n.id); descendre(n.id); });
+    };
+    descendre(null);
+    return out;
+  }, [enfantsDe]);
+
+  // Un sujet « à renseigner » a des positions rédigées ET pas encore de réponse
+  // de ma part. Le filtre ne vaut que pendant la saisie des réponses : en
+  // rédaction, il n'y a rien à renseigner.
+  const aRenseigner = (id) => aDesPositions(id) && reponses[id] === undefined;
+  const admissible  = (id) => !(mode === 'reponse' && restantes) || aRenseigner(id);
+
+  // Ce qu'il reste à faire, et le moment où il ne reste plus rien.
+  const reste = useMemo(
+    () => (mode === 'reponse' && personne) ? ordreParcours.filter(aRenseigner) : [],
+    [ordreParcours, cases, reponses, mode, personne]);
+  const aDesQuestions = useMemo(
+    () => ordreParcours.some(id => aDesPositions(id)),
+    [ordreParcours, cases]);
+  const toutRenseigne = mode === 'reponse' && !!personne && aDesQuestions && reste.length === 0;
+
   // On garde le niveau le plus profond sous les yeux.
   useEffect(() => {
     const el = pisteRef.current;
@@ -19961,18 +19975,13 @@ function AdminMindVectorScreen({ user, profile, onBack }) {
   }
 
   // Règle unique, grand comme petit écran : ce qu'on désigne est ce qu'on édite.
-  const choisir = (id, liste, c) => {
+  const choisir = (id, liste) => {
     const l = liste || noeuds || [];
-    let cible = id;
-    if (compact && !aDesPositions(id, c)) {
-      const rempli = premierRempli(id, l, c);
-      if (rempli) cible = rempli;
-    }
-    const n = l.find(x => x.id === cible); if (!n) return;
+    const n = l.find(x => x.id === id); if (!n) return;
     fermerPos();
-    memoireRef.current[n.parent_id || '_'] = cible;
-    setChemin(prolongerAvec(l, mvChemin(l, cible)));
-    setSel(cible);
+    memoireRef.current[n.parent_id || '_'] = id;
+    setChemin(prolongerAvec(l, mvChemin(l, id)));
+    setSel(id);
   };
 
   // ── Écriture des positions ────────────────────────────────────────────────
@@ -20091,47 +20100,28 @@ function AdminMindVectorScreen({ user, profile, onBack }) {
   // Horizontalement on longe le niveau, verticalement on change d'étage : les
   // quatre gestes suffisent à visiter tout l'arbre sans rouvrir une seule liste.
 
-  // Les frères : les sujets qui partagent le même parent. En boucle — arrivé au
-  // bout, on repart de l'autre côté plutôt que de buter dans le vide.
-  const versFrere = (pas) => {
-    if (!sel) return;
-    const n = parId[sel]; if (!n) return;
-    const freres = enfantsDe[n.parent_id || '_'] || [];
-    if (freres.length < 2) return;
-    const i = freres.findIndex(f => f.id === sel);
-    if (i < 0) return;
-    choisir(freres[(i + pas + freres.length) % freres.length].id);
+  // Le glissé latéral ne longe plus un seul niveau : il parcourt TOUT l'arbre,
+  // en profondeur d'abord. Arrivé au bout des sujets d'un groupe, il enchaîne
+  // sur le groupe suivant, puis remonte d'un cran, etc. Assez de glissés dans
+  // le même sens finissent donc par montrer tous les sujets, sans jamais
+  // tourner en rond dans une seule branche.
+  const versVoisin = (pas) => {
+    const tous = ordreParcours;
+    if (!tous.length) return;
+    const i = tous.indexOf(sel);
+    const depart = i < 0 ? (pas > 0 ? -1 : 0) : i;
+    for (let k = 1; k <= tous.length; k++) {
+      const j = (((depart + pas * k) % tous.length) + tous.length) % tous.length;
+      if (admissible(tous[j])) { choisir(tous[j]); return; }
+    }
+    // Rien d'admissible ailleurs : on reste où l'on est.
   };
 
+  // Vertical : vers le bas on remonte d'un niveau (vers la racine), vers le
+  // haut on descend vers le bout des branches.
   const versParent = () => {
     const n = parId[sel];
-    if (!n || !n.parent_id) return;
-    if (!compact) { choisir(n.parent_id); return; }
-
-    const p = parId[n.parent_id];
-    if (!p) return;
-    // Le parent porte lui-même des positions : c'est un sujet, on s'y arrête.
-    if (aDesPositions(p.id)) { choisir(p.id); return; }
-
-    // Sinon c'est un titre de groupe : s'y poser n'afficherait rien, et y
-    // redescendre nous ramènerait d'où l'on vient — le rebond sans fin. On file
-    // donc au groupe voisin, et on entre dedans s'il est vide à son tour.
-    //
-    // Si ce niveau n'offre aucun voisin utilisable — cas courant du groupe
-    // enfant unique — on monte d'un cran et on recommence, jusqu'à trouver du
-    // contenu ailleurs dans l'arbre. Sans cela le geste mourait en silence alors
-    // qu'il restait des sujets à voir sous une autre branche.
-    let courant = p;
-    for (let etage = 0; courant && etage < 40; etage++) {
-      const freres = enfantsDe[courant.parent_id || '_'] || [];
-      const i = freres.findIndex(f => f.id === courant.id);
-      for (let k = 1; i >= 0 && k < freres.length; k++) {
-        const voisin = freres[(i + k) % freres.length];
-        // choisir() se charge de descendre si le voisin est lui-même un groupe.
-        if (aDesPositions(voisin.id) || premierRempli(voisin.id)) { choisir(voisin.id); return; }
-      }
-      courant = courant.parent_id ? parId[courant.parent_id] : null;
-    }
+    if (n && n.parent_id) choisir(n.parent_id);
   };
 
   const versEnfant = () => {
@@ -20158,7 +20148,7 @@ function AdminMindVectorScreen({ user, profile, onBack }) {
 
     if (ax > ay * 1.4) {                       // franchement horizontal
       if (ax < 60) return;
-      versFrere(dx > 0 ? -1 : 1);              // vers la droite = sujet précédent
+      versVoisin(dx > 0 ? -1 : 1);             // vers la droite = sujet précédent
       return;
     }
     if (ay > ax * 1.4) {                       // franchement vertical
@@ -20184,6 +20174,7 @@ function AdminMindVectorScreen({ user, profile, onBack }) {
   useEffect(() => {
     if (!popupQui) return;
     setErrQui(null);
+    if (!peutChoisirQui) return;   // rien à lister : il ne répond que pour lui
     sb.rpc('get_all_users').then(({ data }) => setUsagers(data || []));
     sb.from('mv_personnes').select('*').order('nom').then(({ data }) => setFiches(data || []));
   }, [popupQui]);
@@ -20286,6 +20277,22 @@ function AdminMindVectorScreen({ user, profile, onBack }) {
           { onConflict: 'personne_id,node_id,auteur_id' });
     setEnVol(v => v - 1);
     if (error) setErreur(error.message);
+  };
+
+  // ── Portrait : ce que l'ensemble des positions retenues dit de la personne ─
+  const demanderPortrait = async () => {
+    if (!personne || portraitEnCours) return;
+    setPortraitEnCours(true);
+    setPortrait({ chargement: true });
+    const { data, error } = await sb.functions.invoke('mind-vector', {
+      body: { action: 'profil', personne_id: personne.id },
+    });
+    setPortraitEnCours(false);
+    if (error || data?.error) {
+      setPortrait({ erreur: data?.message || error?.message || 'Analyse impossible.' });
+      return;
+    }
+    setPortrait({ texte: data.texte, sujets: data.sujets });
   };
 
   // ── Remplissage automatique des 5 positions ───────────────────────────────
@@ -20447,6 +20454,10 @@ function AdminMindVectorScreen({ user, profile, onBack }) {
     setFeuille({ type: 'menu', prof });
   };
 
+  // Choisir la personne à évaluer est un pouvoir d'administrateur. Un simple
+  // utilisateur ne répond que pour lui-même : on ne lui montre que le filtre.
+  const peutChoisirQui = ['admin','superadmin'].includes(profile?.role);
+
   const selNoeud = sel ? parId[sel] : null;
   const nomDe = (id) => (parId[id] || {}).label || '';
 
@@ -20604,6 +20615,25 @@ function AdminMindVectorScreen({ user, profile, onBack }) {
       {/* ── Les 5 positions du sujet retenu ──────────────────────────────── */}
       {noeuds === null
         ? <div style={{flex:1,display:'flex',alignItems:'center',justifyContent:'center'}}><StarSpinner size={34}/></div>
+        : toutRenseigne ? (
+          // Plus rien à classer : on le dit, et on propose la suite.
+          <div style={{flex:1,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',
+                       textAlign:'center',gap:16,padding:'0 20px'}}>
+            <div style={{fontSize:44,lineHeight:1}}>🎉</div>
+            <div style={{fontSize:21,fontWeight:900,color:'#fff',lineHeight:1.25,maxWidth:460}}>
+              Vous avez tout renseigné, place aux résultats
+            </div>
+            <div style={{fontSize:13,color:'rgba(255,255,255,.5)',lineHeight:1.55,maxWidth:420}}>
+              {reste.length === 0 && `${ordreParcours.filter(id => aDesPositions(id)).length} sujets classés.`}
+            </div>
+            <button className="btn btn-yes" style={{width:'auto',fontSize:14,padding:'12px 26px'}}
+              disabled={portraitEnCours} onClick={demanderPortrait}>
+              {portraitEnCours ? <><StarSpinner size={15} color="#1a4500"/> Analyse…</> : '✨ Vos résultats'}
+            </button>
+            <button className="btn btn-no" style={{width:'auto',fontSize:12.5,padding:'8px 16px'}}
+              onClick={() => setRestantes(false)}>Revoir mes réponses</button>
+          </div>
+        )
         : selNoeud ? grillePositions()
         : <div style={{flex:1,display:'flex',alignItems:'center',justifyContent:'center',textAlign:'center',
                        color:'rgba(255,255,255,.35)',fontSize:13,padding:'0 24px'}}>
@@ -20665,6 +20695,42 @@ function AdminMindVectorScreen({ user, profile, onBack }) {
       );
     })()}
 
+    {/* ── Portrait issu des positions retenues ────────────────────────────── */}
+    {portrait && (
+      <div style={{position:'fixed',inset:0,zIndex:9650,background:'rgba(3,12,18,.88)',backdropFilter:'blur(4px)',WebkitBackdropFilter:'blur(4px)',display:'flex',alignItems:'center',justifyContent:'center',padding:16}}
+        onClick={() => { if (!portrait.chargement) setPortrait(null); }}>
+        <div className="mv-fiche" onClick={e => e.stopPropagation()}>
+          <div style={{display:'flex',alignItems:'flex-start',gap:12}}>
+            <div style={{flex:1,minWidth:0}}>
+              <div style={{fontSize:19,fontWeight:900,color:'#fff',lineHeight:1.2}}>
+                Portrait — {personne ? `${personne.prenom} ${personne.nom}` : ''}
+              </div>
+              {portrait.sujets && (
+                <div style={{fontSize:11.5,color:'rgba(255,255,255,.45)',marginTop:3}}>
+                  D'après {portrait.sujets} sujet{portrait.sujets > 1 ? 's' : ''} classé{portrait.sujets > 1 ? 's' : ''}.
+                  Une lecture, pas un verdict.
+                </div>
+              )}
+            </div>
+            {!portrait.chargement && (
+              <button className="btn btn-no" style={{flex:'0 0 auto',width:'auto',fontSize:13,padding:'7px 13px'}}
+                onClick={() => setPortrait(null)}>Fermer</button>
+            )}
+          </div>
+          <div className="mv-fiche-corps">
+            {portrait.chargement
+              ? <div style={{textAlign:'center',padding:'30px 0'}}>
+                  <StarSpinner size={30}/>
+                  <div style={{fontSize:12.5,color:'rgba(255,255,255,.5)',marginTop:12}}>Lecture de vos positions…</div>
+                </div>
+              : portrait.erreur
+                ? <div style={{fontSize:13,fontWeight:700,color:'#ff8a8a',lineHeight:1.5}}>{portrait.erreur}</div>
+                : <BilanMarkdown text={portrait.texte} fontSize={14}/>}
+          </div>
+        </div>
+      </div>
+    )}
+
     {/* ── Fiche documentaire du sujet ─────────────────────────────────────── */}
     {docOuvert && selNoeud && (
       <div style={{position:'fixed',inset:0,zIndex:9600,background:'rgba(3,12,18,.86)',backdropFilter:'blur(4px)',WebkitBackdropFilter:'blur(4px)',display:'flex',alignItems:'center',justifyContent:'center',padding:16}}
@@ -20702,7 +20768,9 @@ function AdminMindVectorScreen({ user, profile, onBack }) {
       <div style={{position:'fixed',inset:0,zIndex:9600,background:'rgba(3,12,18,.82)',backdropFilter:'blur(4px)',WebkitBackdropFilter:'blur(4px)',display:'flex',alignItems:'center',justifyContent:'center',padding:16}}
         onClick={() => { if (!busyQui) { setPopupQui(false); setFormQui(null); if (!personne) { setMode('saisie'); } } }}>
         <div className="mv-dialogue" onClick={e => e.stopPropagation()}>
-          <div style={{fontSize:16,fontWeight:900,color:'#fff'}}>Pour qui saisit-on les réponses ?</div>
+          <div style={{fontSize:16,fontWeight:900,color:'#fff'}}>
+            {peutChoisirQui ? 'Pour qui saisit-on les réponses ?' : 'Vos réponses'}
+          </div>
 
           {formQui ? (
             <>
@@ -20739,6 +20807,7 @@ function AdminMindVectorScreen({ user, profile, onBack }) {
             </>
           ) : (
             <>
+              {peutChoisirQui && (
               <div style={{display:'flex',gap:8,alignItems:'stretch'}}>
                 <select className="inp" style={{flex:'1 1 0',minWidth:0,fontSize:13,padding:'10px 12px'}}
                   value={selQui} onChange={e => setSelQui(e.target.value)}>
@@ -20764,21 +20833,50 @@ function AdminMindVectorScreen({ user, profile, onBack }) {
                   style={{flex:'0 0 auto',width:'auto',fontSize:17,fontWeight:900,padding:'0 14px'}}
                   onClick={() => { setErrQui(null); setFormQui({ prenom:'', nom:'', email:'', commentaire:'' }); }}>＋</button>
               </div>
+              )}
+
+              {/* Le filtre : sauter ce qui est déjà classé pour n'enchaîner que
+                  les sujets restants. Seule commande offerte à un utilisateur
+                  qui n'a pas le droit de répondre pour quelqu'un d'autre. */}
+              <label style={{display:'flex',alignItems:'flex-start',gap:9,cursor:'pointer',
+                             padding:'10px 12px',borderRadius:12,
+                             background:'rgba(255,255,255,.06)',border:'1px solid rgba(255,255,255,.14)'}}>
+                <input type="checkbox" checked={restantes} style={{marginTop:2,width:17,height:17,accentColor:'#7dd940',flexShrink:0}}
+                  onChange={e => setRestantes(e.target.checked)}/>
+                <span style={{minWidth:0}}>
+                  <span style={{display:'block',fontSize:13,fontWeight:700,color:'#fff'}}>
+                    N'afficher que les questions non encore renseignées
+                  </span>
+                  <span style={{display:'block',fontSize:10.5,color:'rgba(255,255,255,.4)',marginTop:2,lineHeight:1.45}}>
+                    Le glissé latéral enchaîne alors uniquement ce qu'il reste à classer.
+                  </span>
+                </span>
+              </label>
 
               <div style={{display:'flex',gap:9}}>
-                <button className="btn btn-yes" style={{flex:'1 1 0',width:'auto',fontSize:13,padding:'10px 0'}}
-                  disabled={busyQui || !selQui} onClick={choisirDansListe}>
-                  {busyQui ? <><StarSpinner size={14} color="#1a4500"/> …</> : 'Saisir pour cette personne'}
-                </button>
-                <button className="btn btn-no" style={{flex:'0 0 auto',width:'auto',fontSize:13,padding:'10px 16px'}}
-                  disabled={busyQui} onClick={choisirMoi}>Moi-même</button>
+                {peutChoisirQui ? (
+                  <>
+                    <button className="btn btn-yes" style={{flex:'1 1 0',width:'auto',fontSize:13,padding:'10px 0'}}
+                      disabled={busyQui || !selQui} onClick={choisirDansListe}>
+                      {busyQui ? <><StarSpinner size={14} color="#1a4500"/> …</> : 'Saisir pour cette personne'}
+                    </button>
+                    <button className="btn btn-no" style={{flex:'0 0 auto',width:'auto',fontSize:13,padding:'10px 16px'}}
+                      disabled={busyQui} onClick={choisirMoi}>Moi-même</button>
+                  </>
+                ) : (
+                  <button className="btn btn-yes" style={{flex:'1 1 0',width:'auto',fontSize:13,padding:'10px 0'}}
+                    disabled={busyQui} onClick={choisirMoi}>
+                    {busyQui ? <><StarSpinner size={14} color="#1a4500"/> …</> : 'Commencer'}
+                  </button>
+                )}
               </div>
 
-              {usagers === null && <div style={{fontSize:11.5,color:'rgba(255,255,255,.4)'}}>Chargement des comptes…</div>}
+              {peutChoisirQui && usagers === null && <div style={{fontSize:11.5,color:'rgba(255,255,255,.4)'}}>Chargement des comptes…</div>}
               {errQui && <div style={{fontSize:12,fontWeight:700,color:'#ff8a8a'}}>{errQui}</div>}
               <div style={{fontSize:10.5,color:'rgba(255,255,255,.35)',lineHeight:1.5}}>
-                Les réponses sont enregistrées au nom de cette personne. Fermer sans choisir
-                revient à la rédaction des questions.
+                {peutChoisirQui
+                  ? <>Les réponses sont enregistrées au nom de cette personne. Fermer sans choisir revient à la rédaction des questions.</>
+                  : <>Vos réponses n'appartiennent qu'à vous.</>}
               </div>
             </>
           )}

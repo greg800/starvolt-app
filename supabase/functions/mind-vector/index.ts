@@ -24,6 +24,44 @@ const PRICES: Record<string, { in: number; out: number }> = {
 
 const ADMIN_EMAIL = "greg@starvolt.fr";
 const FEATURE = "mind_vector_fill";
+const FEATURE_PROFIL = "mind_vector_profil";
+
+// Repli si le prompt n'a pas encore été semé en base.
+const DEFAULT_PROFIL_PROMPT =
+  `Tu dresses le portrait d'une personne à partir de ses positions sur une série
+de sujets. Chaque sujet propose 5 positions qui vont d'un extrême à l'extrême
+opposé ; on te donne, pour chacun, celle qu'elle a retenue.
+
+Ce n'est PAS un test de personnalité : ce sont des opinions. Tu en tires
+néanmoins ce qu'elles révèlent d'une manière de voir le monde.
+
+Produis, en français et en Markdown léger (## titres, **gras**, - listes) :
+
+## Le portrait
+Un portrait-robot en 6 à 10 phrases : ce qui structure sa façon de penser, ce à
+quoi elle tient, ses lignes de force et ses angles morts. Écris-le en t'adressant
+à elle (« tu »). Sois précis et incarné, jamais complaisant ni flatteur.
+
+## Ce que disent les grilles
+Trois lectures courtes, 2 à 3 phrases chacune, en assumant qu'il s'agit
+d'hypothèses et non de mesures :
+- **Process Communication** — la base et la phase les plus probables ;
+- **MBTI** — le type le plus probable, avec les deux axes les plus nets ;
+- **Ennéagramme** — le type dominante et son aile.
+Pour chacune, dis en une phrase CE QUI, dans ses réponses, te fait pencher là.
+
+## Les tensions
+1 à 3 endroits où ses positions se contredisent ou se tendent, s'il y en a.
+
+## À toi de dire
+Termine en lui demandant si ce portrait lui paraît juste, et, si ce n'est pas le
+cas, sur quoi précisément il se trompe — pour qu'on puisse l'affiner.
+
+Règles :
+- Tu ne juges pas les opinions, tu les lis.
+- N'invente aucune position qu'elle n'a pas prise.
+- Si les réponses sont trop peu nombreuses pour trancher, dis-le franchement
+  plutôt que de broder.`;
 
 const cors = {
   "Access-Control-Allow-Origin": "*",
@@ -86,19 +124,6 @@ Pas d'introduction, pas de commentaire, pas de bloc de code. Il doit se terminer
 en demandant d'appeler l'outil report_positions avec exactement 5 positions.
 Rédige-le en français. Tu peux citer 1 ou 2 exemples courts tirés du corpus s'ils
 éclairent une consigne.`;
-
-async function getCallerEmail(jwt: string): Promise<string | null> {
-  try {
-    const res = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
-      headers: { Authorization: `Bearer ${jwt}`, apikey: ANON_KEY },
-    });
-    if (!res.ok) return null;
-    const u = await res.json();
-    return u?.email ?? null;
-  } catch {
-    return null;
-  }
-}
 
 async function dbSelect(path: string): Promise<any> {
   const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
@@ -351,15 +376,89 @@ async function generer(body: any, email: string): Promise<Response> {
   });
 }
 
+// ── action "profil" ─────────────────────────────────────────────────────────
+// Ouverte à tout utilisateur connecté, mais STRICTEMENT sur ses propres
+// classements : on lit les réponses dont il est l'auteur, jamais celles d'un
+// autre. Le service_role contourne la RLS, c'est donc ici que la garde se joue.
+async function profil(body: any, caller: { id: string; email: string }): Promise<Response> {
+  const personneId = String(body?.personne_id || "").trim();
+  if (!personneId) return json({ error: "bad_request", message: "Personne manquante." }, 400);
+
+  const reps = (await dbSelect(
+    `mv_reponses?personne_id=eq.${personneId}&auteur_id=eq.${caller.id}&select=node_id,pos`,
+  )) || [];
+  if (!reps.length) {
+    return json({ error: "vide", message: "Aucune réponse à analyser." }, 422);
+  }
+
+  const noeuds    = (await dbSelect("mv_nodes?select=id,parent_id,label,description")) || [];
+  const positions = (await dbSelect("mv_positions?select=node_id,pos,titre,content")) || [];
+  const parId: Record<string, any> = {};
+  for (const n of noeuds) parId[n.id] = n;
+  const chemin = (n: any) => {
+    const out: string[] = [];
+    let cur = n;
+    for (let g = 0; cur && g < 40; g++) { out.unshift(cur.label); cur = cur.parent_id ? parId[cur.parent_id] : null; }
+    return out.join(" › ");
+  };
+
+  const blocs: string[] = [];
+  for (const r of reps) {
+    const n = parId[r.node_id];
+    if (!n) continue;
+    const ps = positions.filter((p: any) => p.node_id === r.node_id).sort((a: any, b: any) => a.pos - b.pos);
+    const retenue = ps.find((p: any) => p.pos === r.pos);
+    if (!retenue) continue;
+    // On donne aussi les deux extrêmes : sans eux, « position 4 » ne dit rien.
+    const p1 = ps.find((p: any) => p.pos === 1), p5 = ps.find((p: any) => p.pos === 5);
+    blocs.push(
+      `SUJET : ${chemin(n)}` +
+      (n.description ? `\n  (${String(n.description).replace(/\s+/g, " ").trim()})` : "") +
+      (p1 || p5 ? `\n  Éventail : 1 = ${p1?.titre || "?"} … 5 = ${p5?.titre || "?"}` : "") +
+      `\n  RETENU → position ${r.pos}${retenue.titre ? ` « ${retenue.titre} »` : ""} : ` +
+      String(retenue.content || "").replace(/\s+/g, " ").trim(),
+    );
+  }
+  if (!blocs.length) return json({ error: "vide", message: "Aucune réponse exploitable." }, 422);
+
+  let systemPrompt = DEFAULT_PROFIL_PROMPT;
+  try {
+    const pr = await dbSelect(`ai_prompts?feature=eq.${FEATURE_PROFIL}&select=system_prompt`);
+    const p = Array.isArray(pr) ? pr[0] : null;
+    if (p?.system_prompt) systemPrompt = p.system_prompt;
+  } catch { /* repli sur le prompt codé */ }
+
+  const { ok, jsonRes } = await askClaude(
+    systemPrompt,
+    `Voici les ${blocs.length} positions retenues.\n\n${blocs.join("\n\n")}`,
+  );
+  if (!ok) return json({ error: "ai_error", message: jsonRes?.error?.message || "Appel Claude en échec." }, 502);
+  const texte = (jsonRes?.content || [])
+    .filter((c: any) => c.type === "text").map((c: any) => c.text).join("\n").trim();
+  if (!texte) return json({ error: "vide", message: "Claude n'a rien renvoyé." }, 502);
+
+  const usage = jsonRes?.usage || {};
+  const costUsd = await loggerCout(usage, caller.email, FEATURE_PROFIL);
+  return json({ texte, sujets: blocs.length, usage, cost: { usd: costUsd, eur: costUsd / USD_PER_EUR } });
+}
+
+async function getCaller(jwt: string): Promise<{ id: string; email: string } | null> {
+  try {
+    const res = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
+      headers: { Authorization: `Bearer ${jwt}`, apikey: ANON_KEY },
+    });
+    if (!res.ok) return null;
+    const u = await res.json();
+    return u?.id ? { id: u.id, email: u.email || "" } : null;
+  } catch { return null; }
+}
+
 async function handle(req: Request): Promise<Response> {
   const auth = req.headers.get("Authorization") || "";
   const jwt = auth.replace(/^Bearer\s+/i, "");
   if (!jwt) return json({ error: "no_token", message: "Token manquant." }, 401);
-  const email = await getCallerEmail(jwt);
-  if (!email) return json({ error: "invalid_token", message: "Session invalide." }, 401);
-  if (email.toLowerCase() !== ADMIN_EMAIL) {
-    return json({ error: "forbidden", message: "Accès réservé à l'administrateur." }, 403);
-  }
+  const caller = await getCaller(jwt);
+  if (!caller) return json({ error: "invalid_token", message: "Session invalide." }, 401);
   if (!ANTHROPIC_API_KEY) {
     return json({ error: "missing_key", message: "ANTHROPIC_API_KEY non configurée." }, 500);
   }
@@ -367,7 +466,14 @@ async function handle(req: Request): Promise<Response> {
   let body: any = {};
   try { body = await req.json(); } catch { /* corps vide accepté */ }
 
-  return body?.action === "rescan" ? await rescan(email) : await generer(body, email);
+  // Le portrait est à tout le monde — sur ses propres réponses. Rédiger les
+  // questions et réécrire le prompt restent des gestes d'administrateur.
+  if (body?.action === "profil") return await profil(body, caller);
+
+  if (caller.email.toLowerCase() !== ADMIN_EMAIL) {
+    return json({ error: "forbidden", message: "Accès réservé à l'administrateur." }, 403);
+  }
+  return body?.action === "rescan" ? await rescan(caller.email) : await generer(body, caller.email);
 }
 
 Deno.serve(async (req) => {
