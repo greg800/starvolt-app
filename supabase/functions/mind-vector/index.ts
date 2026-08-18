@@ -422,24 +422,63 @@ async function profil(body: any, caller: { id: string; email: string }): Promise
   if (!blocs.length) return json({ error: "vide", message: "Aucune réponse exploitable." }, 422);
 
   let systemPrompt = DEFAULT_PROFIL_PROMPT;
+  let versionPrompt = "defaut";
   try {
-    const pr = await dbSelect(`ai_prompts?feature=eq.${FEATURE_PROFIL}&select=system_prompt`);
+    const pr = await dbSelect(`ai_prompts?feature=eq.${FEATURE_PROFIL}&select=system_prompt,updated_at`);
     const p = Array.isArray(pr) ? pr[0] : null;
-    if (p?.system_prompt) systemPrompt = p.system_prompt;
+    if (p?.system_prompt) { systemPrompt = p.system_prompt; versionPrompt = String(p.updated_at || ""); }
   } catch { /* repli sur le prompt codé */ }
+
+  // Portrait déjà en mémoire ? On ne repaie un appel que si quelque chose a
+  // bougé : les réponses, le prompt, ou le commentaire laissé par l'intéressé.
+  const stocke = ((await dbSelect(
+    `mv_portraits?personne_id=eq.${personneId}&auteur_id=eq.${caller.id}&select=texte,signature,commentaire`,
+  )) || [])[0] || null;
+  const commentaire = String(body?.commentaire ?? stocke?.commentaire ?? "").trim();
+  const signature = JSON.stringify({
+    r: reps.map((r: any) => `${r.node_id}:${r.pos}`).sort(),
+    p: versionPrompt,
+    c: commentaire,
+  });
+  if (stocke && stocke.signature === signature && !body?.forcer) {
+    return json({ texte: stocke.texte, sujets: blocs.length, commentaire, cache: true });
+  }
 
   const { ok, jsonRes } = await askClaude(
     systemPrompt,
-    `Voici les ${blocs.length} positions retenues.\n\n${blocs.join("\n\n")}`,
+    `Voici les ${blocs.length} positions retenues.\n\n${blocs.join("\n\n")}` +
+    (commentaire
+      ? `\n\n=== CE QUE LA PERSONNE A RÉPONDU AU PORTRAIT PRÉCÉDENT ===\n${commentaire}\n` +
+        `Prends-le au sérieux : corrige ce qu'elle conteste, et affine le reste en conséquence.`
+      : ""),
   );
   if (!ok) return json({ error: "ai_error", message: jsonRes?.error?.message || "Appel Claude en échec." }, 502);
   const texte = (jsonRes?.content || [])
     .filter((c: any) => c.type === "text").map((c: any) => c.text).join("\n").trim();
   if (!texte) return json({ error: "vide", message: "Claude n'a rien renvoyé." }, 502);
 
+  // On garde le texte ET l'état qui l'a produit : le prochain clic n'appellera
+  // l'IA que si l'un des deux a bougé.
+  try {
+    await fetch(`${SUPABASE_URL}/rest/v1/mv_portraits?on_conflict=personne_id,auteur_id`, {
+      method: "POST",
+      headers: {
+        apikey: SERVICE_ROLE,
+        Authorization: `Bearer ${SERVICE_ROLE}`,
+        "Content-Type": "application/json",
+        Prefer: "resolution=merge-duplicates,return=minimal",
+      },
+      body: JSON.stringify({
+        personne_id: personneId, auteur_id: caller.id,
+        texte, signature, commentaire: commentaire || null,
+        updated_at: new Date().toISOString(),
+      }),
+    });
+  } catch { /* le portrait est rendu même si la mémorisation échoue */ }
+
   const usage = jsonRes?.usage || {};
   const costUsd = await loggerCout(usage, caller.email, FEATURE_PROFIL);
-  return json({ texte, sujets: blocs.length, usage, cost: { usd: costUsd, eur: costUsd / USD_PER_EUR } });
+  return json({ texte, sujets: blocs.length, commentaire, usage, cost: { usd: costUsd, eur: costUsd / USD_PER_EUR } });
 }
 
 async function getCaller(jwt: string): Promise<{ id: string; email: string } | null> {

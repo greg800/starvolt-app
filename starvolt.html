@@ -19710,6 +19710,7 @@ function AdminMindVectorScreen({ user, profile, onBack }) {
   const [restantes,  setRestantes]  = useState(false);  // « ne montrer que ce qui reste à renseigner »
   const [portrait,   setPortrait]   = useState(null);   // { texte } ou { erreur }
   const [portraitEnCours, setPortraitEnCours] = useState(false);
+  const [commentaire, setCommentaire] = useState(null);   // null = champ fermé
   const [popupQui, setPopupQui] = useState(false);
   const [usagers,  setUsagers]  = useState(null);       // comptes Starvolt (get_all_users)
   const [fiches,   setFiches]   = useState([]);         // fiches mv_personnes déjà créées
@@ -19883,17 +19884,34 @@ function AdminMindVectorScreen({ user, profile, onBack }) {
   // nœud retenu au niveau k-1. Seule et unique description de l'arbre, partagée
   // par le bandeau et les boutons de niveau.
   const niveaux = useMemo(() => {
+    // Quand on ne veut voir que ce qui reste, l'arbre se réduit aux sujets non
+    // classés et aux branches qui y mènent — sinon le filtre ne masquerait rien
+    // et il faudrait deviner où sont les questions restantes.
+    let garde = null;
+    if (mode === 'reponse' && restantes) {
+      garde = new Set();
+      (noeuds || []).forEach(n => {
+        if (!(aDesPositions(n.id) && reponses[n.id] === undefined)) return;
+        let cur = n;
+        for (let g = 0; cur && g < 40; g++) { garde.add(cur.id); cur = cur.parent_id ? parId[cur.parent_id] : null; }
+      });
+      // Le sujet ouvert reste visible même une fois classé : il disparaîtrait
+      // sous les doigts au moment même où on le renseigne.
+      let cur = sel ? parId[sel] : null;
+      for (let g = 0; cur && g < 40; g++) { garde.add(cur.id); cur = cur.parent_id ? parId[cur.parent_id] : null; }
+    }
     const out = [];
     let parent = '_';
     for (let k = 0; k < 40; k++) {
-      const items = enfantsDe[parent] || [];
+      let items = enfantsDe[parent] || [];
+      if (garde) items = items.filter(n => garde.has(n.id));
       if (!items.length) break;
       out.push({ prof: k, parent: parent === '_' ? null : parent, items, choisi: chemin[k] || null });
       if (!chemin[k]) break;
       parent = chemin[k];
     }
     return out;
-  }, [enfantsDe, chemin]);
+  }, [enfantsDe, chemin, mode, restantes, noeuds, reponses, cases, sel, parId]);
 
   // L'arbre à plat, en profondeur d'abord : racines dans l'ordre, et sous chacune
   // toute sa descendance avant de passer à la suivante. C'est le fil que suit le
@@ -19921,6 +19939,9 @@ function AdminMindVectorScreen({ user, profile, onBack }) {
     () => ordreParcours.some(id => aDesPositions(id)),
     [ordreParcours, cases]);
   const toutRenseigne = mode === 'reponse' && !!personne && aDesQuestions && reste.length === 0;
+  // On ne PREND l'écran de fin que si l'on demandait justement à ne voir que ce
+  // qui reste. Sinon on laisse l'arbre : décocher le filtre doit rendre la main.
+  const ecranDeFin = toutRenseigne && restantes;
 
   // On garde le niveau le plus profond sous les yeux.
   useEffect(() => {
@@ -20280,20 +20301,27 @@ function AdminMindVectorScreen({ user, profile, onBack }) {
   };
 
   // ── Portrait : ce que l'ensemble des positions retenues dit de la personne ─
-  const demanderPortrait = async () => {
+  // `commentaire` non défini = on garde celui déjà en base. La fonction edge ne
+  // rappelle l'IA que si les réponses, le prompt ou le commentaire ont bougé :
+  // rouvrir ses résultats ne coûte donc rien.
+  const demanderPortrait = async (commentaire) => {
     if (!personne || portraitEnCours) return;
     setPortraitEnCours(true);
-    setPortrait({ chargement: true });
-    const { data, error } = await sb.functions.invoke('mind-vector', {
-      body: { action: 'profil', personne_id: personne.id },
-    });
+    setPortrait(p => ({ ...(p || {}), chargement: true }));
+    const corps = { action: 'profil', personne_id: personne.id };
+    if (commentaire !== undefined) corps.commentaire = commentaire;
+    const { data, error } = await sb.functions.invoke('mind-vector', { body: corps });
     setPortraitEnCours(false);
     if (error || data?.error) {
       setPortrait({ erreur: data?.message || error?.message || 'Analyse impossible.' });
       return;
     }
-    setPortrait({ texte: data.texte, sujets: data.sujets });
+    setPortrait({ texte: data.texte, sujets: data.sujets, commentaire: data.commentaire || '', cache: !!data.cache });
   };
+
+  // Fermer le portrait rend la main sur l'arbre : rester sur « il ne reste rien »
+  // après avoir vu ses résultats était un cul-de-sac.
+  const fermerPortrait = () => { setPortrait(null); setCommentaire(null); setRestantes(false); };
 
   // ── Remplissage automatique des 5 positions ───────────────────────────────
   // Le sujet doit exister avant de porter ses positions : on le crée (ou on
@@ -20539,6 +20567,11 @@ function AdminMindVectorScreen({ user, profile, onBack }) {
             )}
           </button>
         </div>
+        {toutRenseigne && (
+          <button className="btn btn-yes" style={{flex:'0 0 auto',width:'auto',fontSize:12,padding:'6px 12px'}}
+            title="Revoir le portrait tiré de vos positions"
+            onClick={() => demanderPortrait()}>✨ Résultats</button>
+        )}
         {selNoeud && (() => {
           // Le livre ne s'affiche que s'il y a vraiment quelque chose à lire —
           // sinon c'est une promesse vide. Vaut dans les deux modes.
@@ -20615,7 +20648,7 @@ function AdminMindVectorScreen({ user, profile, onBack }) {
       {/* ── Les 5 positions du sujet retenu ──────────────────────────────── */}
       {noeuds === null
         ? <div style={{flex:1,display:'flex',alignItems:'center',justifyContent:'center'}}><StarSpinner size={34}/></div>
-        : toutRenseigne ? (
+        : ecranDeFin ? (
           // Plus rien à classer : on le dit, et on propose la suite.
           <div style={{flex:1,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',
                        textAlign:'center',gap:16,padding:'0 20px'}}>
@@ -20632,6 +20665,9 @@ function AdminMindVectorScreen({ user, profile, onBack }) {
             </button>
             <button className="btn btn-no" style={{width:'auto',fontSize:12.5,padding:'8px 16px'}}
               onClick={() => setRestantes(false)}>Revoir mes réponses</button>
+            <div style={{fontSize:11,color:'rgba(255,255,255,.35)',lineHeight:1.5,maxWidth:380}}>
+              « Revoir mes réponses » décoche le filtre et rouvre l'arbre entier.
+            </div>
           </div>
         )
         : selNoeud ? grillePositions()
@@ -20714,7 +20750,7 @@ function AdminMindVectorScreen({ user, profile, onBack }) {
             </div>
             {!portrait.chargement && (
               <button className="btn btn-no" style={{flex:'0 0 auto',width:'auto',fontSize:13,padding:'7px 13px'}}
-                onClick={() => setPortrait(null)}>Fermer</button>
+                onClick={fermerPortrait}>Fermer</button>
             )}
           </div>
           <div className="mv-fiche-corps">
@@ -20727,6 +20763,39 @@ function AdminMindVectorScreen({ user, profile, onBack }) {
                 ? <div style={{fontSize:13,fontWeight:700,color:'#ff8a8a',lineHeight:1.5}}>{portrait.erreur}</div>
                 : <BilanMarkdown text={portrait.texte} fontSize={14}/>}
           </div>
+
+          {/* Le portrait pose une question : il faut pouvoir y répondre, et la
+              réponse doit servir au portrait suivant plutôt que se perdre. */}
+          {!portrait.chargement && !portrait.erreur && (
+            commentaire === null ? (
+              <div style={{display:'flex',gap:9,marginTop:12,flexWrap:'wrap'}}>
+                <button className="btn btn-yes" style={{flex:'1 1 0',width:'auto',fontSize:13,padding:'10px 0'}}
+                  onClick={() => setCommentaire(portrait.commentaire || '')}>
+                  ✍️ Saisir mes commentaires
+                </button>
+                {portrait.commentaire && (
+                  <span style={{alignSelf:'center',fontSize:10.5,color:'rgba(255,255,255,.4)'}}>
+                    Un commentaire est déjà pris en compte.
+                  </span>
+                )}
+              </div>
+            ) : (
+              <div style={{marginTop:12,display:'flex',flexDirection:'column',gap:9}}>
+                <textarea className="mv-dialogue-zone" rows={4} autoFocus value={commentaire}
+                  placeholder="Ce portrait vous paraît juste ? Sur quoi se trompe-t-il ? Votre réponse nourrira la prochaine analyse."
+                  onChange={e => setCommentaire(e.target.value)}/>
+                <div style={{display:'flex',gap:9}}>
+                  <button className="btn btn-yes" style={{flex:'1 1 0',width:'auto',fontSize:13,padding:'10px 0'}}
+                    disabled={portraitEnCours}
+                    onClick={() => { const c = commentaire; setCommentaire(null); demanderPortrait(c); }}>
+                    Enregistrer et réanalyser
+                  </button>
+                  <button className="btn btn-no" style={{flex:'0 0 auto',width:'auto',fontSize:13,padding:'10px 16px'}}
+                    onClick={() => setCommentaire(null)}>Annuler</button>
+                </div>
+              </div>
+            )
+          )}
         </div>
       </div>
     )}
