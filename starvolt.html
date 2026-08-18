@@ -1796,6 +1796,12 @@
       color: #fff; font-family: inherit; font-size: 14px; font-weight: 600; outline: none;
     }
     .mv-dialogue input:focus { border-color: #7dd940; }
+    /* Ligne à cocher : c'est du texte à lire, pas un intitulé de champ — elle ne
+       doit hériter ni des majuscules ni de l'interlettrage des <label>. */
+    .mv-dialogue label.mv-choix {
+      text-transform: none; letter-spacing: normal; margin-bottom: 0;
+      color: #fff; font-weight: 600;
+    }
     .mv-dialogue-zone {
       width: 100%; padding: 9px 12px; border-radius: 10px;
       border: 1.5px solid rgba(255,255,255,.20); background: rgba(0,0,0,.24);
@@ -19711,6 +19717,7 @@ function AdminMindVectorScreen({ user, profile, onBack }) {
   const [portrait,   setPortrait]   = useState(null);   // { texte } ou { erreur }
   const [portraitEnCours, setPortraitEnCours] = useState(false);
   const [commentaire, setCommentaire] = useState(null);   // null = champ fermé
+  const [exclusions, setExclusions] = useState([]);       // branches écartées pour cette personne
   const [popupQui, setPopupQui] = useState(false);
   const [usagers,  setUsagers]  = useState(null);       // comptes Starvolt (get_all_users)
   const [fiches,   setFiches]   = useState([]);         // fiches mv_personnes déjà créées
@@ -19755,7 +19762,28 @@ function AdminMindVectorScreen({ user, profile, onBack }) {
   // Deux jeux distincts : ce que J'AI classé, et ce que la personne a dit
   // d'elle-même. La base ne renvoie le second qu'à un super admin (policy
   // « mv_reponses lecture ») — inutile de le refiltrer ici.
+  // Une branche écartée emporte toute sa descendance : on teste le sujet et ses
+  // ancêtres.
+  const estExclu = (id) => {
+    if (!exclusions.length) return false;
+    let cur = parId[id];
+    for (let g = 0; cur && g < 40; g++) {
+      if (exclusions.includes(cur.id)) return true;
+      cur = cur.parent_id ? parId[cur.parent_id] : null;
+    }
+    return false;
+  };
+
+  const basculerBranche = async (id) => {
+    if (!personne) return;
+    const suite = exclusions.includes(id) ? exclusions.filter(x => x !== id) : [...exclusions, id];
+    setExclusions(suite);
+    const { error } = await sb.from('mv_personnes').update({ exclusions: suite }).eq('id', personne.id);
+    if (error) setErrQui(error.message);
+  };
+
   const chargerReponses = async (fiche) => {
+    setExclusions(Array.isArray(fiche.exclusions) ? fiche.exclusions : []);
     const { data } = await sb.from('mv_reponses')
       .select('node_id,pos,auteur_id').eq('personne_id', fiche.id);
     const miennes = {}, auto = {};
@@ -19904,6 +19932,7 @@ function AdminMindVectorScreen({ user, profile, onBack }) {
     let parent = '_';
     for (let k = 0; k < 40; k++) {
       let items = enfantsDe[parent] || [];
+      if (mode === 'reponse' && exclusions.length) items = items.filter(n => !exclusions.includes(n.id));
       if (garde) items = items.filter(n => garde.has(n.id));
       if (!items.length) break;
       out.push({ prof: k, parent: parent === '_' ? null : parent, items, choisi: chemin[k] || null });
@@ -19911,7 +19940,7 @@ function AdminMindVectorScreen({ user, profile, onBack }) {
       parent = chemin[k];
     }
     return out;
-  }, [enfantsDe, chemin, mode, restantes, noeuds, reponses, cases, sel, parId]);
+  }, [enfantsDe, chemin, mode, restantes, noeuds, reponses, cases, sel, parId, exclusions]);
 
   // L'arbre à plat, en profondeur d'abord : racines dans l'ordre, et sous chacune
   // toute sa descendance avant de passer à la suivante. C'est le fil que suit le
@@ -19919,11 +19948,14 @@ function AdminMindVectorScreen({ user, profile, onBack }) {
   const ordreParcours = useMemo(() => {
     const out = [];
     const descendre = (pid) => {
-      (enfantsDe[pid || '_'] || []).forEach(n => { out.push(n.id); descendre(n.id); });
+      (enfantsDe[pid || '_'] || []).forEach(n => {
+        if (mode === 'reponse' && exclusions.includes(n.id)) return;  // branche écartée
+        out.push(n.id); descendre(n.id);
+      });
     };
     descendre(null);
     return out;
-  }, [enfantsDe]);
+  }, [enfantsDe, mode, exclusions]);
 
   // Un sujet « à renseigner » a des positions rédigées ET pas encore de réponse
   // de ma part. Le filtre ne vaut que pendant la saisie des réponses : en
@@ -19938,6 +19970,31 @@ function AdminMindVectorScreen({ user, profile, onBack }) {
   const aDesQuestions = useMemo(
     () => ordreParcours.some(id => aDesPositions(id)),
     [ordreParcours, cases]);
+  // Les « branches » : les sujets qui en portent d'autres. Écarter une feuille
+  // n'aurait pas de sens — c'est justement une question. On les liste à plat,
+  // dans l'ordre de l'arbre, avec leur profondeur pour l'indentation.
+  const branches = useMemo(() => {
+    const enf = {};
+    (noeuds || []).forEach(n => {
+      const k = n.parent_id || '_';
+      if (!enf[k]) enf[k] = [];
+      enf[k].push(n);
+    });
+    const out = [];
+    const descendre = (pid, prof) => {
+      (enf[pid || '_'] || []).forEach(n => {
+        if (!(enf[n.id] || []).length) return;      // feuille : rien à écarter
+        out.push({ id: n.id, label: n.label, prof });
+        descendre(n.id, prof + 1);
+      });
+    };
+    descendre(null, 0);
+    return out;
+  }, [noeuds]);
+
+  // Avancement, sur le seul périmètre retenu pour cette personne.
+  const aClasser = useMemo(() => ordreParcours.filter(id => aDesPositions(id)), [ordreParcours, cases]);
+  const classees = aClasser.filter(id => reponses[id] !== undefined).length;
   const toutRenseigne = mode === 'reponse' && !!personne && aDesQuestions && reste.length === 0;
   // On ne PREND l'écran de fin que si l'on demandait justement à ne voir que ce
   // qui reste. Sinon on laisse l'arbre : décocher le filtre doit rendre la main.
@@ -20570,7 +20627,9 @@ function AdminMindVectorScreen({ user, profile, onBack }) {
             )}
           </button>
         </div>
-        {toutRenseigne && (
+        {/* Sur petit écran ce bouton rognait la largeur de l'intitulé, qui
+            devenait illisible : il vit là-bas dans « Info navigation ». */}
+        {toutRenseigne && !compact && (
           <button className="btn btn-yes" style={{flex:'0 0 auto',width:'auto',fontSize:12,padding:'6px 12px'}}
             title="Revoir le portrait tiré de vos positions"
             onClick={() => demanderPortrait()}>✨ Résultats</button>
@@ -20840,9 +20899,7 @@ function AdminMindVectorScreen({ user, profile, onBack }) {
       <div style={{position:'fixed',inset:0,zIndex:9600,background:'rgba(3,12,18,.82)',backdropFilter:'blur(4px)',WebkitBackdropFilter:'blur(4px)',display:'flex',alignItems:'center',justifyContent:'center',padding:16}}
         onClick={() => { if (!busyQui) { setPopupQui(false); setFormQui(null); if (!personne) { setMode('saisie'); } } }}>
         <div className="mv-dialogue" onClick={e => e.stopPropagation()}>
-          <div style={{fontSize:16,fontWeight:900,color:'#fff'}}>
-            {peutChoisirQui ? 'Pour qui saisit-on les réponses ?' : 'Vos réponses'}
-          </div>
+          <div style={{fontSize:16,fontWeight:900,color:'#fff'}}>Info navigation</div>
 
           {formQui ? (
             <>
@@ -20907,10 +20964,59 @@ function AdminMindVectorScreen({ user, profile, onBack }) {
               </div>
               )}
 
+              {personne && (
+                <>
+                  {/* Où en est-on, sur le seul périmètre retenu pour cette personne. */}
+                  <div style={{background:'rgba(255,255,255,.06)',border:'1px solid rgba(255,255,255,.14)',
+                               borderRadius:12,padding:'11px 13px'}}>
+                    <div style={{display:'flex',alignItems:'baseline',justifyContent:'space-between',gap:10}}>
+                      <span style={{fontSize:12,fontWeight:700,color:'rgba(255,255,255,.6)'}}>Avancement</span>
+                      <span style={{fontSize:14,fontWeight:900,color:'#fff'}}>
+                        {classees} / {aClasser.length}
+                      </span>
+                    </div>
+                    <div style={{height:6,borderRadius:4,marginTop:8,background:'rgba(255,255,255,.12)',overflow:'hidden'}}>
+                      <div style={{height:'100%',borderRadius:4,background:'var(--green)',transition:'width .3s',
+                                   width: aClasser.length ? `${Math.round(classees / aClasser.length * 100)}%` : '0%'}}/>
+                    </div>
+                    <div style={{fontSize:10.5,color:'rgba(255,255,255,.4)',marginTop:6,lineHeight:1.45}}>
+                      {aClasser.length - classees > 0
+                        ? `Il reste ${aClasser.length - classees} sujet${aClasser.length - classees > 1 ? 's' : ''} à classer.`
+                        : 'Tout est classé.'}
+                    </div>
+                  </div>
+
+                  {/* Les branches sans objet pour cette personne : on les écarte
+                      plutôt que de lui faire traverser des questions hors sujet. */}
+                  {branches.length > 0 && (
+                    <div>
+                      <label>Sujets à lui présenter</label>
+                      <div style={{maxHeight:170,overflowY:'auto',display:'flex',flexDirection:'column',gap:4,
+                                   background:'rgba(0,0,0,.18)',border:'1px solid rgba(255,255,255,.12)',
+                                   borderRadius:10,padding:'8px 10px'}}>
+                        {branches.map(b => (
+                          <label key={b.id} className="mv-choix" style={{display:'flex',alignItems:'center',gap:8,cursor:'pointer',
+                                                    paddingLeft: b.prof * 14, fontSize:12.5,color:'#fff'}}>
+                            <input type="checkbox" checked={!exclusions.includes(b.id)}
+                              style={{width:15,height:15,accentColor:'#7dd940',flexShrink:0}}
+                              onChange={() => basculerBranche(b.id)}/>
+                            <span style={{minWidth:0,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',
+                                          opacity: exclusions.includes(b.id) ? .45 : 1}}>{b.label}</span>
+                          </label>
+                        ))}
+                      </div>
+                      <div style={{fontSize:10.5,color:'rgba(255,255,255,.35)',marginTop:5,lineHeight:1.45}}>
+                        Décocher une branche retire aussi tout ce qu'elle contient.
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
+
               {/* Le filtre : sauter ce qui est déjà classé pour n'enchaîner que
                   les sujets restants. Seule commande offerte à un utilisateur
                   qui n'a pas le droit de répondre pour quelqu'un d'autre. */}
-              <label style={{display:'flex',alignItems:'flex-start',gap:9,cursor:'pointer',
+              <label className="mv-choix" style={{display:'flex',alignItems:'flex-start',gap:9,cursor:'pointer',
                              padding:'10px 12px',borderRadius:12,
                              background:'rgba(255,255,255,.06)',border:'1px solid rgba(255,255,255,.14)'}}>
                 <input type="checkbox" checked={restantes} style={{marginTop:2,width:17,height:17,accentColor:'#7dd940',flexShrink:0}}
@@ -20942,6 +21048,19 @@ function AdminMindVectorScreen({ user, profile, onBack }) {
                   </button>
                 )}
               </div>
+
+              {personne && (
+                <button className="btn btn-yes" style={{width:'100%',fontSize:13,padding:'11px 0'}}
+                  disabled={portraitEnCours || !classees}
+                  onClick={() => { setPopupQui(false); demanderPortrait(); }}>
+                  {portraitEnCours ? <><StarSpinner size={14} color="#1a4500"/> Analyse…</> : '✨ Lancer l\'analyse'}
+                </button>
+              )}
+              {personne && !classees && (
+                <div style={{fontSize:10.5,color:'rgba(255,255,255,.35)',lineHeight:1.45,marginTop:-4}}>
+                  Classez au moins un sujet pour lancer une analyse.
+                </div>
+              )}
 
               {peutChoisirQui && usagers === null && <div style={{fontSize:11.5,color:'rgba(255,255,255,.4)'}}>Chargement des comptes…</div>}
               {errQui && <div style={{fontSize:12,fontWeight:700,color:'#ff8a8a'}}>{errQui}</div>}
