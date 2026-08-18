@@ -20309,7 +20309,10 @@ function AdminMindVectorScreen({ user, profile, onBack }) {
     setPortraitEnCours(true);
     setPortrait(p => ({ ...(p || {}), chargement: true }));
     const corps = { action: 'profil', personne_id: personne.id };
-    if (commentaire !== undefined) corps.commentaire = commentaire;
+    // On n'accepte QUE du texte : branché directement sur un onClick, cette
+    // fonction recevait l'événement React, qui partait dans le corps JSON et
+    // faisait échouer la sérialisation (structure circulaire).
+    if (typeof commentaire === 'string') corps.commentaire = commentaire;
     const { data, error } = await sb.functions.invoke('mind-vector', { body: corps });
     setPortraitEnCours(false);
     if (error || data?.error) {
@@ -20660,7 +20663,7 @@ function AdminMindVectorScreen({ user, profile, onBack }) {
               {reste.length === 0 && `${ordreParcours.filter(id => aDesPositions(id)).length} sujets classés.`}
             </div>
             <button className="btn btn-yes" style={{width:'auto',fontSize:14,padding:'12px 26px'}}
-              disabled={portraitEnCours} onClick={demanderPortrait}>
+              disabled={portraitEnCours} onClick={() => demanderPortrait()}>
               {portraitEnCours ? <><StarSpinner size={15} color="#1a4500"/> Analyse…</> : '✨ Vos résultats'}
             </button>
             <button className="btn btn-no" style={{width:'auto',fontSize:12.5,padding:'8px 16px'}}
