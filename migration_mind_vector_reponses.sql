@@ -37,20 +37,15 @@ create index if not exists mv_reponses_node_idx on public.mv_reponses (node_id, 
 alter table public.mv_personnes enable row level security;
 alter table public.mv_reponses  enable row level security;
 
-drop policy if exists "mv_personnes read" on public.mv_personnes;
-create policy "mv_personnes read" on public.mv_personnes
-  for select to authenticated using (true);
+-- ⚠️ Les lectures étaient ouvertes à tout compte connecté (`using (true)`).
+-- Elles ont été refermées depuis, et les policies définitives vivent ailleurs :
+--   · `mv_personnes` → `migration_mind_vector_rls.sql`    (admin + sa propre fiche)
+--   · `mv_reponses`  → `migration_mind_vector_auteur.sql` (ses propres classements)
+-- Ce fichier ne les recrée donc plus : réexécuté un jour, il rouvrirait
+-- l'annuaire des personnes évaluées à n'importe quel utilisateur.
+
 drop policy if exists "mv_personnes admin write" on public.mv_personnes;
 create policy "mv_personnes admin write" on public.mv_personnes
-  for all to authenticated
-  using      (exists (select 1 from public.profiles p where p.id = auth.uid() and p.role in ('admin','superadmin')))
-  with check (exists (select 1 from public.profiles p where p.id = auth.uid() and p.role in ('admin','superadmin')));
-
-drop policy if exists "mv_reponses read" on public.mv_reponses;
-create policy "mv_reponses read" on public.mv_reponses
-  for select to authenticated using (true);
-drop policy if exists "mv_reponses admin write" on public.mv_reponses;
-create policy "mv_reponses admin write" on public.mv_reponses
   for all to authenticated
   using      (exists (select 1 from public.profiles p where p.id = auth.uid() and p.role in ('admin','superadmin')))
   with check (exists (select 1 from public.profiles p where p.id = auth.uid() and p.role in ('admin','superadmin')));
