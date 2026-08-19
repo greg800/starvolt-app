@@ -133,10 +133,10 @@ async function dbSelect(path: string): Promise<any> {
   return await res.json();
 }
 
-async function askClaude(system: string, userContent: string, tools?: any[]) {
+async function askClaude(system: string, userContent: string, tools?: any[], maxTokens = 8000) {
   const corps: any = {
     model: MODEL,
-    max_tokens: 8000,
+    max_tokens: maxTokens,
     // Opus 4.7 raisonne d'abord : forcer un tool sans le laisser réfléchir
     // produit régulièrement un appel vide. On active le thinking adaptatif et on
     // laisse le tool en "auto" — le prompt impose déjà de l'appeler.
@@ -515,6 +515,19 @@ async function branche(body: any, email: string): Promise<Response> {
     if (p?.system_prompt) systemPrompt = p.system_prompt;
   } catch { /* repli sur le prompt codé */ }
 
+  // Ce prompt se termine par « appelle report_positions » — l'outil du
+  // remplissage d'UN sujet. Ici on en produit plusieurs d'un coup, avec un autre
+  // outil : sans cette mise au point, le modèle réclamait un outil absent et ne
+  // renvoyait aucun appel exploitable. On garde le prompt pour son style, on
+  // corrige la seule consigne qui ne vaut plus.
+  systemPrompt += `
+
+=== POUR CETTE DEMANDE ===
+Tu ne produis PAS un seul sujet mais PLUSIEURS d'un coup. L'outil à appeler est
+report_branche (et non report_positions) : il attend une liste de sujets, chacun
+avec son intitulé, une description d'une phrase, et ses 5 positions numérotées de
+1 à 5. Toutes les règles d'écriture ci-dessus restent valables pour chaque sujet.`;
+
   const tool = {
     name: "report_branche",
     description: "Renvoie les sujets de la branche, chacun avec ses 5 positions.",
@@ -564,13 +577,22 @@ async function branche(body: any, email: string): Promise<Response> {
     ` plus une description d'une phrase disant ce que le sujet recouvre.` +
     ` Appelle l'outil report_branche.`;
 
-  const { ok, jsonRes } = await askClaude(systemPrompt, userContent, [tool]);
+  // Jusqu'à 8 sujets de 5 positions : la réponse est longue, et le raisonnement
+  // adaptatif consomme lui aussi du plafond.
+  const { ok, jsonRes } = await askClaude(systemPrompt, userContent, [tool], 24000);
   if (!ok) return json({ error: "ai_error", message: jsonRes?.error?.message || "Appel Claude en échec." }, 502);
 
   const bloc = (jsonRes?.content || []).find(
     (x: any) => x.type === "tool_use" && x.name === "report_branche",
   );
   const brut = Array.isArray(bloc?.input?.sujets) ? bloc.input.sujets : [];
+  if (!bloc) {
+    // Diagnostic utile plutôt qu'un « échec » opaque : on dit ce qu'on a reçu.
+    const raison = jsonRes?.stop_reason === "max_tokens"
+      ? "La réponse a été coupée avant la fin : demandez moins de sujets."
+      : "Le modèle n'a pas appelé l'outil attendu. Réessayez.";
+    return json({ error: "vide", message: raison, stop_reason: jsonRes?.stop_reason || null }, 502);
+  }
 
   // Garde-fous : au plus 8 sujets, 5 rangs chacun, rien de vide.
   const sujets = brut.slice(0, 8).map((s: any) => {

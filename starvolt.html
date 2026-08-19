@@ -19561,7 +19561,7 @@ function AdminMindVectorPromptsScreen({ onBack }) {
     setRescan({ busy:true, msg:null, type:null });
     const { data, error } = await sb.functions.invoke('mind-vector', { body: { action: 'rescan' } });
     if (error || data?.error) {
-      setRescan({ busy:false, type:'err', msg: data?.message || error?.message || 'Rescan impossible.' });
+      setRescan({ busy:false, type:'err', msg: await mvMessageErreur(error, data) });
       return;
     }
     load();
@@ -19654,6 +19654,20 @@ function AdminMindVectorPromptsScreen({ onBack }) {
     <StickyFooter onBack={onBack}/>
     </>
   );
+}
+
+// Sur un statut non-2xx, supabase-js renvoie `data: null` et un message
+// générique (« Edge Function returned a non-2xx status code ») : le message utile
+// que la fonction a pris soin de rédiger reste dans le corps de la réponse, qu'il
+// faut aller relire. Sans ça, toute erreur serveur s'affiche à l'identique et on
+// ne peut rien diagnostiquer depuis l'écran.
+async function mvMessageErreur(error, data) {
+  if (data && data.message) return data.message;
+  try {
+    const corps = await (error && error.context && error.context.json && error.context.json());
+    if (corps && (corps.message || corps.error)) return corps.message || corps.error;
+  } catch {}
+  return (error && error.message) || 'Appel impossible.';
 }
 
 // ─── Mind Vector : formaliser les modèles mentaux ─────────────────────────────
@@ -20490,7 +20504,7 @@ function AdminMindVectorScreen({ user, profile, onBack }) {
     const { data, error } = await sb.functions.invoke('mind-vector', { body: corps });
     setPortraitEnCours(false);
     if (error || data?.error) {
-      setPortrait({ erreur: data?.message || error?.message || 'Analyse impossible.' });
+      setPortrait({ erreur: await mvMessageErreur(error, data) });
       return;
     }
     setPortrait({ texte: data.texte, sujets: data.sujets, commentaire: data.commentaire || '', cache: !!data.cache });
@@ -20541,7 +20555,7 @@ function AdminMindVectorScreen({ user, profile, onBack }) {
       const { data, error } = await sb.functions.invoke('mind-vector', {
         body: { label, description, contenu: champs.contenu || '' },
       });
-      if (error || data?.error) throw new Error(data?.message || error?.message || 'Remplissage impossible.');
+      if (error || data?.error) throw new Error(await mvMessageErreur(error, data));
 
       const lignes = (data.positions || [])
         .filter(p => (p.contenu || '').trim() || (p.titre || '').trim())
@@ -20583,7 +20597,7 @@ function AdminMindVectorScreen({ user, profile, onBack }) {
       const { data, error } = await sb.functions.invoke('mind-vector', {
         body: { action: 'branche', label, description, instructions },
       });
-      if (error || data?.error) throw new Error(data?.message || error?.message || 'Création impossible.');
+      if (error || data?.error) throw new Error(await mvMessageErreur(error, data));
       const sujets = data.sujets || [];
       if (!sujets.length) throw new Error("L'IA n'a produit aucun sujet.");
 
