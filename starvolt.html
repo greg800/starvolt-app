@@ -13902,8 +13902,8 @@ function AdminScreen({ onTariffs, onUsers, onRoles, onSites, onSpot, onAcc, onPr
           <button className="sim-btn" onClick={onMindVector}>
             <span className="sim-icon">🧭</span>
             <div className="sim-text">
-              <div className="sim-title">Mind Vector</div>
-              <div className="sim-sub">Modèles mentaux : arbre des sujets et 5 positions</div>
+              <div className="sim-title">Paramètres Mind Vector</div>
+              <div className="sim-sub">Le parcours proposé d'office à un nouveau compte</div>
             </div>
             <span className="sim-arrow">→</span>
           </button>
@@ -18207,6 +18207,7 @@ const SCREEN_LABELS = {
   ADMIN_CYBER_SECURITY:'Admin — cyber-sécurité',
   ADMIN_MIND_VECTOR:'Admin — Mind Vector',
   ADMIN_MIND_VECTOR_PROMPTS:'Admin — prompts Mind Vector',
+  ADMIN_MIND_VECTOR_PARAMS:'Admin — paramètres Mind Vector',
 };
 const screenLabel = (s) => SCREEN_LABELS[s] || s || 'Inconnue';
 
@@ -19560,6 +19561,111 @@ function ComprendreScoreScreen({ user, subject, score, total, results, isRevisio
 // Ils vivaient dans la liste générique des prompts IA, noyés entre le bilan et
 // la correction orthographique. Ils tiennent à Mind Vector : ils sont donc dans
 // le groupe « Comprendre », à côté de lui.
+// ─── Paramètres Mind Vector ───────────────────────────────────────────────────
+// Le parcours par défaut : quelles branches un nouveau venu se voit proposer
+// d'office. Ce n'est qu'une graine, lue une fois, à la création de sa fiche —
+// ensuite chacun rouvre ou referme ce qu'il veut depuis son propre menu, et son
+// choix tient pour toutes les sessions suivantes. Décocher ici ne referme donc
+// rien chez les comptes déjà créés.
+function AdminMindVectorParamsScreen({ onBack }) {
+  const [noeuds, setNoeuds] = useState(null);
+  const [busy,   setBusy]   = useState(false);
+  const [err,    setErr]    = useState(null);
+
+  useEffect(() => {
+    sb.from('mv_nodes').select('*').order('ordre').order('created_at')
+      .then(({ data, error }) => {
+        if (error) { setErr(error.message); setNoeuds([]); return; }
+        setNoeuds(data || []);
+      });
+  }, []);
+
+  const lignes = useMemo(() => mvArbrePlat(noeuds || []), [noeuds]);
+  const visible = (n) => n.visible_defaut !== false;   // colonne absente = proposé
+  const proposes = (noeuds || []).filter(visible).length;
+
+  // Une branche décochée emporte sa descendance, et la recocher la rend
+  // entièrement : les cases doivent décrire le parcours tel qu'il sera vécu.
+  const basculer = async (id) => {
+    const l = noeuds || [];
+    const n = l.find(x => x.id === id); if (!n || busy) return;
+    const famille = mvSousArbre(l, id);
+    const valeur = !visible(n);
+    setBusy(true); setErr(null);
+    setNoeuds(list => list.map(x => famille.includes(x.id) ? { ...x, visible_defaut: valeur } : x));
+    const { error } = await sb.from('mv_nodes').update({ visible_defaut: valeur }).in('id', famille);
+    setBusy(false);
+    if (error) {
+      setErr(error.message.includes('visible_defaut')
+        ? "Colonne visible_defaut absente : appliquez migration_mind_vector_parcours.sql."
+        : error.message);
+      setNoeuds(list => list.map(x => famille.includes(x.id) ? { ...x, visible_defaut: !valeur } : x));
+    }
+  };
+
+  return (
+    <div className="screen fade-in">
+      <div className="auth-header">
+        <div className="welcome-tag" style={{color:'#7dd940'}}>Admin · Comprendre</div>
+        <h1 className="welcome-title">Paramètres<br/><span className="accent">Mind Vector</span></h1>
+      </div>
+
+      <p style={{color:'rgba(255,255,255,.55)', fontSize:13, lineHeight:1.55, margin:'0 0 16px'}}>
+        Les sujets cochés composent le parcours proposé d'office à un nouveau compte.
+        C'est un point de départ, pas une interdiction : chacun peut ensuite rouvrir
+        une branche cachée depuis son nom, en haut à gauche de Mind Vector, et son
+        choix vaut pour toutes ses sessions suivantes. Modifier cette page ne change
+        rien pour les comptes déjà créés.
+      </p>
+
+      {err && (
+        <div className="card" style={{padding:'11px 13px', marginBottom:14, border:'1px solid rgba(255,128,128,.4)'}}>
+          <div style={{fontSize:12.5, fontWeight:700, color:'#ff8080'}}>{err}</div>
+        </div>
+      )}
+
+      {noeuds === null ? <div style={{textAlign:'center',padding:40}}><StarSpinner size={34}/></div>
+       : lignes.length === 0 ? (
+        <div style={{textAlign:'center',color:'rgba(255,255,255,.4)',fontSize:14,padding:'24px 0'}}>
+          Aucun sujet dans l'arbre pour l'instant.
+        </div>
+      ) : (
+        <div className="card" style={{padding:14, marginBottom:14}}>
+          <div style={{display:'flex',alignItems:'baseline',justifyContent:'space-between',gap:10,marginBottom:10}}>
+            <div style={{fontWeight:800, fontSize:14, color:'#fff'}}>Parcours par défaut</div>
+            <span style={{fontSize:12, fontWeight:800, color:'rgba(255,255,255,.55)'}}>
+              {proposes} / {lignes.length} sujets
+            </span>
+          </div>
+          <div style={{display:'flex',flexDirection:'column',gap:4}}>
+            {lignes.map(b => {
+              const n = (noeuds || []).find(x => x.id === b.id);
+              const on = !!n && visible(n);
+              return (
+                <label key={b.id} className="mv-choix"
+                  style={{display:'flex',alignItems:'center',gap:9,cursor: busy ? 'default' : 'pointer',
+                          paddingLeft: b.prof * 16, fontSize:13, color:'#fff'}}>
+                  <input type="checkbox" checked={on} disabled={busy}
+                    style={{width:16,height:16,accentColor:'#7dd940',flexShrink:0}}
+                    onChange={() => basculer(b.id)}/>
+                  <span style={{minWidth:0,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',
+                                opacity: on ? 1 : .4, fontWeight: b.feuille ? 400 : 700}}>{b.label}</span>
+                </label>
+              );
+            })}
+          </div>
+          <div style={{fontSize:11, color:'rgba(255,255,255,.35)', marginTop:9, lineHeight:1.45}}>
+            Décocher un sujet retire aussi tout ce qu'il contient. Les noms en gras portent des sous-sujets.
+          </div>
+        </div>
+      )}
+
+      <button className="btn btn-no" onClick={onBack} style={{marginTop:4}}>← Retour</button>
+    </div>
+  );
+}
+
+// ─── Prompts Mind Vector ──────────────────────────────────────────────────────
 function AdminMindVectorPromptsScreen({ onBack }) {
   const [rows,    setRows]    = useState(null);
   const [drafts,  setDrafts]  = useState({});
@@ -19792,6 +19898,28 @@ function mvChemin(liste, id) {
   return out;
 }
 
+// L'arbre entier, à plat et dans l'ordre d'affichage, avec sa profondeur. Sert
+// aux deux listes à cocher : le parcours par défaut côté admin, et le périmètre
+// de chacun dans « Info navigation ». Les feuilles en font partie — une question
+// isolée se cache et se rouvre comme une branche.
+function mvArbrePlat(liste) {
+  const enf = {};
+  (liste || []).forEach(n => {
+    const k = n.parent_id || '_';
+    if (!enf[k]) enf[k] = [];
+    enf[k].push(n);
+  });
+  const out = [];
+  const descendre = (pid, prof) => {
+    (enf[pid || '_'] || []).forEach(n => {
+      out.push({ id: n.id, label: n.label, prof, feuille: !(enf[n.id] || []).length });
+      descendre(n.id, prof + 1);
+    });
+  };
+  descendre(null, 0);
+  return out;
+}
+
 // ─── Une des 5 positions ──────────────────────────────────────────────────────
 // Purement présentatif : la taille du texte est décidée en haut, pour les cinq à
 // la fois (c'est la case la plus chargée qui la fixe), et transmise ici.
@@ -19953,9 +20081,14 @@ function AdminMindVectorScreen({ user, profile, onBack }) {
     return false;
   };
 
+  // Décocher une branche décoche tout ce qu'elle porte ; la recocher rend la
+  // descendance entière. Les cases doivent dire la vérité sur ce que la personne
+  // verra, et pas seulement sur le nœud cliqué.
   const basculerBranche = async (id) => {
     if (!personne) return;
-    const suite = exclusions.includes(id) ? exclusions.filter(x => x !== id) : [...exclusions, id];
+    const famille = mvSousArbre(noeuds || [], id);
+    const reste = exclusions.filter(x => !famille.includes(x));
+    const suite = exclusions.includes(id) ? reste : [...reste, ...famille];
     setExclusions(suite);
     const { error } = await sb.from('mv_personnes').update({ exclusions: suite }).eq('id', personne.id);
     if (error) setErrQui(error.message);
@@ -20152,24 +20285,7 @@ function AdminMindVectorScreen({ user, profile, onBack }) {
   // Les « branches » : les sujets qui en portent d'autres. Écarter une feuille
   // n'aurait pas de sens — c'est justement une question. On les liste à plat,
   // dans l'ordre de l'arbre, avec leur profondeur pour l'indentation.
-  const branches = useMemo(() => {
-    const enf = {};
-    (noeuds || []).forEach(n => {
-      const k = n.parent_id || '_';
-      if (!enf[k]) enf[k] = [];
-      enf[k].push(n);
-    });
-    const out = [];
-    const descendre = (pid, prof) => {
-      (enf[pid || '_'] || []).forEach(n => {
-        if (!(enf[n.id] || []).length) return;      // feuille : rien à écarter
-        out.push({ id: n.id, label: n.label, prof });
-        descendre(n.id, prof + 1);
-      });
-    };
-    descendre(null, 0);
-    return out;
-  }, [noeuds]);
+  const branches = useMemo(() => mvArbrePlat(noeuds), [noeuds]);
 
   // Avancement, sur le seul périmètre retenu pour cette personne.
   const aClasser = useMemo(() => ordreParcours.filter(id => aDesPositions(id)), [ordreParcours, cases]);
@@ -20467,6 +20583,13 @@ function AdminMindVectorScreen({ user, profile, onBack }) {
   // simple utilisateur arrivait donc toujours ici avec une liste vide et
   // butait sur l'index unique mv_personnes_user_idx. On interroge la base
   // avant d'insérer, et on retombe sur elle si deux onglets se croisent.
+  // Une fiche neuve hérite du parcours décidé dans « Paramètres Mind Vector » :
+  // les branches décochées là-bas partent dans ses exclusions. Ensuite la fiche
+  // vit sa vie — chacun peut rouvrir ce qu'il veut depuis son propre menu, et son
+  // choix tient pour toutes les sessions suivantes.
+  const exclusionsParDefaut = () =>
+    (noeuds || []).filter(n => n.visible_defaut === false).map(n => n.id);
+
   const ficheDuCompte = async (u) => {
     const dejala = fiches.find(f => f.user_id === u.id);
     if (dejala) return dejala;
@@ -20477,6 +20600,7 @@ function AdminMindVectorScreen({ user, profile, onBack }) {
       prenom: (u.prenom || u.pseudo || '').trim() || '—',
       nom:    (u.nom || '').trim() || '—',
       email:  u.email || '',
+      exclusions: exclusionsParDefaut(),
       created_by: user?.email || null,
     }).select().single();
     if (error) {
@@ -20528,6 +20652,7 @@ function AdminMindVectorScreen({ user, profile, onBack }) {
     const { data, error } = await sb.from('mv_personnes').insert({
       prenom, nom, email,
       commentaire: (f.commentaire || '').trim() || null,
+      exclusions: exclusionsParDefaut(),
       created_by: user?.email || null,
     }).select().single();
     setBusyQui(false);
@@ -21282,7 +21407,7 @@ function AdminMindVectorScreen({ user, profile, onBack }) {
                   {branches.length > 0 && (
                     <div>
                       <label>Sujets à lui présenter</label>
-                      <div style={{maxHeight:170,overflowY:'auto',display:'flex',flexDirection:'column',gap:4,
+                      <div style={{maxHeight:220,overflowY:'auto',display:'flex',flexDirection:'column',gap:4,
                                    background:'rgba(0,0,0,.18)',border:'1px solid rgba(255,255,255,.12)',
                                    borderRadius:10,padding:'8px 10px'}}>
                         {branches.map(b => (
@@ -22418,7 +22543,7 @@ function App() {
           onPrix={()=>goTo('ADMIN_PRIX_MATERIAUX')}
           onOffres={()=>goTo('ADMIN_OFFRES')}
           onLearn={()=>goTo('ADMIN_LEARN')}
-          onMindVector={()=>goTo('ADMIN_MIND_VECTOR')}
+          onMindVector={()=>goTo('ADMIN_MIND_VECTOR_PARAMS')}
           onMindVectorPrompts={()=>goTo('ADMIN_MIND_VECTOR_PROMPTS')}
           onFeedback={()=>goTo('ADMIN_FEEDBACK')}
           onFactures={()=>goTo('ADMIN_FACTURES')}
@@ -22457,6 +22582,9 @@ function App() {
 
       case 'ADMIN_MIND_VECTOR_PROMPTS':
         return <AdminMindVectorPromptsScreen onBack={goBack}/>;
+
+      case 'ADMIN_MIND_VECTOR_PARAMS':
+        return <AdminMindVectorParamsScreen onBack={goBack}/>;
 
       case 'ADMIN_MIND_VECTOR':
         return <AdminMindVectorScreen user={user} profile={profile} onBack={goBack}/>;
