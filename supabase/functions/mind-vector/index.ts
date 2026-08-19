@@ -481,6 +481,122 @@ async function profil(body: any, caller: { id: string; email: string }): Promise
   return json({ texte, sujets: blocs.length, commentaire, usage, cost: { usd: costUsd, eur: costUsd / USD_PER_EUR } });
 }
 
+// ── action "branche" ────────────────────────────────────────────────────────
+// Crée d'un coup plusieurs sujets sous une même branche, chacun avec ses 5
+// positions. Lit d'abord TOUT ce qui existe déjà pour ne pas reposer une
+// question sous un autre nom : c'est le principal risque quand on génère en lot.
+async function branche(body: any, email: string): Promise<Response> {
+  const label = String(body?.label || "").trim();
+  const description = String(body?.description || "").trim();
+  const consignes = String(body?.instructions || "").trim().slice(0, 12000);
+  if (!label) return json({ error: "bad_request", message: "Intitulé manquant." }, 400);
+
+  // Le catalogue existant : intitulé complet et titres des 5 positions.
+  const noeuds    = (await dbSelect("mv_nodes?select=id,parent_id,label")) || [];
+  const positions = (await dbSelect("mv_positions?select=node_id,pos,titre")) || [];
+  const parId: Record<string, any> = {};
+  for (const n of noeuds) parId[n.id] = n;
+  const chemin = (n: any) => {
+    const out: string[] = [];
+    let cur = n;
+    for (let g = 0; cur && g < 40; g++) { out.unshift(cur.label); cur = cur.parent_id ? parId[cur.parent_id] : null; }
+    return out.join(" › ");
+  };
+  const deja = noeuds.map((n: any) => {
+    const ts = positions.filter((p: any) => p.node_id === n.id && p.titre)
+      .sort((a: any, b: any) => a.pos - b.pos).map((p: any) => p.titre);
+    return `- ${chemin(n)}${ts.length ? `  [${ts.join(" · ")}]` : ""}`;
+  }).join("\n");
+
+  let systemPrompt = DEFAULT_SYSTEM_PROMPT;
+  try {
+    const pr = await dbSelect(`ai_prompts?feature=eq.${FEATURE}&select=system_prompt`);
+    const p = Array.isArray(pr) ? pr[0] : null;
+    if (p?.system_prompt) systemPrompt = p.system_prompt;
+  } catch { /* repli sur le prompt codé */ }
+
+  const tool = {
+    name: "report_branche",
+    description: "Renvoie les sujets de la branche, chacun avec ses 5 positions.",
+    input_schema: {
+      type: "object",
+      properties: {
+        sujets: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              label: { type: "string", description: "Intitulé du sujet" },
+              description: { type: "string", description: "Ce que le sujet recouvre, une phrase" },
+              positions: {
+                type: "array",
+                items: {
+                  type: "object",
+                  properties: {
+                    pos: { type: "integer" },
+                    titre: { type: "string" },
+                    contenu: { type: "string" },
+                  },
+                  required: ["pos", "titre", "contenu"],
+                },
+              },
+            },
+            required: ["label", "positions"],
+          },
+        },
+      },
+      required: ["sujets"],
+    },
+  };
+
+  const userContent =
+    `BRANCHE À CRÉER : ${label}` +
+    (description ? `\n\nCE QUE CETTE BRANCHE RECOUVRE :\n${description}` : "") +
+    (consignes ? `\n\n=== CONSIGNES DE L'AUTEUR ===\n${consignes}\n=== FIN DES CONSIGNES ===` : "") +
+    `\n\nCombien de sujets : si les consignes ci-dessus indiquent un nombre, produis EXACTEMENT ce nombre` +
+    ` (8 au maximum). Si elles n'en indiquent aucun, produis-en 3.` +
+    (deja
+      ? `\n\n=== SUJETS DÉJÀ POSÉS DANS MIND VECTOR — n'en reproduis AUCUN ===\n${deja}\n` +
+        `Ne repose pas une de ces questions sous un autre nom, et ne reprends pas leurs` +
+        ` façons de trancher : cherche des angles que ce catalogue ne couvre pas encore.`
+      : "") +
+    `\n\nPour CHAQUE sujet, produis les 5 positions selon les règles du prompt système,` +
+    ` plus une description d'une phrase disant ce que le sujet recouvre.` +
+    ` Appelle l'outil report_branche.`;
+
+  const { ok, jsonRes } = await askClaude(systemPrompt, userContent, [tool]);
+  if (!ok) return json({ error: "ai_error", message: jsonRes?.error?.message || "Appel Claude en échec." }, 502);
+
+  const bloc = (jsonRes?.content || []).find(
+    (x: any) => x.type === "tool_use" && x.name === "report_branche",
+  );
+  const brut = Array.isArray(bloc?.input?.sujets) ? bloc.input.sujets : [];
+
+  // Garde-fous : au plus 8 sujets, 5 rangs chacun, rien de vide.
+  const sujets = brut.slice(0, 8).map((s: any) => {
+    const parRang: Record<number, any> = {};
+    for (const p of (Array.isArray(s?.positions) ? s.positions : [])) {
+      const r = parseInt(p?.pos, 10);
+      if (r >= 1 && r <= 5 && !parRang[r]) {
+        parRang[r] = { pos: r, titre: String(p?.titre || "").trim().slice(0, 60), contenu: String(p?.contenu || "").trim() };
+      }
+    }
+    return {
+      label: String(s?.label || "").trim().slice(0, 120),
+      description: String(s?.description || "").trim() || null,
+      positions: [1, 2, 3, 4, 5].map((r) => parRang[r] || { pos: r, titre: "", contenu: "" }),
+    };
+  }).filter((s: any) => s.label && s.positions.filter((p: any) => p.contenu).length >= 3);
+
+  if (!sujets.length) {
+    return json({ error: "vide", message: "L'IA n'a produit aucun sujet exploitable. Réessayez." }, 502);
+  }
+
+  const usage = jsonRes?.usage || {};
+  const costUsd = await loggerCout(usage, email, FEATURE);
+  return json({ sujets, connus: noeuds.length, usage, cost: { usd: costUsd, eur: costUsd / USD_PER_EUR } });
+}
+
 async function getCaller(jwt: string): Promise<{ id: string; email: string } | null> {
   try {
     const res = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
@@ -512,7 +628,9 @@ async function handle(req: Request): Promise<Response> {
   if (caller.email.toLowerCase() !== ADMIN_EMAIL) {
     return json({ error: "forbidden", message: "Accès réservé à l'administrateur." }, 403);
   }
-  return body?.action === "rescan" ? await rescan(caller.email) : await generer(body, caller.email);
+  if (body?.action === "rescan")  return await rescan(caller.email);
+  if (body?.action === "branche") return await branche(body, caller.email);
+  return await generer(body, caller.email);
 }
 
 Deno.serve(async (req) => {

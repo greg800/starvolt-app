@@ -13763,7 +13763,7 @@ function AdminQuizFailsScreen({ user, onBack }) {
   );
 }
 
-function AdminScreen({ onTariffs, onUsers, onRoles, onSites, onSpot, onAcc, onProduction, onGlobalVars, onFactureVars, onPrix, onOffres, onLearn, onMindVector, onFeedback, onFactures, onProofread, onAICosts, onAIPrompts, onCyberSecurity, onViewLogs, onViewFails, onImpersonate, onBack }) {
+function AdminScreen({ onTariffs, onUsers, onRoles, onSites, onSpot, onAcc, onProduction, onGlobalVars, onFactureVars, onPrix, onOffres, onLearn, onMindVector, onMindVectorPrompts, onFeedback, onFactures, onProofread, onAICosts, onAIPrompts, onCyberSecurity, onViewLogs, onViewFails, onImpersonate, onBack }) {
   return (
     <>
     <div className="screen screen-admin fade-in">
@@ -13904,6 +13904,14 @@ function AdminScreen({ onTariffs, onUsers, onRoles, onSites, onSpot, onAcc, onPr
             <div className="sim-text">
               <div className="sim-title">Mind Vector</div>
               <div className="sim-sub">Modèles mentaux : arbre des sujets et 5 positions</div>
+            </div>
+            <span className="sim-arrow">→</span>
+          </button>
+          <button className="sim-btn" onClick={onMindVectorPrompts}>
+            <span className="sim-icon">✏️</span>
+            <div className="sim-text">
+              <div className="sim-title">Prompts Mind Vector</div>
+              <div className="sim-sub">Remplissage automatique et portrait</div>
             </div>
             <span className="sim-arrow">→</span>
           </button>
@@ -14811,7 +14819,8 @@ function slugifyMd(label) {
 
 // Ces prompts se règlent sur LEUR propre page (Cyber-sécurité). Les répéter ici
 // donnait deux endroits pour la même valeur, donc deux vérités possibles.
-const AI_PROMPTS_AILLEURS = ['cyber_security', 'cyber_security_code'];
+const AI_PROMPTS_AILLEURS = ['cyber_security', 'cyber_security_code',
+                             'mind_vector_fill', 'mind_vector_profil'];
 
 function AdminAIPromptsScreen({ onBack, onBilanData }) {
   const [rows, setRows] = useState(null);       // [{feature,label,system_prompt,updated_at,updated_by}]
@@ -14820,25 +14829,6 @@ function AdminAIPromptsScreen({ onBack, onBilanData }) {
   const [msg, setMsg] = useState(null);         // {feature, type:'ok'|'err', text}
   const [files, setFiles] = useState([]);       // [{id,feature,label,content,updated_at,updated_by}] — données métier éditables
   const [edit, setEdit] = useState(null);       // {id, feature, label, content, draft, saving, deleting} — modale d'édition d'un fichier
-  const [rescan, setRescan] = useState({ busy:false, msg:null, type:null });
-
-  // Relit tout Mind Vector et réécrit le prompt de remplissage à partir de la
-  // manière de faire observée. La fonction edge enregistre elle-même le résultat
-  // dans ai_prompts : on recharge pour l'afficher.
-  const rescanMindVector = async () => {
-    setRescan({ busy:true, msg:null, type:null });
-    const { data, error } = await sb.functions.invoke('mind-vector', { body: { action: 'rescan' } });
-    if (error || data?.error) {
-      setRescan({ busy:false, type:'err',
-        msg: data?.message || error?.message || 'Rescan impossible.' });
-      return;
-    }
-    load();
-    const eur = data?.cost?.eur;
-    setRescan({ busy:false, type:'ok',
-      msg: `Prompt réécrit à partir de ${data.scanned} sujet${data.scanned > 1 ? 's' : ''}`
-           + (eur ? ` · ${eur.toFixed(3)} €` : '') + '.' });
-  };
 
   const load = () => {
     sb.rpc('get_ai_prompts').then(({ data, error }) => {
@@ -14970,25 +14960,6 @@ function AdminAIPromptsScreen({ onBack, onBilanData }) {
                 <div style={{marginTop:8, fontSize:12.5, fontWeight:600, color: msg.type==='ok' ? '#5fd38a' : '#ff8080'}}>
                   {msg.text}
                 </div>
-              )}
-              {r.feature==='mind_vector_fill' && (
-                <>
-                  <button onClick={rescanMindVector} disabled={rescan.busy}
-                    style={{marginTop:12, width:'100%', background:'rgba(125,217,64,.12)', border:'1px solid rgba(125,217,64,.4)', borderRadius:10, color:'#a3ed6a', fontSize:13, fontWeight:800, padding:'10px 14px', cursor: rescan.busy?'default':'pointer', fontFamily:'inherit', opacity: rescan.busy?.6:1}}>
-                    {rescan.busy
-                      ? <><StarSpinner size={14} color="#a3ed6a"/> Lecture de Mind Vector…</>
-                      : '🔄 Rescanner pour mettre à jour le prompt'}
-                  </button>
-                  <div style={{marginTop:6, fontSize:11, color:'rgba(255,255,255,.4)', lineHeight:1.5}}>
-                    Relit tous les sujets déjà rédigés dans Mind Vector et réécrit ce prompt
-                    à partir de leur manière de faire. Le prompt ci-dessus sera remplacé.
-                  </div>
-                  {rescan.msg && (
-                    <div style={{marginTop:6, fontSize:12.5, fontWeight:600, color: rescan.type==='ok' ? '#5fd38a' : '#ff8080'}}>
-                      {rescan.msg}
-                    </div>
-                  )}
-                </>
               )}
               {r.feature==='bilan' && (
                 <button onClick={onBilanData}
@@ -18235,6 +18206,7 @@ const SCREEN_LABELS = {
   ADMIN_ROLES_MGMT:'Admin — gestion des rôles',
   ADMIN_CYBER_SECURITY:'Admin — cyber-sécurité',
   ADMIN_MIND_VECTOR:'Admin — Mind Vector',
+  ADMIN_MIND_VECTOR_PROMPTS:'Admin — prompts Mind Vector',
 };
 const screenLabel = (s) => SCREEN_LABELS[s] || s || 'Inconnue';
 
@@ -19539,6 +19511,151 @@ function ComprendreScoreScreen({ user, subject, score, total, results, isRevisio
   );
 }
 
+
+// ─── Admin : les prompts de Mind Vector, réunis ───────────────────────────────
+// Ils vivaient dans la liste générique des prompts IA, noyés entre le bilan et
+// la correction orthographique. Ils tiennent à Mind Vector : ils sont donc dans
+// le groupe « Comprendre », à côté de lui.
+function AdminMindVectorPromptsScreen({ onBack }) {
+  const [rows,    setRows]    = useState(null);
+  const [drafts,  setDrafts]  = useState({});
+  const [saving,  setSaving]  = useState(null);
+  const [msg,     setMsg]     = useState(null);   // { feature, type, texte }
+  const [rescan,  setRescan]  = useState({ busy:false, msg:null, type:null });
+
+  // Chaque écran d'admin a le sien : il n'existe pas d'helper partagé.
+  const fmtDate = (d) => d ? new Date(d).toLocaleString('fr-FR',
+    { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit' }) : '—';
+
+  const MIENS = ['mind_vector_fill', 'mind_vector_profil'];
+  const EXPLICATIONS = {
+    mind_vector_fill:   "Sert au bouton « 🤖 Remplissage auto » et à « Créer une branche » : il rédige les 5 positions d'un sujet et leurs titres.",
+    mind_vector_profil: "Sert au CTA « Vos résultats » : il lit les positions retenues par une personne et en tire un portrait.",
+  };
+
+  const load = () => {
+    sb.rpc('get_ai_prompts').then(({ data, error }) => {
+      if (error) { console.error('get_ai_prompts', error); setRows([]); return; }
+      const miens = (data || []).filter(r => MIENS.includes(r.feature))
+        .sort((a, b) => MIENS.indexOf(a.feature) - MIENS.indexOf(b.feature));
+      setRows(miens);
+      const d = {}; miens.forEach(r => { d[r.feature] = r.system_prompt; });
+      setDrafts(d);
+    });
+  };
+  useEffect(load, []);
+
+  const enregistrer = async (feature) => {
+    setSaving(feature); setMsg(null);
+    const { error } = await sb.rpc('set_ai_prompt', { p_feature: feature, p_prompt: drafts[feature] });
+    setSaving(null);
+    if (error) { setMsg({ feature, type:'err', texte: error.message }); return; }
+    setRows(l => l.map(r => r.feature === feature ? { ...r, system_prompt: drafts[feature] } : r));
+    setMsg({ feature, type:'ok', texte: 'Enregistré.' });
+  };
+
+  // Relit tout Mind Vector et réécrit le prompt de remplissage à partir de la
+  // manière de faire observée. La fonction edge enregistre elle-même le
+  // résultat : on recharge pour l'afficher.
+  const rescanner = async () => {
+    setRescan({ busy:true, msg:null, type:null });
+    const { data, error } = await sb.functions.invoke('mind-vector', { body: { action: 'rescan' } });
+    if (error || data?.error) {
+      setRescan({ busy:false, type:'err', msg: data?.message || error?.message || 'Rescan impossible.' });
+      return;
+    }
+    load();
+    const eur = data?.cost?.eur;
+    setRescan({ busy:false, type:'ok',
+      msg: `Prompt réécrit à partir de ${data.scanned} sujet${data.scanned > 1 ? 's' : ''}`
+           + (eur ? ` · ${eur.toFixed(3)} €` : '') + '.' });
+  };
+
+  return (
+    <>
+    <div className="screen fade-in">
+      <div className="auth-header">
+        <div className="welcome-tag" style={{color:'#7dd940'}}>Admin · Comprendre</div>
+        <h1 className="welcome-title">Prompts<br/><span className="accent">Mind Vector</span></h1>
+      </div>
+
+      <p style={{color:'rgba(255,255,255,.55)', fontSize:13, lineHeight:1.55, margin:'0 0 16px'}}>
+        Chaque service est cadré par un prompt système, lu en base juste avant l'appel.
+        La prise en compte est immédiate, sans redéploiement.
+      </p>
+
+      {rows === null ? <div style={{textAlign:'center',padding:40}}><StarSpinner size={34}/></div>
+       : rows.length === 0 ? (
+        <div style={{textAlign:'center',color:'rgba(255,255,255,.4)',fontSize:14,padding:'24px 0'}}>
+          Aucun prompt Mind Vector en base.
+        </div>
+      ) : rows.map(r => {
+        const dirty = drafts[r.feature] !== r.system_prompt;
+        return (
+          <div key={r.feature} className="card" style={{padding:14, marginBottom:14}}>
+            <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:8,marginBottom:6}}>
+              <div style={{fontWeight:800, fontSize:14, color:'#fff'}}>{r.label}</div>
+              <code style={{fontSize:11, color:'rgba(255,255,255,.4)'}}>{r.feature}</code>
+            </div>
+            <div style={{fontSize:11.5, color:'rgba(255,255,255,.45)', lineHeight:1.5, marginBottom:8}}>
+              {EXPLICATIONS[r.feature]}
+            </div>
+            <textarea value={drafts[r.feature] ?? ''} spellCheck={false}
+              onChange={e => setDrafts(d => ({ ...d, [r.feature]: e.target.value }))}
+              style={{width:'100%', minHeight:200, resize:'vertical', boxSizing:'border-box',
+                background:'rgba(0,0,0,.25)', border:'1px solid rgba(255,255,255,.14)', borderRadius:10,
+                color:'rgba(255,255,255,.9)', fontSize:13, lineHeight:1.5, padding:'10px 12px', fontFamily:'inherit'}}/>
+            <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:10,marginTop:8,flexWrap:'wrap'}}>
+              <span style={{fontSize:11.5, color:'rgba(255,255,255,.4)'}}>
+                Modifié le {fmtDate(r.updated_at)}{r.updated_by ? ' · '+r.updated_by : ''}
+              </span>
+              <div style={{display:'flex', gap:8}}>
+                {dirty && (
+                  <button className="btn btn-no" style={{width:'auto',fontSize:12.5,padding:'8px 14px'}}
+                    onClick={() => setDrafts(d => ({ ...d, [r.feature]: r.system_prompt }))}>Annuler</button>
+                )}
+                <button className="btn btn-yes" disabled={!dirty || saving===r.feature}
+                  style={{width:'auto',fontSize:12.5,padding:'8px 16px',opacity: dirty ? 1 : .45}}
+                  onClick={() => enregistrer(r.feature)}>
+                  {saving===r.feature ? <><StarSpinner size={14} color="#1a4500"/> …</> : 'Enregistrer'}
+                </button>
+              </div>
+            </div>
+            {msg && msg.feature===r.feature && (
+              <div style={{marginTop:8, fontSize:12.5, fontWeight:600, color: msg.type==='ok' ? '#5fd38a' : '#ff8080'}}>
+                {msg.texte}
+              </div>
+            )}
+
+            {r.feature === 'mind_vector_fill' && (
+              <>
+                <button onClick={rescanner} disabled={rescan.busy}
+                  style={{marginTop:12, width:'100%', background:'rgba(125,217,64,.12)', border:'1px solid rgba(125,217,64,.4)', borderRadius:10, color:'#a3ed6a', fontSize:13, fontWeight:800, padding:'10px 14px', cursor: rescan.busy?'default':'pointer', fontFamily:'inherit', opacity: rescan.busy?.6:1}}>
+                  {rescan.busy
+                    ? <><StarSpinner size={14} color="#a3ed6a"/> Lecture de Mind Vector…</>
+                    : '🔄 Rescanner pour mettre à jour le prompt'}
+                </button>
+                <div style={{marginTop:6, fontSize:11, color:'rgba(255,255,255,.4)', lineHeight:1.5}}>
+                  Relit tous les sujets déjà rédigés et réécrit ce prompt à partir de leur
+                  manière de faire. Le texte ci-dessus sera remplacé.
+                </div>
+                {rescan.msg && (
+                  <div style={{marginTop:6, fontSize:12.5, fontWeight:600, color: rescan.type==='ok' ? '#5fd38a' : '#ff8080'}}>
+                    {rescan.msg}
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        );
+      })}
+      <div style={{height:60}}/>
+    </div>
+    <StickyFooter onBack={onBack}/>
+    </>
+  );
+}
+
 // ─── Mind Vector : formaliser les modèles mentaux ─────────────────────────────
 // Un modèle mental se pose en deux gestes : dessiner l'arbre des sujets (du plus
 // général au plus précis), puis, pour le sujet retenu, écrire les 5 positions qui
@@ -20453,6 +20570,86 @@ function AdminMindVectorScreen({ user, profile, onBack }) {
     }
   };
 
+  // Crée la branche puis, sous elle, plusieurs sujets d'un coup. Le nombre et le
+  // cadrage se lisent dans « Documenter ce sujet », qui sert ici de consignes.
+  const creerBranche = async () => {
+    const d = dialogue; if (!d || remplissage) return;
+    const label = (d.label || '').trim();
+    if (!label) { setMsgAuto({ type:'err', texte:"Donnez d'abord un intitulé à la branche." }); return; }
+    const description = (d.description || '').trim();
+    const instructions = (d.contenu || '').trim();
+    setRemplissage(true); setMsgAuto(null);
+    try {
+      const { data, error } = await sb.functions.invoke('mind-vector', {
+        body: { action: 'branche', label, description, instructions },
+      });
+      if (error || data?.error) throw new Error(data?.message || error?.message || 'Création impossible.');
+      const sujets = data.sujets || [];
+      if (!sujets.length) throw new Error("L'IA n'a produit aucun sujet.");
+
+      // 1) la branche elle-même — ou le sujet déjà ouvert si on éditait
+      let liste = noeuds || [];
+      let racineId = d.id;
+      const champs = {
+        label, description: description || null,
+        contenu: instructions || null,
+        image_url: (d.image_url || '').trim() || null,
+      };
+      if (d.mode === 'ajout') {
+        const freres = liste.filter(n => (n.parent_id || null) === (d.parentId || null));
+        const ordre = freres.length ? Math.max(...freres.map(f => f.ordre || 0)) + 1 : 0;
+        const { data: cree, error: e1 } = await sb.from('mv_nodes')
+          .insert({ ...champs, parent_id: d.parentId || null, ordre }).select().single();
+        if (e1) throw e1;
+        racineId = cree.id; liste = [...liste, cree];
+        setNoeuds(liste);
+        setDialogue(dd => dd ? { ...dd, mode:'edition', id: racineId } : dd);
+      } else {
+        const patch = { ...champs, updated_at: new Date().toISOString() };
+        liste = liste.map(n => n.id === racineId ? { ...n, ...patch } : n);
+        setNoeuds(liste);
+        const { error: e2 } = await sb.from('mv_nodes').update(patch).eq('id', racineId);
+        if (e2) throw e2;
+      }
+
+      // 2) les sujets, puis leurs positions
+      const nouveaux = [];
+      const lignes = [];
+      for (let i = 0; i < sujets.length; i++) {
+        const su = sujets[i];
+        const { data: n, error: e3 } = await sb.from('mv_nodes')
+          .insert({ label: su.label, description: su.description || null, parent_id: racineId, ordre: i })
+          .select().single();
+        if (e3) throw e3;
+        nouveaux.push(n);
+        (su.positions || []).forEach(p => {
+          if (!(p.contenu || '').trim() && !(p.titre || '').trim()) return;
+          lignes.push({ node_id: n.id, pos: p.pos, content: (p.contenu || '').trim(),
+                        titre: (p.titre || '').trim() || null, updated_at: new Date().toISOString() });
+        });
+      }
+      if (lignes.length) {
+        const { error: e4 } = await sb.from('mv_positions').upsert(lignes, { onConflict: 'node_id,pos' });
+        if (e4) throw e4;
+        setCases(c => { const m = { ...c }; lignes.forEach(l => { m[l.node_id + ':' + l.pos] = l.content; }); return m; });
+        setTitres(t => {
+          const m = { ...t };
+          lignes.forEach(l => { if (l.titre) m[l.node_id + ':' + l.pos] = l.titre; });
+          return m;
+        });
+      }
+
+      const finale = [...liste, ...nouveaux];
+      setNoeuds(finale);
+      setDialogue(null); setMsgAuto(null);
+      choisir(nouveaux[0].id, finale);
+    } catch (e) {
+      setMsgAuto({ type:'err', texte: e?.message || String(e) });
+    } finally {
+      setRemplissage(false);
+    }
+  };
+
   const validerDialogue = async () => {
     const d = dialogue; if (!d) return;
     // Le dialogue ne porte plus que l'intitulé : les noms des 5 positions se
@@ -21154,6 +21351,19 @@ function AdminMindVectorScreen({ user, profile, onBack }) {
             </button>
             <button className="btn btn-no" style={{flex:'0 0 auto',width:'auto',fontSize:13,padding:'10px 16px'}}
               disabled={remplissage} onClick={() => setDialogue(null)}>Annuler</button>
+          </div>
+          {/* Crée d'un coup toute une branche : plusieurs sujets, chacun avec ses
+              5 positions. Le nombre et le cadrage se lisent dans « Documenter ce
+              sujet », qui tient lieu de consignes. */}
+          <button className="btn btn-no" style={{width:'100%',fontSize:13,padding:'10px 0'}}
+            disabled={remplissage} title="Créer plusieurs sujets sous cette branche"
+            onClick={creerBranche}>
+            {remplissage ? <><StarSpinner size={14} color="#d8f5c4"/> Création…</> : '🌱 Créer une branche'}
+          </button>
+          <div style={{fontSize:10.5,color:'rgba(255,255,255,.35)',lineHeight:1.5,marginTop:-4}}>
+            Indiquez dans « Documenter ce sujet » combien de sujets créer et sur quoi
+            porter — 3 par défaut. Les questions déjà posées ailleurs sont relues pour
+            n'être pas reposées.
           </div>
         </div>
       </div>
@@ -22115,6 +22325,7 @@ function App() {
           onOffres={()=>goTo('ADMIN_OFFRES')}
           onLearn={()=>goTo('ADMIN_LEARN')}
           onMindVector={()=>goTo('ADMIN_MIND_VECTOR')}
+          onMindVectorPrompts={()=>goTo('ADMIN_MIND_VECTOR_PROMPTS')}
           onFeedback={()=>goTo('ADMIN_FEEDBACK')}
           onFactures={()=>goTo('ADMIN_FACTURES')}
           onProofread={()=>goTo('ADMIN_PROOFREAD')}
@@ -22149,6 +22360,9 @@ function App() {
 
       case 'ADMIN_BILAN_DATA':
         return <AdminBilanDataScreen onBack={goBack}/>;
+
+      case 'ADMIN_MIND_VECTOR_PROMPTS':
+        return <AdminMindVectorPromptsScreen onBack={goBack}/>;
 
       case 'ADMIN_MIND_VECTOR':
         return <AdminMindVectorScreen user={user} profile={profile} onBack={goBack}/>;
