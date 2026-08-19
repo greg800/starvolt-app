@@ -19927,9 +19927,13 @@ function AdminMindVectorScreen({ user, profile, onBack }) {
 
   // Reprend une personne mémorisée : sa fiche puis ses réponses. Si la fiche
   // n'existe plus, on rouvre le choix plutôt que de saisir dans le vide.
+  // Le souvenir est rangé par navigateur et non par compte : en mode debug, ou
+  // sur un poste partagé, il désigne encore la personne du compte précédent.
+  // Qui n'a pas le droit de choisir la personne évaluée ne répond que pour
+  // lui-même : on écarte alors la fiche héritée et on repose la question.
   const reprendrePersonne = async (id) => {
     const { data } = await sb.from('mv_personnes').select('*').eq('id', id).maybeSingle();
-    if (!data) { setPopupQui(true); return; }
+    if (!data || (!peutChoisirQui && data.user_id !== user?.id)) { setPopupQui(true); return; }
     setPersonne(data);
     chargerReponses(data);
   };
@@ -20459,9 +20463,15 @@ function AdminMindVectorScreen({ user, profile, onBack }) {
   };
 
   // Un compte Starvolt n'a qu'une fiche : on la retrouve, sinon on la crée.
+  // `fiches` n'est chargé que pour qui a le droit de choisir la personne : un
+  // simple utilisateur arrivait donc toujours ici avec une liste vide et
+  // butait sur l'index unique mv_personnes_user_idx. On interroge la base
+  // avant d'insérer, et on retombe sur elle si deux onglets se croisent.
   const ficheDuCompte = async (u) => {
     const dejala = fiches.find(f => f.user_id === u.id);
     if (dejala) return dejala;
+    const { data: connue } = await sb.from('mv_personnes').select('*').eq('user_id', u.id).maybeSingle();
+    if (connue) { setFiches(l => l.some(f => f.id === connue.id) ? l : [...l, connue]); return connue; }
     const { data, error } = await sb.from('mv_personnes').insert({
       user_id: u.id,
       prenom: (u.prenom || u.pseudo || '').trim() || '—',
@@ -20469,7 +20479,13 @@ function AdminMindVectorScreen({ user, profile, onBack }) {
       email:  u.email || '',
       created_by: user?.email || null,
     }).select().single();
-    if (error) throw error;
+    if (error) {
+      if (error.code !== '23505') throw error;
+      const { data: doublon } = await sb.from('mv_personnes').select('*').eq('user_id', u.id).maybeSingle();
+      if (!doublon) throw error;
+      setFiches(l => l.some(f => f.id === doublon.id) ? l : [...l, doublon]);
+      return doublon;
+    }
     setFiches(l => [...l, data]);
     return data;
   };
