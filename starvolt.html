@@ -18340,7 +18340,18 @@ function getVideoEmbed(url) {
 // consoPrete : false ⇒ la collecte ENEDIS n'a rien donné. La zone basse ne
 // lance PAS le parcours guidé (il n'aurait aucun chiffre à présenter) : elle
 // renvoie vers « Mon site », le seul endroit où l'on fournit sa consommation.
-function HomeChoiceScreen({ profile, user, onComprendre, onAction, onCollecte, consoPrete = true, can = () => true }) {
+// Silhouette face a son miroir : picto de la zone « Connais-toi toi-meme ».
+// Trace repris de l'original, debarrasse de la signature d'auteur et peint en
+// blanc pour tenir sur l'image de fond.
+function IconMiroir({ color = '#fff' }) {
+  return (
+    <svg viewBox="-5 -10 110 120" width="100%" height="100%" aria-hidden="true" style={{display:'block',filter:'drop-shadow(0 2px 14px rgba(4,32,20,.5))'}}>
+      <path fill={color} d="m35.172 26.93c0 3.8203 3.1016 6.9219 6.9219 6.9219s6.9219-3.1016 6.9219-6.9219c0-3.8203-3.1016-6.9219-6.9219-6.9219-3.8242 0.003907-6.9219 3.1016-6.9219 6.9219zm11.938 0c0 2.7695-2.25 5.0195-5.0195 5.0195-2.7695 0-5.0195-2.25-5.0195-5.0195 0-2.7695 2.25-5.0195 5.0195-5.0195 2.7695 0 5.0195 2.25 5.0195 5.0195zm29.262 13.031h-12.992c-2.2188 0-4.2617 0.80078-5.8398 2.1289-0.75-4.2695-4.4688-7.5195-8.9492-7.5195h-13c-5.0195 0-9.1016 4.0781-9.1016 9.1016v14.527c0 2.3594 1.9219 4.2812 4.2812 4.2812 0.87891 0 1.6992-0.26953 2.3789-0.73047v21.672h-11.559c-0.46875 0-0.85156-0.37891-0.85156-0.85156v-72.129c0-0.46875 0.37891-0.85156 0.85156-0.85156h46.031c0.46875 0 0.85156 0.37891 0.85156 0.85156v15.09c-3.1406 0.64844-5.5117 3.4414-5.5117 6.7812 0 3.8203 3.1016 6.9219 6.9219 6.9219 3.8203 0 6.9219-3.1016 6.9219-6.9219 0-1.9492-0.80859-3.7109-2.1211-4.9688v-16.898c0-3.8906-3.1719-7.0586-7.0586-7.0586l-46.035-0.007813c-3.8906 0-7.0586 3.1719-7.0586 7.0586v72.129c0 3.8906 3.1719 7.0586 7.0586 7.0586h39.352v2.0391c0 2.7188 2.2188 4.9414 4.9414 4.9414 1.6406 0 3.0898-0.80078 3.9883-2.0312 0.89844 1.2305 2.3516 2.0312 3.9883 2.0312 2.7188 0 4.9414-2.2188 4.9414-4.9414v-24.523c0.67969 0.46094 1.5 0.73047 2.3789 0.73047 2.3594 0 4.2812-1.9219 4.2812-4.2812v-14.531c0.007812-5.0195-4.0703-9.0977-9.0898-9.0977zm-15.43 43.461h-9.9297v-21.672c0.67969 0.46094 1.5 0.73047 2.3789 0.73047 0.30078 0 0.58984-0.039063 0.87891-0.10156v1.2109c0 2.3594 1.9219 4.2812 4.2812 4.2812 0.87891 0 1.6992-0.26953 2.3789-0.73047v16.281zm-26.832-40.652c-0.53125 0-0.94922 0.42969-0.94922 0.94922v14.5 0.011719c-0.019531 1.2891-1.0898 2.3398-2.3789 2.3398-1.3086 0-2.3789-1.0703-2.3789-2.3789l-0.003906-14.52c0-3.9688 3.2305-7.1914 7.1914-7.1914h12.988c3.9688 0 7.1914 3.2305 7.1914 7.1914v0.39844c-0.94141 1.4297-1.5 3.1484-1.5 4.9883v11.32c-0.28125 0.10938-0.57031 0.19141-0.87891 0.19141-1.2891 0-2.3594-1.0508-2.3789-2.3516v-0.011719-14.477c0-0.53125-0.42969-0.94922-0.94922-0.94922-0.53125 0-0.94922 0.42969-0.94922 0.94922v39.699h-6.0703l-0.003907-21.828c0-0.53125-0.42969-0.94922-0.94922-0.94922-0.53125 0-0.94922 0.42969-0.94922 0.94922v21.82h-6.0703v-39.699c-0.011718-0.52344-0.42969-0.95312-0.96094-0.95312zm40.781-10.461c0 2.7695-2.25 5.0195-5.0195 5.0195-2.7695 0-5.0195-2.25-5.0195-5.0195 0-2.7695 2.25-5.0195 5.0195-5.0195 2.7695 0.011719 5.0195 2.2617 5.0195 5.0195zm-53.301 55.422c-2.8398 0-5.1602-2.3086-5.1602-5.1602v-72.129c0-2.8398 2.3086-5.1602 5.1602-5.1602h46.031c2.8398 0 5.1602 2.3086 5.1602 5.1602v15.59c-0.73828-0.33984-1.5508-0.55859-2.4102-0.62109v-14.969c0-1.5195-1.2305-2.75-2.75-2.75h-46.031c-1.5195 0-2.75 1.2305-2.75 2.75v72.129c0 1.5195 1.2305 2.75 2.75 2.75h39.352v2.4102zm61.969-24.152c0 1.3086-1.0703 2.3789-2.3789 2.3789-1.2891 0-2.3594-1.0508-2.3789-2.3516v-0.011719-14.484c0-0.53125-0.42969-0.94922-0.94922-0.94922-0.53125 0-0.94922 0.42969-0.94922 0.94922v42.559c0 1.6719-1.3594 3.0391-3.0391 3.0391-1.6797 0-3.0391-1.3594-3.0391-3.0391l-0.003907-24.68c0-0.53125-0.42969-0.94922-0.94922-0.94922-0.51953 0-0.94922 0.42969-0.94922 0.94922v24.691c0 1.6719-1.3594 3.0391-3.0391 3.0391-1.6719 0-3.0391-1.3594-3.0391-3.0391l-0.003906-42.57c0-0.53125-0.42969-0.94922-0.94922-0.94922-0.53125 0-0.94922 0.42969-0.94922 0.94922v14.488 0.011719c-0.019531 1.2891-1.0898 2.3398-2.3789 2.3398-1.3086 0-2.3789-1.0703-2.3789-2.3789l-0.003906-14.512c0-3.9688 3.2305-7.1914 7.1914-7.1914h12.988c3.9688 0 7.1914 3.2305 7.1914 7.1914v14.52z"/>
+    </svg>
+  );
+}
+
+function HomeChoiceScreen({ profile, user, onComprendre, onAction, onCollecte, onMindVector, consoPrete = true, can = () => true }) {
   const [learnStats, setLearnStats] = useState(null);
 
   useEffect(() => {
@@ -18377,15 +18388,32 @@ function HomeChoiceScreen({ profile, user, onComprendre, onAction, onCollecte, c
     return { emoji:'⭐⭐⭐', label:'3ᵉ étoile' };
   })();
 
+  // Trois chemins au lieu de deux : chaque zone n'a plus qu'un tiers de la
+  // hauteur. On resserre alors le rythme vertical et on cale les tailles sur la
+  // hauteur autant que sur la largeur, sinon la zone du bas se fait couper sur
+  // un écran d'ordinateur portable.
+  const nbZones = (can('menus','comprendre') ? 1 : 0)
+    + (can('menus','passer_action') ? 1 : 0)
+    + (onMindVector && can('menus','mind_vector') ? 1 : 0);
+  const d = nbZones >= 3
+    ? { pad:'clamp(8px,1.6vh,22px) 24px', gap:'clamp(4px,0.9vh,10px)',
+        ico:'clamp(32px,min(8vw,4.6vh),48px)', icoL:'clamp(36px,min(9.2vw,5.2vh),54px)',
+        titre:'clamp(19px,min(5.4vw,3.3vh),27px)', texte:'clamp(13px,min(3.7vw,2.1vh),17px)',
+        cta:'clamp(6px,1.1vh,10px) 26px', ctaTxt:14, mt:'clamp(1px,0.4vh,6px)' }
+    : { pad:'clamp(14px,3.2vh,40px) 24px', gap:'clamp(7px,1.3vh,14px)',
+        ico:'clamp(40px,8vw,56px)', icoL:'clamp(46px,9.2vw,64px)',
+        titre:'clamp(23px,6.2vw,32px)', texte:'clamp(14px,4vw,19.5px)',
+        cta:'clamp(9px,1.5vh,13px) 32px', ctaTxt:15, mt:'clamp(2px,0.6vh,8px)' };
+
   return (
     <div style={{position:'fixed',top:56,left:0,right:0,bottom:0,display:'flex',flexDirection:'column'}}>
-      {can('menus','comprendre') && <button onClick={onComprendre} style={{flex:1,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',backgroundImage:'linear-gradient(180deg, rgba(4,44,56,.58) 0%, rgba(6,64,72,.34) 40%, rgba(16,92,86,.62) 100%), url("/comprendre-bg.jpg")',backgroundSize:'cover',backgroundPosition:'right 78%',backgroundRepeat:'no-repeat',border:'none',cursor:'pointer',padding:'clamp(14px,3.2vh,40px) 24px',gap:'clamp(7px,1.3vh,14px)',textAlign:'center',width:'100%',minHeight:0,overflow:'hidden'}}>
-        <div style={{width:'clamp(40px,8vw,56px)',height:'clamp(40px,8vw,56px)',flexShrink:0,filter:'drop-shadow(0 2px 14px rgba(3,26,34,.5))'}}>
+      {can('menus','comprendre') && <button onClick={onComprendre} style={{flex:1,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',backgroundImage:'linear-gradient(180deg, rgba(4,44,56,.58) 0%, rgba(6,64,72,.34) 40%, rgba(16,92,86,.62) 100%), url("/comprendre-bg.jpg")',backgroundSize:'cover',backgroundPosition:'right 78%',backgroundRepeat:'no-repeat',border:'none',cursor:'pointer',padding:d.pad,gap:d.gap,textAlign:'center',width:'100%',minHeight:0,overflow:'hidden'}}>
+        <div style={{width:d.ico,height:d.ico,flexShrink:0,filter:'drop-shadow(0 2px 14px rgba(3,26,34,.5))'}}>
           <IconHeadCheck/>
         </div>
-        <div style={{fontSize:'clamp(23px,6.2vw,32px)',fontWeight:900,color:'white',lineHeight:1.15,textShadow:'0 2px 18px rgba(3,26,34,.6)'}}>L'énergie,<br/>enfin expliquée</div>
-        <div style={{fontSize:'clamp(14px,4vw,19.5px)',color:'rgba(255,255,255,.82)',maxWidth:420,lineHeight:1.45,textShadow:'0 1px 12px rgba(3,26,34,.55)'}}>Comprendre comment la transition énergétique va vous impacter concrètement</div>
-        <div style={{marginTop:'clamp(2px,0.6vh,8px)',padding:'clamp(9px,1.5vh,13px) 32px',background:'rgba(255,255,255,.14)',borderRadius:14,fontSize:15,fontWeight:700,color:'white',border:'1.5px solid rgba(255,255,255,.25)'}}>Comprendre →</div>
+        <div style={{fontSize:d.titre,fontWeight:900,color:'white',lineHeight:1.15,textShadow:'0 2px 18px rgba(3,26,34,.6)'}}>L'énergie,<br/>enfin expliquée</div>
+        <div style={{fontSize:d.texte,color:'rgba(255,255,255,.82)',maxWidth:420,lineHeight:1.45,textShadow:'0 1px 12px rgba(3,26,34,.55)'}}>Comprendre comment la transition énergétique va vous impacter concrètement</div>
+        <div style={{marginTop:d.mt,padding:d.cta,background:'rgba(255,255,255,.14)',borderRadius:14,fontSize:d.ctaTxt,fontWeight:700,color:'white',border:'1.5px solid rgba(255,255,255,.25)'}}>Comprendre →</div>
         {learnStats && (
           <div className="offer-meta" style={{justifyContent:'center',marginTop:'clamp(4px,0.8vh,10px)'}}>
             <span className="offer-chip" title="Sujets appris sur le total">
@@ -18407,20 +18435,36 @@ function HomeChoiceScreen({ profile, user, onComprendre, onAction, onCollecte, c
           </div>
         )}
       </button>}
-      {can('menus','passer_action') && <button onClick={consoPrete === false ? onCollecte : onAction} style={{flex:1,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',backgroundImage:'linear-gradient(180deg, rgba(16,92,86,.62) 0%, rgba(12,104,80,.40) 42%, rgba(11,120,74,.52) 100%), url("/action-bg.jpg")',backgroundSize:'cover',backgroundPosition:'right 78%',backgroundRepeat:'no-repeat',border:'none',cursor:'pointer',padding:'clamp(14px,3.2vh,40px) 24px',gap:'clamp(7px,1.3vh,14px)',textAlign:'center',width:'100%',minHeight:0,overflow:'hidden'}}>
-        <div style={{width:'clamp(46px,9.2vw,64px)',height:'clamp(46px,9.2vw,64px)',flexShrink:0,filter:'drop-shadow(0 2px 14px rgba(4,32,20,.5))'}}>
+      {can('menus','passer_action') && <button onClick={consoPrete === false ? onCollecte : onAction} style={{flex:1,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',backgroundImage:'linear-gradient(180deg, rgba(16,92,86,.62) 0%, rgba(12,104,80,.40) 42%, rgba(11,120,74,.52) 100%), url("/action-bg.jpg")',backgroundSize:'cover',backgroundPosition:'right 78%',backgroundRepeat:'no-repeat',border:'none',cursor:'pointer',padding:d.pad,gap:d.gap,textAlign:'center',width:'100%',minHeight:0,overflow:'hidden'}}>
+        <div style={{width:d.icoL,height:d.icoL,flexShrink:0,filter:'drop-shadow(0 2px 14px rgba(4,32,20,.5))'}}>
           {consoPrete === false ? <IconPower/> : <IconRobot/>}
         </div>
-        <div style={{fontSize:'clamp(23px,6.2vw,32px)',fontWeight:900,color:'white',lineHeight:1.15,textShadow:'0 2px 18px rgba(4,32,20,.6)'}}>
+        <div style={{fontSize:d.titre,fontWeight:900,color:'white',lineHeight:1.15,textShadow:'0 2px 18px rgba(4,32,20,.6)'}}>
           {consoPrete === false ? <>Connecter<br/>ma consommation</> : <>Passer à l'action<br/>dès maintenant</>}
         </div>
-        <div style={{fontSize:'clamp(14px,4vw,19.5px)',color:'rgba(255,255,255,.82)',maxWidth:420,lineHeight:1.45,textShadow:'0 1px 12px rgba(4,32,20,.55)'}}>
+        <div style={{fontSize:d.texte,color:'rgba(255,255,255,.82)',maxWidth:420,lineHeight:1.45,textShadow:'0 1px 12px rgba(4,32,20,.55)'}}>
           {consoPrete === false
             ? "Sans vos données ENEDIS, aucune économie ne peut être chiffrée. C'est l'affaire de quelques minutes."
             : 'Simulez vos économies et choisissez les meilleures solutions pour votre logement'}
         </div>
-        <div style={{marginTop:'clamp(2px,0.6vh,8px)',padding:'clamp(9px,1.5vh,13px) 32px',background:'rgba(255,255,255,.14)',borderRadius:14,fontSize:15,fontWeight:700,color:'white',border:'1.5px solid rgba(255,255,255,.25)'}}>
+        <div style={{marginTop:d.mt,padding:d.cta,background:'rgba(255,255,255,.14)',borderRadius:14,fontSize:d.ctaTxt,fontWeight:700,color:'white',border:'1.5px solid rgba(255,255,255,.25)'}}>
           {consoPrete === false ? 'Récupérer ma conso →' : "C'est parti →"}
+        </div>
+      </button>}
+      {/* Troisieme chemin : se connaitre soi-meme. N'apparait que si le role
+          donne acces a Mind Vector. */}
+      {onMindVector && can('menus','mind_vector') && <button onClick={onMindVector} style={{flex:1,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',backgroundImage:'linear-gradient(180deg, rgba(6,52,64,.55) 0%, rgba(10,74,78,.32) 42%, rgba(8,86,80,.60) 100%), url("/mindvector-bg.jpg")',backgroundSize:'cover',backgroundPosition:'center 58%',backgroundRepeat:'no-repeat',border:'none',cursor:'pointer',padding:d.pad,gap:d.gap,textAlign:'center',width:'100%',minHeight:0,overflow:'hidden'}}>
+        <div style={{width:d.icoL,height:d.icoL,flexShrink:0}}>
+          <IconMiroir/>
+        </div>
+        <div style={{fontSize:d.titre,fontWeight:900,color:'white',lineHeight:1.15,textShadow:'0 2px 18px rgba(4,32,20,.6)'}}>
+          Connais-toi<br/>toi-même
+        </div>
+        <div style={{fontSize:d.texte,color:'rgba(255,255,255,.82)',maxWidth:420,lineHeight:1.45,textShadow:'0 1px 12px rgba(4,32,20,.55)'}}>
+          Situez-vous sur les grands désaccords, et découvrez ce que vos positions disent de vous
+        </div>
+        <div style={{marginTop:d.mt,padding:d.cta,background:'rgba(255,255,255,.14)',borderRadius:14,fontSize:d.ctaTxt,fontWeight:700,color:'white',border:'1.5px solid rgba(255,255,255,.25)'}}>
+          Mind Vector →
         </div>
       </button>}
     </div>
@@ -19975,7 +20019,7 @@ function AdminMindVectorScreen({ user, profile, onBack }) {
       // textes viennent d'être chargés dans `c`, l'état n'est pas encore posé :
       // on les passe explicitement.
       const depart = repris || (liste.find(x => !x.parent_id) || {}).id || null;
-      if (depart) choisir(depart, liste);
+      if (depart) choisir(depart, liste, true, c);
     });
     return () => { vivant = false; };
   }, []);
@@ -20183,14 +20227,34 @@ function AdminMindVectorScreen({ user, profile, onBack }) {
     return out;
   }
 
+  // Descend jusqu'au premier sujet réellement rédigé. Désigner « Politique »,
+  // qui n'est qu'un titre de groupe, doit montrer cinq positions et non cinq
+  // cases vides : on suit le souvenir de branche, à défaut le premier enfant.
+  const premierRedige = (l, id, c) => {
+    let cur = id;
+    for (let g = 0; g < 40; g++) {
+      if (aDesPositions(cur, c)) return cur;
+      const kids = (l || []).filter(x => x.parent_id === cur);
+      if (!kids.length) return cur;
+      cur = (kids.find(k => k.id === memoireRef.current[cur]) || kids[0]).id;
+    }
+    return cur;
+  };
+
   // Règle unique, grand comme petit écran : ce qu'on désigne est ce qu'on édite.
-  const choisir = (id, liste) => {
+  // `auto` n'est posé que par la navigation explicite (clic dans le bandeau,
+  // liste de niveau, réouverture de la page) ; les glissés, eux, ont le droit
+  // de s'arrêter sur un titre de groupe. `c` sert au premier chargement, quand
+  // les textes ne sont pas encore dans l'état.
+  const choisir = (id, liste, auto, c) => {
     const l = liste || noeuds || [];
-    const n = l.find(x => x.id === id); if (!n) return;
+    let vise = id;
+    if (auto) vise = premierRedige(l, id, c);
+    const n = l.find(x => x.id === vise); if (!n) return;
     fermerPos();
-    memoireRef.current[n.parent_id || '_'] = id;
-    setChemin(prolongerAvec(l, mvChemin(l, id)));
-    setSel(id);
+    memoireRef.current[n.parent_id || '_'] = vise;
+    setChemin(prolongerAvec(l, mvChemin(l, vise)));
+    setSel(vise);
   };
 
   // ── Écriture des positions ────────────────────────────────────────────────
@@ -20879,7 +20943,7 @@ function AdminMindVectorScreen({ user, profile, onBack }) {
                     + (sel === n.id ? ' sel' : chemin.includes(n.id) ? ' chemin' : '')
                     + (glisse === n.id ? ' glisse' : '')
                     + (cible === n.id ? ' cible' : '')}
-                  onClick={() => choisir(n.id)}
+                  onClick={() => choisir(n.id, null, true)}
                   onDragStart={e => { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', n.id); setGlisse(n.id); }}
                   onDragEnd={() => { setGlisse(null); setCible(null); }}
                   onDragOver={e => { if (glisse && glisse !== n.id) { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; setCible(n.id); } }}
@@ -20965,7 +21029,7 @@ function AdminMindVectorScreen({ user, profile, onBack }) {
                 <div className="mv-feuille-titre">{dansQuoi} — {niv.items.length} sujet{niv.items.length > 1 ? 's' : ''}</div>
                 {niv.items.map(n => (
                   <button key={n.id} className={'mv-option' + (niv.choisi === n.id ? ' actif' : '')}
-                    onClick={() => { choisir(n.id); setFeuille(null); }}>
+                    onClick={() => { choisir(n.id, null, true); setFeuille(null); }}>
                     <span style={{flex:1,minWidth:0}}>
                       {n.label}
                       {(titres[n.id + ':1'] || titres[n.id + ':5']) && (
@@ -22244,7 +22308,7 @@ function App() {
     switch (state.screen) {
 
       case 'HOME_CHOICE':
-        return <HomeChoiceScreen profile={profile} user={user} onComprendre={()=>goTo('COMPRENDRE_HOME')} onAction={autoStart} onCollecte={()=>{ try{localStorage.setItem('starvolt_focus_enedis','1');}catch{} goTo('MA_CONSO'); }} consoPrete={consoPrete} can={can}/>;
+        return <HomeChoiceScreen profile={profile} user={user} onComprendre={()=>goTo('COMPRENDRE_HOME')} onAction={autoStart} onCollecte={()=>{ try{localStorage.setItem('starvolt_focus_enedis','1');}catch{} goTo('MA_CONSO'); }} onMindVector={()=>goTo('ADMIN_MIND_VECTOR')} consoPrete={consoPrete} can={can}/>;
 
       case 'COMPRENDRE_HOME':
         return <ComprendreHomeScreen user={user} rolePerms={rolePerms} onGroup={(g)=>goTo('COMPRENDRE_GROUP',{learnGroup:g})} onAction={()=>goTo('MA_CONSO')}
@@ -22313,7 +22377,7 @@ function App() {
       }
 
       case 'HOME_LOGGED_IN': // ancien écran retiré → on redirige vers la nouvelle landing
-        return <HomeChoiceScreen profile={profile} user={user} onComprendre={()=>goTo('COMPRENDRE_HOME')} onAction={autoStart} onCollecte={()=>{ try{localStorage.setItem('starvolt_focus_enedis','1');}catch{} goTo('MA_CONSO'); }} consoPrete={consoPrete} can={can}/>;
+        return <HomeChoiceScreen profile={profile} user={user} onComprendre={()=>goTo('COMPRENDRE_HOME')} onAction={autoStart} onCollecte={()=>{ try{localStorage.setItem('starvolt_focus_enedis','1');}catch{} goTo('MA_CONSO'); }} onMindVector={()=>goTo('ADMIN_MIND_VECTOR')} consoPrete={consoPrete} can={can}/>;
 
       case 'PROFILE':
         return <ProfileScreen
