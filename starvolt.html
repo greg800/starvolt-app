@@ -13567,6 +13567,9 @@ function AdminDashboard({ onViewLogs, onImpersonate, onViewFails }) {
   const [loading, setLoading]   = useState(true);
   const [showAll, setShowAll]   = useState(false);   // afficher toutes les lignes
   const [collapsed, setCollapsed] = useState(false); // replier tout le bloc
+  // Sujets « Comprendre » marqués « à remonter » → colonnes dynamiques de bonnes réponses.
+  const [actSubjects, setActSubjects] = useState([]);       // [{id,title}]
+  const [actByUser, setActByUser]     = useState({});       // { user_id: { subject_id: {correct,total} } }
 
   useEffect(() => {
     sb.rpc('get_admin_dashboard').then(({ data, error }) => {
@@ -13574,6 +13577,21 @@ function AdminDashboard({ onViewLogs, onImpersonate, onViewFails }) {
       setRows(data || []);
       setLoading(false);
     });
+    // Colonnes dynamiques : sujets « à remonter » + résultats par personne.
+    (async () => {
+      const { data: subs } = await sb.from('learn_subjects')
+        .select('id,title').eq('remonter_activite', true).order('ordre');
+      setActSubjects(subs || []);
+      if (subs && subs.length) {
+        const { data: act, error: actErr } = await sb.rpc('get_learn_activite');
+        if (actErr) { console.error('get_learn_activite', actErr); return; }
+        const map = {};
+        (act || []).forEach(r => {
+          (map[r.user_id] = map[r.user_id] || {})[r.subject_id] = { correct: r.correct, total: r.total };
+        });
+        setActByUser(map);
+      }
+    })();
   }, []);
 
   // Stats quizz calculées côté serveur (RPC).
@@ -13640,6 +13658,9 @@ function AdminDashboard({ onViewLogs, onImpersonate, onViewFails }) {
                   <th style={{padding:'8px 10px', fontSize:10, letterSpacing:'.5px', textTransform:'uppercase', color:'rgba(255,255,255,.4)', fontWeight:700, textAlign:'right'}}>Clics</th>
                   <th style={{padding:'8px 10px', fontSize:10, letterSpacing:'.5px', textTransform:'uppercase', color:'rgba(255,255,255,.4)', fontWeight:700, textAlign:'center', whiteSpace:'nowrap'}}>Niveau quizz</th>
                   <th style={{padding:'8px 10px', fontSize:10, letterSpacing:'.5px', textTransform:'uppercase', color:'rgba(255,255,255,.4)', fontWeight:700, textAlign:'right', whiteSpace:'nowrap'}} title="Part des questions réussies du premier coup">% 1er coup</th>
+                  {actSubjects.map(s => (
+                    <th key={s.id} style={{padding:'8px 10px', fontSize:10, letterSpacing:'.5px', textTransform:'uppercase', color:'rgba(255,255,255,.4)', fontWeight:700, textAlign:'center', whiteSpace:'nowrap'}} title={`Bonnes réponses — ${s.title}`}>{s.title}</th>
+                  ))}
                   <th style={{padding:'8px 10px', fontSize:10, letterSpacing:'.5px', textTransform:'uppercase', color:'rgba(255,255,255,.4)', fontWeight:700, textAlign:'right'}}>Tickets</th>
                   <th style={{padding:'8px 10px', fontSize:10, letterSpacing:'.5px', textTransform:'uppercase', color:'rgba(255,255,255,.4)', fontWeight:700, textAlign:'center', whiteSpace:'nowrap'}}>Debug</th>
                 </tr>
@@ -13672,6 +13693,15 @@ function AdminDashboard({ onViewLogs, onImpersonate, onViewFails }) {
                         {q.firstPct==null ? '—' : q.firstPct + '%'}
                       </td>
                     </>); })()}
+                    {actSubjects.map(s => {
+                      const a = actByUser[u.id] && actByUser[u.id][s.id];
+                      return (
+                        <td key={s.id} style={{padding:'9px 10px', borderTop:'1px solid rgba(255,255,255,.06)', textAlign:'center', fontVariantNumeric:'tabular-nums', whiteSpace:'nowrap', color: a ? 'rgba(255,255,255,.9)' : 'rgba(255,255,255,.25)'}}
+                            title={a ? `${a.correct} / ${a.total} bonnes réponses` : 'Sujet non passé'}>
+                          {a ? <><span style={{fontWeight:800}}>{a.correct}</span><span style={{color:'rgba(255,255,255,.4)',fontWeight:600}}>/{a.total}</span></> : '—'}
+                        </td>
+                      );
+                    })}
                     <td onClick={() => onViewLogs && onViewLogs(u)} style={{padding:'9px 10px', borderTop:'1px solid rgba(255,255,255,.06)', textAlign:'right', cursor:'pointer'}}
                         title="Voir les logs de cet utilisateur">
                       {u.ticket_count > 0 ? (
@@ -21948,6 +21978,7 @@ function AdminLearnSubjectEditScreen({ subjectId, groupId, isAdmin, onSave, onBa
   const [content, setContent] = useState('');
   const [imageUrl, setImageUrl] = useState('');
   const [videoUrl, setVideoUrl] = useState('');
+  const [remonterActivite, setRemonterActivite] = useState(false);
   const [ordre, setOrdre] = useState(0);
   const [questions, setQuestions] = useState([]);
   const [loading, setLoading] = useState(!isNew);
@@ -21959,7 +21990,7 @@ function AdminLearnSubjectEditScreen({ subjectId, groupId, isAdmin, onSave, onBa
 
   const loadData = async (sid) => {
     const { data: s } = await sb.from('learn_subjects').select('*').eq('id',sid).single();
-    if (s) { setTitle(s.title||''); setContent(s.content||''); setImageUrl(s.image_url||''); setVideoUrl(s.video_url||''); setOrdre(s.ordre??0); }
+    if (s) { setTitle(s.title||''); setContent(s.content||''); setImageUrl(s.image_url||''); setVideoUrl(s.video_url||''); setRemonterActivite(!!s.remonter_activite); setOrdre(s.ordre??0); }
     const { data: qs } = await sb.from('learn_questions').select('id,question,image_url,ordre, learn_choices(id,text,is_correct,ordre)').eq('subject_id',sid).order('ordre');
     setQuestions(qs||[]);
     setLoading(false);
@@ -21977,13 +22008,13 @@ function AdminLearnSubjectEditScreen({ subjectId, groupId, isAdmin, onSave, onBa
     if (!title.trim()) { setMsg('Titre obligatoire.'); return; }
     setSaving(true);
     if (!currentSubjectId) {
-      const { data, error } = await sb.from('learn_subjects').insert({ group_id:groupId, title:title.trim(), content:content.trim()||null, image_url:imageUrl||null, video_url:videoUrl.trim()||null, ordre:parseInt(ordre)||0 }).select('id').single();
+      const { data, error } = await sb.from('learn_subjects').insert({ group_id:groupId, title:title.trim(), content:content.trim()||null, image_url:imageUrl||null, video_url:videoUrl.trim()||null, remonter_activite:remonterActivite, ordre:parseInt(ordre)||0 }).select('id').single();
       if (error) { setMsg(error.message); setSaving(false); return; }
       setCurrentSubjectId(data.id);
       setSaving(false); setMsg('✓ Enregistré');
       loadData(data.id);
     } else {
-      const { error } = await sb.from('learn_subjects').update({ title:title.trim(), content:content.trim()||null, image_url:imageUrl||null, video_url:videoUrl.trim()||null, ordre:parseInt(ordre)||0 }).eq('id',currentSubjectId);
+      const { error } = await sb.from('learn_subjects').update({ title:title.trim(), content:content.trim()||null, image_url:imageUrl||null, video_url:videoUrl.trim()||null, remonter_activite:remonterActivite, ordre:parseInt(ordre)||0 }).eq('id',currentSubjectId);
       if (error) { setMsg(error.message); setSaving(false); return; }
       setSaving(false); setMsg('✓ Enregistré');
     }
@@ -22014,6 +22045,14 @@ function AdminLearnSubjectEditScreen({ subjectId, groupId, isAdmin, onSave, onBa
             {uploadingImg && <div style={{display:'flex',alignItems:'center',gap:7,fontSize:11,color:'rgba(255,255,255,.5)',marginTop:4}}><StarSpinner size={14}/> Upload en cours…</div>}
           </div>
           <div className="inp-group"><label className="inp-label">URL vidéo (YouTube ou embed)</label><input className="inp" value={videoUrl} onChange={e=>setVideoUrl(e.target.value)} placeholder="https://youtube.com/watch?v=…"/></div>
+          <div className="inp-group">
+            <label style={{display:'flex',alignItems:'flex-start',gap:10,cursor:'pointer'}}>
+              <input type="checkbox" checked={remonterActivite} onChange={e=>setRemonterActivite(e.target.checked)} style={{accentColor:'#7dd940',width:17,height:17,flexShrink:0,marginTop:1,cursor:'pointer'}}/>
+              <span style={{fontSize:13,color:'rgba(255,255,255,.82)',lineHeight:1.4}}>Résultat à remonter dans le tableau de bord activité ?
+                <span style={{display:'block',fontSize:11,color:'rgba(255,255,255,.45)',marginTop:2}}>Ajoute une colonne « bonnes réponses » par personne dans le tableau admin.</span>
+              </span>
+            </label>
+          </div>
           <div className="inp-group"><label className="inp-label">Ordre</label><input className="inp" type="number" value={ordre} onChange={e=>setOrdre(e.target.value)}/></div>
           {msg && <div style={{color: msg.startsWith('✓')?'#7dd940':'#ff6060',fontSize:12,marginTop:4}}>{msg}</div>}
           <button className="btn btn-yes" style={{width:'100%',marginTop:12}} onClick={save} disabled={saving}>{saving?<><StarSpinner size={16} color="#1a4500"/> Enregistrement…</>:'Enregistrer le sujet'}</button>
