@@ -1959,13 +1959,27 @@ async function logAppError({ severity = 'majeur', module = '', message = '', det
 }
 window.logAppError = logAppError;
 
+// Bruit connu du navigateur, sans impact réel → ne PAS journaliser (sinon faux
+// positifs « bloquants » qui polluent le journal) :
+//  - « ResizeObserver loop … » : un observer déclenche un relayout hors frame ;
+//    totalement bénin, aucun objet erreur (name/stack null).
+//  - « Script error. » nu : erreur cross-origin sans détail, inexploitable.
+function isBenignError(message, hasErrorObj) {
+  const m = String(message || '');
+  if (/ResizeObserver loop/i.test(m)) return true;
+  if (!hasErrorObj && /^Script error\.?$/i.test(m.trim())) return true;
+  return false;
+}
+
 // Erreurs JS non capturées → bloquant (l'écran a probablement planté).
 window.addEventListener('error', (e) => {
   const err = e?.error;
+  const message = (err && err.message) || e?.message || 'Erreur JS non gérée';
+  if (isBenignError(message, !!err)) return;
   logAppError({
     severity: 'bloquant',
     module: window.__currentScreen || 'window.onerror',
-    message: (err && err.message) || e?.message || 'Erreur JS non gérée',
+    message,
     detail: {
       name: err && err.name, stack: err && String(err.stack || '').slice(0, 1800),
       source: e?.filename, line: e?.lineno, col: e?.colno,
@@ -1975,10 +1989,12 @@ window.addEventListener('error', (e) => {
 // Promesses rejetées non gérées → majeur.
 window.addEventListener('unhandledrejection', (e) => {
   const r = e?.reason;
+  const message = (r && (r.message || r.error_description)) || String(r || 'Promesse rejetée');
+  if (isBenignError(message, !!r)) return;
   logAppError({
     severity: 'majeur',
     module: window.__currentScreen || 'unhandledrejection',
-    message: (r && (r.message || r.error_description)) || String(r || 'Promesse rejetée'),
+    message,
     detail: { name: r && r.name, status: r && r.status, stack: r && String(r.stack || '').slice(0, 1800) },
   });
 });
