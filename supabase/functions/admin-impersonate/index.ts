@@ -31,7 +31,12 @@ Deno.serve(async (req) => {
     const meRes = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
       headers: { Authorization: `Bearer ${token}`, apikey: SERVICE_ROLE },
     });
-    if (!meRes.ok) return jsonResp({ error: "bad_token" }, 401);
+    if (!meRes.ok) {
+      // On remonte le pourquoi (jeton expiré → 401 ; signature invalide → 403…)
+      // pour que le journal des erreurs le montre au lieu d'un « bad_token » nu.
+      const authBody = await meRes.text().catch(() => "");
+      return jsonResp({ error: "bad_token", auth_status: meRes.status, auth_body: authBody.slice(0, 200) }, 401);
+    }
     const me = await meRes.json();
     const callerId = me?.id;
     if (!callerId) return jsonResp({ error: "no_caller" }, 401);

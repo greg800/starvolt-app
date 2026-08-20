@@ -22832,14 +22832,23 @@ function App() {
 
   const startImpersonation = async (u) => {
     try {
-      // 1) Mémoriser la session admin courante pour pouvoir y revenir
-      const { data: { session } } = await sb.auth.getSession();
+      // 1) Rafraîchir la session admin AVANT tout : le client supabase-js peut
+      //    détenir un access_token périmé, que la vérification serveur rejette
+      //    (bad_token). On force un jeton frais et on le passe explicitement.
+      let { data: { session } } = await sb.auth.getSession();
       if (!session) { alert('Session admin introuvable.'); return; }
+      try {
+        const { data: refreshed } = await sb.auth.refreshSession();
+        if (refreshed?.session) session = refreshed.session;
+      } catch (_) { /* on garde la session courante si le refresh échoue */ }
       const adminInfo = { access: session.access_token, refresh: session.refresh_token };
       // 2) Activer le flag AVANT le changement de session (coupe le tracking + le log de connexion)
       window.__impersonating = true;
-      // 3) Demander une session pour l'utilisateur cible
-      const { data, error } = await sb.functions.invoke('admin-impersonate', { body: { target_user_id: u.id } });
+      // 3) Demander une session pour l'utilisateur cible (jeton frais transmis explicitement)
+      const { data, error } = await sb.functions.invoke('admin-impersonate', {
+        body: { target_user_id: u.id },
+        headers: { Authorization: `Bearer ${session.access_token}` },
+      });
       if (error || !data?.access_token) {
         window.__impersonating = false;
         // supabase-js ne met pas le corps de la réponse dans `error` : sur un
