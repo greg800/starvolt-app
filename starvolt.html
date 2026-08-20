@@ -20028,6 +20028,12 @@ function AdminMindVectorScreen({ user, profile, onBack }) {
   const [formQui,  setFormQui]  = useState(null);       // { prenom, nom, email, commentaire }
   const [busyQui,  setBusyQui]  = useState(false);
   const [errQui,   setErrQui]   = useState(null);
+  const [profilsAcces, setProfilsAcces] = useState([]);   // profils que je peux évaluer (le mien + ceux où l'on m'invite)
+  const [evaluateurs,  setEvaluateurs]  = useState([]);   // qui peut évaluer MON profil, + leur avancement
+  const [inviteEmail,  setInviteEmail]  = useState('');
+  const [inviteBusy,   setInviteBusy]   = useState(false);
+  const [inviteMsg,    setInviteMsg]    = useState(null); // { type:'ok'|'err'|'absent', texte, email? }
+  const [modeRetrait,  setModeRetrait]  = useState(false); // le « − » : afficher les croix de révocation
   const [msgAuto,  setMsgAuto]  = useState(null);  // { type:'ok'|'err', texte } affiché dans le dialogue
   const [glisse,   setGlisse]   = useState(null);  // id de la branche en cours de déplacement
   const [cible,    setCible]    = useState(null);  // id survolé comme destination ('_' = racine)
@@ -20061,7 +20067,15 @@ function AdminMindVectorScreen({ user, profile, onBack }) {
   // lui-même : on écarte alors la fiche héritée et on repose la question.
   const reprendrePersonne = async (id) => {
     const { data } = await sb.from('mv_personnes').select('*').eq('id', id).maybeSingle();
-    if (!data || (!peutChoisirQui && data.user_id !== user?.id)) { setPopupQui(true); return; }
+    if (!data) { setPopupQui(true); return; }
+    // Le souvenir est rangé par navigateur, pas par compte. On ne reprend un
+    // profil AUTRE que le sien que si l'on y a vraiment droit : superadmin, ou
+    // invité nommément (une ligne mv_acces).
+    if (data.user_id !== user?.id && !peutToutVoir) {
+      const { data: acc } = await sb.from('mv_acces')
+        .select('personne_id').eq('personne_id', id).eq('evaluateur_id', user?.id).maybeSingle();
+      if (!acc) { setPopupQui(true); return; }
+    }
     setPersonne(data);
     chargerReponses(data);
   };
@@ -20562,21 +20576,138 @@ function AdminMindVectorScreen({ user, profile, onBack }) {
     else { setMode('saisie'); setPersonne(null); setReponses({}); setPopupQui(false); }
   };
 
-  // La liste ne se charge qu'à l'ouverture du popup : inutile de tirer tous les
-  // comptes tant qu'on rédige des questions.
+  // Superadmin : accès à tout le monde. Les autres n'évaluent que leur propre
+  // profil et ceux auxquels ils ont été invités.
+  const peutToutVoir = profile?.role === 'superadmin';
+  // Gérer un profil (inviter des évaluateurs, décider les sujets ouverts) est
+  // réservé à son propriétaire et au superadmin.
+  const peutGererProfil = !!personne && (personne.user_id === user?.id || peutToutVoir);
+
+  // Les profils que le compte connecté a le droit d'évaluer : le sien, plus ceux
+  // auxquels on l'a invité. Passe par une fonction serveur pour rester correct
+  // même si la lecture de mv_personnes se resserre. Si la fonction n'existe pas
+  // encore (migration pas passée), on se rabat sur sa propre fiche pour ne pas
+  // bloquer l'auto-évaluation.
+  const chargerAcces = async () => {
+    const { data, error } = await sb.rpc('mv_profils_acces');
+    if (error) {
+      try {
+        const own = await ficheDuCompte({ id: user.id, prenom: profile?.prenom, nom: profile?.nom, pseudo: profile?.pseudo, email: user.email });
+        const l = [{ ...own, is_own: true }]; setProfilsAcces(l); return l;
+      } catch { setProfilsAcces([]); return []; }
+    }
+    setProfilsAcces(data || []); return data || [];
+  };
+
+  // Qui peut évaluer un profil donné, et combien de sujets chacun a déjà classé.
+  // La fonction ne rend qu'un compte, jamais le contenu des réponses.
+  const chargerEvaluateurs = async (fiche) => {
+    if (!fiche) { setEvaluateurs([]); return; }
+    const { data } = await sb.rpc('mv_evaluateurs', { p_personne_id: fiche.id });
+    setEvaluateurs(data || []);
+  };
+
+  // Choisir un profil ne referme plus rien : la page reste ouverte, seule la
+  // sélection change et se charge aussitôt. Retour / OK ferment la page.
+  const selectionner = (fiche) => {
+    if (!fiche) return;
+    setPersonne(fiche); setSelQui(fiche.id); setInviteMsg(null); setModeRetrait(false);
+    chargerReponses(fiche);
+  };
+
+  // Le sélecteur de profil du haut. Un superadmin choisit dans tous les comptes
+  // (préfixes 'u:' compte, 'f:' fiche manuelle) et la fiche est créée à la
+  // volée ; les autres choisissent dans les profils auxquels ils ont accès.
+  const choisirProfil = async (val) => {
+    if (!val) return;
+    setBusyQui(true); setErrQui(null);
+    try {
+      let fiche = null;
+      if (val.startsWith('u:')) { const u = (usagers || []).find(x => x.id === val.slice(2)); if (u) fiche = await ficheDuCompte(u); }
+      else if (val.startsWith('f:')) fiche = fiches.find(x => x.id === val.slice(2));
+      else fiche = profilsAcces.find(x => x.id === val) || fiches.find(x => x.id === val);
+      if (fiche) { selectionner(fiche); setSelQui(val); }
+    } catch (e) { setErrQui(e?.message || String(e)); }
+    finally { setBusyQui(false); }
+  };
+
+  // Inviter un compte à évaluer le profil courant. On cherche l'e-mail : s'il a
+  // un compte, il gagne le droit tout de suite ; sinon on propose de l'inciter à
+  // s'inscrire.
+  const inviter = async () => {
+    const email = (inviteEmail || '').trim();
+    if (!personne) return;
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { setInviteMsg({ type:'err', texte:"Cette adresse e-mail n'a pas l'air valide." }); return; }
+    setInviteBusy(true); setInviteMsg(null);
+    try {
+      const { data, error } = await sb.rpc('mv_lookup_email', { p_email: email });
+      if (error) throw error;
+      const u = data && data.length ? data[0] : null;
+      if (!u) { setInviteMsg({ type:'absent', texte:`${email} n'a pas encore de compte Starvolt.`, email }); return; }
+      if (u.id === personne.user_id) { setInviteMsg({ type:'err', texte:"C'est le profil lui-même." }); return; }
+      const { error: e2 } = await sb.from('mv_acces').upsert({
+        personne_id: personne.id, evaluateur_id: u.id,
+        evaluateur_email: email, evaluateur_prenom: u.prenom, evaluateur_nom: u.nom,
+        granted_by: user?.email || null,
+      }, { onConflict: 'personne_id,evaluateur_id' });
+      if (e2) throw e2;
+      setInviteEmail('');
+      setInviteMsg({ type:'ok', texte:`${[u.prenom, u.nom].filter(Boolean).join(' ') || email} peut désormais évaluer ce profil.` });
+      chargerEvaluateurs(personne);
+    } catch (e) { setInviteMsg({ type:'err', texte: e?.message || String(e) }); }
+    finally { setInviteBusy(false); }
+  };
+
+  const revoquer = async (ev) => {
+    if (!personne) return;
+    const qui = [ev.prenom, ev.nom].filter(Boolean).join(' ') || ev.email || 'cette personne';
+    if (!window.confirm(`Retirer ${qui} des personnes autorisées à évaluer ce profil ?`)) return;
+    const { error } = await sb.from('mv_acces').delete()
+      .eq('personne_id', personne.id).eq('evaluateur_id', ev.evaluateur_id);
+    if (error) { setInviteMsg({ type:'err', texte: error.message }); return; }
+    chargerEvaluateurs(personne);
+  };
+
+  // Rien à installer côté serveur : on ouvre le client mail de l'utilisateur,
+  // pré-rempli. Greg pourra brancher un envoi soigné plus tard.
+  const inviterParMail = (email) => {
+    const sujet = encodeURIComponent('Rejoignez-moi sur Starvolt');
+    const corps = encodeURIComponent(
+      `Bonjour,\n\nJ'aimerais que vous évaluiez mon profil sur Starvolt (Mind Vector).\n`
+      + `Créez votre compte ici : ${location.origin}\n\nMerci !`);
+    window.location.href = `mailto:${email}?subject=${sujet}&body=${corps}`;
+  };
+
+  // Fermer la page. Retour et OK ferment de la même façon (tout est déjà
+  // enregistré) ; si aucun profil n'a été retenu, on repasse en rédaction.
+  const fermerPage = () => {
+    setPopupQui(false); setFormQui(null); setInviteMsg(null); setModeRetrait(false);
+    if (!personne) setMode('saisie');
+  };
+
+  // À l'ouverture de la page : charger les profils accessibles et se placer par
+  // défaut sur soi-même. Un superadmin voit en plus tous les comptes.
   useEffect(() => {
     if (!popupQui) return;
     setErrQui(null);
-    if (!peutChoisirQui) return;   // rien à lister : il ne répond que pour lui
-    sb.rpc('get_all_users').then(({ data }) => setUsagers(data || []));
-    sb.from('mv_personnes').select('*').order('nom').then(({ data }) => setFiches(data || []));
+    (async () => {
+      const liste = await chargerAcces();
+      if (peutToutVoir) {
+        sb.rpc('get_all_users').then(({ data }) => setUsagers(data || []));
+        const { data: fs } = await sb.from('mv_personnes').select('*').order('nom');
+        setFiches(fs || []);
+      }
+      if (!personne) {
+        if (peutToutVoir) choisirProfil('u:' + user.id);
+        else { const own = (liste || []).find(p => p.is_own) || (liste || [])[0]; if (own) selectionner(own); }
+      }
+    })();
   }, [popupQui]);
 
-  const activer = async (fiche) => {
-    setPersonne(fiche);
-    setPopupQui(false); setFormQui(null); setSelQui('');
-    chargerReponses(fiche);
-  };
+  // Dès qu'un profil qu'on gère est retenu, on liste ses évaluateurs.
+  useEffect(() => {
+    if (popupQui && personne && peutGererProfil) chargerEvaluateurs(personne);
+  }, [popupQui, personne, peutGererProfil]);
 
   // Un compte Starvolt n'a qu'une fiche : on la retrouve, sinon on la crée.
   // `fiches` n'est chargé que pour qui a le droit de choisir la personne : un
@@ -20614,33 +20745,6 @@ function AdminMindVectorScreen({ user, profile, onBack }) {
     return data;
   };
 
-  const choisirDansListe = async () => {
-    if (!selQui) return;
-    setBusyQui(true); setErrQui(null);
-    try {
-      if (selQui.startsWith('f:')) {
-        const f = fiches.find(x => x.id === selQui.slice(2));
-        if (f) await activer(f);
-      } else {
-        const u = (usagers || []).find(x => x.id === selQui.slice(2));
-        if (u) await activer(await ficheDuCompte(u));
-      }
-    } catch (e) { setErrQui(e?.message || String(e)); }
-    finally { setBusyQui(false); }
-  };
-
-  const choisirMoi = async () => {
-    if (!user?.id) { setErrQui('Aucun compte connecté.'); return; }
-    setBusyQui(true); setErrQui(null);
-    try {
-      await activer(await ficheDuCompte({
-        id: user.id, prenom: profile?.prenom, nom: profile?.nom,
-        pseudo: profile?.pseudo, email: user.email,
-      }));
-    } catch (e) { setErrQui(e?.message || String(e)); }
-    finally { setBusyQui(false); }
-  };
-
   const creerPersonne = async () => {
     const f = formQui; if (!f) return;
     const prenom = (f.prenom || '').trim();
@@ -20658,7 +20762,8 @@ function AdminMindVectorScreen({ user, profile, onBack }) {
     setBusyQui(false);
     if (error) { setErrQui(error.message); return; }
     setFiches(l => [...l, data]);
-    await activer(data);
+    setFormQui(null);
+    selectionner(data);
   };
 
   // Un seul choix par sujet : la clé primaire (personne, sujet) s'en charge en
@@ -20957,10 +21062,6 @@ function AdminMindVectorScreen({ user, profile, onBack }) {
     if (appuiRef.current.long) { appuiRef.current.long = false; return; }  // l'appui long a déjà agi
     setFeuille({ type: 'menu', prof });
   };
-
-  // Choisir la personne à évaluer est un pouvoir d'administrateur. Un simple
-  // utilisateur ne répond que pour lui-même : on ne lui montre que le filtre.
-  const peutChoisirQui = ['admin','superadmin'].includes(profile?.role);
 
   const selNoeud = sel ? parId[sel] : null;
   const nomDe = (id) => (parId[id] || {}).label || '';
@@ -21312,13 +21413,22 @@ function AdminMindVectorScreen({ user, profile, onBack }) {
 
     {/* ── Pour qui saisit-on les réponses ? ───────────────────────────────── */}
     {popupQui && (
-      <div style={{position:'fixed',inset:0,zIndex:9600,background:'rgba(3,12,18,.82)',backdropFilter:'blur(4px)',WebkitBackdropFilter:'blur(4px)',display:'flex',alignItems:'center',justifyContent:'center',padding:16}}
-        onClick={() => { if (!busyQui) { setPopupQui(false); setFormQui(null); if (!personne) { setMode('saisie'); } } }}>
-        <div className="mv-dialogue" onClick={e => e.stopPropagation()}>
-          <div style={{fontSize:16,fontWeight:900,color:'#fff'}}>Info navigation</div>
+      <div style={{position:'fixed',inset:0,zIndex:9600,background:'#071820',display:'flex',flexDirection:'column'}}>
+        {/* En-tête de la page */}
+        <div style={{flexShrink:0,padding:'16px 18px 11px',borderBottom:'1px solid rgba(255,255,255,.08)'}}>
+          <div style={{fontSize:18,fontWeight:900,color:'#fff'}}>Info navigation</div>
+          <div style={{fontSize:12,color:'rgba(255,255,255,.5)',marginTop:3,lineHeight:1.45}}>
+            Choisir le profil à renseigner, décider qui peut l'évaluer et sur quels sujets. Chaque réglage est enregistré aussitôt.
+          </div>
+        </div>
+
+        {/* Corps défilant */}
+        <div style={{flex:1,minHeight:0,overflowY:'auto',width:'100%',maxWidth:640,margin:'0 auto',boxSizing:'border-box',
+                     padding:'14px 18px 24px',display:'flex',flexDirection:'column',gap:15}}>
 
           {formQui ? (
-            <>
+            <div style={{display:'flex',flexDirection:'column',gap:11}}>
+              <div style={{fontSize:13,fontWeight:800,color:'#fff'}}>Ajouter une personne sans compte</div>
               <div>
                 <label>Prénom *</label>
                 <input autoFocus value={formQui.prenom || ''}
@@ -21344,94 +21454,165 @@ function AdminMindVectorScreen({ user, profile, onBack }) {
               <div style={{display:'flex',gap:9}}>
                 <button className="btn btn-yes" style={{flex:'1 1 0',width:'auto',fontSize:13,padding:'10px 0'}}
                   disabled={busyQui} onClick={creerPersonne}>
-                  {busyQui ? <><StarSpinner size={14} color="#1a4500"/> Création…</> : 'Créer et saisir'}
+                  {busyQui ? <><StarSpinner size={14} color="#1a4500"/> Création…</> : 'Créer et sélectionner'}
                 </button>
                 <button className="btn btn-no" style={{flex:'0 0 auto',width:'auto',fontSize:13,padding:'10px 16px'}}
                   disabled={busyQui} onClick={() => { setFormQui(null); setErrQui(null); }}>Retour</button>
               </div>
-            </>
+            </div>
           ) : (
             <>
-              {peutChoisirQui && (
-              <div style={{display:'flex',gap:8,alignItems:'stretch'}}>
-                <select className="inp" style={{flex:'1 1 0',minWidth:0,fontSize:13,padding:'10px 12px'}}
-                  value={selQui} onChange={e => setSelQui(e.target.value)}>
-                  <option value="" style={{background:'#0d2430'}}>— choisir une personne —</option>
-                  {fiches.filter(f => !f.user_id).length > 0 && (
-                    <optgroup label="Personnes ajoutées à la main" style={{background:'#0d2430'}}>
-                      {fiches.filter(f => !f.user_id).map(f => (
-                        <option key={f.id} value={'f:' + f.id} style={{background:'#0d2430'}}>
-                          {f.prenom} {f.nom} — {f.email}
-                        </option>
-                      ))}
-                    </optgroup>
-                  )}
-                  <optgroup label="Comptes Starvolt" style={{background:'#0d2430'}}>
-                    {(usagers || []).map(u => (
-                      <option key={u.id} value={'u:' + u.id} style={{background:'#0d2430'}}>
-                        {(u.prenom || u.pseudo || '—')} {u.nom || ''} — {u.email}
+              {/* ── A. Le profil que l'on renseigne ─────────────────────────── */}
+              <div>
+                <label>Les profils auxquels j'ai accès</label>
+                {peutToutVoir ? (
+                  <div style={{display:'flex',gap:8,alignItems:'stretch'}}>
+                    <select className="inp" style={{flex:'1 1 0',minWidth:0,fontSize:13,padding:'10px 12px'}}
+                      value={selQui} onChange={e => choisirProfil(e.target.value)}>
+                      <option value="" style={{background:'#0d2430'}}>— choisir un profil —</option>
+                      {fiches.filter(f => !f.user_id).length > 0 && (
+                        <optgroup label="Personnes ajoutées à la main" style={{background:'#0d2430'}}>
+                          {fiches.filter(f => !f.user_id).map(f => (
+                            <option key={f.id} value={'f:' + f.id} style={{background:'#0d2430'}}>
+                              {f.prenom} {f.nom} — {f.email}
+                            </option>
+                          ))}
+                        </optgroup>
+                      )}
+                      <optgroup label="Comptes Starvolt" style={{background:'#0d2430'}}>
+                        {(usagers || []).map(u => (
+                          <option key={u.id} value={'u:' + u.id} style={{background:'#0d2430'}}>
+                            {(u.prenom || u.pseudo || '—')} {u.nom || ''} — {u.email}
+                          </option>
+                        ))}
+                      </optgroup>
+                    </select>
+                    <button className="btn btn-no" title="Ajouter une personne qui n'a pas de compte"
+                      style={{flex:'0 0 auto',width:'auto',fontSize:17,fontWeight:900,padding:'0 14px'}}
+                      onClick={() => { setErrQui(null); setFormQui({ prenom:'', nom:'', email:'', commentaire:'' }); }}>＋</button>
+                  </div>
+                ) : profilsAcces.length > 1 ? (
+                  <select className="inp" style={{width:'100%',fontSize:13,padding:'10px 12px'}}
+                    value={personne ? personne.id : ''} onChange={e => choisirProfil(e.target.value)}>
+                    {profilsAcces.map(f => (
+                      <option key={f.id} value={f.id} style={{background:'#0d2430'}}>
+                        {f.prenom} {f.nom}{f.is_own ? ' (moi)' : ''}
                       </option>
                     ))}
-                  </optgroup>
-                </select>
-                <button className="btn btn-no" title="Ajouter une personne qui n'a pas de compte"
-                  style={{flex:'0 0 auto',width:'auto',fontSize:17,fontWeight:900,padding:'0 14px'}}
-                  onClick={() => { setErrQui(null); setFormQui({ prenom:'', nom:'', email:'', commentaire:'' }); }}>＋</button>
+                  </select>
+                ) : (
+                  <div style={{fontSize:14,fontWeight:800,color:'#fff',padding:'2px 0'}}>
+                    {personne ? `${personne.prenom} ${personne.nom}` : '—'}
+                  </div>
+                )}
               </div>
-              )}
 
-              {personne && (
-                <>
-                  {/* Où en est-on, sur le seul périmètre retenu pour cette personne. */}
-                  <div style={{background:'rgba(255,255,255,.06)',border:'1px solid rgba(255,255,255,.14)',
-                               borderRadius:12,padding:'11px 13px'}}>
-                    <div style={{display:'flex',alignItems:'baseline',justifyContent:'space-between',gap:10}}>
-                      <span style={{fontSize:12,fontWeight:700,color:'rgba(255,255,255,.6)'}}>Avancement</span>
-                      <span style={{fontSize:14,fontWeight:900,color:'#fff'}}>
-                        {classees} / {aClasser.length}
-                      </span>
-                    </div>
-                    <div style={{height:6,borderRadius:4,marginTop:8,background:'rgba(255,255,255,.12)',overflow:'hidden'}}>
-                      <div style={{height:'100%',borderRadius:4,background:'var(--green)',transition:'width .3s',
-                                   width: aClasser.length ? `${Math.round(classees / aClasser.length * 100)}%` : '0%'}}/>
-                    </div>
-                    <div style={{fontSize:10.5,color:'rgba(255,255,255,.4)',marginTop:6,lineHeight:1.45}}>
-                      {aClasser.length - classees > 0
-                        ? `Il reste ${aClasser.length - classees} sujet${aClasser.length - classees > 1 ? 's' : ''} à classer.`
-                        : 'Tout est classé.'}
-                    </div>
+              {/* ── B. Qui peut évaluer ce profil ───────────────────────────── */}
+              {peutGererProfil && (
+                <div>
+                  <label>Inviter des utilisateurs à évaluer mon profil</label>
+                  <div style={{display:'flex',gap:8,alignItems:'stretch'}}>
+                    <input type="email" value={inviteEmail} placeholder="adresse e-mail…"
+                      style={{flex:'1 1 0',minWidth:0}}
+                      onChange={e => setInviteEmail(e.target.value)}
+                      onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); inviter(); } }}/>
+                    <button className="btn btn-yes" title="Inviter cette adresse"
+                      style={{flex:'0 0 auto',width:'auto',fontSize:17,fontWeight:900,padding:'0 14px'}}
+                      disabled={inviteBusy} onClick={inviter}>
+                      {inviteBusy ? <StarSpinner size={14} color="#1a4500"/> : '＋'}
+                    </button>
+                    <button className={'btn ' + (modeRetrait ? 'btn-yes' : 'btn-no')} title="Retirer une personne de la liste"
+                      style={{flex:'0 0 auto',width:'auto',fontSize:17,fontWeight:900,padding:'0 14px'}}
+                      onClick={() => setModeRetrait(m => !m)}>−</button>
                   </div>
 
-                  {/* Les branches sans objet pour cette personne : on les écarte
-                      plutôt que de lui faire traverser des questions hors sujet. */}
-                  {branches.length > 0 && (
-                    <div>
-                      <label>Sujets à lui présenter</label>
-                      <div style={{maxHeight:220,overflowY:'auto',display:'flex',flexDirection:'column',gap:4,
-                                   background:'rgba(0,0,0,.18)',border:'1px solid rgba(255,255,255,.12)',
-                                   borderRadius:10,padding:'8px 10px'}}>
-                        {branches.map(b => (
-                          <label key={b.id} className="mv-choix" style={{display:'flex',alignItems:'center',gap:8,cursor:'pointer',
-                                                    paddingLeft: b.prof * 14, fontSize:12.5,color:'#fff'}}>
-                            <input type="checkbox" checked={!exclusions.includes(b.id)}
-                              style={{width:15,height:15,accentColor:'#7dd940',flexShrink:0}}
-                              onChange={() => basculerBranche(b.id)}/>
-                            <span style={{minWidth:0,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',
-                                          opacity: exclusions.includes(b.id) ? .45 : 1}}>{b.label}</span>
-                          </label>
-                        ))}
-                      </div>
-                      <div style={{fontSize:10.5,color:'rgba(255,255,255,.35)',marginTop:5,lineHeight:1.45}}>
-                        Décocher une branche retire aussi tout ce qu'elle contient.
-                      </div>
+                  {inviteMsg && (
+                    <div style={{marginTop:8,fontSize:12,fontWeight:700,lineHeight:1.5,
+                                 color: inviteMsg.type==='ok' ? '#5fd38a' : inviteMsg.type==='absent' ? '#ffcf7a' : '#ff8a8a'}}>
+                      {inviteMsg.texte}
+                      {inviteMsg.type==='absent' && (
+                        <button className="btn btn-no" style={{width:'auto',fontSize:12,padding:'7px 12px',marginTop:7}}
+                          onClick={() => inviterParMail(inviteMsg.email)}>✉️ L'inviter à créer un compte</button>
+                      )}
                     </div>
                   )}
-                </>
+
+                  {evaluateurs.length > 0 && (
+                    <div style={{marginTop:10,display:'flex',flexDirection:'column',gap:5}}>
+                      {evaluateurs.map(ev => {
+                        const total = aClasser.length;
+                        const fait = Math.min(Number(ev.repondu) || 0, total);
+                        return (
+                          <div key={ev.evaluateur_id}
+                            style={{display:'flex',alignItems:'center',gap:8,fontSize:12.5,color:'#fff',
+                                    background:'rgba(255,255,255,.05)',border:'1px solid rgba(255,255,255,.1)',
+                                    borderRadius:9,padding:'7px 10px'}}>
+                            <span style={{width:8,height:8,borderRadius:'50%',background:'#5fd38a',flexShrink:0}}/>
+                            <span style={{flex:1,minWidth:0,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
+                              {[ev.prenom, ev.nom].filter(Boolean).join(' ') || ev.email}
+                              <span style={{color:'rgba(255,255,255,.45)',fontWeight:700}}> ({fait}/{total})</span>
+                            </span>
+                            {modeRetrait && (
+                              <button title="Retirer" style={{flexShrink:0,background:'rgba(255,90,90,.15)',border:'1px solid rgba(255,90,90,.4)',
+                                       borderRadius:7,color:'#ff8a8a',fontSize:13,fontWeight:900,padding:'2px 9px',cursor:'pointer'}}
+                                onClick={() => revoquer(ev)}>✕</button>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                  <div style={{fontSize:10.5,color:'rgba(255,255,255,.35)',marginTop:7,lineHeight:1.45}}>
+                    Entre parenthèses : le nombre de sujets déjà classés par cette personne, sur le total ouvert.
+                  </div>
+                </div>
               )}
 
-              {/* Le filtre : sauter ce qui est déjà classé pour n'enchaîner que
-                  les sujets restants. Seule commande offerte à un utilisateur
-                  qui n'a pas le droit de répondre pour quelqu'un d'autre. */}
+              {/* ── C. Les sujets ouverts à l'évaluation ────────────────────── */}
+              {peutGererProfil && branches.length > 0 && (
+                <div>
+                  <label>Sujets sur lesquels évaluer mon profil</label>
+                  <div style={{maxHeight:220,overflowY:'auto',display:'flex',flexDirection:'column',gap:4,
+                               background:'rgba(0,0,0,.18)',border:'1px solid rgba(255,255,255,.12)',
+                               borderRadius:10,padding:'8px 10px'}}>
+                    {branches.map(b => (
+                      <label key={b.id} className="mv-choix" style={{display:'flex',alignItems:'center',gap:8,cursor:'pointer',
+                                                paddingLeft: b.prof * 14, fontSize:12.5,color:'#fff'}}>
+                        <input type="checkbox" checked={!exclusions.includes(b.id)}
+                          style={{width:15,height:15,accentColor:'#7dd940',flexShrink:0}}
+                          onChange={() => basculerBranche(b.id)}/>
+                        <span style={{minWidth:0,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',
+                                      opacity: exclusions.includes(b.id) ? .45 : 1}}>{b.label}</span>
+                      </label>
+                    ))}
+                  </div>
+                  <div style={{fontSize:10.5,color:'rgba(255,255,255,.35)',marginTop:5,lineHeight:1.45}}>
+                    Les invités n'évaluent que les sujets cochés. Décocher une branche retire aussi tout ce qu'elle contient.
+                  </div>
+                </div>
+              )}
+
+              {/* ── D. Avancement du profil retenu ──────────────────────────── */}
+              {personne && (
+                <div style={{background:'rgba(255,255,255,.06)',border:'1px solid rgba(255,255,255,.14)',
+                             borderRadius:12,padding:'11px 13px'}}>
+                  <div style={{display:'flex',alignItems:'baseline',justifyContent:'space-between',gap:10}}>
+                    <span style={{fontSize:12,fontWeight:700,color:'rgba(255,255,255,.6)'}}>Mon avancement</span>
+                    <span style={{fontSize:14,fontWeight:900,color:'#fff'}}>{classees} / {aClasser.length}</span>
+                  </div>
+                  <div style={{height:6,borderRadius:4,marginTop:8,background:'rgba(255,255,255,.12)',overflow:'hidden'}}>
+                    <div style={{height:'100%',borderRadius:4,background:'var(--green)',transition:'width .3s',
+                                 width: aClasser.length ? `${Math.round(classees / aClasser.length * 100)}%` : '0%'}}/>
+                  </div>
+                  <div style={{fontSize:10.5,color:'rgba(255,255,255,.4)',marginTop:6,lineHeight:1.45}}>
+                    {aClasser.length - classees > 0
+                      ? `Il reste ${aClasser.length - classees} sujet${aClasser.length - classees > 1 ? 's' : ''} à classer.`
+                      : 'Tout est classé.'}
+                  </div>
+                </div>
+              )}
+
+              {/* ── E. Le filtre (inchangé) ─────────────────────────────────── */}
               <label className="mv-choix" style={{display:'flex',alignItems:'flex-start',gap:9,cursor:'pointer',
                              padding:'10px 12px',borderRadius:12,
                              background:'rgba(255,255,255,.06)',border:'1px solid rgba(255,255,255,.14)'}}>
@@ -21439,7 +21620,7 @@ function AdminMindVectorScreen({ user, profile, onBack }) {
                   onChange={e => setRestantes(e.target.checked)}/>
                 <span style={{minWidth:0}}>
                   <span style={{display:'block',fontSize:13,fontWeight:700,color:'#fff'}}>
-                    N'afficher que les questions non encore renseignées
+                    N'afficher que les questions non encore renseignées sur ce profil
                   </span>
                   <span style={{display:'block',fontSize:10.5,color:'rgba(255,255,255,.4)',marginTop:2,lineHeight:1.45}}>
                     Le glissé latéral enchaîne alors uniquement ce qu'il reste à classer.
@@ -21447,24 +21628,7 @@ function AdminMindVectorScreen({ user, profile, onBack }) {
                 </span>
               </label>
 
-              <div style={{display:'flex',gap:9}}>
-                {peutChoisirQui ? (
-                  <>
-                    <button className="btn btn-yes" style={{flex:'1 1 0',width:'auto',fontSize:13,padding:'10px 0'}}
-                      disabled={busyQui || !selQui} onClick={choisirDansListe}>
-                      {busyQui ? <><StarSpinner size={14} color="#1a4500"/> …</> : 'Saisir pour cette personne'}
-                    </button>
-                    <button className="btn btn-no" style={{flex:'0 0 auto',width:'auto',fontSize:13,padding:'10px 16px'}}
-                      disabled={busyQui} onClick={choisirMoi}>Moi-même</button>
-                  </>
-                ) : (
-                  <button className="btn btn-yes" style={{flex:'1 1 0',width:'auto',fontSize:13,padding:'10px 0'}}
-                    disabled={busyQui} onClick={choisirMoi}>
-                    {busyQui ? <><StarSpinner size={14} color="#1a4500"/> …</> : 'Commencer'}
-                  </button>
-                )}
-              </div>
-
+              {/* ── F. L'analyse ────────────────────────────────────────────── */}
               {personne && (
                 <button className="btn btn-yes" style={{width:'100%',fontSize:13,padding:'11px 0'}}
                   disabled={portraitEnCours || !classees}
@@ -21473,20 +21637,23 @@ function AdminMindVectorScreen({ user, profile, onBack }) {
                 </button>
               )}
               {personne && !classees && (
-                <div style={{fontSize:10.5,color:'rgba(255,255,255,.35)',lineHeight:1.45,marginTop:-4}}>
+                <div style={{fontSize:10.5,color:'rgba(255,255,255,.35)',lineHeight:1.45,marginTop:-6}}>
                   Classez au moins un sujet pour lancer une analyse.
                 </div>
               )}
 
-              {peutChoisirQui && usagers === null && <div style={{fontSize:11.5,color:'rgba(255,255,255,.4)'}}>Chargement des comptes…</div>}
+              {peutToutVoir && usagers === null && <div style={{fontSize:11.5,color:'rgba(255,255,255,.4)'}}>Chargement des comptes…</div>}
               {errQui && <div style={{fontSize:12,fontWeight:700,color:'#ff8a8a'}}>{errQui}</div>}
-              <div style={{fontSize:10.5,color:'rgba(255,255,255,.35)',lineHeight:1.5}}>
-                {peutChoisirQui
-                  ? <>Les réponses sont enregistrées au nom de cette personne. Fermer sans choisir revient à la rédaction des questions.</>
-                  : <>Vos réponses n'appartiennent qu'à vous.</>}
-              </div>
             </>
           )}
+        </div>
+
+        {/* Pied collant */}
+        <div style={{flexShrink:0,display:'flex',gap:10,padding:'12px 18px',borderTop:'1px solid rgba(255,255,255,.08)',
+                     background:'#071820',width:'100%',maxWidth:640,margin:'0 auto',boxSizing:'border-box'}}>
+          <button className="btn btn-no" style={{flex:'0 0 auto',width:'auto',padding:'12px 22px'}}
+            disabled={busyQui} onClick={fermerPage}>← Retour</button>
+          <button className="btn btn-yes" style={{flex:1}} disabled={busyQui} onClick={fermerPage}>OK</button>
         </div>
       </div>
     )}
