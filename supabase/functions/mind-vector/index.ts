@@ -15,6 +15,8 @@ const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
 const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY");
+const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY") ?? "";
+const EMAIL_FROM = Deno.env.get("EMAIL_FROM") ?? "Starvolt <noreply@starvolt.fr>";
 
 const MODEL = "claude-opus-4-7";
 const USD_PER_EUR = 0.92;
@@ -619,6 +621,77 @@ avec son intitulé, une description d'une phrase, et ses 5 positions numérotée
   return json({ sujets, connus: noeuds.length, usage, cost: { usd: costUsd, eur: costUsd / USD_PER_EUR } });
 }
 
+// ── action "invite" ─────────────────────────────────────────────────────────
+// Inviter par e-mail quelqu'un qui n'a pas encore de compte à en créer un, pour
+// qu'il puisse évaluer le profil du demandeur. Ouvert à tout compte connecté.
+// Le demandeur est mis en copie ; le contenu est fixé côté serveur (le seul
+// paramètre libre est l'adresse cible) pour éviter tout détournement.
+function inviteHtml(demandeur: string, appUrl: string): string {
+  const bgMain = "#061e2a", bgCard = "#0d2d3e", green = "#7dd940", gold = "#f7c948";
+  return `<!DOCTYPE html>
+<html lang="fr"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><title>Invitation Starvolt</title></head>
+<body style="margin:0;padding:0;background:${bgMain};font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:${bgMain};padding:32px 16px;"><tr><td align="center">
+    <table width="100%" cellpadding="0" cellspacing="0" style="max-width:520px;">
+      <tr><td style="padding:0 0 24px;text-align:center;">
+        <div style="font-size:28px;letter-spacing:2px;color:${gold};font-weight:900;">✦ STARVOLT</div>
+        <div style="font-size:12px;color:rgba(255,255,255,.35);letter-spacing:3px;text-transform:uppercase;margin-top:4px;">La constellation énergétique</div>
+      </td></tr>
+      <tr><td style="background:${bgCard};border-radius:18px;border:1px solid rgba(255,255,255,.1);padding:32px 28px;">
+        <p style="margin:0 0 8px;font-size:22px;font-weight:800;color:#fff;">${demandeur} vous invite ✦</p>
+        <p style="margin:0 0 22px;font-size:15px;color:rgba(255,255,255,.72);line-height:1.7;">
+          <strong style="color:${green};">${demandeur}</strong> aimerait connaître votre regard. Sur Starvolt, l'outil <strong style="color:#fff;">Mind Vector</strong> permet de situer chacun sur les grands sujets — et de comparer sa vision de soi à celle des autres.
+        </p>
+        <div style="background:rgba(125,217,64,.08);border:1px solid rgba(125,217,64,.22);border-radius:12px;padding:18px 20px;margin-bottom:24px;">
+          <p style="margin:0;font-size:14px;color:rgba(255,255,255,.8);line-height:1.65;">
+            Créez votre compte en quelques secondes, puis retrouvez le profil de ${demandeur} dans « les profils auxquels j'ai accès » pour l'évaluer.
+          </p>
+        </div>
+        <table width="100%" cellpadding="0" cellspacing="0"><tr><td align="center">
+          <a href="${appUrl}" style="display:inline-block;background:${green};color:#0a2b00;text-decoration:none;font-size:16px;font-weight:800;padding:15px 34px;border-radius:12px;">Créer mon compte →</a>
+        </td></tr></table>
+        <p style="margin:22px 0 0;font-size:12px;color:rgba(255,255,255,.4);line-height:1.6;text-align:center;">
+          Vous recevez cet e-mail parce que ${demandeur} vous a invité·e sur Starvolt. Si cela ne vous dit rien, ignorez-le simplement.
+        </p>
+      </td></tr>
+      <tr><td style="padding:20px 0 0;text-align:center;font-size:11px;color:rgba(255,255,255,.3);">✦ Starvolt — l'énergie, ensemble</td></tr>
+    </table>
+  </td></tr></table>
+</body></html>`;
+}
+
+async function invite(body: any, caller: { id: string; email: string }): Promise<Response> {
+  const email = String(body?.email || "").trim().toLowerCase();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return json({ error: "bad_email", message: "Adresse e-mail invalide." }, 400);
+  }
+  if (!RESEND_API_KEY) {
+    return json({ error: "missing_resend", message: "RESEND_API_KEY non configurée." }, 500);
+  }
+  const appUrl = String(body?.appUrl || "").trim() || "https://app.starvolt.fr";
+  const profs = await dbSelect(`profiles?id=eq.${caller.id}&select=prenom,nom`);
+  const p = (profs && profs[0]) || {};
+  const demandeur = [p.prenom, p.nom].filter(Boolean).join(" ") || caller.email;
+  const resendResp = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: { "Authorization": `Bearer ${RESEND_API_KEY}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      from: EMAIL_FROM,
+      to: [email],
+      cc: [caller.email],
+      reply_to: caller.email,
+      subject: `${demandeur} vous invite à rejoindre Starvolt ✦`,
+      html: inviteHtml(demandeur, appUrl),
+    }),
+  });
+  if (!resendResp.ok) {
+    const t = await resendResp.text().catch(() => "");
+    console.error("resend invite failed:", resendResp.status, t);
+    return json({ error: "resend_failed", message: "L'envoi de l'e-mail a échoué." }, 502);
+  }
+  return json({ sent: true, cc: caller.email });
+}
+
 async function getCaller(jwt: string): Promise<{ id: string; email: string } | null> {
   try {
     const res = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
@@ -636,12 +709,17 @@ async function handle(req: Request): Promise<Response> {
   if (!jwt) return json({ error: "no_token", message: "Token manquant." }, 401);
   const caller = await getCaller(jwt);
   if (!caller) return json({ error: "invalid_token", message: "Session invalide." }, 401);
-  if (!ANTHROPIC_API_KEY) {
-    return json({ error: "missing_key", message: "ANTHROPIC_API_KEY non configurée." }, 500);
-  }
 
   let body: any = {};
   try { body = await req.json(); } catch { /* corps vide accepté */ }
+
+  // Inviter par e-mail ne dépend pas d'Anthropic : on le traite avant le reste,
+  // et c'est ouvert à tout compte connecté (chacun invite pour son profil).
+  if (body?.action === "invite") return await invite(body, caller);
+
+  if (!ANTHROPIC_API_KEY) {
+    return json({ error: "missing_key", message: "ANTHROPIC_API_KEY non configurée." }, 500);
+  }
 
   // Le portrait est à tout le monde — sur ses propres réponses. Rédiger les
   // questions et réécrire le prompt restent des gestes d'administrateur.

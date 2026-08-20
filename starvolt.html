@@ -20046,6 +20046,7 @@ function AdminMindVectorScreen({ user, profile, onBack }) {
   const [inviteBusy,   setInviteBusy]   = useState(false);
   const [inviteMsg,    setInviteMsg]    = useState(null); // { type:'ok'|'err'|'absent', texte, email? }
   const [modeRetrait,  setModeRetrait]  = useState(false); // le « − » : afficher les croix de révocation
+  const [sujetsOuverts, setSujetsOuverts] = useState(() => new Set()); // branches dépliées dans « Sujets à évaluer » (tout replié au départ)
   const [msgAuto,  setMsgAuto]  = useState(null);  // { type:'ok'|'err', texte } affiché dans le dialogue
   const [glisse,   setGlisse]   = useState(null);  // id de la branche en cours de déplacement
   const [cible,    setCible]    = useState(null);  // id survolé comme destination ('_' = racine)
@@ -20680,14 +20681,20 @@ function AdminMindVectorScreen({ user, profile, onBack }) {
     chargerEvaluateurs(personne);
   };
 
-  // Rien à installer côté serveur : on ouvre le client mail de l'utilisateur,
-  // pré-rempli. Greg pourra brancher un envoi soigné plus tard.
-  const inviterParMail = (email) => {
-    const sujet = encodeURIComponent('Rejoignez-moi sur Starvolt');
-    const corps = encodeURIComponent(
-      `Bonjour,\n\nJ'aimerais que vous évaluiez mon profil sur Starvolt (Mind Vector).\n`
-      + `Créez votre compte ici : ${location.origin}\n\nMerci !`);
-    window.location.href = `mailto:${email}?subject=${sujet}&body=${corps}`;
+  // Starvolt envoie l'e-mail lui-même (Resend, gabarit soigné côté serveur),
+  // avec le demandeur en copie. Le contenu est fixé serveur : seul l'e-mail
+  // cible est transmis.
+  const inviterParMail = async (email) => {
+    setInviteBusy(true);
+    const { data, error } = await sb.functions.invoke('mind-vector', {
+      body: { action: 'invite', email, appUrl: location.origin },
+    });
+    setInviteBusy(false);
+    if (error || data?.error) {
+      setInviteMsg({ type: 'err', texte: (data && data.message) || "L'envoi de l'e-mail a échoué." });
+      return;
+    }
+    setInviteMsg({ type: 'ok', texte: `Invitation envoyée à ${email} — vous êtes en copie.` });
   };
 
   // Fermer la page. Retour et OK ferment de la même façon (tout est déjà
@@ -21593,22 +21600,41 @@ function AdminMindVectorScreen({ user, profile, onBack }) {
               {peutGererProfil && branches.length > 0 && (
                 <div>
                   <label>Sujets sur lesquels évaluer mon profil</label>
-                  <div style={{maxHeight:220,overflowY:'auto',display:'flex',flexDirection:'column',gap:4,
+                  <div style={{maxHeight:260,overflowY:'auto',display:'flex',flexDirection:'column',gap:4,
                                background:'rgba(0,0,0,.18)',border:'1px solid rgba(255,255,255,.12)',
                                borderRadius:10,padding:'8px 10px'}}>
-                    {branches.map(b => (
-                      <label key={b.id} className="mv-choix" style={{display:'flex',alignItems:'center',gap:8,cursor:'pointer',
-                                                paddingLeft: b.prof * 14, fontSize:12.5,color:'#fff'}}>
-                        <input type="checkbox" checked={!exclusions.includes(b.id)}
-                          style={{width:15,height:15,accentColor:'#7dd940',flexShrink:0}}
-                          onChange={() => basculerBranche(b.id)}/>
-                        <span style={{minWidth:0,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',
-                                      opacity: exclusions.includes(b.id) ? .45 : 1}}>{b.label}</span>
-                      </label>
-                    ))}
+                    {branches.filter(b => {
+                      // Visible seulement si tous ses parents sont dépliés. Au
+                      // départ rien n'est déplié : on ne voit que les racines.
+                      const nb = parId[b.id];
+                      let a = nb && nb.parent_id ? parId[nb.parent_id] : null;
+                      while (a) { if (!sujetsOuverts.has(a.id)) return false; a = a.parent_id ? parId[a.parent_id] : null; }
+                      return true;
+                    }).map(b => {
+                      const aEnfants = (enfantsDe[b.id] || []).length > 0;
+                      const ouvert = sujetsOuverts.has(b.id);
+                      return (
+                        <div key={b.id} style={{display:'flex',alignItems:'center',gap:6,paddingLeft: b.prof * 18}}>
+                          {aEnfants ? (
+                            <button type="button" title={ouvert ? 'Replier' : 'Déplier'}
+                              onClick={() => setSujetsOuverts(s => { const n = new Set(s); n.has(b.id) ? n.delete(b.id) : n.add(b.id); return n; })}
+                              style={{flexShrink:0,width:20,height:20,lineHeight:'17px',textAlign:'center',padding:0,
+                                      background:'rgba(125,217,64,.14)',border:'1px solid rgba(125,217,64,.4)',borderRadius:6,
+                                      color:'#a3ed6a',fontSize:15,fontWeight:900,cursor:'pointer'}}>{ouvert ? '−' : '+'}</button>
+                          ) : <span style={{flexShrink:0,width:20}}/>}
+                          <label className="mv-choix" style={{display:'flex',alignItems:'center',gap:8,cursor:'pointer',flex:1,minWidth:0,fontSize:12.5,color:'#fff'}}>
+                            <input type="checkbox" checked={!exclusions.includes(b.id)}
+                              style={{width:15,height:15,accentColor:'#7dd940',flexShrink:0}}
+                              onChange={() => basculerBranche(b.id)}/>
+                            <span style={{minWidth:0,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',
+                                          opacity: exclusions.includes(b.id) ? .45 : 1, fontWeight: aEnfants ? 700 : 400}}>{b.label}</span>
+                          </label>
+                        </div>
+                      );
+                    })}
                   </div>
                   <div style={{fontSize:10.5,color:'rgba(255,255,255,.68)',marginTop:5,lineHeight:1.45}}>
-                    Les invités n'évaluent que les sujets cochés. Décocher une branche retire aussi tout ce qu'elle contient.
+                    Cliquez le <strong style={{color:'#a3ed6a'}}>+</strong> pour déplier une branche. Les invités n'évaluent que les sujets cochés ; décocher une branche retire tout ce qu'elle contient.
                   </div>
                 </div>
               )}
