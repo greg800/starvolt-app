@@ -1918,7 +1918,7 @@ function trackEvent(type, label, screen) {
 // Tracker global de clics sur les boutons de l'app
 (function installClickTracker() {
   let _currentScreen = '';
-  window.__setTrackScreen = (s) => { _currentScreen = s; };
+  window.__setTrackScreen = (s) => { _currentScreen = s; window.__currentScreen = s; };
   // Détail contextuel facultatif pour le feedback (ex : la question de quiz affichée)
   window.__feedbackDetail = null;
   window.__setFeedbackDetail = (d) => { window.__feedbackDetail = d || null; };
@@ -1932,6 +1932,56 @@ function trackEvent(type, label, screen) {
     trackEvent('click', txt, _currentScreen);
   }, true);
 })();
+
+// ─── Journal des erreurs applicatives ─────────────────────────────────────────
+// Toute erreur (JS non gérée, échec d'appel réseau/edge function) est consignée
+// en base via la RPC log_app_error, puis lisible par l'admin en haut de la page
+// Cyber-sécurité. Objectif : ne plus « avaler » un 401 sans que Greg le sache.
+//   severity : 'bloquant' (casse l'app) | 'majeur' (action importante échouée) | 'mineur'
+async function logAppError({ severity = 'majeur', module = '', message = '', detail = null } = {}) {
+  try {
+    // Anti-boucle : on ne consigne pas une erreur survenue dans le logger lui-même.
+    if (window.__loggingError) return;
+    window.__loggingError = true;
+    let det = detail;
+    if (det && typeof det !== 'object') det = { info: String(det) };
+    await sb.rpc('log_app_error', {
+      p_severity:   severity,
+      p_module:     module || window.__currentScreen || '',
+      p_message:    String(message || '').slice(0, 2000),
+      p_detail:     det ? det : null,
+      p_screen:     window.__currentScreen || null,
+      p_url:        (typeof location !== 'undefined' ? location.href : null),
+      p_user_agent: (typeof navigator !== 'undefined' ? navigator.userAgent : null),
+    });
+  } catch (_) { /* le logger ne doit jamais casser l'app */ }
+  finally { window.__loggingError = false; }
+}
+window.logAppError = logAppError;
+
+// Erreurs JS non capturées → bloquant (l'écran a probablement planté).
+window.addEventListener('error', (e) => {
+  const err = e?.error;
+  logAppError({
+    severity: 'bloquant',
+    module: window.__currentScreen || 'window.onerror',
+    message: (err && err.message) || e?.message || 'Erreur JS non gérée',
+    detail: {
+      name: err && err.name, stack: err && String(err.stack || '').slice(0, 1800),
+      source: e?.filename, line: e?.lineno, col: e?.colno,
+    },
+  });
+});
+// Promesses rejetées non gérées → majeur.
+window.addEventListener('unhandledrejection', (e) => {
+  const r = e?.reason;
+  logAppError({
+    severity: 'majeur',
+    module: window.__currentScreen || 'unhandledrejection',
+    message: (r && (r.message || r.error_description)) || String(r || 'Promesse rejetée'),
+    detail: { name: r && r.name, status: r && r.status, stack: r && String(r.stack || '').slice(0, 1800) },
+  });
+});
 
 // Capturer le hash AVANT que Supabase le nettoie (pour détecter type=recovery)
 const initialHash = window.location.hash;
@@ -3407,7 +3457,14 @@ function AuthSignupScreen({ onGoToLogin, onSignedUp, onSuccessDone }) {
               userUrl:   consentUrl,
             }));
           }
-        } catch(e) { console.warn('Switchgrid auto-launch failed', e); }
+        } catch(e) {
+          console.warn('Switchgrid auto-launch failed', e);
+          window.logAppError && window.logAppError({
+            severity: 'majeur', module: 'signup · switchgrid',
+            message: 'Lancement automatique Switchgrid échoué',
+            detail: { error: String(e && e.message || e), site_id: newSite && newSite.id },
+          });
+        }
       }
     }
 
@@ -3417,7 +3474,25 @@ function AuthSignupScreen({ onGoToLogin, onSignedUp, onSuccessDone }) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${data.session.access_token}`, apikey: ANON_KEY },
         body: JSON.stringify({ email: email.trim(), firstName: prenom.trim(), consentUrl: consentUrl || null }),
-      }).catch(() => {});
+      }).then(async (r) => {
+        // Un email de bienvenue muet doit remonter : c'est le seul email de
+        // création de compte (le 401 silencieux de send-welcome est resté
+        // invisible pendant une semaine faute de journal).
+        if (!r.ok) {
+          const body = await r.text().catch(() => '');
+          window.logAppError && window.logAppError({
+            severity: 'majeur', module: 'signup · send-welcome',
+            message: `Email de bienvenue non envoyé (HTTP ${r.status})`,
+            detail: { status: r.status, response: body.slice(0, 500), email: email.trim() },
+          });
+        }
+      }).catch((err) => {
+        window.logAppError && window.logAppError({
+          severity: 'majeur', module: 'signup · send-welcome',
+          message: 'Email de bienvenue : appel réseau échoué',
+          detail: { error: String(err), email: email.trim() },
+        });
+      });
     }
 
     setLoading(false);
@@ -15231,6 +15306,143 @@ function SecProgressModal({ phaseIdx, done }) {
   );
 }
 
+// ─── Journal des erreurs : fenêtre en tête de la page Cyber-sécurité ──────────
+// Liste les erreurs applicatives consignées par logAppError (JS non gérées,
+// échecs d'appels). Chaque ligne se déplie et offre un bouton « Copier le
+// contexte » qui met dans le presse-papier un prompt prêt pour Claude Code.
+const SEV_META = {
+  bloquant: { label:'Bloquant', color:'#ff5d5d', bg:'rgba(255,93,93,.15)' },
+  majeur:   { label:'Majeur',   color:'#ffb340', bg:'rgba(255,179,64,.15)' },
+  mineur:   { label:'Mineur',   color:'#7dd0ff', bg:'rgba(125,208,255,.13)' },
+};
+
+function ErrorJournalPanel() {
+  const [rows, setRows]         = useState(null);
+  const [collapsed, setCollapsed] = useState(false);
+  const [openId, setOpenId]     = useState(null);
+  const [copiedId, setCopiedId] = useState(null);
+  const [busy, setBusy]         = useState(false);
+
+  const load = () => sb.rpc('get_app_errors', { p_limit: 100 }).then(({ data }) => setRows(data || []));
+  useEffect(() => { load(); }, []);
+
+  const who = (r) => {
+    const n = [r.prenom, r.nom].filter(Boolean).join(' ').trim();
+    if (n && r.email) return `${n} (${r.email})`;
+    return n || r.email || 'Non connecté';
+  };
+
+  const buildContext = (r) => {
+    const det = r.detail ? JSON.stringify(r.detail, null, 2) : '(aucun)';
+    return `Bug à corriger dans l'application Starvolt (starvolt.html).\n\n`
+      + `- Date : ${fmtSecDate(r.created_at)}\n`
+      + `- Gravité : ${(SEV_META[r.severity]||{}).label || r.severity}\n`
+      + `- Personne connectée : ${who(r)}\n`
+      + `- Module / écran : ${r.module || r.screen || '—'}\n`
+      + `- URL : ${r.url || '—'}\n`
+      + `- Navigateur : ${r.user_agent || '—'}\n`
+      + `- Message : ${r.message}\n`
+      + `- Détails techniques :\n${det}\n\n`
+      + `Analyse la cause racine de cette erreur et corrige-la.`;
+  };
+
+  const copy = async (r) => {
+    const text = buildContext(r);
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedId(r.id); setTimeout(() => setCopiedId(null), 2000);
+      return;
+    } catch (_) { /* Clipboard API indisponible (http, iframe…) → repli execCommand */ }
+    try {
+      const ta = document.createElement('textarea');
+      ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+      document.body.appendChild(ta); ta.focus(); ta.select();
+      const ok = document.execCommand('copy'); document.body.removeChild(ta);
+      if (ok) { setCopiedId(r.id); setTimeout(() => setCopiedId(null), 2000); return; }
+    } catch (_) { /* ignore */ }
+    setCopiedId('fail-' + r.id); setTimeout(() => setCopiedId(null), 2500);
+  };
+
+  const clearAll = async () => {
+    if (!window.confirm('Vider tout le journal des erreurs ?')) return;
+    setBusy(true);
+    await sb.rpc('clear_app_errors', { p_id: null });
+    setBusy(false); load();
+  };
+  const clearOne = async (id) => {
+    setBusy(true);
+    await sb.rpc('clear_app_errors', { p_id: id });
+    setBusy(false); load();
+  };
+
+  const count = rows?.length || 0;
+  const blocking = (rows || []).filter(r => r.severity === 'bloquant').length;
+
+  return (
+    <div style={{ background:'rgba(255,255,255,.04)', border:'1px solid rgba(255,255,255,.1)', borderRadius:14, overflow:'hidden', margin:'0 16px 16px' }}>
+      <button onClick={() => setCollapsed(c => !c)} style={{ width:'100%', background:'none', border:'none', cursor:'pointer', fontFamily:'inherit', display:'flex', alignItems:'center', justifyContent:'space-between', padding:'12px 14px', color:'#fff' }}>
+        <span style={{ display:'flex', alignItems:'center', gap:9, fontWeight:800, fontSize:15 }}>
+          <span style={{ fontSize:17 }}>🐞</span> Journal des erreurs
+        </span>
+        <span style={{ display:'flex', alignItems:'center', gap:10 }}>
+          {blocking > 0 && <span style={{ fontSize:11, fontWeight:800, color:SEV_META.bloquant.color, background:SEV_META.bloquant.bg, padding:'2px 8px', borderRadius:20 }}>{blocking} bloquant{blocking>1?'s':''}</span>}
+          <span style={{ fontSize:11, color:'rgba(255,255,255,.4)', fontWeight:600 }}>{count} erreur{count>1?'s':''}</span>
+          <span style={{ fontSize:13, color:'rgba(255,255,255,.5)', transition:'transform .2s', transform:collapsed?'rotate(-90deg)':'none' }}>▾</span>
+        </span>
+      </button>
+
+      {!collapsed && (
+        <div style={{ padding:'0 12px 12px' }}>
+          <div style={{ display:'flex', gap:8, justifyContent:'flex-end', marginBottom:8 }}>
+            <button onClick={load} style={{ background:'rgba(255,255,255,.06)', border:'1px solid rgba(255,255,255,.16)', borderRadius:8, color:'rgba(255,255,255,.7)', fontSize:12, fontWeight:700, padding:'5px 10px', cursor:'pointer', fontFamily:'inherit' }}>↻ Rafraîchir</button>
+            {count > 0 && <button onClick={clearAll} disabled={busy} style={{ background:'rgba(255,93,93,.12)', border:'1px solid rgba(255,93,93,.3)', borderRadius:8, color:'#ff8a8a', fontSize:12, fontWeight:700, padding:'5px 10px', cursor:'pointer', fontFamily:'inherit' }}>Vider</button>}
+          </div>
+
+          {rows === null ? (
+            <div style={{ textAlign:'center', padding:24 }}><StarSpinner size={28}/></div>
+          ) : count === 0 ? (
+            <div style={{ textAlign:'center', padding:'20px', color:'rgba(255,255,255,.4)', fontSize:13 }}>Aucune erreur consignée. 🎉</div>
+          ) : (
+            <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
+              {rows.map(r => {
+                const sev = SEV_META[r.severity] || SEV_META.majeur;
+                const isOpen = openId === r.id;
+                return (
+                  <div key={r.id} style={{ background:'rgba(0,0,0,.22)', border:'1px solid rgba(255,255,255,.1)', borderRadius:10, overflow:'hidden' }}>
+                    <div onClick={() => setOpenId(o => o===r.id ? null : r.id)} style={{ display:'flex', alignItems:'center', gap:9, padding:'9px 11px', cursor:'pointer' }}>
+                      <span style={{ flexShrink:0, fontSize:10.5, fontWeight:800, color:sev.color, background:sev.bg, padding:'2px 7px', borderRadius:6, textTransform:'uppercase', letterSpacing:.4 }}>{sev.label}</span>
+                      <span style={{ flex:1, minWidth:0, fontSize:12.5, color:'#fff', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{r.message}</span>
+                      <span style={{ flexShrink:0, fontSize:11, color:'rgba(255,255,255,.45)' }}>{fmtSecDate(r.created_at)}</span>
+                      <span style={{ flexShrink:0, color:'rgba(255,255,255,.3)', fontSize:12, transform:isOpen?'rotate(90deg)':'none', transition:'transform .15s' }}>▸</span>
+                    </div>
+                    {isOpen && (
+                      <div style={{ padding:'2px 12px 12px', fontSize:12, color:'rgba(255,255,255,.75)', lineHeight:1.6 }}>
+                        <div><span style={{ color:'rgba(255,255,255,.45)' }}>Personne :</span> {who(r)}</div>
+                        <div><span style={{ color:'rgba(255,255,255,.45)' }}>Module :</span> {r.module || r.screen || '—'}</div>
+                        {r.url && <div style={{ wordBreak:'break-all' }}><span style={{ color:'rgba(255,255,255,.45)' }}>URL :</span> {r.url}</div>}
+                        {r.user_agent && <div style={{ wordBreak:'break-word' }}><span style={{ color:'rgba(255,255,255,.45)' }}>Navigateur :</span> {r.user_agent}</div>}
+                        {r.detail && (
+                          <pre style={{ margin:'8px 0 0', padding:'9px 11px', background:'rgba(0,0,0,.35)', borderRadius:8, fontSize:11, color:'rgba(255,255,255,.7)', whiteSpace:'pre-wrap', wordBreak:'break-word', maxHeight:220, overflow:'auto' }}>{JSON.stringify(r.detail, null, 2)}</pre>
+                        )}
+                        <div style={{ display:'flex', gap:8, marginTop:10, flexWrap:'wrap' }}>
+                          <button onClick={(e)=>{ e.stopPropagation(); copy(r); }} style={{ background: copiedId===r.id ? '#7dd940' : copiedId===('fail-'+r.id) ? 'rgba(255,93,93,.18)' : '#ffb340', border:'none', borderRadius:8, color: copiedId===r.id ? '#12330a' : copiedId===('fail-'+r.id) ? '#ff8a8a' : '#1a1208', fontSize:12, fontWeight:800, padding:'7px 13px', cursor:'pointer', fontFamily:'inherit' }}>
+                            {copiedId===r.id ? '✓ Copié' : copiedId===('fail-'+r.id) ? '✗ Copie impossible' : '📋 Copier le contexte'}
+                          </button>
+                          <button onClick={(e)=>{ e.stopPropagation(); clearOne(r.id); }} disabled={busy} style={{ background:'rgba(255,255,255,.06)', border:'1px solid rgba(255,255,255,.16)', borderRadius:8, color:'rgba(255,255,255,.6)', fontSize:12, fontWeight:700, padding:'7px 13px', cursor:'pointer', fontFamily:'inherit' }}>Supprimer</button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function AdminCyberSecurityScreen({ onBack }) {
   const [promptRow, setPromptRow] = useState(null);   // {system_prompt, updated_at, updated_by}
   const [promptDraft, setPromptDraft] = useState('');
@@ -15315,6 +15527,8 @@ function AdminCyberSecurityScreen({ onBack }) {
         <div className="welcome-tag" style={{color:'#ffb340'}}>Administration</div>
         <h1 className="welcome-title">Cyber<br/><span className="accent">sécurité</span></h1>
       </div>
+
+      <ErrorJournalPanel />
 
       <div style={{padding:'0 16px'}}>
         <p style={{color:'rgba(255,255,255,.55)', fontSize:13, lineHeight:1.55, margin:'0 0 16px'}}>
@@ -22748,7 +22962,32 @@ function App() {
             // L'auto-évaluation se termine TOUJOURS par le retour IA (onboarding OU
             // lancée depuis la zone Comprendre) — détecté via le flag ou le titre du sujet.
             const isAutoEval = state.onboardingEval || /auto.?[eé]val/i.test(state.learnSubject?.title || '');
-            if (isAutoEval && !state.isRevision) goTo('ONBOARDING_EVAL_RESULT',{learnQuestions:state.learnQuestions,quizResults:res});
+            if (isAutoEval && !state.isRevision) {
+              // L'écran de retour IA (OnboardingEvalResultScreen) n'enregistre PAS la
+              // progression, contrairement à ComprendreScoreScreen. Sans ça, le quiz
+              // d'auto-évaluation ne remontait ni dans le compte, ni dans le tableau
+              // de bord admin. On persiste ici, comme un passage de quiz normal.
+              const subj = state.learnSubject;
+              if (user && subj?.id) {
+                (async () => {
+                  const rr = res?.results || [];
+                  const total = res?.total || rr.length;
+                  const failedIds = rr.filter(r=>!r.correct).map(r=>r.questionId);
+                  const pct = total > 0 ? Math.round((total - failedIds.length) / total * 100) : 0;
+                  const { error } = await sb.from('user_learn_progress').upsert({
+                    user_id: user.id, subject_id: subj.id,
+                    completed_at: pct >= 70 ? new Date().toISOString() : null,
+                    score: pct, failed_question_ids: failedIds,
+                  }, { onConflict: 'user_id,subject_id' });
+                  if (error) { console.error('Erreur enregistrement auto-évaluation', error); return; }
+                  await sb.from('user_learn_progress')
+                    .update({ first_try_total: total, first_try_failed_ids: failedIds })
+                    .eq('user_id', user.id).eq('subject_id', subj.id)
+                    .is('first_try_total', null);
+                })();
+              }
+              goTo('ONBOARDING_EVAL_RESULT',{learnQuestions:state.learnQuestions,quizResults:res});
+            }
             else goTo('COMPRENDRE_SCORE',{learnSubject:state.learnSubject,learnGroup:state.learnGroup,quizResults:res,isRevision:!!state.isRevision});
           }}
           onBack={goBack}/>;
