@@ -13,6 +13,7 @@
 // faire envoyer un courriel « Starvolt » à n'importe qui, depuis notre domaine.)
 
 const SUPABASE_URL     = Deno.env.get("SUPABASE_URL")           ?? "";
+const ANON_KEY         = Deno.env.get("SUPABASE_ANON_KEY")      ?? "";
 const RESEND_API_KEY   = Deno.env.get("RESEND_API_KEY")         ?? "";
 const EMAIL_FROM       = Deno.env.get("EMAIL_FROM")             ?? "Starvolt <noreply@starvolt.fr>";
 const APP_URL          = Deno.env.get("APP_URL")                ?? "https://app.starvolt.fr";
@@ -101,6 +102,10 @@ Deno.serve(async (req: Request) => {
     return new Response(JSON.stringify({ error: "Method not allowed" }), { status: 405, headers: CORS });
 
   // Auth : le JWT est réellement vérifié, et c'est lui qui donne le destinataire.
+  // L'en-tête `apikey` DOIT être la clé anon (publique) : la passerelle Supabase
+  // n'accepte comme apikey que les clés anon/service_role, jamais un jeton
+  // utilisateur (rôle « authenticated »). Passer le token en apikey faisait
+  // échouer /auth/v1/user → 401 → aucun email de bienvenue ne partait.
   const token = (req.headers.get("Authorization") ?? "").replace(/^Bearer\s+/i, "");
   if (!token) {
     return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers: CORS });
@@ -108,7 +113,7 @@ Deno.serve(async (req: Request) => {
   let callerEmail = "";
   try {
     const who = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
-      headers: { Authorization: `Bearer ${token}`, apikey: token },
+      headers: { Authorization: `Bearer ${token}`, apikey: ANON_KEY },
     });
     if (!who.ok) throw new Error("invalid token");
     callerEmail = ((await who.json()) as Record<string, string>).email ?? "";
