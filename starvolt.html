@@ -1809,6 +1809,18 @@
       line-height: 1.5; outline: none; resize: vertical; display: block;
     }
     .mv-dialogue-zone:focus { border-color: #7dd940; }
+    /* Page « Info navigation » : même charte que le reste — fond vert, texte
+       blanc. Les intitulés de champ doivent rester lisibles sur le dégradé. */
+    .mv-page label {
+      display: block; margin-bottom: 6px;
+      font-size: 11px; font-weight: 800; letter-spacing: .4px;
+      text-transform: uppercase; color: #fff;
+    }
+    .mv-page label.mv-choix {
+      text-transform: none; letter-spacing: normal; margin-bottom: 0;
+      color: #fff; font-weight: 600;
+    }
+    .mv-page .mv-hint { color: rgba(255,255,255,.72); }
   </style>
 </head>
 <body>
@@ -20697,9 +20709,17 @@ function AdminMindVectorScreen({ user, profile, onBack }) {
         const { data: fs } = await sb.from('mv_personnes').select('*').order('nom');
         setFiches(fs || []);
       }
+      // Défaut : toujours soi-même — jamais « aucun profil ». On construit la
+      // fiche directement depuis le compte connecté (pas besoin d'attendre la
+      // liste des comptes, qui se charge en parallèle).
       if (!personne) {
-        if (peutToutVoir) choisirProfil('u:' + user.id);
-        else { const own = (liste || []).find(p => p.is_own) || (liste || [])[0]; if (own) selectionner(own); }
+        try {
+          const own = await ficheDuCompte({ id: user.id, prenom: profile?.prenom, nom: profile?.nom, pseudo: profile?.pseudo, email: user.email });
+          selectionner(own);
+        } catch (e) {
+          const secours = (liste || []).find(p => p.is_own) || (liste || [])[0];
+          if (secours) selectionner(secours); else setErrQui(e?.message || String(e));
+        }
       }
     })();
   }, [popupQui]);
@@ -21413,17 +21433,18 @@ function AdminMindVectorScreen({ user, profile, onBack }) {
 
     {/* ── Pour qui saisit-on les réponses ? ───────────────────────────────── */}
     {popupQui && (
-      <div style={{position:'fixed',inset:0,zIndex:9600,background:'#071820',display:'flex',flexDirection:'column'}}>
+      <div style={{position:'fixed',inset:0,zIndex:9600,display:'flex',flexDirection:'column',
+                   background:'linear-gradient(145deg, #065060 0%, #0a9b8c 50%, #0b8264 100%)'}}>
         {/* En-tête de la page */}
-        <div style={{flexShrink:0,padding:'16px 18px 11px',borderBottom:'1px solid rgba(255,255,255,.08)'}}>
+        <div style={{flexShrink:0,padding:'16px 18px 11px',borderBottom:'1px solid rgba(255,255,255,.14)'}}>
           <div style={{fontSize:18,fontWeight:900,color:'#fff'}}>Info navigation</div>
-          <div style={{fontSize:12,color:'rgba(255,255,255,.5)',marginTop:3,lineHeight:1.45}}>
-            Choisir le profil à renseigner, décider qui peut l'évaluer et sur quels sujets. Chaque réglage est enregistré aussitôt.
+          <div style={{fontSize:12,color:'rgba(255,255,255,.75)',marginTop:3,lineHeight:1.45}}>
+            Le profil à renseigner, qui peut l'évaluer et sur quels sujets. Chaque réglage est enregistré aussitôt.
           </div>
         </div>
 
         {/* Corps défilant */}
-        <div style={{flex:1,minHeight:0,overflowY:'auto',width:'100%',maxWidth:640,margin:'0 auto',boxSizing:'border-box',
+        <div className="mv-page" style={{flex:1,minHeight:0,overflowY:'auto',width:'100%',maxWidth:640,margin:'0 auto',boxSizing:'border-box',
                      padding:'14px 18px 24px',display:'flex',flexDirection:'column',gap:15}}>
 
           {formQui ? (
@@ -21468,8 +21489,8 @@ function AdminMindVectorScreen({ user, profile, onBack }) {
                 {peutToutVoir ? (
                   <div style={{display:'flex',gap:8,alignItems:'stretch'}}>
                     <select className="inp" style={{flex:'1 1 0',minWidth:0,fontSize:13,padding:'10px 12px'}}
-                      value={selQui} onChange={e => choisirProfil(e.target.value)}>
-                      <option value="" style={{background:'#0d2430'}}>— choisir un profil —</option>
+                      value={personne ? (personne.user_id ? 'u:' + personne.user_id : 'f:' + personne.id) : ''}
+                      onChange={e => choisirProfil(e.target.value)}>
                       {fiches.filter(f => !f.user_id).length > 0 && (
                         <optgroup label="Personnes ajoutées à la main" style={{background:'#0d2430'}}>
                           {fiches.filter(f => !f.user_id).map(f => (
@@ -21562,7 +21583,7 @@ function AdminMindVectorScreen({ user, profile, onBack }) {
                       })}
                     </div>
                   )}
-                  <div style={{fontSize:10.5,color:'rgba(255,255,255,.35)',marginTop:7,lineHeight:1.45}}>
+                  <div style={{fontSize:10.5,color:'rgba(255,255,255,.68)',marginTop:7,lineHeight:1.45}}>
                     Entre parenthèses : le nombre de sujets déjà classés par cette personne, sur le total ouvert.
                   </div>
                 </div>
@@ -21586,7 +21607,7 @@ function AdminMindVectorScreen({ user, profile, onBack }) {
                       </label>
                     ))}
                   </div>
-                  <div style={{fontSize:10.5,color:'rgba(255,255,255,.35)',marginTop:5,lineHeight:1.45}}>
+                  <div style={{fontSize:10.5,color:'rgba(255,255,255,.68)',marginTop:5,lineHeight:1.45}}>
                     Les invités n'évaluent que les sujets cochés. Décocher une branche retire aussi tout ce qu'elle contient.
                   </div>
                 </div>
@@ -21637,7 +21658,7 @@ function AdminMindVectorScreen({ user, profile, onBack }) {
                 </button>
               )}
               {personne && !classees && (
-                <div style={{fontSize:10.5,color:'rgba(255,255,255,.35)',lineHeight:1.45,marginTop:-6}}>
+                <div style={{fontSize:10.5,color:'rgba(255,255,255,.68)',lineHeight:1.45,marginTop:-6}}>
                   Classez au moins un sujet pour lancer une analyse.
                 </div>
               )}
@@ -21648,12 +21669,13 @@ function AdminMindVectorScreen({ user, profile, onBack }) {
           )}
         </div>
 
-        {/* Pied collant */}
-        <div style={{flexShrink:0,display:'flex',gap:10,padding:'12px 18px',borderTop:'1px solid rgba(255,255,255,.08)',
-                     background:'#071820',width:'100%',maxWidth:640,margin:'0 auto',boxSizing:'border-box'}}>
-          <button className="btn btn-no" style={{flex:'0 0 auto',width:'auto',padding:'12px 22px'}}
-            disabled={busyQui} onClick={fermerPage}>← Retour</button>
-          <button className="btn btn-yes" style={{flex:1}} disabled={busyQui} onClick={fermerPage}>OK</button>
+        {/* Pied collant, pleine largeur */}
+        <div style={{flexShrink:0,borderTop:'1px solid rgba(255,255,255,.14)',background:'rgba(4,44,56,.55)'}}>
+          <div style={{display:'flex',gap:10,padding:'12px 18px',width:'100%',maxWidth:640,margin:'0 auto',boxSizing:'border-box'}}>
+            <button className="btn btn-no" style={{flex:'0 0 auto',width:'auto',padding:'12px 22px'}}
+              disabled={busyQui} onClick={fermerPage}>← Retour</button>
+            <button className="btn btn-yes" style={{flex:1}} disabled={busyQui} onClick={fermerPage}>OK</button>
+          </div>
         </div>
       </div>
     )}
