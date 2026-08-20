@@ -22842,8 +22842,21 @@ function App() {
       const { data, error } = await sb.functions.invoke('admin-impersonate', { body: { target_user_id: u.id } });
       if (error || !data?.access_token) {
         window.__impersonating = false;
-        console.error('impersonate', error || data);
-        alert("Impossible de se connecter en tant que cet utilisateur.");
+        // supabase-js ne met pas le corps de la réponse dans `error` : sur un
+        // non-2xx, le détail ({error, detail}) est dans error.context (Response).
+        // On l'extrait pour l'afficher ET le consigner au journal des erreurs,
+        // sinon un échec transitoire (ex : passerelle auth) reste un mystère.
+        let fnDetail = (data && !data.access_token) ? data : null;
+        try { if (error?.context && typeof error.context.json === 'function') fnDetail = await error.context.json(); } catch (_) {}
+        const reason = fnDetail?.error || error?.message || 'inconnue';
+        console.error('impersonate', error || data, fnDetail);
+        window.logAppError && window.logAppError({
+          severity: 'majeur', module: 'admin · impersonation',
+          message: `Impersonation impossible (${reason})`,
+          detail: { target_user_id: u.id, target: u.email || u.prenom, invoke_error: String(error?.message || ''), fn_response: fnDetail },
+        });
+        alert("Impossible de se connecter en tant que cet utilisateur."
+          + (fnDetail?.error ? `\n\nRaison : ${fnDetail.error}${fnDetail.detail ? ' — ' + fnDetail.detail : ''}` : ''));
         return;
       }
       const impInfo = { name: u.prenom || u.email, adminAccess: adminInfo.access, adminRefresh: adminInfo.refresh };
