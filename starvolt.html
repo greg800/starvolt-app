@@ -20563,7 +20563,15 @@ function AdminMindVectorScreen({ user, profile, onBack }) {
   // de ma part. Le filtre ne vaut que pendant la saisie des réponses : en
   // rédaction, il n'y a rien à renseigner.
   const aRenseigner = (id) => aDesPositions(id) && reponses[id] === undefined;
-  const admissible  = (id) => !(mode === 'reponse' && restantes) || aRenseigner(id);
+  // Ce sur quoi la navigation peut s'arrêter. En modification on montre tout, y
+  // compris les cartes vides (l'admin doit pouvoir les remplir). En saisie des
+  // réponses on ne s'arrête JAMAIS sur une carte sans position rédigée : on file
+  // à la suivante qui est remplie ; le filtre « non renseigné » se cumule.
+  const admissible = (id) => {
+    if (mode !== 'reponse') return true;
+    if (!aDesPositions(id)) return false;
+    return !restantes || reponses[id] === undefined;
+  };
 
   // Ce qu'il reste à faire, et le moment où il ne reste plus rien.
   const reste = useMemo(
@@ -20800,50 +20808,50 @@ function AdminMindVectorScreen({ user, profile, onBack }) {
     // Rien d'admissible ailleurs : on reste où l'on est.
   };
 
-  // Vertical : vers le bas on remonte d'un niveau (vers la racine), vers le
-  // haut on descend vers le bout des branches.
-  const versParent = () => {
-    const n = parId[sel];
-    if (n && n.parent_id) choisir(n.parent_id);
-  };
-
-  const versEnfant = () => {
-    const kids = enfantsDe[sel] || [];
-    if (!kids.length) return;
-    // On redescend là où on était déjà allé dans cette branche.
-    const memo = kids.find(k => k.id === memoireRef.current[sel]);
-    choisir((memo || kids[0]).id);
-  };
-
-  const tactRef = useRef(null);
-  const debutTact = (e) => {
-    if (!e.touches || e.touches.length !== 1) { tactRef.current = null; return; }
-    tactRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
-  };
-  const finTact = (e) => {
-    const d = tactRef.current; tactRef.current = null;
-    // Pendant une saisie de texte, le doigt sert à placer le curseur.
-    if (!d || posEdit != null) return;
-    const t = e.changedTouches && e.changedTouches[0];
-    if (!t) return;
-    const dx = t.clientX - d.x, dy = t.clientY - d.y;
-    const ax = Math.abs(dx), ay = Math.abs(dy);
-
-    if (ax > ay * 1.4) {                       // franchement horizontal
-      if (ax < 60) return;
-      versVoisin(dx > 0 ? -1 : 1);             // vers la droite = sujet précédent
-      return;
-    }
-    if (ay > ax * 1.4) {                       // franchement vertical
-      if (ay < 70) return;
-      // Si une case est dépliée, la colonne défile : le doigt sert à ça.
-      const g = grilleRef.current;
-      if (g && g.scrollHeight > g.clientHeight + 2) return;
-      if (dy > 0) versParent();                // vers le bas = remonter d'un niveau
-      else        versEnfant();                // vers le haut = entrer dans le niveau suivant
-    }
-    // Trop en diagonale : on ne devine pas l'intention.
-  };
+  // Le geste tactile de la page des cartes, posé en natif (non passif) pour
+  // pouvoir bloquer le retour-navigateur / la sortie d'appli quand on glisse
+  // près du bord. Plus de navigation verticale : seul le glissé LATÉRAL change
+  // de sujet ; le vertical reste au défilement natif d'une carte dépliée.
+  const pleinRef = useRef(null);
+  const navRef = useRef({});
+  navRef.current = { versVoisin, posEdit };
+  useEffect(() => {
+    const el = pleinRef.current;
+    if (!el || !compact) return;
+    let start = null;
+    const dansPiste = (t) => pisteRef.current && t && pisteRef.current.contains(t);
+    const onStart = (e) => {
+      if (!e.touches || e.touches.length !== 1) { start = null; return; }
+      const t = e.touches[0];
+      start = { x: t.clientX, y: t.clientY, piste: dansPiste(e.target) };
+    };
+    const onMove = (e) => {
+      if (!start || !e.touches || e.touches.length !== 1) return;
+      const dx = e.touches[0].clientX - start.x, dy = e.touches[0].clientY - start.y;
+      // Geste horizontal hors du rail de niveaux : on garde la main pour ne pas
+      // déclencher le retour navigateur / la sortie de l'appli.
+      if (!start.piste && Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 8) e.preventDefault();
+    };
+    const onEnd = (e) => {
+      const s = start; start = null;
+      const { versVoisin: vv, posEdit: pe } = navRef.current;
+      if (!s || s.piste || pe != null) return;      // édition de texte : le doigt place le curseur
+      const t = e.changedTouches && e.changedTouches[0];
+      if (!t) return;
+      const dx = t.clientX - s.x, dy = t.clientY - s.y;
+      if (Math.abs(dx) > Math.abs(dy) * 1.4 && Math.abs(dx) >= 60) {
+        vv(dx > 0 ? -1 : 1);                        // vers la droite = sujet précédent
+      }
+    };
+    el.addEventListener('touchstart', onStart, { passive: false });
+    el.addEventListener('touchmove', onMove, { passive: false });
+    el.addEventListener('touchend', onEnd, { passive: false });
+    return () => {
+      el.removeEventListener('touchstart', onStart);
+      el.removeEventListener('touchmove', onMove);
+      el.removeEventListener('touchend', onEnd);
+    };
+  }, [compact]);
 
   // ── Mode « réponses » : pour qui, et quelle position ───────────────────────
   // Éditer l'arbre des sujets (mode « saisie ») est un pouvoir d'administrateur.
@@ -21374,9 +21382,7 @@ function AdminMindVectorScreen({ user, profile, onBack }) {
   );
 
   const grillePositions = () => (
-    <div className="mv-grille" ref={grilleRef}
-      onTouchStart={compact ? debutTact : undefined}
-      onTouchEnd={compact ? finTact : undefined}>
+    <div className="mv-grille" ref={grilleRef} style={{touchAction:'pan-y'}}>
       {MV_POSITIONS.map(p => (
         <MvPosition key={p.n} p={p} longueurMax={MV_MAX}
           texte={cases[sel + ':' + p.n] || ''}
@@ -21412,7 +21418,7 @@ function AdminMindVectorScreen({ user, profile, onBack }) {
 
   return (
     <>
-    <div className={'mv-plein fade-in' + (compact ? ' compact' : '')}>
+    <div className={'mv-plein fade-in' + (compact ? ' compact' : '')} ref={pleinRef} style={{overscrollBehaviorX:'contain'}}>
       {/* Le sujet retenu et ce qu'il recouvre, à côté du titre : c'est le seul
           endroit où la description se lit, et elle cadre la lecture des 5 cases. */}
       <div className="mv-entete">
