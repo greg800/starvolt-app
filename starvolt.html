@@ -20284,7 +20284,10 @@ function AdminMindVectorScreen({ user, profile, onBack }) {
   const docRef = useRef(null);                            // textarea du contenu documentaire
   // ── Deux façons d'utiliser l'écran : on rédige les questions (✎) ou on saisit
   //    les réponses de quelqu'un (👁). Le mode est retenu d'une visite à l'autre.
-  const [mode,     setMode]     = useState('saisie');   // 'saisie' | 'reponse'
+  // Rédiger les questions est réservé aux admins ; un simple utilisateur ne fait
+  // que répondre. On démarre donc directement en mode réponse pour lui.
+  const [mode,     setMode]     = useState(() =>
+    ['admin','superadmin'].includes(profile?.role) ? 'saisie' : 'reponse');   // 'saisie' | 'reponse'
   const [personne, setPersonne] = useState(null);       // fiche mv_personnes en cours de saisie
   const [reponses, setReponses] = useState({});         // idNoeud → MA position retenue (1..5)
   const [autoDiag, setAutoDiag] = useState({});         // idNoeud → ce que la personne a dit d'elle-même
@@ -20843,8 +20846,13 @@ function AdminMindVectorScreen({ user, profile, onBack }) {
   };
 
   // ── Mode « réponses » : pour qui, et quelle position ───────────────────────
+  // Éditer l'arbre des sujets (mode « saisie ») est un pouvoir d'administrateur.
+  const peutEditer = ['admin','superadmin'].includes(profile?.role);
   const basculerMode = () => {
     fermerPos();
+    // Un non-admin ne bascule jamais en rédaction : le clic ouvre juste la page
+    // de choix du profil, on reste en réponse.
+    if (!peutEditer) { setMode('reponse'); setPopupQui(true); return; }
     if (mode === 'saisie') { setMode('reponse'); setPopupQui(true); }
     else { setMode('saisie'); setPersonne(null); setReponses({}); setPopupQui(false); }
   };
@@ -21467,7 +21475,7 @@ function AdminMindVectorScreen({ user, profile, onBack }) {
           {niveaux.map(niv => (
             <div key={niv.prof} className="mvt-niveau">
               {niv.items.map(n => (
-                <div key={n.id} draggable ref={el => { fichesRefs.current[n.id] = el; }}
+                <div key={n.id} draggable={peutEditer && mode === 'saisie'} ref={el => { fichesRefs.current[n.id] = el; }}
                   className={'mvt-noeud'
                     + (sel === n.id ? ' sel' : chemin.includes(n.id) ? ' chemin' : '')
                     + (glisse === n.id ? ' glisse' : '')
@@ -21504,8 +21512,10 @@ function AdminMindVectorScreen({ user, profile, onBack }) {
           {niveaux.length === 0 && (
             <div className="mvt-niveau">
               <span className="mvt-vide">Aucun sujet.</span>
-              <button className="btn btn-no" style={{width:'auto',fontSize:11,padding:'6px 12px',color:'#a3ed6a',border:'1px dashed rgba(125,217,64,.45)'}}
-                onClick={() => ouvrirAjout(null)}>＋ créer la racine</button>
+              {peutEditer && (
+                <button className="btn btn-no" style={{width:'auto',fontSize:11,padding:'6px 12px',color:'#a3ed6a',border:'1px dashed rgba(125,217,64,.45)'}}
+                  onClick={() => ouvrirAjout(null)}>＋ créer la racine</button>
+              )}
             </div>
           )}
         </div>
