@@ -1429,8 +1429,9 @@
       position: fixed; inset: 0; z-index: 1;
       display: flex; flex-direction: column;
       width: 100%; max-width: 1400px; margin: 0 auto;
-      /* 56 px = la barre du haut, fixe elle aussi (.top-bar) */
-      padding: 62px 20px calc(94px + env(safe-area-inset-bottom, 0px));
+      /* Mind Vector porte sa PROPRE barre du haut (mv-head), la barre globale est
+         masquée sur cet écran : on ne réserve donc plus 56 px en haut. */
+      padding: calc(12px + env(safe-area-inset-top, 0px)) 20px calc(94px + env(safe-area-inset-bottom, 0px));
     }
     .mv-plein.compact { padding-left: 12px; padding-right: 12px; }
     /* Titre de la page, puis le sujet retenu et ce qu'il recouvre, sur la même
@@ -1504,6 +1505,39 @@
     }
     .mv-sujet-lien:hover { color: var(--green); }
     .mv-livre { flex: 0 0 auto; display: flex; align-items: center; color: var(--green); }
+
+    /* En-tête Mind Vector : remplace la barre du haut sur cet écran. Ligne 1 =
+       logo (à la place de Starvolt) + personne analysée, puis pouces + compte à
+       droite. Ligne 2 = le sujet courant et son descriptif, en pleine largeur. */
+    .mv-head { flex: 0 0 auto; display: flex; flex-direction: column; gap: 9px;
+      margin-bottom: 10px; padding-bottom: 10px; border-bottom: 1px solid rgba(255,255,255,.12); }
+    .mv-head-row { display: flex; align-items: center; gap: 10px; min-width: 0; }
+    .mv-head-logo { flex: 0 0 auto; background: none; border: none; padding: 0; cursor: pointer;
+      font-family: inherit; font-size: 18px; font-weight: 900; color: #fff; line-height: 1; white-space: nowrap; }
+    .mv-head-logo .accent { color: var(--green); }
+    .mv-head-qui { flex: 0 1 auto; min-width: 0; display: flex; align-items: center; gap: 6px;
+      background: rgba(125,217,64,.16); border: 1px solid rgba(125,217,64,.5); border-radius: 20px;
+      padding: 5px 12px; color: #fff; font-weight: 800; font-size: 13px; cursor: pointer;
+      font-family: inherit; overflow: hidden; }
+    .mv-head-qui.crayon { background: rgba(255,255,255,.12); border-color: rgba(255,255,255,.22); }
+    .mv-head-qui .mv-mode-ico { display: flex; align-items: center; flex: 0 0 auto; color: #fff; }
+    .mv-head-qui .nom { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .mv-head-spacer { flex: 1 1 auto; }
+    .mv-head-tools { flex: 0 0 auto; display: flex; align-items: center; gap: 8px; }
+    .mv-head-titre { font-size: clamp(19px, 4.8vw, 27px); font-weight: 900; color: #fff;
+      line-height: 1.15; display: flex; align-items: center; gap: 8px; min-width: 0; }
+    .mv-head-titre.lien { background: none; border: none; padding: 0; font-family: inherit; cursor: pointer; text-align: left; }
+    .mv-head-titre.lien:hover { color: var(--green); }
+    .mv-head-desc { font-size: clamp(13px, 3.4vw, 15.5px); color: rgba(255,255,255,.74); line-height: 1.45; margin-top: 4px; }
+    @media (max-width: 899px) {
+      /* La personne analysée prime : on lui laisse la largeur, et le compte
+         connecté se réduit à sa pastille (pas de nom en double avec la barre). */
+      .mv-head-logo { font-size: 16px; }
+      .mv-head-qui .nom { max-width: 44vw; }
+      .mv-head .user-chip span { display: none; }
+      .mv-head .user-chip { max-width: none; padding: 4px; }
+      .mv-head-tools { gap: 6px; }
+    }
 
     /* Fiche documentaire du sujet */
     .mv-fiche {
@@ -20264,7 +20298,7 @@ function MvPosition({
   );
 }
 
-function AdminMindVectorScreen({ user, profile, onBack }) {
+function AdminMindVectorScreen({ user, profile, onBack, onFeedback, chipName, avatarName, onProfile, isImperso }) {
   const [noeuds,   setNoeuds]   = useState(null);  // liste plate des nœuds
   const [cases,    setCases]    = useState({});    // "idNoeud:position" → texte
   const [titres,   setTitres]   = useState({});    // "idNoeud:position" → nom de la position
@@ -21367,6 +21401,9 @@ function AdminMindVectorScreen({ user, profile, onBack }) {
   };
 
   const selNoeud = sel ? parId[sel] : null;
+  // Initiales du compte connecté, pour la pastille reprise de la barre globale.
+  const mvInitiales = (avatarName || chipName || '').trim().split(/\s+/)
+    .map(w => (w[0] || '').toUpperCase()).join('').slice(0, 2);
   const nomDe = (id) => (parId[id] || {}).label || '';
 
   // ── Fragments de rendu ────────────────────────────────────────────────────
@@ -21418,56 +21455,66 @@ function AdminMindVectorScreen({ user, profile, onBack }) {
 
   return (
     <>
-    <div className={'mv-plein fade-in' + (compact ? ' compact' : '')} ref={pleinRef} style={{overscrollBehaviorX:'contain'}}>
-      {/* Le sujet retenu et ce qu'il recouvre, à côté du titre : c'est le seul
-          endroit où la description se lit, et elle cadre la lecture des 5 cases. */}
-      <div className="mv-entete">
-        {/* Sur deux lignes : le titre de la page tient dans une colonne étroite
-            et rend la largeur au sujet, qui est ce qu'on vient vraiment lire. */}
-        {/* Titre sur une ligne, et le mode juste dessous : empilés, ils tiennent
-            dans une colonne étroite et rendent la largeur au sujet — c'est lui
-            et son commentaire qu'on vient lire, surtout sur petit écran. */}
-        <div className="mv-marque">
-          <button className="mv-titre-court" onClick={basculerMode}
-            title="Cliquer pour passer de la rédaction des questions à la saisie des réponses">
+    <div className={'mv-plein fade-in' + (compact ? ' compact' : '')} ref={pleinRef}
+      style={{overscrollBehaviorX:'contain', paddingTop: isImperso ? 'calc(52px + env(safe-area-inset-top,0px))' : undefined}}>
+      {/* En-tête propre à Mind Vector : il REMPLACE la barre du haut de l'appli.
+          Logo (à la place de Starvolt) + personne analysée à gauche ; pouces et
+          compte connecté à droite ; sujet courant + descriptif en pleine largeur. */}
+      <div className="mv-head">
+        <div className="mv-head-row">
+          <button className="mv-head-logo" onClick={basculerMode}
+            title={peutEditer ? 'Mind Vector — basculer rédaction / réponses' : 'Mind Vector — choisir la personne'}>
             Mind <span className="accent">Vector</span>
           </button>
-          <button className={'mv-mode' + (mode === 'reponse' ? ' oeil' : '')}
+          <button className={'mv-head-qui' + (mode === 'saisie' ? ' crayon' : '')}
             onClick={() => mode === 'reponse' ? setPopupQui(true) : basculerMode()}
-            title={mode === 'saisie'
-              ? 'Rédaction des questions — cliquer le titre pour saisir des réponses'
-              : 'Saisie des réponses — cliquer pour changer de personne'}>
+            title={mode === 'saisie' ? 'Rédaction des questions' : 'Changer de personne évaluée'}>
             <span className="mv-mode-ico">{mode === 'saisie' ? MV_PICTO.crayon : MV_PICTO.oeil}</span>
-            {mode === 'reponse' && (
-              <span className="mv-mode-qui">
-                {personne ? `${personne.prenom} ${personne.nom}` : 'choisir qui répond'}
-              </span>
-            )}
+            <span className="nom">{personne ? `${personne.prenom} ${personne.nom}` : (mode === 'reponse' ? 'choisir qui répond' : '—')}</span>
           </button>
+          <div className="mv-head-spacer"/>
+          <div className="mv-head-tools">
+            {toutRenseigne && !compact && (
+              <button className="btn btn-yes" style={{width:'auto',fontSize:12,padding:'6px 12px'}}
+                title="Revoir le portrait tiré de vos positions"
+                onClick={() => demanderPortrait()}>✨ Résultats</button>
+            )}
+            {onFeedback && (
+              <div style={{display:'flex',alignItems:'center',gap:2}}>
+                <button onClick={()=>onFeedback('up')} title="J'aime cette page" aria-label="Retour positif"
+                  style={{background:'transparent',border:'none',padding:4,cursor:'pointer',display:'flex',alignItems:'center',borderRadius:8,lineHeight:0,color:'#fff',opacity:.85}}>
+                  <ThumbIcon up size={19}/>
+                </button>
+                <button onClick={()=>onFeedback('down')} title="Un problème sur cette page" aria-label="Retour négatif"
+                  style={{background:'transparent',border:'none',padding:4,cursor:'pointer',display:'flex',alignItems:'center',borderRadius:8,lineHeight:0,color:'#fff',opacity:.85}}>
+                  <ThumbIcon up={false} size={19}/>
+                </button>
+              </div>
+            )}
+            {chipName && onProfile && (
+              <div className="user-chip" onClick={onProfile} style={{cursor:'pointer'}}>
+                <div className="user-chip-av">{mvInitiales || '?'}</div>
+                <span>{chipName}</span>
+              </div>
+            )}
+          </div>
         </div>
-        {/* Sur petit écran ce bouton rognait la largeur de l'intitulé, qui
-            devenait illisible : il vit là-bas dans « Info navigation ». */}
-        {toutRenseigne && !compact && (
-          <button className="btn btn-yes" style={{flex:'0 0 auto',width:'auto',fontSize:12,padding:'6px 12px'}}
-            title="Revoir le portrait tiré de vos positions"
-            onClick={() => demanderPortrait()}>✨ Résultats</button>
-        )}
         {selNoeud && (() => {
           // Le livre ne s'affiche que s'il y a vraiment quelque chose à lire —
           // sinon c'est une promesse vide. Vaut dans les deux modes.
           const documente = !!(selNoeud.contenu || selNoeud.image_url);
           return (
-            <div className="mv-sujet">
+            <div className="mv-head-sujet">
               {documente ? (
-                <button className="mv-sujet-nom mv-sujet-lien" onClick={() => setDocOuvert(true)}
+                <button className="mv-head-titre lien" onClick={() => setDocOuvert(true)}
                   title="Lire la documentation de ce sujet">
                   {selNoeud.label}
                   <span className="mv-livre">{MV_PICTO.livre}</span>
                 </button>
               ) : (
-                <div className="mv-sujet-nom">{selNoeud.label}</div>
+                <div className="mv-head-titre">{selNoeud.label}</div>
               )}
-              {selNoeud.description && <div className="mv-sujet-desc">{selNoeud.description}</div>}
+              {selNoeud.description && <div className="mv-head-desc">{selNoeud.description}</div>}
             </div>
           );
         })()}
@@ -23134,7 +23181,9 @@ function App() {
         return <AdminMindVectorParamsScreen onBack={goBack}/>;
 
       case 'ADMIN_MIND_VECTOR':
-        return <AdminMindVectorScreen user={user} profile={profile} onBack={goBack}/>;
+        return <AdminMindVectorScreen user={user} profile={profile} onBack={goBack}
+          onFeedback={(s)=>setFeedbackSentiment(s)} chipName={chipLabel} avatarName={avatarName}
+          onProfile={()=>goTo('PROFILE')} isImperso={!!imperso}/>;
 
       case 'ADMIN_LEARN':
         return <AdminLearnScreen
@@ -23455,6 +23504,8 @@ function App() {
           </button>
         </div>
       )}
+      {/* Mind Vector remplace entièrement la barre du haut par la sienne. */}
+      {state.screen !== 'ADMIN_MIND_VECTOR' && (
       <TopBar
         name={chipLabel}
         avatarName={avatarName}
@@ -23468,6 +23519,7 @@ function App() {
         cartCount={cartCount}
         onFeedback={user && !isAuthScreen ? (s)=>setFeedbackSentiment(s) : null}
       />
+      )}
       {feedbackSentiment && (
         <FeedbackModal sentiment={feedbackSentiment} user={user} screen={state.screen} onClose={()=>setFeedbackSentiment(null)}/>
       )}
