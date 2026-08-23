@@ -1528,6 +1528,7 @@
       line-height: 1.15; display: flex; align-items: center; gap: 8px; min-width: 0; }
     .mv-head-titre.lien { background: none; border: none; padding: 0; font-family: inherit; cursor: pointer; text-align: left; }
     .mv-head-titre.lien:hover { color: var(--green); }
+    .mv-head-num { font-size: .6em; font-weight: 800; color: rgba(255,255,255,.6); white-space: nowrap; }
     .mv-head-desc { font-size: clamp(13px, 3.4vw, 15.5px); color: rgba(255,255,255,.74); line-height: 1.45; margin-top: 4px; }
     @media (max-width: 899px) {
       /* La personne analysée prime : on lui laisse la largeur, et le compte
@@ -20344,6 +20345,8 @@ function AdminMindVectorScreen({ user, profile, onBack, onFeedback, chipName, av
   const [inviteMsg,    setInviteMsg]    = useState(null); // { type:'ok'|'err'|'absent', texte, email? }
   const [modeRetrait,  setModeRetrait]  = useState(false); // le « − » : afficher les croix de révocation
   const [sujetsOuverts, setSujetsOuverts] = useState(() => new Set()); // branches dépliées dans « Sujets à évaluer » (tout replié au départ)
+  const [tip, setTip] = useState(false);              // conseil de navigation au lancement
+  const [tipNoPlus, setTipNoPlus] = useState(false);  // « ne plus montrer ce conseil »
   const [msgAuto,  setMsgAuto]  = useState(null);  // { type:'ok'|'err', texte } affiché dans le dialogue
   const [glisse,   setGlisse]   = useState(null);  // id de la branche en cours de déplacement
   const [cible,    setCible]    = useState(null);  // id survolé comme destination ('_' = racine)
@@ -20843,9 +20846,10 @@ function AdminMindVectorScreen({ user, profile, onBack, onFeedback, chipName, av
   };
 
   // Le geste tactile de la page des cartes, posé en natif (non passif) pour
-  // pouvoir bloquer le retour-navigateur / la sortie d'appli quand on glisse
-  // près du bord. Plus de navigation verticale : seul le glissé LATÉRAL change
-  // de sujet ; le vertical reste au défilement natif d'une carte dépliée.
+  // pouvoir bloquer le retour-navigateur / la sortie d'appli. Les DEUX axes
+  // changent de sujet, sur la même séquence : haut ≡ droite = précédent,
+  // bas ≡ gauche = suivant. Exception : si une carte dépliée déborde, le glissé
+  // vertical sert à la faire défiler (on ne navigue pas).
   const pleinRef = useRef(null);
   const navRef = useRef({});
   navRef.current = { versVoisin, posEdit };
@@ -20854,17 +20858,23 @@ function AdminMindVectorScreen({ user, profile, onBack, onFeedback, chipName, av
     if (!el || !compact) return;
     let start = null;
     const dansPiste = (t) => pisteRef.current && t && pisteRef.current.contains(t);
+    const grilleDeborde = () => {
+      const g = grilleRef.current;
+      return !!(g && g.scrollHeight > g.clientHeight + 2);
+    };
     const onStart = (e) => {
       if (!e.touches || e.touches.length !== 1) { start = null; return; }
       const t = e.touches[0];
-      start = { x: t.clientX, y: t.clientY, piste: dansPiste(e.target) };
+      start = { x: t.clientX, y: t.clientY, piste: dansPiste(e.target), scroll: grilleDeborde() };
     };
     const onMove = (e) => {
-      if (!start || !e.touches || e.touches.length !== 1) return;
+      if (!start || start.piste || !e.touches || e.touches.length !== 1) return;
       const dx = e.touches[0].clientX - start.x, dy = e.touches[0].clientY - start.y;
-      // Geste horizontal hors du rail de niveaux : on garde la main pour ne pas
-      // déclencher le retour navigateur / la sortie de l'appli.
-      if (!start.piste && Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 8) e.preventDefault();
+      const horizontal = Math.abs(dx) > Math.abs(dy);
+      // Horizontal : toujours à nous (pas de retour navigateur). Vertical : à
+      // nous seulement si la carte ne défile pas — sinon on laisse défiler.
+      if (horizontal && Math.abs(dx) > 8) e.preventDefault();
+      else if (!horizontal && !start.scroll && Math.abs(dy) > 8) e.preventDefault();
     };
     const onEnd = (e) => {
       const s = start; start = null;
@@ -20873,8 +20883,11 @@ function AdminMindVectorScreen({ user, profile, onBack, onFeedback, chipName, av
       const t = e.changedTouches && e.changedTouches[0];
       if (!t) return;
       const dx = t.clientX - s.x, dy = t.clientY - s.y;
-      if (Math.abs(dx) > Math.abs(dy) * 1.4 && Math.abs(dx) >= 60) {
-        vv(dx > 0 ? -1 : 1);                        // vers la droite = sujet précédent
+      const ax = Math.abs(dx), ay = Math.abs(dy);
+      if (ax > ay * 1.4 && ax >= 60) {
+        vv(dx > 0 ? -1 : 1);                        // droite = précédent, gauche = suivant
+      } else if (ay > ax * 1.4 && ay >= 60 && !s.scroll) {
+        vv(dy > 0 ? 1 : -1);                        // bas = suivant, haut = précédent
       }
     };
     el.addEventListener('touchstart', onStart, { passive: false });
@@ -20886,6 +20899,39 @@ function AdminMindVectorScreen({ user, profile, onBack, onFeedback, chipName, av
       el.removeEventListener('touchend', onEnd);
     };
   }, [compact]);
+
+  // Sur grand écran, les flèches du clavier changent de sujet : droite/bas =
+  // suivant, gauche/haut = précédent. On s'efface dès qu'un champ est actif ou
+  // qu'une fenêtre est ouverte.
+  const clavierRef = useRef({});
+  clavierRef.current = { versVoisin, posEdit, bloque: popupQui || !!dialogue || docOuvert || renomme != null || !!portrait };
+  useEffect(() => {
+    if (compact) return;
+    const onKey = (e) => {
+      const { versVoisin: vv, posEdit: pe, bloque } = clavierRef.current;
+      if (pe != null || bloque) return;
+      const a = document.activeElement;
+      if (a && (/^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName) || a.isContentEditable)) return;
+      if (e.key === 'ArrowRight' || e.key === 'ArrowDown') { e.preventDefault(); vv(1); }
+      else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') { e.preventDefault(); vv(-1); }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [compact]);
+
+  // Conseil de navigation au lancement, propre à la plateforme et masquable par
+  // l'utilisateur (mémoire par compte + navigateur).
+  const cleTip = () => `mv_tip_${compact ? 'm' : 'd'}_${user?.id || 'x'}`;
+  const tipVuRef = useRef(false);
+  useEffect(() => {
+    if (tipVuRef.current || noeuds === null) return;   // on attend le chargement de l'arbre
+    tipVuRef.current = true;
+    try { if (localStorage.getItem(cleTip()) !== '1') setTip(true); } catch {}
+  }, [noeuds, compact]);
+  const fermerTip = () => {
+    if (tipNoPlus) { try { localStorage.setItem(cleTip(), '1'); } catch {} }
+    setTip(false);
+  };
 
   // ── Mode « réponses » : pour qui, et quelle position ───────────────────────
   // Éditer l'arbre des sujets (mode « saisie ») est un pouvoir d'administrateur.
@@ -21404,6 +21450,9 @@ function AdminMindVectorScreen({ user, profile, onBack, onFeedback, chipName, av
   // Initiales du compte connecté, pour la pastille reprise de la barre globale.
   const mvInitiales = (avatarName || chipName || '').trim().split(/\s+/)
     .map(w => (w[0] || '').toUpperCase()).join('').slice(0, 2);
+  // Numéro du sujet courant parmi les sujets à répondre (ex. « 23/56 »).
+  const rangSujet = aClasser.indexOf(sel);
+  const compteurSujet = (mode === 'reponse' && rangSujet >= 0) ? `${rangSujet + 1}/${aClasser.length}` : '';
   const nomDe = (id) => (parId[id] || {}).label || '';
 
   // ── Fragments de rendu ────────────────────────────────────────────────────
@@ -21509,10 +21558,14 @@ function AdminMindVectorScreen({ user, profile, onBack, onFeedback, chipName, av
                 <button className="mv-head-titre lien" onClick={() => setDocOuvert(true)}
                   title="Lire la documentation de ce sujet">
                   {selNoeud.label}
+                  {compteurSujet && <span className="mv-head-num">({compteurSujet})</span>}
                   <span className="mv-livre">{MV_PICTO.livre}</span>
                 </button>
               ) : (
-                <div className="mv-head-titre">{selNoeud.label}</div>
+                <div className="mv-head-titre">
+                  {selNoeud.label}
+                  {compteurSujet && <span className="mv-head-num">({compteurSujet})</span>}
+                </div>
               )}
               {selNoeud.description && <div className="mv-head-desc">{selNoeud.description}</div>}
             </div>
@@ -21757,6 +21810,28 @@ function AdminMindVectorScreen({ user, profile, onBack, onFeedback, chipName, av
                   Pas encore de texte pour ce sujet.
                 </div>}
           </div>
+        </div>
+      </div>
+    )}
+
+    {/* ── Conseil de navigation au lancement ──────────────────────────────── */}
+    {tip && (
+      <div style={{position:'fixed',inset:0,zIndex:9700,background:'rgba(3,12,18,.82)',backdropFilter:'blur(4px)',WebkitBackdropFilter:'blur(4px)',display:'flex',alignItems:'center',justifyContent:'center',padding:16}}
+        onClick={fermerTip}>
+        <div className="mv-dialogue" style={{maxWidth:380,textAlign:'center',alignItems:'stretch'}} onClick={e=>e.stopPropagation()}>
+          <div style={{fontSize:34,lineHeight:1}}>{compact ? '👆' : '⌨️'}</div>
+          <div style={{fontSize:15,fontWeight:800,color:'#fff'}}>Conseil</div>
+          <div style={{fontSize:13.5,color:'rgba(255,255,255,.8)',lineHeight:1.55}}>
+            {compact
+              ? "Pour passer d'un sujet à l'autre, faites glisser votre pouce vers le haut ou vers le bas."
+              : 'Utilisez les flèches du clavier pour aller au sujet suivant.'}
+          </div>
+          <label className="mv-choix" style={{display:'flex',alignItems:'center',gap:9,justifyContent:'center',cursor:'pointer',fontSize:12.5,color:'rgba(255,255,255,.85)'}}>
+            <input type="checkbox" checked={tipNoPlus} onChange={e=>setTipNoPlus(e.target.checked)}
+              style={{width:16,height:16,accentColor:'#7dd940',flexShrink:0}}/>
+            Ne plus montrer ce conseil
+          </label>
+          <button className="btn btn-yes" style={{width:'100%',fontSize:14,padding:'11px 0'}} onClick={fermerTip}>Compris</button>
         </div>
       </div>
     )}
