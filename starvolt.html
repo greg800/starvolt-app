@@ -1532,47 +1532,49 @@
 
     /* ── Image de synthèse : feuille claire, imprimable en A4 ──────────────── */
     .syn-overlay { position: fixed; inset: 0; z-index: 9800; background: rgba(3,12,18,.85);
-      overflow: auto; padding: 20px; display: flex; justify-content: center; }
+      overflow: auto; padding: 18px; display: flex; justify-content: center; }
     .syn-sheet { width: 100%; max-width: 794px; align-self: flex-start;
-      background: #fff; color: #12242c; border-radius: 14px; padding: 24px 30px 32px;
+      background: #fff; color: #12242c; border-radius: 14px; padding: 18px 22px 22px;
       box-shadow: 0 20px 60px rgba(0,0,0,.5); font-family: inherit; }
-    .syn-toolbar { display: flex; justify-content: flex-end; gap: 10px; margin-bottom: 14px; }
+    .syn-toolbar { display: flex; justify-content: flex-end; gap: 10px; margin-bottom: 10px; }
     .syn-toolbar button { border: none; border-radius: 9px; padding: 8px 16px; font-weight: 800;
       font-size: 13px; cursor: pointer; font-family: inherit; }
     .syn-print { background: #0d2d3e; color: #fff; }
     .syn-close { background: #e6ecee; color: #12242c; }
-    .syn-entete { text-align: center; margin-bottom: 18px; }
-    .syn-titre { font-size: 24px; font-weight: 900; color: #0d2d3e; line-height: 1.15; }
-    .syn-sous { font-size: 11px; color: #7a8a90; letter-spacing: .05em; text-transform: uppercase; margin-top: 4px; }
-    .syn-bloc { border: 1.5px solid rgba(13,45,62,.12); border-radius: 14px; padding: 12px 12px 5px; margin-bottom: 12px; }
-    .syn-bloc.niv0 { background: rgba(13,45,62,.045); }
-    .syn-bloc .syn-bloc { background: rgba(13,45,62,.03); }
+    .syn-entete { text-align: center; margin-bottom: 12px; }
+    .syn-titre { font-size: 21px; font-weight: 900; color: #0d2d3e; line-height: 1.15; }
+    .syn-sous { font-size: 10px; color: #7a8a90; letter-spacing: .05em; text-transform: uppercase; margin-top: 3px; }
+    .syn-bloc { border: 1px solid rgba(13,45,62,.14); border-radius: 11px; padding: 7px 9px 3px; margin-bottom: 7px; }
+    .syn-bloc.niv0 { background: rgba(13,45,62,.05); }
+    .syn-bloc .syn-bloc { background: rgba(13,45,62,.035); margin-bottom: 5px; }
     .syn-bloc .syn-bloc .syn-bloc { background: rgba(13,45,62,.02); }
-    .syn-bloc-t { font-size: 13.5px; font-weight: 900; color: #0d2d3e; margin-bottom: 8px; letter-spacing: .01em; }
-    .syn-sujet { margin: 0 2px 9px; }
-    .syn-sujet-t { font-size: 12px; font-weight: 700; color: #324a52; margin-bottom: 3px; }
-    .syn-echelle { display: flex; align-items: stretch; gap: 8px; }
-    .syn-pole { flex: 0 0 82px; font-size: 10px; font-weight: 700; color: #5a6f76; line-height: 1.25;
-      display: flex; align-items: center; }
-    .syn-pole.g { justify-content: flex-end; text-align: right; }
-    .syn-pole.d { justify-content: flex-start; text-align: left; }
-    .syn-cases { flex: 1 1 auto; display: grid; grid-template-columns: repeat(5,1fr); gap: 4px; }
-    .syn-case { min-height: 30px; border-radius: 8px; display: flex; align-items: center;
-      justify-content: center; gap: 3px; flex-wrap: wrap; padding: 3px; }
-    .syn-bulle { width: 14px; height: 14px; border-radius: 50%; border: 2px solid #fff;
-      box-shadow: 0 0 0 1px rgba(0,0,0,.14); display: inline-block; flex-shrink: 0; }
-    .syn-legende { display: flex; flex-wrap: wrap; gap: 14px; justify-content: center;
-      margin-top: 16px; padding-top: 14px; border-top: 1px solid rgba(13,45,62,.12); }
-    .syn-leg-item { display: flex; align-items: center; gap: 7px; font-size: 12px; font-weight: 700; color: #324a52; }
+    .syn-bloc-t { font-size: 12px; font-weight: 900; color: #0d2d3e; margin-bottom: 5px; letter-spacing: .01em; }
+    /* Un sujet = une seule ligne : titre · extrême gauche · 5 cases · extrême droite. */
+    .syn-sujet { display: flex; align-items: center; gap: 7px; margin: 0 1px 3px; }
+    .syn-sujet-t { flex: 1 1 auto; min-width: 60px; font-size: 11px; font-weight: 700; color: #26424b;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .syn-pole { flex: 0 0 auto; max-width: 96px; font-size: 9px; font-weight: 700; color: #6a7d84;
+      line-height: 1.15; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .syn-pole.g { text-align: right; }
+    .syn-pole.d { text-align: left; }
+    .syn-cases { flex: 0 0 auto; display: flex; gap: 2px; }
+    .syn-case { width: 22px; height: 17px; border-radius: 4px; display: flex; align-items: center;
+      justify-content: center; gap: 1px; padding: 0 1px; overflow: hidden; }
+    .syn-bulle { width: 11px; height: 11px; border-radius: 50%; border: 1.5px solid #fff;
+      box-shadow: 0 0 0 1px rgba(0,0,0,.16); display: inline-block; flex-shrink: 0; }
+    .syn-legende { display: flex; flex-wrap: wrap; gap: 12px; justify-content: center;
+      margin-top: 12px; padding-top: 10px; border-top: 1px solid rgba(13,45,62,.12); }
+    .syn-leg-item { display: flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 700; color: #324a52; }
+    .syn-legende .syn-bulle { width: 12px; height: 12px; }
     @media print {
-      body * { visibility: hidden !important; }
-      .syn-overlay, .syn-overlay * { visibility: visible !important; }
-      .syn-overlay { position: absolute; inset: 0; background: #fff; padding: 0; overflow: visible; display: block; }
-      .syn-sheet { box-shadow: none; max-width: none; width: 100%; border-radius: 0; padding: 8mm 6mm; }
+      /* La feuille est un enfant direct de <body> (portail) : on masque tout le
+         reste pour un rendu compact, sans pages vides. */
+      body > *:not(.syn-overlay) { display: none !important; }
+      .syn-overlay { position: static; inset: auto; background: #fff; padding: 0; overflow: visible; display: block; z-index: auto; }
+      .syn-sheet { box-shadow: none; max-width: none; width: 100%; border-radius: 0; padding: 0; }
       .syn-no-print { display: none !important; }
-      .syn-bloc { break-inside: avoid; }
-      .syn-sujet { break-inside: avoid; }
-      @page { size: A4; margin: 10mm; }
+      .syn-bloc, .syn-sujet { break-inside: avoid; }
+      @page { size: A4; margin: 9mm; }
     }
     .mv-head-desc { font-size: clamp(13px, 3.4vw, 15.5px); color: rgba(255,255,255,.74); line-height: 1.45; margin-top: 4px; }
     @media (max-width: 899px) {
@@ -20357,21 +20359,20 @@ function MvSyntheseSheet({ personne, noeuds, cases, titres, auteurs, parNode, on
 
   const sujetRow = (n) => {
     const reps = parNode[n.id] || [];
+    // Tout sur une ligne : titre · extrême gauche · 5 cases · extrême droite.
     return (
       <div className="syn-sujet" key={'s' + n.id}>
         <div className="syn-sujet-t">{n.label}</div>
-        <div className="syn-echelle">
-          <div className="syn-pole g">{pole(n.id, 1) || '—'}</div>
-          <div className="syn-cases">
-            {MV_POSITIONS.map(p => (
-              <div className="syn-case" key={p.n} style={{ background: SYN_CASE_BG[p.n - 1] }}>
-                {reps.filter(r => r.pos === p.n).map((r, i) =>
-                  <span key={i} className="syn-bulle" style={{ background: r.couleur }} title={r.nom}/>)}
-              </div>
-            ))}
-          </div>
-          <div className="syn-pole d">{pole(n.id, 5) || '—'}</div>
+        <div className="syn-pole g">{pole(n.id, 1) || '—'}</div>
+        <div className="syn-cases">
+          {MV_POSITIONS.map(p => (
+            <div className="syn-case" key={p.n} style={{ background: SYN_CASE_BG[p.n - 1] }}>
+              {reps.filter(r => r.pos === p.n).map((r, i) =>
+                <span key={i} className="syn-bulle" style={{ background: r.couleur }} title={r.nom}/>)}
+            </div>
+          ))}
         </div>
+        <div className="syn-pole d">{pole(n.id, 5) || '—'}</div>
       </div>
     );
   };
@@ -20389,7 +20390,10 @@ function MvSyntheseSheet({ personne, noeuds, cases, titres, auteurs, parNode, on
   };
 
   const dateStr = new Date().toLocaleDateString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric' });
-  return (
+  // Portail vers <body> : à l'impression, on masque tout sauf cette feuille, ce
+  // qui n'est fiable que si elle est un enfant direct de body (sinon le reste de
+  // l'appli occupe encore la place et l'on obtient des pages presque vides).
+  return ReactDOM.createPortal((
     <div className="syn-overlay" onClick={onClose}>
       <div className="syn-sheet" onClick={e => e.stopPropagation()}>
         <div className="syn-toolbar syn-no-print">
@@ -20413,7 +20417,7 @@ function MvSyntheseSheet({ personne, noeuds, cases, titres, auteurs, parNode, on
         </div>
       </div>
     </div>
-  );
+  ), document.body);
 }
 
 function AdminMindVectorScreen({ user, profile, onBack, onFeedback, chipName, avatarName, onProfile, isImperso }) {
