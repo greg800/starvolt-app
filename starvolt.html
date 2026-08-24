@@ -1544,16 +1544,18 @@
     .syn-bloc .syn-bloc { background: rgba(13,45,62,.035); margin-bottom: 5px; }
     .syn-bloc .syn-bloc .syn-bloc { background: rgba(13,45,62,.02); }
     .syn-bloc-t { font-size: 12px; font-weight: 900; color: #0d2d3e; margin-bottom: 5px; letter-spacing: .01em; }
-    /* Un sujet = une ligne, en grille pour aligner verticalement les 5 cases :
-       titre · extrême gauche · 5 cases · extrême droite. */
-    .syn-sujet { display: grid; grid-template-columns: minmax(0,1fr) 92px auto 92px;
-      align-items: center; gap: 6px; margin: 0 1px 3px; }
-    .syn-sujet-t { min-width: 0; font-size: 11px; font-weight: 700; color: #26424b;
-      overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: default; }
-    .syn-pole { font-size: 9px; font-weight: 700; color: #6a7d84; line-height: 1.15;
+    /* Un sujet = une ligne, en grille pour aligner verticalement les 5 cases.
+       Desktop : titre à largeur fixe, extrêmes larges et plus gros (l'espace
+       autrefois vide sert à afficher davantage de texte), bloc calé à gauche. */
+    .syn-sujet { display: grid; grid-template-columns: 300px 200px auto 200px 1fr;
+      align-items: center; gap: 10px; margin: 0 1px 3px; }
+    .syn-sujet-t { min-width: 0; font-size: 12px; font-weight: 700; color: #26424b;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .syn-pole { font-size: 10.5px; font-weight: 700; color: #6a7d84; line-height: 1.15;
       overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .syn-pole.g { text-align: right; }
     .syn-pole.d { text-align: left; }
+    .syn-clic { outline: 2px solid #ff4d4d; outline-offset: 1px; border-radius: 5px; }
     .syn-cases { display: flex; gap: 2px; }
     .syn-case { width: 18px; min-height: 16px; border-radius: 4px; display: flex; align-items: center;
       justify-content: center; gap: 1px; padding: 1px; flex-wrap: wrap; cursor: default; }
@@ -1579,6 +1581,21 @@
     .syn-info-t { font-size: 14px; font-weight: 900; color: #0d2d3e; margin-bottom: 8px; }
     .syn-info-x { font-size: 13px; line-height: 1.5; color: #324a52; margin-bottom: 14px; white-space: pre-wrap; }
     .syn-info .syn-close { width: 100%; padding: 11px 0; border-radius: 10px; border: none; font-weight: 800; font-family: inherit; cursor: pointer; }
+    .syn-astuce-btns { display: flex; flex-direction: column; gap: 8px; }
+    .syn-astuce-btns button { width: 100%; padding: 11px 0; border: none; border-radius: 10px;
+      font-weight: 800; font-family: inherit; cursor: pointer; font-size: 13.5px; }
+    /* Mobile : au tap, on grise toute la page sauf la ligne éclairée. */
+    .syn-dim .syn-entete, .syn-dim .syn-legende, .syn-dim .syn-bloc-t, .syn-dim .syn-sujet { opacity: .2; transition: opacity .12s; }
+    .syn-dim .syn-sujet.syn-row-actif { opacity: 1; }
+    .syn-row-actif { background: rgba(255,77,77,.06); border-radius: 6px; }
+    /* Le détail en bas de page : on voit la cellule cliquée ET son texte. */
+    .syn-bas { flex: 0 0 auto; background: #fff; border-top: 2px solid #0d2d3e; padding: 12px 16px;
+      box-shadow: 0 -8px 24px rgba(0,0,0,.14); max-width: 900px; width: 100%; margin: 0 auto; box-sizing: border-box; }
+    .syn-bas-t { font-size: 13px; font-weight: 900; color: #0d2d3e; margin-bottom: 5px; }
+    .syn-bas-x { font-size: 13px; line-height: 1.5; color: #324a52; margin-bottom: 10px;
+      white-space: pre-wrap; max-height: 32vh; overflow-y: auto; }
+    .syn-bas .syn-close { width: 100%; padding: 10px 0; border: none; border-radius: 10px;
+      font-weight: 800; font-family: inherit; cursor: pointer; font-size: 14px; }
     @media (max-width: 899px) {
       .syn-corps { padding: 9px 8px 6px; }
       .syn-bloc { padding: 6px 6px 2px; border-radius: 9px; margin-bottom: 5px; }
@@ -20373,7 +20390,9 @@ function MvPosition({
 // auteur — orange pour soi. Les noms des autres évaluateurs en bas.
 const SYN_CASE_BG = ['#e8f0ff', '#eef2f9', '#f2f2f2', '#fdf3e6', '#ffedd0'];
 function MvSyntheseSheet({ personne, noeuds, cases, titres, auteurs, parNode, onClose, compact }) {
-  const [info, setInfo] = useState(null);   // pop-up mobile : { titre, texte }
+  const [focus, setFocus] = useState(null);          // mobile : élément mis en avant
+  const [astuce, setAstuce] = useState(false);       // conseil de lecture au 1er chargement
+  const rowRef = useRef(null);
   const enfants = {};
   (noeuds || []).forEach(n => { const k = n.parent_id || '_'; (enfants[k] = enfants[k] || []).push(n); });
   const aPos = (id) => MV_POSITIONS.some(p => (cases[id + ':' + p.n] || '').trim());
@@ -20381,31 +20400,48 @@ function MvSyntheseSheet({ personne, noeuds, cases, titres, auteurs, parNode, on
   const pole = (id, p) => sansCr(titres[id + ':' + p]);
   const contenu = (id, p) => (cases[id + ':' + p] || '').trim();   // texte exact d'une case
 
-  // Desktop : infobulle native au survol. Mobile : au tap, un pop-up.
+  useEffect(() => { try { if (localStorage.getItem('mv_syn_astuce') !== '1') setAstuce(true); } catch {} }, []);
+  const fermerAstuce = (persister) => {
+    if (persister) { try { localStorage.setItem('mv_syn_astuce', '1'); } catch {} }
+    setAstuce(false);
+  };
+  // Mobile : au tap on éclaire la ligne, on cadre l'élément en rouge et on montre
+  // son texte complet en bas. Desktop : infobulle native au survol.
   const survol = (texte) => (compact || !texte) ? undefined : texte;
-  const tap = (titre, texte) => compact ? (() => setInfo({ titre, texte: texte || '—' })) : undefined;
+  const choisir = (rowId, kind, pos, titre, texte) => compact
+    ? (() => setFocus({ rowId, kind, pos, titre, texte: (texte || '').trim() || '—' })) : undefined;
+  const actif = (rowId, kind, pos) => focus && focus.rowId === rowId && focus.kind === kind
+    && (pos == null || focus.pos === pos);
+  useEffect(() => {
+    if (focus && rowRef.current && rowRef.current.scrollIntoView)
+      rowRef.current.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  }, [focus && focus.rowId, focus && focus.kind, focus && focus.pos]);
 
   const sujetRow = (n) => {
     const reps = parNode[n.id] || [];
     const desc = (n.description || '').trim();
+    const estActive = focus && focus.rowId === n.id;
     return (
-      <div className="syn-sujet" key={'s' + n.id}>
-        <div className="syn-sujet-t" title={survol(n.label + (desc ? '\n' + desc : ''))}
-          onClick={tap(n.label, desc || n.label)}>{n.label}</div>
-        <div className="syn-pole g" title={survol(pole(n.id, 1))}>{pole(n.id, 1) || '—'}</div>
+      <div className={'syn-sujet' + (estActive ? ' syn-row-actif' : '')} key={'s' + n.id} ref={estActive ? rowRef : null}>
+        <div className={'syn-sujet-t' + (actif(n.id, 'titre') ? ' syn-clic' : '')}
+          title={survol(n.label + (desc ? '\n' + desc : ''))}
+          onClick={choisir(n.id, 'titre', null, n.label, desc || n.label)}>{n.label}</div>
+        <div className={'syn-pole g' + (actif(n.id, 'pole', 1) ? ' syn-clic' : '')} title={survol(pole(n.id, 1))}
+          onClick={choisir(n.id, 'pole', 1, pole(n.id, 1) || 'Extrême gauche', contenu(n.id, 1) || pole(n.id, 1))}>{pole(n.id, 1) || '—'}</div>
         <div className="syn-cases">
           {MV_POSITIONS.map(p => {
             const txt = contenu(n.id, p.n) || pole(n.id, p.n);
             return (
-              <div className="syn-case" key={p.n} style={{ background: SYN_CASE_BG[p.n - 1] }}
-                title={survol(txt)} onClick={tap('Position ' + p.n, txt)}>
+              <div className={'syn-case' + (actif(n.id, 'case', p.n) ? ' syn-clic' : '')} key={p.n} style={{ background: SYN_CASE_BG[p.n - 1] }}
+                title={survol(txt)} onClick={choisir(n.id, 'case', p.n, 'Position ' + p.n, txt)}>
                 {reps.filter(r => r.pos === p.n).map((r, i) =>
                   <span key={i} className="syn-bulle" style={{ background: r.couleur }} title={survol(r.nom)}/>)}
               </div>
             );
           })}
         </div>
-        <div className="syn-pole d" title={survol(pole(n.id, 5))}>{pole(n.id, 5) || '—'}</div>
+        <div className={'syn-pole d' + (actif(n.id, 'pole', 5) ? ' syn-clic' : '')} title={survol(pole(n.id, 5))}
+          onClick={choisir(n.id, 'pole', 5, pole(n.id, 5) || 'Extrême droit', contenu(n.id, 5) || pole(n.id, 5))}>{pole(n.id, 5) || '—'}</div>
       </div>
     );
   };
@@ -20427,7 +20463,7 @@ function MvSyntheseSheet({ personne, noeuds, cases, titres, auteurs, parNode, on
   // doit être enfant direct de body), sinon le reste de l'appli occupe la place.
   return ReactDOM.createPortal((
     <div className="syn-page">
-      <div className="syn-corps">
+      <div className={'syn-corps' + (compact && focus ? ' syn-dim' : '')}>
         <div className="syn-entete">
           <div className="syn-titre">{personne.prenom} {personne.nom}</div>
           <div className="syn-sous">Mind Vector · synthèse des positions · {dateStr}</div>
@@ -20442,16 +20478,29 @@ function MvSyntheseSheet({ personne, noeuds, cases, titres, auteurs, parNode, on
           ))}
         </div>
       </div>
-      <div className="syn-pied syn-no-print">
-        <button className="syn-print" onClick={() => window.print()}>🖨️ Imprimer</button>
-        <button className="syn-close" onClick={onClose}>Fermer</button>
-      </div>
-      {info && (
-        <div className="syn-info-overlay" onClick={() => setInfo(null)}>
-          <div className="syn-info" onClick={e => e.stopPropagation()}>
-            {info.titre && <div className="syn-info-t">{info.titre}</div>}
-            <div className="syn-info-x">{info.texte}</div>
-            <button className="syn-close" onClick={() => setInfo(null)}>Fermer</button>
+      {focus ? (
+        <div className="syn-bas syn-no-print">
+          <div className="syn-bas-t">{focus.titre}</div>
+          <div className="syn-bas-x">{focus.texte}</div>
+          <button className="syn-close" onClick={() => setFocus(null)}>Fermer</button>
+        </div>
+      ) : (
+        <div className="syn-pied syn-no-print">
+          <button className="syn-print" onClick={() => window.print()}>🖨️ Imprimer</button>
+          <button className="syn-close" onClick={onClose}>Fermer</button>
+        </div>
+      )}
+      {astuce && (
+        <div className="syn-info-overlay">
+          <div className="syn-info">
+            <div className="syn-info-t">Comment lire cette page</div>
+            <div className="syn-info-x">{compact
+              ? "Touchez une case, un titre ou une position : la ligne s'éclaire, la case cliquée se cadre en rouge, et son texte complet apparaît en bas de l'écran."
+              : 'Survolez une case, un titre ou une position : son texte complet apparaît dans une infobulle.'}</div>
+            <div className="syn-astuce-btns">
+              <button className="syn-print" onClick={() => fermerAstuce(false)}>Compris</button>
+              <button className="syn-close" onClick={() => fermerAstuce(true)}>Ne plus afficher la prochaine fois</button>
+            </div>
           </div>
         </div>
       )}
