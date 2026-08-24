@@ -2024,6 +2024,14 @@ const sb = supabase.createClient(
 const SWITCHGRID_EDGE_URL = 'https://hkxkhwegqkapdbsisxwv.supabase.co/functions/v1/switchgrid-v0';
 const SB_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhreGtod2VncWthcGRic2lzeHd2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc0MjY4NjksImV4cCI6MjA5MzAwMjg2OX0.9-_oHRJfwXZkl3bRYDMb5K56UzB8O1NOfa5QfrXFfkQ';
 
+// ─── Numéro de build ──────────────────────────────
+// server.js remplace le jeton ci-dessous par le SHA court du commit déployé.
+// En local (python http.server, pas de remplacement) le jeton reste tel quel
+// → on affiche 'dev'. Sert au journal des erreurs (sur quelle version le bug).
+const _rawBuild = '%BUILD_ID%';
+const BUILD = _rawBuild.charAt(0) === '%' ? 'dev' : _rawBuild;
+window.__BUILD = BUILD;
+
 // ─── Tracking événements utilisateur ──────────────
 // UID courant stocké en global pour éviter un appel réseau à chaque clic
 window.__trackUserId = null;
@@ -2075,6 +2083,7 @@ async function logAppError({ severity = 'majeur', module = '', message = '', det
       p_screen:     window.__currentScreen || null,
       p_url:        (typeof location !== 'undefined' ? location.href : null),
       p_user_agent: (typeof navigator !== 'undefined' ? navigator.userAgent : null),
+      p_build:      window.__BUILD || null,
     });
   } catch (_) { /* le logger ne doit jamais casser l'app */ }
   finally { window.__loggingError = false; }
@@ -15460,6 +15469,8 @@ function ErrorJournalPanel() {
   const [openId, setOpenId]     = useState(null);
   const [copiedId, setCopiedId] = useState(null);
   const [busy, setBusy]         = useState(false);
+  const [prodOnly, setProdOnly] = useState(false);   // n'afficher que le build en prod
+  const curBuild = window.__BUILD || 'dev';           // build servi = version en prod
 
   const load = () => sb.rpc('get_app_errors', { p_limit: 100 }).then(({ data }) => setRows(data || []));
   useEffect(() => { load(); }, []);
@@ -15474,6 +15485,7 @@ function ErrorJournalPanel() {
     const det = r.detail ? JSON.stringify(r.detail, null, 2) : '(aucun)';
     return `Bug à corriger dans l'application Starvolt (starvolt.html).\n\n`
       + `- Date : ${fmtSecDate(r.created_at)}\n`
+      + `- Build : ${r.build || '—'}${r.build && r.build === curBuild ? ' (version en prod)' : ''}\n`
       + `- Gravité : ${(SEV_META[r.severity]||{}).label || r.severity}\n`
       + `- Personne connectée : ${who(r)}\n`
       + `- Module / écran : ${r.module || r.screen || '—'}\n`
@@ -15513,8 +15525,11 @@ function ErrorJournalPanel() {
     setBusy(false); load();
   };
 
-  const count = rows?.length || 0;
-  const blocking = (rows || []).filter(r => r.severity === 'bloquant').length;
+  const total = rows?.length || 0;
+  // Filtre « version en prod » : ne garder que les erreurs du build servi.
+  const visible = prodOnly ? (rows || []).filter(r => (r.build || null) === curBuild) : (rows || []);
+  const count = visible.length;
+  const blocking = visible.filter(r => r.severity === 'bloquant').length;
 
   return (
     <div style={{ background:'rgba(255,255,255,.04)', border:'1px solid rgba(255,255,255,.1)', borderRadius:14, overflow:'hidden', margin:'0 16px 16px' }}>
@@ -15531,18 +15546,25 @@ function ErrorJournalPanel() {
 
       {!collapsed && (
         <div style={{ padding:'0 12px 12px' }}>
-          <div style={{ display:'flex', gap:8, justifyContent:'flex-end', marginBottom:8 }}>
-            <button onClick={load} style={{ background:'rgba(255,255,255,.06)', border:'1px solid rgba(255,255,255,.16)', borderRadius:8, color:'rgba(255,255,255,.7)', fontSize:12, fontWeight:700, padding:'5px 10px', cursor:'pointer', fontFamily:'inherit' }}>↻ Rafraîchir</button>
-            {count > 0 && <button onClick={clearAll} disabled={busy} style={{ background:'rgba(255,93,93,.12)', border:'1px solid rgba(255,93,93,.3)', borderRadius:8, color:'#ff8a8a', fontSize:12, fontWeight:700, padding:'5px 10px', cursor:'pointer', fontFamily:'inherit' }}>Vider</button>}
+          <div style={{ display:'flex', gap:10, alignItems:'center', justifyContent:'space-between', marginBottom:8, flexWrap:'wrap' }}>
+            <label style={{ display:'flex', alignItems:'center', gap:8, cursor:'pointer', fontSize:12, color:'rgba(255,255,255,.7)' }}>
+              <input type="checkbox" checked={prodOnly} onChange={e=>setProdOnly(e.target.checked)} style={{ accentColor:'#7dd940', width:15, height:15, cursor:'pointer' }}/>
+              N'afficher que les bugs de la version en prod
+              <span style={{ fontFamily:'monospace', fontSize:11, color:'#7dd940', background:'rgba(125,217,64,.12)', padding:'1px 6px', borderRadius:5 }}>build {curBuild}</span>
+            </label>
+            <div style={{ display:'flex', gap:8 }}>
+              <button onClick={load} style={{ background:'rgba(255,255,255,.06)', border:'1px solid rgba(255,255,255,.16)', borderRadius:8, color:'rgba(255,255,255,.7)', fontSize:12, fontWeight:700, padding:'5px 10px', cursor:'pointer', fontFamily:'inherit' }}>↻ Rafraîchir</button>
+              {total > 0 && <button onClick={clearAll} disabled={busy} style={{ background:'rgba(255,93,93,.12)', border:'1px solid rgba(255,93,93,.3)', borderRadius:8, color:'#ff8a8a', fontSize:12, fontWeight:700, padding:'5px 10px', cursor:'pointer', fontFamily:'inherit' }}>Vider</button>}
+            </div>
           </div>
 
           {rows === null ? (
             <div style={{ textAlign:'center', padding:24 }}><StarSpinner size={28}/></div>
           ) : count === 0 ? (
-            <div style={{ textAlign:'center', padding:'20px', color:'rgba(255,255,255,.4)', fontSize:13 }}>Aucune erreur consignée. 🎉</div>
+            <div style={{ textAlign:'center', padding:'20px', color:'rgba(255,255,255,.4)', fontSize:13 }}>{prodOnly && total > 0 ? `Aucune erreur sur le build en prod (${curBuild}). ${total} au total, autres versions.` : 'Aucune erreur consignée. 🎉'}</div>
           ) : (
             <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
-              {rows.map(r => {
+              {visible.map(r => {
                 const sev = SEV_META[r.severity] || SEV_META.majeur;
                 const isOpen = openId === r.id;
                 return (
@@ -15550,12 +15572,14 @@ function ErrorJournalPanel() {
                     <div onClick={() => setOpenId(o => o===r.id ? null : r.id)} style={{ display:'flex', alignItems:'center', gap:9, padding:'9px 11px', cursor:'pointer' }}>
                       <span style={{ flexShrink:0, fontSize:10.5, fontWeight:800, color:sev.color, background:sev.bg, padding:'2px 7px', borderRadius:6, textTransform:'uppercase', letterSpacing:.4 }}>{sev.label}</span>
                       <span style={{ flex:1, minWidth:0, fontSize:12.5, color:'#fff', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{r.message}</span>
+                      {r.build && <span title={r.build === curBuild ? 'Version actuellement en prod' : 'Build antérieur'} style={{ flexShrink:0, fontFamily:'monospace', fontSize:10, padding:'1px 5px', borderRadius:5, color: r.build === curBuild ? '#7dd940' : 'rgba(255,255,255,.4)', background: r.build === curBuild ? 'rgba(125,217,64,.12)' : 'rgba(255,255,255,.05)' }}>{r.build}</span>}
                       <span style={{ flexShrink:0, fontSize:11, color:'rgba(255,255,255,.45)' }}>{fmtSecDate(r.created_at)}</span>
                       <span style={{ flexShrink:0, color:'rgba(255,255,255,.3)', fontSize:12, transform:isOpen?'rotate(90deg)':'none', transition:'transform .15s' }}>▸</span>
                     </div>
                     {isOpen && (
                       <div style={{ padding:'2px 12px 12px', fontSize:12, color:'rgba(255,255,255,.75)', lineHeight:1.6 }}>
                         <div><span style={{ color:'rgba(255,255,255,.45)' }}>Personne :</span> {who(r)}</div>
+                        <div><span style={{ color:'rgba(255,255,255,.45)' }}>Build :</span> <span style={{ fontFamily:'monospace' }}>{r.build || '—'}</span>{r.build && r.build === curBuild && <span style={{ color:'#7dd940' }}> · version en prod</span>}</div>
                         <div><span style={{ color:'rgba(255,255,255,.45)' }}>Module :</span> {r.module || r.screen || '—'}</div>
                         {r.url && <div style={{ wordBreak:'break-all' }}><span style={{ color:'rgba(255,255,255,.45)' }}>URL :</span> {r.url}</div>}
                         {r.user_agent && <div style={{ wordBreak:'break-word' }}><span style={{ color:'rgba(255,255,255,.45)' }}>Navigateur :</span> {r.user_agent}</div>}
