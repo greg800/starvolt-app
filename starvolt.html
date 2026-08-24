@@ -1571,8 +1571,10 @@
       max-width: 900px; width: 100%; margin: 0 auto; box-sizing: border-box; }
     .syn-pied button { flex: 1; border: none; border-radius: 10px; padding: 11px 0; font-weight: 800;
       font-size: 14px; cursor: pointer; font-family: inherit; }
-    .syn-print { background: #0d2d3e; color: #fff; }
-    .syn-close { background: #e6ecee; color: #12242c; }
+    /* Charte Starvolt : deux verts, jamais de gris. Priorité = vert clair,
+       autres actions = vert foncé. */
+    .syn-print { background: var(--green); color: #1a4500; }
+    .syn-close { background: var(--green-dark); color: #d8f5c4; border: 1.5px solid rgba(125,217,64,.35); }
     /* Pop-up mobile au tap d'un titre ou d'une case */
     .syn-info-overlay { position: fixed; inset: 0; z-index: 9850; background: rgba(3,12,18,.6);
       display: flex; align-items: center; justify-content: center; padding: 20px; }
@@ -20400,6 +20402,22 @@ function MvSyntheseSheet({ personne, noeuds, cases, titres, auteurs, parNode, on
   const pole = (id, p) => sansCr(titres[id + ':' + p]);
   const contenu = (id, p) => (cases[id + ':' + p] || '').trim();   // texte exact d'une case
 
+  // Qui a choisi cette case ? On l'ajoute au détail : « C'est ton choix et celui
+  // de X et Y ». « ton » = la personne évaluée (soi, en orange).
+  const selfIds = new Set((auteurs || []).filter(a => a.self).map(a => a.id));
+  const nomDe = (id) => { const a = (auteurs || []).find(x => x.id === id); return a ? a.nom : ''; };
+  const listeFr = (arr) => arr.length <= 1 ? (arr[0] || '')
+    : arr.slice(0, -1).join(', ') + ' et ' + arr[arr.length - 1];
+  const phraseChoix = (reps) => {
+    if (!reps.length) return '';
+    const soi = reps.some(r => selfIds.has(r.auteurId));
+    const autres = listeFr(reps.filter(r => !selfIds.has(r.auteurId)).map(r => nomDe(r.auteurId)).filter(Boolean));
+    if (soi && autres) return `C'est ton choix et celui de ${autres}.`;
+    if (soi) return `C'est ton choix.`;
+    if (autres) return `C'est le choix de ${autres}.`;
+    return '';
+  };
+
   useEffect(() => { try { if (localStorage.getItem('mv_syn_astuce') !== '1') setAstuce(true); } catch {} }, []);
   const fermerAstuce = (persister) => {
     if (persister) { try { localStorage.setItem('mv_syn_astuce', '1'); } catch {} }
@@ -20430,12 +20448,14 @@ function MvSyntheseSheet({ personne, noeuds, cases, titres, auteurs, parNode, on
           onClick={choisir(n.id, 'pole', 1, pole(n.id, 1) || 'Extrême gauche', contenu(n.id, 1) || pole(n.id, 1))}>{pole(n.id, 1) || '—'}</div>
         <div className="syn-cases">
           {MV_POSITIONS.map(p => {
-            const txt = contenu(n.id, p.n) || pole(n.id, p.n);
+            const ici = reps.filter(r => r.pos === p.n);
+            const ph = phraseChoix(ici);
+            const txt = (contenu(n.id, p.n) || pole(n.id, p.n)) + (ph ? '\n\n' + ph : '');
             return (
               <div className={'syn-case' + (actif(n.id, 'case', p.n) ? ' syn-clic' : '')} key={p.n} style={{ background: SYN_CASE_BG[p.n - 1] }}
                 title={survol(txt)} onClick={choisir(n.id, 'case', p.n, 'Position ' + p.n, txt)}>
-                {reps.filter(r => r.pos === p.n).map((r, i) =>
-                  <span key={i} className="syn-bulle" style={{ background: r.couleur }} title={survol(r.nom)}/>)}
+                {ici.map((r, i) =>
+                  <span key={i} className="syn-bulle" style={{ background: r.couleur }} title={survol(nomDe(r.auteurId) || r.nom)}/>)}
               </div>
             );
           })}
