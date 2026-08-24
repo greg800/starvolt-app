@@ -1529,6 +1529,51 @@
     .mv-head-titre.lien { background: none; border: none; padding: 0; font-family: inherit; cursor: pointer; text-align: left; }
     .mv-head-titre.lien:hover { color: var(--green); }
     .mv-head-num { font-size: .6em; font-weight: 800; color: rgba(255,255,255,.6); white-space: nowrap; }
+
+    /* ── Image de synthèse : feuille claire, imprimable en A4 ──────────────── */
+    .syn-overlay { position: fixed; inset: 0; z-index: 9800; background: rgba(3,12,18,.85);
+      overflow: auto; padding: 20px; display: flex; justify-content: center; }
+    .syn-sheet { width: 100%; max-width: 794px; align-self: flex-start;
+      background: #fff; color: #12242c; border-radius: 14px; padding: 24px 30px 32px;
+      box-shadow: 0 20px 60px rgba(0,0,0,.5); font-family: inherit; }
+    .syn-toolbar { display: flex; justify-content: flex-end; gap: 10px; margin-bottom: 14px; }
+    .syn-toolbar button { border: none; border-radius: 9px; padding: 8px 16px; font-weight: 800;
+      font-size: 13px; cursor: pointer; font-family: inherit; }
+    .syn-print { background: #0d2d3e; color: #fff; }
+    .syn-close { background: #e6ecee; color: #12242c; }
+    .syn-entete { text-align: center; margin-bottom: 18px; }
+    .syn-titre { font-size: 24px; font-weight: 900; color: #0d2d3e; line-height: 1.15; }
+    .syn-sous { font-size: 11px; color: #7a8a90; letter-spacing: .05em; text-transform: uppercase; margin-top: 4px; }
+    .syn-bloc { border: 1.5px solid rgba(13,45,62,.12); border-radius: 14px; padding: 12px 12px 5px; margin-bottom: 12px; }
+    .syn-bloc.niv0 { background: rgba(13,45,62,.045); }
+    .syn-bloc .syn-bloc { background: rgba(13,45,62,.03); }
+    .syn-bloc .syn-bloc .syn-bloc { background: rgba(13,45,62,.02); }
+    .syn-bloc-t { font-size: 13.5px; font-weight: 900; color: #0d2d3e; margin-bottom: 8px; letter-spacing: .01em; }
+    .syn-sujet { margin: 0 2px 9px; }
+    .syn-sujet-t { font-size: 12px; font-weight: 700; color: #324a52; margin-bottom: 3px; }
+    .syn-echelle { display: flex; align-items: stretch; gap: 8px; }
+    .syn-pole { flex: 0 0 82px; font-size: 10px; font-weight: 700; color: #5a6f76; line-height: 1.25;
+      display: flex; align-items: center; }
+    .syn-pole.g { justify-content: flex-end; text-align: right; }
+    .syn-pole.d { justify-content: flex-start; text-align: left; }
+    .syn-cases { flex: 1 1 auto; display: grid; grid-template-columns: repeat(5,1fr); gap: 4px; }
+    .syn-case { min-height: 30px; border-radius: 8px; display: flex; align-items: center;
+      justify-content: center; gap: 3px; flex-wrap: wrap; padding: 3px; }
+    .syn-bulle { width: 14px; height: 14px; border-radius: 50%; border: 2px solid #fff;
+      box-shadow: 0 0 0 1px rgba(0,0,0,.14); display: inline-block; flex-shrink: 0; }
+    .syn-legende { display: flex; flex-wrap: wrap; gap: 14px; justify-content: center;
+      margin-top: 16px; padding-top: 14px; border-top: 1px solid rgba(13,45,62,.12); }
+    .syn-leg-item { display: flex; align-items: center; gap: 7px; font-size: 12px; font-weight: 700; color: #324a52; }
+    @media print {
+      body * { visibility: hidden !important; }
+      .syn-overlay, .syn-overlay * { visibility: visible !important; }
+      .syn-overlay { position: absolute; inset: 0; background: #fff; padding: 0; overflow: visible; display: block; }
+      .syn-sheet { box-shadow: none; max-width: none; width: 100%; border-radius: 0; padding: 8mm 6mm; }
+      .syn-no-print { display: none !important; }
+      .syn-bloc { break-inside: avoid; }
+      .syn-sujet { break-inside: avoid; }
+      @page { size: A4; margin: 10mm; }
+    }
     .mv-head-desc { font-size: clamp(13px, 3.4vw, 15.5px); color: rgba(255,255,255,.74); line-height: 1.45; margin-top: 4px; }
     @media (max-width: 899px) {
       /* La personne analysée prime : on lui laisse la largeur, et le compte
@@ -20299,6 +20344,78 @@ function MvPosition({
   );
 }
 
+// ─── Image de synthèse d'un profil ─────────────────────────────────────────────
+// Une page claire, imprimable A4 : les thèmes en rectangles imbriqués, chaque
+// sujet en échelle de 5 cases (un mot par extrême), et une bulle de couleur par
+// auteur — orange pour soi. Les noms des autres évaluateurs en bas.
+const SYN_CASE_BG = ['#e8f0ff', '#eef2f9', '#f2f2f2', '#fdf3e6', '#ffedd0'];
+function MvSyntheseSheet({ personne, noeuds, cases, titres, auteurs, parNode, onClose }) {
+  const enfants = {};
+  (noeuds || []).forEach(n => { const k = n.parent_id || '_'; (enfants[k] = enfants[k] || []).push(n); });
+  const aPos = (id) => MV_POSITIONS.some(p => (cases[id + ':' + p.n] || '').trim());
+  const pole = (id, p) => (titres[id + ':' + p] || '').trim();
+
+  const sujetRow = (n) => {
+    const reps = parNode[n.id] || [];
+    return (
+      <div className="syn-sujet" key={'s' + n.id}>
+        <div className="syn-sujet-t">{n.label}</div>
+        <div className="syn-echelle">
+          <div className="syn-pole g">{pole(n.id, 1) || '—'}</div>
+          <div className="syn-cases">
+            {MV_POSITIONS.map(p => (
+              <div className="syn-case" key={p.n} style={{ background: SYN_CASE_BG[p.n - 1] }}>
+                {reps.filter(r => r.pos === p.n).map((r, i) =>
+                  <span key={i} className="syn-bulle" style={{ background: r.couleur }} title={r.nom}/>)}
+              </div>
+            ))}
+          </div>
+          <div className="syn-pole d">{pole(n.id, 5) || '—'}</div>
+        </div>
+      </div>
+    );
+  };
+
+  const renderNode = (n, prof) => {
+    const kids = enfants[n.id] || [];
+    if (kids.length === 0) return aPos(n.id) ? sujetRow(n) : null;   // feuille sans position = ignorée
+    return (
+      <div className={'syn-bloc niv' + Math.min(prof, 3)} key={'b' + n.id}>
+        <div className="syn-bloc-t">{n.label}</div>
+        {aPos(n.id) && sujetRow(n)}
+        {kids.map(k => renderNode(k, prof + 1))}
+      </div>
+    );
+  };
+
+  const dateStr = new Date().toLocaleDateString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric' });
+  return (
+    <div className="syn-overlay" onClick={onClose}>
+      <div className="syn-sheet" onClick={e => e.stopPropagation()}>
+        <div className="syn-toolbar syn-no-print">
+          <button className="syn-print" onClick={() => window.print()}>🖨️ Imprimer</button>
+          <button className="syn-close" onClick={onClose}>Fermer</button>
+        </div>
+        <div className="syn-entete">
+          <div className="syn-titre">{personne.prenom} {personne.nom}</div>
+          <div className="syn-sous">Mind Vector · synthèse des positions · {dateStr}</div>
+        </div>
+        <div className="syn-corps">
+          {(enfants['_'] || []).map(r => renderNode(r, 0))}
+        </div>
+        <div className="syn-legende">
+          {auteurs.map(a => (
+            <span key={a.id} className="syn-leg-item">
+              <span className="syn-bulle" style={{ background: a.couleur }}/>
+              {a.nom}{a.self ? ' (soi)' : ''}
+            </span>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function AdminMindVectorScreen({ user, profile, onBack, onFeedback, chipName, avatarName, onProfile, isImperso }) {
   const [noeuds,   setNoeuds]   = useState(null);  // liste plate des nœuds
   const [cases,    setCases]    = useState({});    // "idNoeud:position" → texte
@@ -20347,6 +20464,7 @@ function AdminMindVectorScreen({ user, profile, onBack, onFeedback, chipName, av
   const [sujetsOuverts, setSujetsOuverts] = useState(() => new Set()); // branches dépliées dans « Sujets à évaluer » (tout replié au départ)
   const [tip, setTip] = useState(false);              // conseil de navigation au lancement
   const [tipNoPlus, setTipNoPlus] = useState(false);  // « ne plus montrer ce conseil »
+  const [synthese, setSynthese] = useState(null);     // image de synthèse : {chargement}|{erreur}|{auteurs,parNode}
   const [msgAuto,  setMsgAuto]  = useState(null);  // { type:'ok'|'err', texte } affiché dans le dialogue
   const [glisse,   setGlisse]   = useState(null);  // id de la branche en cours de déplacement
   const [cible,    setCible]    = useState(null);  // id survolé comme destination ('_' = racine)
@@ -21181,6 +21299,31 @@ function AdminMindVectorScreen({ user, profile, onBack, onFeedback, chipName, av
     if (error) setErreur(error.message);
   };
 
+  // ── Image de synthèse : toutes les réponses du profil sur une page ─────────
+  // On lit auto-diagnostic + évaluations des invités (fonction réservée au
+  // propriétaire/superadmin), on attribue une couleur par auteur — orange pour
+  // soi — et on prépare la carte sujet → réponses.
+  const PALETTE_SYNTH = ['#3b82f6','#8b5cf6','#14b8a6','#ec4899','#eab308','#ef4444','#0ea5e9','#a855f7'];
+  const ouvrirSynthese = async () => {
+    if (!personne) return;
+    setPopupQui(false); setPortrait(null);
+    setSynthese({ chargement: true });
+    const { data, error } = await sb.rpc('mv_synthese', { p_personne_id: personne.id });
+    if (error) { setSynthese({ erreur: error.message }); return; }
+    const rows = data || [];
+    const map = new Map();
+    rows.forEach(r => { if (!map.has(r.auteur_id)) map.set(r.auteur_id, { id: r.auteur_id, nom: r.nom, self: !!r.is_self }); });
+    const auteurs = [...map.values()].sort((a, b) => (b.self ? 1 : 0) - (a.self ? 1 : 0) || (a.nom || '').localeCompare(b.nom || ''));
+    let ci = 0;
+    auteurs.forEach(a => { a.couleur = a.self ? '#f7941e' : PALETTE_SYNTH[ci++ % PALETTE_SYNTH.length]; });
+    const coul = {}; auteurs.forEach(a => { coul[a.id] = a.couleur; });
+    const parNode = {};
+    rows.forEach(r => {
+      (parNode[r.node_id] = parNode[r.node_id] || []).push({ auteurId: r.auteur_id, pos: r.pos, couleur: coul[r.auteur_id], nom: map.get(r.auteur_id).nom });
+    });
+    setSynthese({ auteurs, parNode });
+  };
+
   // ── Portrait : ce que l'ensemble des positions retenues dit de la personne ─
   // `commentaire` non défini = on garde celui déjà en base. La fonction edge ne
   // rappelle l'IA que si les réponses, le prompt ou le commentaire ont bougé :
@@ -21450,9 +21593,10 @@ function AdminMindVectorScreen({ user, profile, onBack, onFeedback, chipName, av
   // Initiales du compte connecté, pour la pastille reprise de la barre globale.
   const mvInitiales = (avatarName || chipName || '').trim().split(/\s+/)
     .map(w => (w[0] || '').toUpperCase()).join('').slice(0, 2);
-  // Numéro du sujet courant parmi les sujets à répondre (ex. « 23/56 »).
-  const rangSujet = aClasser.indexOf(sel);
-  const compteurSujet = (mode === 'reponse' && rangSujet >= 0) ? `${rangSujet + 1}/${aClasser.length}` : '';
+  // Ce qu'il reste à renseigner sur ce profil, sur le total à renseigner
+  // (ex. « 33/56 » = 33 sujets encore à classer sur 56).
+  const restantsCount = aClasser.filter(id => reponses[id] === undefined).length;
+  const compteurSujet = (mode === 'reponse' && aClasser.length) ? `${restantsCount}/${aClasser.length}` : '';
   const nomDe = (id) => (parId[id] || {}).label || '';
 
   // ── Fragments de rendu ────────────────────────────────────────────────────
@@ -21645,6 +21789,10 @@ function AdminMindVectorScreen({ user, profile, onBack, onFeedback, chipName, av
               disabled={portraitEnCours} onClick={() => demanderPortrait()}>
               {portraitEnCours ? <><StarSpinner size={15} color="#1a4500"/> Analyse…</> : '✨ Vos résultats'}
             </button>
+            {peutGererProfil && (
+              <button className="btn btn-no" style={{width:'auto',fontSize:13,padding:'10px 20px'}}
+                onClick={ouvrirSynthese}>🖼️ Image de synthèse de mon profil</button>
+            )}
             <button className="btn btn-no" style={{width:'auto',fontSize:12.5,padding:'8px 16px'}}
               onClick={() => setRestantes(false)}>Revoir mes réponses</button>
             <div style={{fontSize:11,color:'rgba(255,255,255,.35)',lineHeight:1.5,maxWidth:380}}>
@@ -21813,6 +21961,25 @@ function AdminMindVectorScreen({ user, profile, onBack, onFeedback, chipName, av
         </div>
       </div>
     )}
+
+    {/* ── Image de synthèse du profil ─────────────────────────────────────── */}
+    {synthese && (synthese.chargement ? (
+      <div style={{position:'fixed',inset:0,zIndex:9800,background:'rgba(3,12,18,.85)',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:14}}>
+        <StarSpinner size={34}/>
+        <div style={{color:'#fff',fontSize:13,fontWeight:600}}>Préparation de l'image de synthèse…</div>
+      </div>
+    ) : synthese.erreur ? (
+      <div style={{position:'fixed',inset:0,zIndex:9800,background:'rgba(3,12,18,.85)',display:'flex',alignItems:'center',justifyContent:'center',padding:16}}
+        onClick={() => setSynthese(null)}>
+        <div className="mv-dialogue" style={{maxWidth:360,textAlign:'center'}} onClick={e=>e.stopPropagation()}>
+          <div style={{fontSize:13.5,fontWeight:700,color:'#ff8a8a'}}>{synthese.erreur}</div>
+          <button className="btn btn-no" style={{width:'100%'}} onClick={() => setSynthese(null)}>Fermer</button>
+        </div>
+      </div>
+    ) : (
+      <MvSyntheseSheet personne={personne} noeuds={noeuds} cases={cases} titres={titres}
+        auteurs={synthese.auteurs} parNode={synthese.parNode} onClose={() => setSynthese(null)}/>
+    ))}
 
     {/* ── Conseil de navigation au lancement ──────────────────────────────── */}
     {tip && (
@@ -22080,6 +22247,10 @@ function AdminMindVectorScreen({ user, profile, onBack, onFeedback, chipName, av
                   onClick={() => { setPopupQui(false); demanderPortrait(); }}>
                   {portraitEnCours ? <><StarSpinner size={14} color="#1a4500"/> Analyse…</> : '✨ Lancer l\'analyse'}
                 </button>
+              )}
+              {personne && peutGererProfil && (
+                <button className="btn btn-no" style={{width:'100%',fontSize:13,padding:'11px 0'}}
+                  disabled={!classees} onClick={ouvrirSynthese}>🖼️ Image de synthèse de mon profil</button>
               )}
               {personne && !classees && (
                 <div style={{fontSize:10.5,color:'rgba(255,255,255,.68)',lineHeight:1.45,marginTop:-6}}>
