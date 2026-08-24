@@ -1531,16 +1531,11 @@
     .mv-head-num { font-size: .6em; font-weight: 800; color: rgba(255,255,255,.6); white-space: nowrap; }
 
     /* ── Image de synthèse : feuille claire, imprimable en A4 ──────────────── */
-    .syn-overlay { position: fixed; inset: 0; z-index: 9800; background: rgba(3,12,18,.85);
-      overflow: auto; padding: 18px; display: flex; justify-content: center; }
-    .syn-sheet { width: 100%; max-width: 794px; align-self: flex-start;
-      background: #fff; color: #12242c; border-radius: 14px; padding: 18px 22px 22px;
-      box-shadow: 0 20px 60px rgba(0,0,0,.5); font-family: inherit; }
-    .syn-toolbar { display: flex; justify-content: flex-end; gap: 10px; margin-bottom: 10px; }
-    .syn-toolbar button { border: none; border-radius: 9px; padding: 8px 16px; font-weight: 800;
-      font-size: 13px; cursor: pointer; font-family: inherit; }
-    .syn-print { background: #0d2d3e; color: #fff; }
-    .syn-close { background: #e6ecee; color: #12242c; }
+    /* Image de synthèse : pleine page blanche, corps défilant + pied collant. */
+    .syn-page { position: fixed; inset: 0; z-index: 9800; background: #fff; color: #12242c;
+      display: flex; flex-direction: column; font-family: inherit; }
+    .syn-corps { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 14px 18px 8px;
+      max-width: 900px; width: 100%; margin: 0 auto; box-sizing: border-box; }
     .syn-entete { text-align: center; margin-bottom: 12px; }
     .syn-titre { font-size: 21px; font-weight: 900; color: #0d2d3e; line-height: 1.15; }
     .syn-sous { font-size: 10px; color: #7a8a90; letter-spacing: .05em; text-transform: uppercase; margin-top: 3px; }
@@ -1549,29 +1544,55 @@
     .syn-bloc .syn-bloc { background: rgba(13,45,62,.035); margin-bottom: 5px; }
     .syn-bloc .syn-bloc .syn-bloc { background: rgba(13,45,62,.02); }
     .syn-bloc-t { font-size: 12px; font-weight: 900; color: #0d2d3e; margin-bottom: 5px; letter-spacing: .01em; }
-    /* Un sujet = une seule ligne : titre · extrême gauche · 5 cases · extrême droite. */
-    .syn-sujet { display: flex; align-items: center; gap: 7px; margin: 0 1px 3px; }
-    .syn-sujet-t { flex: 1 1 auto; min-width: 60px; font-size: 11px; font-weight: 700; color: #26424b;
+    /* Un sujet = une ligne, en grille pour aligner verticalement les 5 cases :
+       titre · extrême gauche · 5 cases · extrême droite. */
+    .syn-sujet { display: grid; grid-template-columns: minmax(0,1fr) 92px auto 92px;
+      align-items: center; gap: 6px; margin: 0 1px 3px; }
+    .syn-sujet-t { min-width: 0; font-size: 11px; font-weight: 700; color: #26424b;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: default; }
+    .syn-pole { font-size: 9px; font-weight: 700; color: #6a7d84; line-height: 1.15;
       overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .syn-pole { flex: 0 0 auto; max-width: 96px; font-size: 9px; font-weight: 700; color: #6a7d84;
-      line-height: 1.15; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .syn-pole.g { text-align: right; }
     .syn-pole.d { text-align: left; }
-    .syn-cases { flex: 0 0 auto; display: flex; gap: 2px; }
-    .syn-case { width: 22px; height: 17px; border-radius: 4px; display: flex; align-items: center;
-      justify-content: center; gap: 1px; padding: 0 1px; overflow: hidden; }
-    .syn-bulle { width: 11px; height: 11px; border-radius: 50%; border: 1.5px solid #fff;
-      box-shadow: 0 0 0 1px rgba(0,0,0,.16); display: inline-block; flex-shrink: 0; }
+    .syn-cases { display: flex; gap: 2px; }
+    .syn-case { width: 18px; min-height: 16px; border-radius: 4px; display: flex; align-items: center;
+      justify-content: center; gap: 1px; padding: 1px; flex-wrap: wrap; cursor: default; }
+    .syn-bulle { width: 7px; height: 7px; border-radius: 50%; border: 1px solid #fff;
+      box-shadow: 0 0 0 1px rgba(0,0,0,.2); display: inline-block; flex-shrink: 0; }
     .syn-legende { display: flex; flex-wrap: wrap; gap: 12px; justify-content: center;
-      margin-top: 12px; padding-top: 10px; border-top: 1px solid rgba(13,45,62,.12); }
+      margin: 12px 0 4px; padding-top: 10px; border-top: 1px solid rgba(13,45,62,.12); }
     .syn-leg-item { display: flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 700; color: #324a52; }
-    .syn-legende .syn-bulle { width: 12px; height: 12px; }
+    .syn-legende .syn-bulle { width: 11px; height: 11px; }
+    /* Pied collant, façon appli */
+    .syn-pied { flex: 0 0 auto; display: flex; gap: 8px; padding: 8px 14px;
+      border-top: 1px solid rgba(13,45,62,.14); background: #fff;
+      max-width: 900px; width: 100%; margin: 0 auto; box-sizing: border-box; }
+    .syn-pied button { flex: 1; border: none; border-radius: 10px; padding: 11px 0; font-weight: 800;
+      font-size: 14px; cursor: pointer; font-family: inherit; }
+    .syn-print { background: #0d2d3e; color: #fff; }
+    .syn-close { background: #e6ecee; color: #12242c; }
+    /* Pop-up mobile au tap d'un titre ou d'une case */
+    .syn-info-overlay { position: fixed; inset: 0; z-index: 9850; background: rgba(3,12,18,.6);
+      display: flex; align-items: center; justify-content: center; padding: 20px; }
+    .syn-info { background: #fff; color: #12242c; border-radius: 14px; padding: 18px; max-width: 340px;
+      width: 100%; box-shadow: 0 20px 50px rgba(0,0,0,.4); }
+    .syn-info-t { font-size: 14px; font-weight: 900; color: #0d2d3e; margin-bottom: 8px; }
+    .syn-info-x { font-size: 13px; line-height: 1.5; color: #324a52; margin-bottom: 14px; white-space: pre-wrap; }
+    .syn-info .syn-close { width: 100%; padding: 11px 0; border-radius: 10px; border: none; font-weight: 800; font-family: inherit; cursor: pointer; }
+    @media (max-width: 899px) {
+      .syn-corps { padding: 9px 8px 6px; }
+      .syn-bloc { padding: 6px 6px 2px; border-radius: 9px; margin-bottom: 5px; }
+      .syn-bloc-t { font-size: 11px; margin-bottom: 4px; }
+      .syn-sujet { grid-template-columns: minmax(0,1fr) 58px auto 58px; gap: 4px; }
+      .syn-pole { font-size: 8px; }
+      .syn-sujet-t { font-size: 10px; }
+      .syn-pied { padding: 6px 10px; }
+      .syn-pied button { padding: 9px 0; font-size: 13px; }
+    }
     @media print {
-      /* La feuille est un enfant direct de <body> (portail) : on masque tout le
-         reste pour un rendu compact, sans pages vides. */
-      body > *:not(.syn-overlay) { display: none !important; }
-      .syn-overlay { position: static; inset: auto; background: #fff; padding: 0; overflow: visible; display: block; z-index: auto; }
-      .syn-sheet { box-shadow: none; max-width: none; width: 100%; border-radius: 0; padding: 0; }
+      body > *:not(.syn-page) { display: none !important; }
+      .syn-page { position: static; inset: auto; height: auto; display: block; z-index: auto; }
+      .syn-corps { overflow: visible; padding: 0; max-width: none; }
       .syn-no-print { display: none !important; }
       .syn-bloc, .syn-sujet { break-inside: avoid; }
       @page { size: A4; margin: 9mm; }
@@ -20351,28 +20372,40 @@ function MvPosition({
 // sujet en échelle de 5 cases (un mot par extrême), et une bulle de couleur par
 // auteur — orange pour soi. Les noms des autres évaluateurs en bas.
 const SYN_CASE_BG = ['#e8f0ff', '#eef2f9', '#f2f2f2', '#fdf3e6', '#ffedd0'];
-function MvSyntheseSheet({ personne, noeuds, cases, titres, auteurs, parNode, onClose }) {
+function MvSyntheseSheet({ personne, noeuds, cases, titres, auteurs, parNode, onClose, compact }) {
+  const [info, setInfo] = useState(null);   // pop-up mobile : { titre, texte }
   const enfants = {};
   (noeuds || []).forEach(n => { const k = n.parent_id || '_'; (enfants[k] = enfants[k] || []).push(n); });
   const aPos = (id) => MV_POSITIONS.some(p => (cases[id + ':' + p.n] || '').trim());
-  const pole = (id, p) => (titres[id + ':' + p] || '').trim();
+  const sansCr = (s) => (s || '').replace(/[\[\]]/g, '').trim();   // sans crochets
+  const pole = (id, p) => sansCr(titres[id + ':' + p]);
+  const contenu = (id, p) => (cases[id + ':' + p] || '').trim();   // texte exact d'une case
+
+  // Desktop : infobulle native au survol. Mobile : au tap, un pop-up.
+  const survol = (texte) => (compact || !texte) ? undefined : texte;
+  const tap = (titre, texte) => compact ? (() => setInfo({ titre, texte: texte || '—' })) : undefined;
 
   const sujetRow = (n) => {
     const reps = parNode[n.id] || [];
-    // Tout sur une ligne : titre · extrême gauche · 5 cases · extrême droite.
+    const desc = (n.description || '').trim();
     return (
       <div className="syn-sujet" key={'s' + n.id}>
-        <div className="syn-sujet-t">{n.label}</div>
-        <div className="syn-pole g">{pole(n.id, 1) || '—'}</div>
+        <div className="syn-sujet-t" title={survol(n.label + (desc ? '\n' + desc : ''))}
+          onClick={tap(n.label, desc || n.label)}>{n.label}</div>
+        <div className="syn-pole g" title={survol(pole(n.id, 1))}>{pole(n.id, 1) || '—'}</div>
         <div className="syn-cases">
-          {MV_POSITIONS.map(p => (
-            <div className="syn-case" key={p.n} style={{ background: SYN_CASE_BG[p.n - 1] }}>
-              {reps.filter(r => r.pos === p.n).map((r, i) =>
-                <span key={i} className="syn-bulle" style={{ background: r.couleur }} title={r.nom}/>)}
-            </div>
-          ))}
+          {MV_POSITIONS.map(p => {
+            const txt = contenu(n.id, p.n) || pole(n.id, p.n);
+            return (
+              <div className="syn-case" key={p.n} style={{ background: SYN_CASE_BG[p.n - 1] }}
+                title={survol(txt)} onClick={tap('Position ' + p.n, txt)}>
+                {reps.filter(r => r.pos === p.n).map((r, i) =>
+                  <span key={i} className="syn-bulle" style={{ background: r.couleur }} title={survol(r.nom)}/>)}
+              </div>
+            );
+          })}
         </div>
-        <div className="syn-pole d">{pole(n.id, 5) || '—'}</div>
+        <div className="syn-pole d" title={survol(pole(n.id, 5))}>{pole(n.id, 5) || '—'}</div>
       </div>
     );
   };
@@ -20390,23 +20423,16 @@ function MvSyntheseSheet({ personne, noeuds, cases, titres, auteurs, parNode, on
   };
 
   const dateStr = new Date().toLocaleDateString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric' });
-  // Portail vers <body> : à l'impression, on masque tout sauf cette feuille, ce
-  // qui n'est fiable que si elle est un enfant direct de body (sinon le reste de
-  // l'appli occupe encore la place et l'on obtient des pages presque vides).
+  // Portail vers <body> : à l'impression, on masque tout sauf cette feuille (elle
+  // doit être enfant direct de body), sinon le reste de l'appli occupe la place.
   return ReactDOM.createPortal((
-    <div className="syn-overlay" onClick={onClose}>
-      <div className="syn-sheet" onClick={e => e.stopPropagation()}>
-        <div className="syn-toolbar syn-no-print">
-          <button className="syn-print" onClick={() => window.print()}>🖨️ Imprimer</button>
-          <button className="syn-close" onClick={onClose}>Fermer</button>
-        </div>
+    <div className="syn-page">
+      <div className="syn-corps">
         <div className="syn-entete">
           <div className="syn-titre">{personne.prenom} {personne.nom}</div>
           <div className="syn-sous">Mind Vector · synthèse des positions · {dateStr}</div>
         </div>
-        <div className="syn-corps">
-          {(enfants['_'] || []).map(r => renderNode(r, 0))}
-        </div>
+        {(enfants['_'] || []).map(r => renderNode(r, 0))}
         <div className="syn-legende">
           {auteurs.map(a => (
             <span key={a.id} className="syn-leg-item">
@@ -20416,6 +20442,19 @@ function MvSyntheseSheet({ personne, noeuds, cases, titres, auteurs, parNode, on
           ))}
         </div>
       </div>
+      <div className="syn-pied syn-no-print">
+        <button className="syn-print" onClick={() => window.print()}>🖨️ Imprimer</button>
+        <button className="syn-close" onClick={onClose}>Fermer</button>
+      </div>
+      {info && (
+        <div className="syn-info-overlay" onClick={() => setInfo(null)}>
+          <div className="syn-info" onClick={e => e.stopPropagation()}>
+            {info.titre && <div className="syn-info-t">{info.titre}</div>}
+            <div className="syn-info-x">{info.texte}</div>
+            <button className="syn-close" onClick={() => setInfo(null)}>Fermer</button>
+          </div>
+        </div>
+      )}
     </div>
   ), document.body);
 }
@@ -21159,6 +21198,25 @@ function AdminMindVectorScreen({ user, profile, onBack, onFeedback, chipName, av
     chargerEvaluateurs(personne);
   };
 
+  // Supprimer un profil ajouté à la main (sans compte) et toutes ses données.
+  // Réservé aux admins. Le CASCADE emporte réponses et invitations.
+  const supprimerFicheManuelle = async () => {
+    if (!personne || personne.user_id) return;
+    const qui = [personne.prenom, personne.nom].filter(Boolean).join(' ') || 'ce profil';
+    if (!window.confirm(`Supprimer définitivement « ${qui} » et toutes les réponses saisies ? Cette action est irréversible.`)) return;
+    setBusyQui(true); setErrQui(null);
+    const { error } = await sb.from('mv_personnes').delete().eq('id', personne.id);
+    setBusyQui(false);
+    if (error) { setErrQui(error.message); return; }
+    setFiches(l => l.filter(f => f.id !== personne.id));
+    setPersonne(null); setReponses({}); setAutoDiag({});
+    // On repart sur soi-même par défaut.
+    try {
+      const own = await ficheDuCompte({ id: user.id, prenom: profile?.prenom, nom: profile?.nom, pseudo: profile?.pseudo, email: user.email });
+      selectionner(own);
+    } catch {}
+  };
+
   // Starvolt envoie l'e-mail lui-même (Resend, gabarit soigné côté serveur),
   // avec le demandeur en copie. Le contenu est fixé serveur : seul l'e-mail
   // cible est transmis.
@@ -21231,6 +21289,18 @@ function AdminMindVectorScreen({ user, profile, onBack, onFeedback, chipName, av
     if (dejala) return dejala;
     const { data: connue } = await sb.from('mv_personnes').select('*').eq('user_id', u.id).maybeSingle();
     if (connue) { setFiches(l => l.some(f => f.id === connue.id) ? l : [...l, connue]); return connue; }
+    // Rattacher une fiche « ajoutée à la main » de même e-mail (le trigger le
+    // fait à l'inscription ; ici c'est le filet pour les comptes déjà anciens).
+    // L'écriture n'aboutit que si l'appelant en a le droit (admin) : sinon on
+    // retombe sur la création normale.
+    if (peutEditer && (u.email || '').trim()) {
+      const { data: manuelle } = await sb.from('mv_personnes').select('*')
+        .is('user_id', null).ilike('email', u.email.trim()).maybeSingle();
+      if (manuelle) {
+        const { data: liee } = await sb.from('mv_personnes').update({ user_id: u.id }).eq('id', manuelle.id).select().single();
+        if (liee) { setFiches(l => l.map(x => x.id === liee.id ? liee : x)); return liee; }
+      }
+    }
     const { data, error } = await sb.from('mv_personnes').insert({
       user_id: u.id,
       prenom: (u.prenom || u.pseudo || '').trim() || '—',
@@ -21982,7 +22052,7 @@ function AdminMindVectorScreen({ user, profile, onBack, onFeedback, chipName, av
       </div>
     ) : (
       <MvSyntheseSheet personne={personne} noeuds={noeuds} cases={cases} titres={titres}
-        auteurs={synthese.auteurs} parNode={synthese.parNode} onClose={() => setSynthese(null)}/>
+        auteurs={synthese.auteurs} parNode={synthese.parNode} compact={compact} onClose={() => setSynthese(null)}/>
     ))}
 
     {/* ── Conseil de navigation au lancement ──────────────────────────────── */}
@@ -22087,6 +22157,12 @@ function AdminMindVectorScreen({ user, profile, onBack, onFeedback, chipName, av
                     <button className="btn btn-no" title="Ajouter une personne qui n'a pas de compte"
                       style={{flex:'0 0 auto',width:'auto',fontSize:17,fontWeight:900,padding:'0 14px'}}
                       onClick={() => { setErrQui(null); setFormQui({ prenom:'', nom:'', email:'', commentaire:'' }); }}>＋</button>
+                    {personne && !personne.user_id && peutEditer && (
+                      <button className="btn btn-no" title="Supprimer ce profil ajouté à la main et ses réponses"
+                        style={{flex:'0 0 auto',width:'auto',fontSize:17,fontWeight:900,padding:'0 14px',
+                                color:'#ff8a8a',borderColor:'rgba(255,138,106,.5)'}}
+                        disabled={busyQui} onClick={supprimerFicheManuelle}>−</button>
+                    )}
                   </div>
                 ) : profilsAcces.length > 1 ? (
                   <select className="inp" style={{width:'100%',fontSize:13,padding:'10px 12px'}}
