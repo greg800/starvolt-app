@@ -13,3 +13,6 @@ dist
 
 # tout fichier contenant le token Supabase, quel que soit son nom
 *supabase-pat*
+
+# état local de la CLI Supabase (version téléchargée, projet lié)
+supabase/.temp/

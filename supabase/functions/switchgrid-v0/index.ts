@@ -6,6 +6,7 @@
 const SG_BASE = "https://api.switchgrid.tech";
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
 const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+const ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY") ?? "";
 const SG_KEY = Deno.env.get("SWITCHGRID_API_KEY") ?? "";
 const SG_CRON_SECRET = Deno.env.get("SWITCHGRID_CRON_SECRET") ?? "";
 // Repli journalier : couverture minimale (jours) pour accepter un R65 comme
@@ -1039,7 +1040,7 @@ async function searchContract({ name, address, prm, testEnv }) {
 async function getUser(token) {
   const r = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
     headers: {
-      "apikey": SERVICE_KEY,
+      "apikey": ANON_KEY,
       "Authorization": `Bearer ${token}`
     }
   });

@@ -24,9 +24,9 @@ const PRICES: Record<string, { in: number; out: number }> = {
   "claude-opus-4-7": { in: 5, out: 25 },
 };
 
-const ADMIN_EMAIL = "greg@starvolt.fr";
 const FEATURE = "mind_vector_fill";
 const FEATURE_PROFIL = "mind_vector_profil";
+const FEATURE_INVITE = "mind_vector_invite";
 
 // Repli si le prompt n'a pas encore été semé en base.
 const DEFAULT_PROFIL_PROMPT =
@@ -192,10 +192,10 @@ async function loggerCout(usage: any, email: string, feature: string) {
 // ── action "rescan" ─────────────────────────────────────────────────────────
 async function rescan(email: string): Promise<Response> {
   const noeuds = (await dbSelect(
-    "mv_nodes?select=id,parent_id,label,description&order=ordre",
+    "mv_nodes?select=id,parent_id,label,description&order=ordre&limit=500",
   )) || [];
   const positions = (await dbSelect(
-    "mv_positions?select=node_id,pos,titre,content&order=node_id,pos",
+    "mv_positions?select=node_id,pos,titre,content&order=node_id,pos&limit=500",
   )) || [];
 
   const parId: Record<string, any> = {};
@@ -393,8 +393,8 @@ async function profil(body: any, caller: { id: string; email: string }): Promise
     return json({ error: "vide", message: "Aucune réponse à analyser." }, 422);
   }
 
-  const noeuds    = (await dbSelect("mv_nodes?select=id,parent_id,label,description")) || [];
-  const positions = (await dbSelect("mv_positions?select=node_id,pos,titre,content")) || [];
+  const noeuds    = (await dbSelect("mv_nodes?select=id,parent_id,label,description&limit=500")) || [];
+  const positions = (await dbSelect("mv_positions?select=node_id,pos,titre,content&limit=500")) || [];
   const parId: Record<string, any> = {};
   for (const n of noeuds) parId[n.id] = n;
   const chemin = (n: any) => {
@@ -494,8 +494,8 @@ async function branche(body: any, email: string): Promise<Response> {
   if (!label) return json({ error: "bad_request", message: "Intitulé manquant." }, 400);
 
   // Le catalogue existant : intitulé complet et titres des 5 positions.
-  const noeuds    = (await dbSelect("mv_nodes?select=id,parent_id,label")) || [];
-  const positions = (await dbSelect("mv_positions?select=node_id,pos,titre")) || [];
+  const noeuds    = (await dbSelect("mv_nodes?select=id,parent_id,label&limit=500")) || [];
+  const positions = (await dbSelect("mv_positions?select=node_id,pos,titre&limit=500")) || [];
   const parId: Record<string, any> = {};
   for (const n of noeuds) parId[n.id] = n;
   const chemin = (n: any) => {
@@ -703,6 +703,55 @@ async function getCaller(jwt: string): Promise<{ id: string; email: string } | n
   } catch { return null; }
 }
 
+async function isAdminOrSuperadmin(userId: string): Promise<boolean> {
+  const rows = await dbSelect(`profiles?id=eq.${userId}&select=role&limit=1`);
+  const role = Array.isArray(rows) ? rows[0]?.role : null;
+  return role === "admin" || role === "superadmin";
+}
+
+async function checkRateLimit(feature: string, userEmail: string, maxPerHour: number): Promise<boolean> {
+  try {
+    const since = new Date(Date.now() - 3600_000).toISOString();
+    const res = await fetch(
+      `${SUPABASE_URL}/rest/v1/ai_usage_log?feature=eq.${feature}&user_email=eq.${encodeURIComponent(userEmail)}&created_at=gte.${encodeURIComponent(since)}&select=id`,
+      {
+        headers: {
+          apikey: SERVICE_ROLE,
+          Authorization: `Bearer ${SERVICE_ROLE}`,
+          "Prefer": "count=exact",
+          "Range-Unit": "items",
+          "Range": "0-0",
+        },
+      },
+    );
+    const range = res.headers.get("Content-Range") || "";
+    const total = parseInt(range.split("/")[1] || "0", 10);
+    return total >= maxPerHour;
+  } catch { return false; }
+}
+
+async function logInviteUsage(userEmail: string): Promise<void> {
+  try {
+    await fetch(`${SUPABASE_URL}/rest/v1/ai_usage_log`, {
+      method: "POST",
+      headers: {
+        apikey: SERVICE_ROLE,
+        Authorization: `Bearer ${SERVICE_ROLE}`,
+        "Content-Type": "application/json",
+        Prefer: "return=minimal",
+      },
+      body: JSON.stringify({
+        feature: FEATURE_INVITE,
+        model: "",
+        input_tokens: 0,
+        output_tokens: 0,
+        cost_usd: 0,
+        user_email: userEmail,
+      }),
+    });
+  } catch { /* best-effort */ }
+}
+
 async function handle(req: Request): Promise<Response> {
   const auth = req.headers.get("Authorization") || "";
   const jwt = auth.replace(/^Bearer\s+/i, "");
@@ -715,7 +764,14 @@ async function handle(req: Request): Promise<Response> {
 
   // Inviter par e-mail ne dépend pas d'Anthropic : on le traite avant le reste,
   // et c'est ouvert à tout compte connecté (chacun invite pour son profil).
-  if (body?.action === "invite") return await invite(body, caller);
+  if (body?.action === "invite") {
+    if (await checkRateLimit(FEATURE_INVITE, caller.email, 10)) {
+      return json({ error: "rate_limited", message: "Limite de 10 invitations par heure atteinte." }, 429);
+    }
+    const res = await invite(body, caller);
+    if (res.status < 400) await logInviteUsage(caller.email);
+    return res;
+  }
 
   if (!ANTHROPIC_API_KEY) {
     return json({ error: "missing_key", message: "ANTHROPIC_API_KEY non configurée." }, 500);
@@ -723,9 +779,14 @@ async function handle(req: Request): Promise<Response> {
 
   // Le portrait est à tout le monde — sur ses propres réponses. Rédiger les
   // questions et réécrire le prompt restent des gestes d'administrateur.
-  if (body?.action === "profil") return await profil(body, caller);
+  if (body?.action === "profil") {
+    if (await checkRateLimit(FEATURE_PROFIL, caller.email, 5)) {
+      return json({ error: "rate_limited", message: "Limite de 5 portraits par heure atteinte." }, 429);
+    }
+    return await profil(body, caller);
+  }
 
-  if (caller.email.toLowerCase() !== ADMIN_EMAIL) {
+  if (!(await isAdminOrSuperadmin(caller.id))) {
     return json({ error: "forbidden", message: "Accès réservé à l'administrateur." }, 403);
   }
   if (body?.action === "rescan")  return await rescan(caller.email);

@@ -17,8 +17,6 @@ const PRICES: Record<string, { in: number; out: number }> = {
   "claude-opus-4-7": { in: 5, out: 25 },
 };
 
-const ADMIN_EMAIL = "greg@starvolt.fr";
-
 const cors = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
@@ -47,17 +45,26 @@ Règles :
 
 Appelle l'outil report_questions avec exactement le nombre de questions demandé.`;
 
-async function getCallerEmail(jwt: string): Promise<string | null> {
+async function getCallerUser(jwt: string): Promise<{ id: string; email: string } | null> {
   try {
     const res = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
       headers: { Authorization: `Bearer ${jwt}`, apikey: ANON_KEY },
     });
     if (!res.ok) return null;
     const u = await res.json();
-    return u?.email ?? null;
+    if (!u?.id) return null;
+    return { id: u.id, email: u.email ?? "" };
   } catch {
     return null;
   }
+}
+
+async function isAdminOrSuperadmin(userId: string): Promise<boolean> {
+  const rows = await dbSelect(
+    `profiles?id=eq.${userId}&select=role&limit=1`
+  );
+  const role = Array.isArray(rows) ? rows[0]?.role : null;
+  return role === "admin" || role === "superadmin";
 }
 
 async function dbSelect(path: string): Promise<any> {
@@ -76,9 +83,9 @@ async function handle(req: Request): Promise<Response> {
   const auth = req.headers.get("Authorization") || "";
   const jwt = auth.replace(/^Bearer\s+/i, "");
   if (!jwt) return json({ error: "no_token", message: "Token manquant." }, 401);
-  const email = await getCallerEmail(jwt);
-  if (!email) return json({ error: "invalid_token", message: "Session invalide." }, 401);
-  if (email.toLowerCase() !== ADMIN_EMAIL) {
+  const caller = await getCallerUser(jwt);
+  if (!caller) return json({ error: "invalid_token", message: "Session invalide." }, 401);
+  if (!(await isAdminOrSuperadmin(caller.id))) {
     return json({ error: "forbidden", message: "Accès réservé à l'administrateur." }, 403);
   }
 

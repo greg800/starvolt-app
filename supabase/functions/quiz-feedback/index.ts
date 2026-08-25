@@ -84,9 +84,9 @@ Deno.serve(async (req) => {
   let catalogue: Array<{ theme: string; sujets: Array<{ sujet: string; questions: string[] }> }> = [];
   try {
     const [{ data: groups }, { data: subjects }, { data: questions }] = await Promise.all([
-      db.from("learn_groups").select("id,title,ordre").order("ordre"),
-      db.from("learn_subjects").select("id,title,group_id,ordre").order("ordre"),
-      db.from("learn_questions").select("id,question,subject_id,ordre").order("ordre"),
+      db.from("learn_groups").select("id,title,ordre").order("ordre").limit(200),
+      db.from("learn_subjects").select("id,title,group_id,ordre").order("ordre").limit(200),
+      db.from("learn_questions").select("id,question,subject_id,ordre").order("ordre").limit(200),
     ]);
     const qBySubject: Record<string, string[]> = {};
     (questions || []).forEach((q: { question: string; subject_id: string }) => {
