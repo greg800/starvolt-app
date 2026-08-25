@@ -3472,7 +3472,7 @@ function AuthSignupScreen({ onGoToLogin, onSignedUp, onSuccessDone }) {
     if (!prenom.trim())     return 'Il manque juste votre prénom 😊';
     if (!nom.trim())        return 'Et votre nom de famille ?';
     if (!email.trim())      return 'Votre email, pour qu\'on puisse vous écrire ✉️';
-    if (pwd.length < 6)     return 'Un mot de passe d\'au moins 6 caractères 🔒';
+    if (pwd.length < 10)    return 'Un mot de passe d\'au moins 10 caractères 🔒';
     if (isEntreprise && !raisonSociale.trim()) return 'Le nom de l\'entreprise 🏢';
     if (!adresse.trim())    return 'L\'adresse du compteur 🏠';
     if (!codePostal.trim()) return 'Le code postal 📮';
@@ -18524,7 +18524,7 @@ function ResetPasswordScreen({ onDone }) {
   const [ok,      setOk]      = useState(false);
 
   const handle = async () => {
-    if (pwd.length < 6)        { setError('6 caractères minimum.'); return; }
+    if (pwd.length < 10)       { setError('10 caractères minimum.'); return; }
     if (pwd !== pwd2)          { setError('Les mots de passe ne correspondent pas.'); return; }
     setLoading(true); setError(null);
     // S'assurer que la session de récupération est bien active (Supabase a pu la
@@ -18569,7 +18569,7 @@ function ResetPasswordScreen({ onDone }) {
           <div className="inp-group">
             <label className="inp-label">Nouveau mot de passe</label>
             <input className="inp" type="password" value={pwd}
-              onChange={e=>setPwd(e.target.value)} placeholder="6 caractères minimum"/>
+              onChange={e=>setPwd(e.target.value)} placeholder="10 caractères minimum"/>
           </div>
           <div className="inp-group">
             <label className="inp-label">Confirmer</label>
