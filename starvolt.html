@@ -21957,7 +21957,7 @@ function AdminMindVectorScreen({ user, profile, onBack, onFeedback, chipName, av
             </button>
             {peutGererProfil && (
               <button className="btn btn-no" style={{width:'auto',fontSize:13,padding:'10px 20px'}}
-                onClick={ouvrirSynthese}>🖼️ Image de synthèse de mon profil</button>
+                onClick={ouvrirSynthese}>🖼️ Image de synthèse de ce profil</button>
             )}
             <button className="btn btn-no" style={{width:'auto',fontSize:12.5,padding:'8px 16px'}}
               onClick={() => setRestantes(false)}>Revoir mes réponses</button>
@@ -22275,7 +22275,7 @@ function AdminMindVectorScreen({ user, profile, onBack, onFeedback, chipName, av
               {/* ── B. Qui peut évaluer ce profil ───────────────────────────── */}
               {peutGererProfil && (
                 <div>
-                  <label>Inviter des utilisateurs à évaluer mon profil</label>
+                  <label>Inviter des utilisateurs à évaluer ce profil</label>
                   <div style={{display:'flex',gap:8,alignItems:'stretch'}}>
                     <input type="email" value={inviteEmail} placeholder="adresse e-mail…"
                       style={{flex:'1 1 0',minWidth:0}}
@@ -22422,7 +22422,7 @@ function AdminMindVectorScreen({ user, profile, onBack, onFeedback, chipName, av
               )}
               {personne && peutGererProfil && (
                 <button className="btn btn-no" style={{width:'100%',fontSize:13,padding:'11px 0'}}
-                  disabled={!classees} onClick={ouvrirSynthese}>🖼️ Image de synthèse de mon profil</button>
+                  disabled={!classees} onClick={ouvrirSynthese}>🖼️ Image de synthèse de ce profil</button>
               )}
               {personne && !classees && (
                 <div style={{fontSize:10.5,color:'rgba(255,255,255,.68)',lineHeight:1.45,marginTop:-6}}>
