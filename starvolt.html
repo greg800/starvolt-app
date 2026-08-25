@@ -21760,10 +21760,9 @@ function AdminMindVectorScreen({ user, profile, onBack, onFeedback, chipName, av
   // Initiales du compte connecté, pour la pastille reprise de la barre globale.
   const mvInitiales = (avatarName || chipName || '').trim().split(/\s+/)
     .map(w => (w[0] || '').toUpperCase()).join('').slice(0, 2);
-  // Ce qu'il reste à renseigner sur ce profil, sur le total à renseigner
-  // (ex. « 33/56 » = 33 sujets encore à classer sur 56).
-  const restantsCount = aClasser.filter(id => reponses[id] === undefined).length;
-  const compteurSujet = (mode === 'reponse' && aClasser.length) ? `${restantsCount}/${aClasser.length}` : '';
+  // Avancement, noté partout de la même façon : sujets renseignés / total à
+  // renseigner (ex. « 23/56 »). Même valeur que la barre « Mon avancement ».
+  const compteurSujet = (mode === 'reponse' && aClasser.length) ? `${classees}/${aClasser.length}` : '';
   const nomDe = (id) => (parId[id] || {}).label || '';
 
   // ── Fragments de rendu ────────────────────────────────────────────────────
