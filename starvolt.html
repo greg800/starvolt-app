@@ -1883,8 +1883,8 @@
     .mv-pied-wrap.compact { padding: 7px 10px calc(7px + env(safe-area-inset-bottom, 0px)); }
     .mv-pied { flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: 8px; }
     .mv-pied-btn {
-      flex: 0 0 auto; display: flex; align-items: center; gap: 7px;
-      padding: 9px 13px; border-radius: 12px; line-height: 1;
+      flex: 0 0 auto; display: flex; align-items: center; justify-content: center; gap: 7px;
+      padding: 9px 22px; border-radius: 12px; line-height: 1;
       background: rgba(255,255,255,.09); border: 1px solid rgba(255,255,255,.18);
       color: #fff; font-family: inherit; font-size: 12.5px; font-weight: 800;
       cursor: pointer; transition: background .15s, border-color .15s;
@@ -1895,7 +1895,7 @@
     .mv-pied-etat { font-size: 11.5px; font-weight: 700; white-space: nowrap; }
     .mv-pied-nav {
       flex: 0 0 auto; display: flex; align-items: center; justify-content: center;
-      width: 48px; height: 38px; padding: 0; border-radius: 12px;
+      width: 82px; height: 38px; padding: 0; border-radius: 12px;
       background: rgba(125,217,64,.16); border: 1px solid rgba(125,217,64,.5);
       color: #d6ffb0; cursor: pointer; transition: background .15s;
       -webkit-user-select: none; user-select: none; -webkit-touch-callout: none;
@@ -1903,9 +1903,14 @@
     .mv-pied-nav:hover { background: rgba(125,217,64,.28); }
     .mv-pied-nav:disabled { opacity: .3; cursor: not-allowed; }
     @media (max-width: 899px) {
+      /* Le pouce vise une cible large bien plus sûrement qu'une cible haute, et
+         la largeur ne coûte rien ici : les quatre boutons se partagent toute la
+         ligne, à hauteur inchangée. Les flèches, les plus sollicitées, prennent
+         la plus grosse part. */
       .mv-pied { gap: 6px; }
-      .mv-pied-btn { padding: 7px 9px; }
-      .mv-pied-nav { width: 44px; height: 34px; }
+      .mv-pied-btn { flex: 1 1 0; min-width: 0; padding: 7px 0; }
+      .mv-pied-nav { flex: 1.5 1 0; width: auto; height: 34px; }
+      .mv-pied-spacer { flex: 0 0 2px; }
     }
 
     /* ── Arbre complet (appui long sur une flèche) ─────────────────────────── */
