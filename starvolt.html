@@ -1446,7 +1446,10 @@
          masquée sur cet écran : on ne réserve donc plus 56 px en haut. */
       padding: calc(12px + env(safe-area-inset-top, 0px)) 20px calc(94px + env(safe-area-inset-bottom, 0px));
     }
-    .mv-plein.compact { padding-left: 12px; padding-right: 12px; }
+    /* Petit écran : le pied est réduit au minimum (sortie, réglages, deux
+       flèches), on rend donc au texte la hauteur qu'il réservait. */
+    .mv-plein.compact { padding-left: 12px; padding-right: 12px;
+      padding-bottom: calc(60px + env(safe-area-inset-bottom, 0px)); }
     /* Titre de la page, puis le sujet retenu et ce qu'il recouvre, sur la même
        ligne — le tout centré tant que ça tient, et à la ligne quand c'est serré. */
     .mv-entete {
@@ -1533,6 +1536,8 @@
       padding: 5px 12px; color: #fff; font-weight: 800; font-size: 13px; cursor: pointer;
       font-family: inherit; overflow: hidden; }
     .mv-head-qui.crayon { background: rgba(255,255,255,.12); border-color: rgba(255,255,255,.22); }
+    /* Étiquette de lecture, plus un bouton : pas de curseur main, pas de survol. */
+    div.mv-head-qui { cursor: default; }
     .mv-head-qui .mv-mode-ico { display: flex; align-items: center; flex: 0 0 auto; color: #fff; }
     .mv-head-qui .nom { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .mv-head-spacer { flex: 1 1 auto; }
@@ -1856,37 +1861,59 @@
     .mv-plein.compact .mv-pos { min-height: 84px; padding: 7px 10px; }
     .mv-plein.compact .mv-pos-tete { margin-bottom: 5px; padding-bottom: 4px; }
 
-    /* ── Fil de navigation (petit écran) : 3 boutons de niveau, glissables ─ */
-    .mvb-piste {
-      flex: 1 1 auto; min-width: 0;
-      display: flex; gap: 7px;
-      overflow-x: auto; -webkit-overflow-scrolling: touch;
-      scroll-snap-type: x mandatory; scrollbar-width: none;
-      padding: 2px 0;
+    /* ── Pied de Mind Vector ────────────────────────────────────────────────
+       Quatre gestes seulement : sortir, régler, sujet précédent, sujet suivant.
+       Sur petit écran le glissé du pouce suffit à parcourir l'arbre : le pied se
+       fait le plus plat possible pour laisser la hauteur aux textes. */
+    .mv-pied-wrap.compact { padding: 7px 10px calc(7px + env(safe-area-inset-bottom, 0px)); }
+    .mv-pied { flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: 8px; }
+    .mv-pied-btn {
+      flex: 0 0 auto; display: flex; align-items: center; gap: 7px;
+      padding: 9px 13px; border-radius: 12px; line-height: 1;
+      background: rgba(255,255,255,.09); border: 1px solid rgba(255,255,255,.18);
+      color: #fff; font-family: inherit; font-size: 12.5px; font-weight: 800;
+      cursor: pointer; transition: background .15s, border-color .15s;
+      -webkit-user-select: none; user-select: none; -webkit-touch-callout: none;
     }
-    .mvb-piste::-webkit-scrollbar { display: none; }
-    .mvb-bouton {
-      flex: 0 0 calc((100% - 14px) / 3);          /* toujours 3 visibles */
-      /* Sans min-width:0, le « min-width:auto » des éléments flex laisse un
-         intitulé long imposer sa largeur et casser le découpage en tiers. */
-      min-width: 0;
-      scroll-snap-align: start;
-      display: flex; align-items: center;
-      padding: 10px 9px; border-radius: 12px;
-      background: rgba(255,255,255,.09);
-      border: 1px solid rgba(255,255,255,.16);
-      font-family: inherit; text-align: left; cursor: pointer;
-      transition: background .15s, border-color .15s;
-      -webkit-user-select: none; user-select: none;
-      -webkit-touch-callout: none;
+    .mv-pied-btn:hover { background: rgba(255,255,255,.16); }
+    .mv-pied-spacer { flex: 1 1 auto; min-width: 0; }
+    .mv-pied-etat { font-size: 11.5px; font-weight: 700; white-space: nowrap; }
+    .mv-pied-nav {
+      flex: 0 0 auto; display: flex; align-items: center; justify-content: center;
+      width: 48px; height: 38px; padding: 0; border-radius: 12px;
+      background: rgba(125,217,64,.16); border: 1px solid rgba(125,217,64,.5);
+      color: #d6ffb0; cursor: pointer; transition: background .15s;
+      -webkit-user-select: none; user-select: none; -webkit-touch-callout: none;
     }
-    .mvb-bouton.actif { background: rgba(125,217,64,.16); border-color: rgba(125,217,64,.55); }
-    .mvb-nom  {
-      font-size: 11.5px; font-weight: 800; color: #fff; line-height: 1.25;
-      width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    .mv-pied-nav:hover { background: rgba(125,217,64,.28); }
+    .mv-pied-nav:disabled { opacity: .3; cursor: not-allowed; }
+    @media (max-width: 899px) {
+      .mv-pied { gap: 6px; }
+      .mv-pied-btn { padding: 7px 9px; }
+      .mv-pied-nav { width: 44px; height: 34px; }
     }
-    .mvb-bouton.actif .mvb-nom { color: #d6ffb0; }
-    .mvb-vide .mvb-nom { color: rgba(255,255,255,.4); font-style: italic; font-weight: 700; }
+
+    /* ── Arbre complet (appui long sur une flèche) ─────────────────────────── */
+    .mv-arbre-ligne {
+      display: flex; align-items: center; gap: 6px;
+      padding: 2px 0; min-width: 0;
+    }
+    .mv-arbre-plier {
+      flex: 0 0 auto; width: 22px; height: 22px; padding: 0; line-height: 19px;
+      text-align: center; border-radius: 7px; cursor: pointer;
+      background: rgba(125,217,64,.14); border: 1px solid rgba(125,217,64,.4);
+      color: #a3ed6a; font-size: 15px; font-weight: 900; font-family: inherit;
+    }
+    .mv-arbre-nom {
+      flex: 1 1 auto; min-width: 0; text-align: left; cursor: pointer;
+      padding: 8px 10px; border-radius: 10px; font-family: inherit;
+      background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.11);
+      font-size: 12.5px; font-weight: 700; color: #fff;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .mv-arbre-nom:hover { background: rgba(255,255,255,.12); }
+    .mv-arbre-nom.actif { background: rgba(125,217,64,.18); border-color: rgba(125,217,64,.5); color: #d6ffb0; }
+    .mv-arbre-nom.groupe { color: rgba(255,255,255,.62); font-weight: 800; }
 
     /* ── Feuille du bas : liste d'un niveau / barre d'actions ───────────── */
     .mv-feuille {
@@ -20401,6 +20428,37 @@ const MV_PICTO = {
       <circle cx="12" cy="12" r="3.1"/>
     </svg>
   ),
+  // Porte ouverte : quitter Mind Vector et revenir d'où l'on vient. Le seul
+  // chambranle se lisait « rectangle » ; la flèche qui en sort dit « sortir ».
+  porte: (
+    <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor"
+      strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M14.6 4.4V3.6A1.6 1.6 0 0 0 13 2H4.9a1.6 1.6 0 0 0-1.6 1.6v16.8A1.6 1.6 0 0 0 4.9 22H13a1.6 1.6 0 0 0 1.6-1.6v-.8"/>
+      <path d="M10.4 12h10.3"/>
+      <path d="M17.5 8.9 20.7 12l-3.2 3.1"/>
+    </svg>
+  ),
+  // Roue dentée : les réglages du profil (page « Info navigation »).
+  roue: (
+    <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor"
+      strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <circle cx="12" cy="12" r="3.1"/>
+      <path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1.03 1.56V21a2 2 0 1 1-4 0v-.09A1.7 1.7 0 0 0 9 19.4a1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-1.56-1.03H3a2 2 0 1 1 0-4h.09A1.7 1.7 0 0 0 4.6 9a1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1.03-1.56V3a2 2 0 1 1 4 0v.09A1.7 1.7 0 0 0 15 4.6a1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.7 1.7 0 0 0 19.4 9v.01a1.7 1.7 0 0 0 1.56 1.02H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.51 1Z"/>
+    </svg>
+  ),
+  // Chevrons du pas-à-pas : sujet précédent / sujet suivant.
+  gauche: (
+    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor"
+      strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M15 5 8 12l7 7"/>
+    </svg>
+  ),
+  droite: (
+    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor"
+      strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M9 5l7 7-7 7"/>
+    </svg>
+  ),
 };
 
 // Bornes de la mise à l'échelle du texte des cases.
@@ -20682,7 +20740,8 @@ function AdminMindVectorScreen({ user, profile, onBack, onFeedback, chipName, av
   const [ouvertes, setOuvertes] = useState({});    // position → true si dépliée
   const [taillePos, setTaillePos] = useState(MV_TXT_MAX);  // taille commune aux 5
   const [debordent, setDebordent] = useState({});  // position → true si coupée
-  const [feuille,  setFeuille]  = useState(null);  // petit écran : { type:'menu'|'actions', prof }
+  const [arbre,    setArbre]    = useState(false); // arbre complet (appui long sur une flèche)
+  const [deplie,   setDeplie]   = useState(() => new Set()); // branches dépliées dans cet arbre
   const [dialogue, setDialogue] = useState(null);  // { mode:'ajout'|'edition', parentId, id, label, description }
   const [remplissage, setRemplissage] = useState(false);  // rédaction IA des 5 positions en cours
   const [imgEnCours,  setImgEnCours]  = useState(false);  // envoi de l'illustration
@@ -20728,7 +20787,6 @@ function AdminMindVectorScreen({ user, profile, onBack, onFeedback, chipName, av
     typeof window !== 'undefined' && window.matchMedia('(max-width: 899px)').matches);
 
   const zoneRef    = useRef(null);   // textarea de la position en saisie
-  const pisteRef   = useRef(null);   // rail des boutons de niveau
   const grilleRef  = useRef(null);   // conteneur des 5 cases
   const corpsRefs  = useRef({});     // position → div du texte, pour mesurer
   const fichesRefs = useRef({});     // idNoeud → fiche du bandeau, pour la ramener à l'écran
@@ -21002,14 +21060,6 @@ function AdminMindVectorScreen({ user, profile, onBack, onFeedback, chipName, av
   // qui reste. Sinon on laisse l'arbre : décocher le filtre doit rendre la main.
   const ecranDeFin = toutRenseigne && restantes;
 
-  // On garde le niveau le plus profond sous les yeux.
-  useEffect(() => {
-    const el = pisteRef.current;
-    if (!el) return;
-    const t = setTimeout(() => { el.scrollLeft = el.scrollWidth; }, 60);
-    return () => clearTimeout(t);
-  }, [niveaux.length, compact]);
-
   // Une rangée bien remplie déborde : on ramène la fiche retenue au centre de
   // SA rangée, sinon on la cherche à la main à chaque changement de branche.
   useEffect(() => {
@@ -21229,7 +21279,6 @@ function AdminMindVectorScreen({ user, profile, onBack, onFeedback, chipName, av
     const el = pleinRef.current;
     if (!el || !compact) return;
     let start = null;
-    const dansPiste = (t) => pisteRef.current && t && pisteRef.current.contains(t);
     const grilleDeborde = () => {
       const g = grilleRef.current;
       return !!(g && g.scrollHeight > g.clientHeight + 2);
@@ -21237,10 +21286,10 @@ function AdminMindVectorScreen({ user, profile, onBack, onFeedback, chipName, av
     const onStart = (e) => {
       if (!e.touches || e.touches.length !== 1) { start = null; return; }
       const t = e.touches[0];
-      start = { x: t.clientX, y: t.clientY, piste: dansPiste(e.target), scroll: grilleDeborde() };
+      start = { x: t.clientX, y: t.clientY, scroll: grilleDeborde() };
     };
     const onMove = (e) => {
-      if (!start || start.piste || !e.touches || e.touches.length !== 1) return;
+      if (!start || !e.touches || e.touches.length !== 1) return;
       const dx = e.touches[0].clientX - start.x, dy = e.touches[0].clientY - start.y;
       const horizontal = Math.abs(dx) > Math.abs(dy);
       // Horizontal : toujours à nous (pas de retour navigateur). Vertical : à
@@ -21251,7 +21300,7 @@ function AdminMindVectorScreen({ user, profile, onBack, onFeedback, chipName, av
     const onEnd = (e) => {
       const s = start; start = null;
       const { versVoisin: vv, posEdit: pe } = navRef.current;
-      if (!s || s.piste || pe != null) return;      // édition de texte : le doigt place le curseur
+      if (!s || pe != null) return;                // édition de texte : le doigt place le curseur
       const t = e.changedTouches && e.changedTouches[0];
       if (!t) return;
       const dx = t.clientX - s.x, dy = t.clientY - s.y;
@@ -21276,7 +21325,7 @@ function AdminMindVectorScreen({ user, profile, onBack, onFeedback, chipName, av
   // suivant, gauche/haut = précédent. On s'efface dès qu'un champ est actif ou
   // qu'une fenêtre est ouverte.
   const clavierRef = useRef({});
-  clavierRef.current = { versVoisin, posEdit, bloque: popupQui || !!dialogue || docOuvert || renomme != null || !!portrait };
+  clavierRef.current = { versVoisin, posEdit, bloque: popupQui || !!dialogue || docOuvert || renomme != null || !!portrait || arbre };
   useEffect(() => {
     if (compact) return;
     const onKey = (e) => {
@@ -21826,7 +21875,6 @@ function AdminMindVectorScreen({ user, profile, onBack, onFeedback, chipName, av
     if (error) { setErreur(error.message); return; }
     const reste = (noeuds || []).filter(x => !ids.includes(x.id));
     setNoeuds(reste);
-    setFeuille(null);
     // On se replie sur le parent, sinon sur la première racine restante.
     const repli = n.parent_id || (reste.find(x => !x.parent_id) || {}).id || null;
     if (repli) choisir(repli, reste);
@@ -21854,24 +21902,27 @@ function AdminMindVectorScreen({ user, profile, onBack, onFeedback, chipName, av
     if (error) setErreur(error.message);
   };
 
-  // ── Appui court / long sur un bouton de niveau (petit écran) ──────────────
-  // La liste s'ouvre sur le CLIC et non sur le « pointerup » : ouverte plus tôt,
-  // le clic qui suit retombait sur le fond noir tout juste posé et la refermait
-  // aussitôt — d'où l'impression qu'un appui bref ne faisait rien.
-  const debutAppui = (prof) => {
-    if (mode === 'reponse') return;          // pas d'édition pendant la saisie des réponses
+  // ── Appui court / long sur une flèche du pied ─────────────────────────────
+  // Court : le sujet d'à côté, dans l'ordre du parcours. Long : l'arbre entier,
+  // pour sauter directement où l'on veut. L'arbre s'ouvre déplié sur le chemin
+  // du sujet courant — sinon on retomberait sur les seules racines.
+  const ouvrirArbre = () => {
+    setDeplie(new Set(chemin));
+    setArbre(true);
+  };
+  const debutFleche = () => {
     appuiRef.current.long = false;
     clearTimeout(appuiRef.current.timer);
     appuiRef.current.timer = setTimeout(() => {
       appuiRef.current.long = true;
-      setFeuille({ type: 'actions', prof });
+      ouvrirArbre();
     }, 480);
   };
-  const finAppui = () => clearTimeout(appuiRef.current.timer);
-  const clicNiveau = (prof) => {
+  const finFleche = () => clearTimeout(appuiRef.current.timer);
+  const clicFleche = (pas) => {
     clearTimeout(appuiRef.current.timer);
     if (appuiRef.current.long) { appuiRef.current.long = false; return; }  // l'appui long a déjà agi
-    setFeuille({ type: 'menu', prof });
+    versVoisin(pas);
   };
 
   const selNoeud = sel ? parId[sel] : null;
@@ -21881,7 +21932,6 @@ function AdminMindVectorScreen({ user, profile, onBack, onFeedback, chipName, av
   // Avancement, noté partout de la même façon : sujets renseignés / total à
   // renseigner (ex. « 23/56 »). Même valeur que la barre « Mon avancement ».
   const compteurSujet = (mode === 'reponse' && aClasser.length) ? `${classees}/${aClasser.length}` : '';
-  const nomDe = (id) => (parId[id] || {}).label || '';
 
   // ── Fragments de rendu ────────────────────────────────────────────────────
   const pictos = (n) => (
@@ -21943,12 +21993,13 @@ function AdminMindVectorScreen({ user, profile, onBack, onFeedback, chipName, av
             title={peutEditer ? 'Mind Vector — basculer rédaction / réponses' : 'Mind Vector — choisir la personne'}>
             Mind <span className="accent">Vector</span>
           </button>
-          <button className={'mv-head-qui' + (mode === 'saisie' ? ' crayon' : '')}
-            onClick={() => mode === 'reponse' ? setPopupQui(true) : basculerMode()}
-            title={mode === 'saisie' ? 'Rédaction des questions' : 'Changer de personne évaluée'}>
+          {/* Le profil retenu se LIT ici et se CHANGE dans « Paramètres », au pied
+              de la page : un même bouton qui affiche et qui règle se lisait mal. */}
+          <div className={'mv-head-qui' + (mode === 'saisie' ? ' crayon' : '')}
+            title={mode === 'saisie' ? 'Rédaction des questions' : 'Profil évalué — se change dans Paramètres'}>
             <span className="mv-mode-ico">{mode === 'saisie' ? MV_PICTO.crayon : MV_PICTO.oeil}</span>
             <span className="nom">{personne ? `${personne.prenom} ${personne.nom}` : (mode === 'reponse' ? 'choisir qui répond' : '—')}</span>
-          </button>
+          </div>
           <div className="mv-head-spacer"/>
           <div className="mv-head-tools">
             {toutRenseigne && !compact && (
@@ -22087,63 +22138,65 @@ function AdminMindVectorScreen({ user, profile, onBack, onFeedback, chipName, av
         : selNoeud ? grillePositions()
         : <div style={{flex:1,display:'flex',alignItems:'center',justifyContent:'center',textAlign:'center',
                        color:'rgba(255,255,255,.35)',fontSize:13,padding:'0 24px'}}>
-            {compact ? 'Choisissez un sujet avec les boutons du bas.' : 'Choisissez un sujet dans l’arbre ci-dessus.'}
+            {compact ? 'Choisissez un sujet avec les flèches du bas — appui long pour ouvrir l’arbre.' : 'Choisissez un sujet dans l’arbre ci-dessus.'}
           </div>}
     </div>
 
-    {/* ── Petit écran : feuille du bas (liste d'un niveau, ou actions) ────── */}
-    {feuille && (() => {
-      const niv = niveaux[feuille.prof];
-      if (!niv) return null;
-      const courant = niv.choisi ? parId[niv.choisi] : null;
-      const dansQuoi = niv.parent ? nomDe(niv.parent) : 'Sujets racines';
-      return (
-        <div style={{position:'fixed',inset:0,zIndex:9550,background:'rgba(3,12,18,.72)',backdropFilter:'blur(3px)',WebkitBackdropFilter:'blur(3px)'}}
-          onClick={() => setFeuille(null)}>
-          <div className="mv-feuille" onClick={e => e.stopPropagation()}>
-            {feuille.type === 'menu' ? (
-              <>
-                <div className="mv-feuille-titre">{dansQuoi} — {niv.items.length} sujet{niv.items.length > 1 ? 's' : ''}</div>
-                {niv.items.map(n => (
-                  <button key={n.id} className={'mv-option' + (niv.choisi === n.id ? ' actif' : '')}
-                    onClick={() => { choisir(n.id, null, true); setFeuille(null); }}>
-                    <span style={{flex:1,minWidth:0}}>
-                      {n.label}
-                      {(titres[n.id + ':1'] || titres[n.id + ':5']) && (
-                        <span style={{display:'block',fontSize:10,fontWeight:700,color:'rgba(255,255,255,.4)',marginTop:2}}>
-                          ◀ {titres[n.id + ':1'] || '—'} · {titres[n.id + ':5'] || '—'} ▶
-                        </span>
-                      )}
-                    </span>
-                    {(enfantsDe[n.id] || []).length > 0 &&
-                      <span style={{fontSize:10,fontWeight:800,color:'rgba(255,255,255,.3)'}}>{(enfantsDe[n.id] || []).length} ▸</span>}
+    {/* ── Arbre complet : appui long sur une flèche du pied ──────────────── */}
+    {arbre && (
+      <div style={{position:'fixed',inset:0,zIndex:9550,background:'rgba(3,12,18,.72)',backdropFilter:'blur(3px)',WebkitBackdropFilter:'blur(3px)'}}
+        onClick={() => setArbre(false)}>
+        <div className="mv-feuille" onClick={e => e.stopPropagation()}>
+          <div className="mv-feuille-titre">Aller à un sujet</div>
+          {branches.filter(b => {
+            // Une ligne ne se montre que si TOUS ses parents sont dépliés.
+            let a = (parId[b.id] || {}).parent_id ? parId[parId[b.id].parent_id] : null;
+            while (a) { if (!deplie.has(a.id)) return false; a = a.parent_id ? parId[a.parent_id] : null; }
+            return true;
+          }).map(b => {
+            const aEnfants = (enfantsDe[b.id] || []).length > 0;
+            const ouvert = deplie.has(b.id);
+            // Un sujet sans position rédigée n'est qu'un titre de groupe : on le
+            // signale, mais on le laisse cliquable — `choisir` descendra tout seul
+            // jusqu'au premier sujet vraiment rédigé.
+            const groupe = !aDesPositions(b.id);
+            return (
+              <div key={b.id} className="mv-arbre-ligne" style={{paddingLeft: b.prof * 16}}>
+                {aEnfants ? (
+                  <button className="mv-arbre-plier" title={ouvert ? 'Replier' : 'Déplier'}
+                    onClick={() => setDeplie(s => { const n = new Set(s); n.has(b.id) ? n.delete(b.id) : n.add(b.id); return n; })}>
+                    {ouvert ? '−' : '+'}
                   </button>
-                ))}
-              </>
-            ) : (
-              <>
-                <div className="mv-feuille-titre">{courant ? courant.label : dansQuoi}</div>
-                <button className="mv-option" onClick={() => { setFeuille(null); ouvrirAjout(niv.parent); }}>
-                  <span className="mv-ico add">＋</span> Ajouter un sujet dans « {dansQuoi} »
+                ) : <span style={{flex:'0 0 auto',width:22}}/>}
+                <button className={'mv-arbre-nom' + (sel === b.id ? ' actif' : groupe ? ' groupe' : '')}
+                  onClick={() => { choisir(b.id, null, true); setArbre(false); }}>
+                  {b.label}
                 </button>
-                <button className="mv-option" disabled={!courant}
-                  style={!courant ? {opacity:.35,cursor:'not-allowed'} : undefined}
-                  onClick={() => { if (courant) supprimer(courant.id); }}>
-                  <span className="mv-ico del">−</span>
-                  {courant ? <>Supprimer « {courant.label} » et ses sous-sujets</> : 'Supprimer — aucun sujet retenu ici'}
-                </button>
-                <button className="mv-option" disabled={!courant}
-                  style={!courant ? {opacity:.35,cursor:'not-allowed'} : undefined}
-                  onClick={() => { if (courant) { setFeuille(null); ouvrirEdition(courant.id); } }}>
-                  <span className="mv-ico edt">✎</span>
-                  {courant ? <>Modifier « {courant.label} »</> : 'Modifier — aucun sujet retenu ici'}
-                </button>
-              </>
-            )}
-          </div>
+                {mode === 'saisie' && (
+                  <div className="mvt-actions" style={{flex:'0 0 auto'}}>
+                    <button className="mv-ico add" title="Ajouter un sous-sujet"
+                      onClick={() => { setArbre(false); ouvrirAjout(b.id); }}>＋</button>
+                    <button className="mv-ico edt" title="Modifier ce sujet"
+                      onClick={() => { setArbre(false); ouvrirEdition(b.id); }}>✎</button>
+                    <button className="mv-ico del" title="Supprimer ce sujet"
+                      onClick={() => supprimer(b.id)}>−</button>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+          {branches.length === 0 && (
+            <div style={{fontSize:12.5,color:'rgba(255,255,255,.5)',padding:'6px 2px'}}>Aucun sujet.</div>
+          )}
+          {mode === 'saisie' && (
+            <button className="mv-option" style={{marginTop:8}}
+              onClick={() => { setArbre(false); ouvrirAjout(null); }}>
+              <span className="mv-ico add">＋</span> Ajouter un sujet racine
+            </button>
+          )}
         </div>
-      );
-    })()}
+      </div>
+    )}
 
     {/* ── Portrait issu des positions retenues ────────────────────────────── */}
     {portrait && (
@@ -22274,8 +22327,8 @@ function AdminMindVectorScreen({ user, profile, onBack, onFeedback, chipName, av
           <div style={{fontSize:15,fontWeight:800,color:'#fff'}}>Conseil</div>
           <div style={{fontSize:13.5,color:'rgba(255,255,255,.8)',lineHeight:1.55}}>
             {compact
-              ? "Pour passer d'un sujet à l'autre, faites glisser votre pouce vers le haut ou vers le bas."
-              : 'Utilisez les flèches du clavier pour aller au sujet suivant.'}
+              ? "Pour passer d'un sujet à l'autre, faites glisser votre pouce vers le haut ou vers le bas — ou servez-vous des deux flèches, en bas. Un appui long sur une flèche ouvre l'arbre entier."
+              : 'Utilisez les flèches du clavier, ou celles du bas, pour aller au sujet suivant. Un appui long sur une flèche ouvre l’arbre entier.'}
           </div>
           <label className="mv-choix" style={{display:'flex',alignItems:'center',gap:9,justifyContent:'center',cursor:'pointer',fontSize:12.5,color:'rgba(255,255,255,.85)'}}>
             <input type="checkbox" checked={tipNoPlus} onChange={e=>setTipNoPlus(e.target.checked)}
@@ -22662,30 +22715,38 @@ function AdminMindVectorScreen({ user, profile, onBack, onFeedback, chipName, av
       </div>
     )}
 
-    <StickyFooter row wide onBack={onBack}>
-      {compact ? (
-        <div className="mvb-piste" ref={pisteRef}>
-          {niveaux.map(niv => {
-            const n = niv.choisi ? parId[niv.choisi] : null;
-            return (
-              <button key={niv.prof}
-                className={'mvb-bouton' + (n ? '' : ' mvb-vide') + (sel && niv.choisi === sel ? ' actif' : '')}
-                onContextMenu={e => e.preventDefault()}
-                onPointerDown={() => debutAppui(niv.prof)}
-                onPointerUp={finAppui}
-                onPointerCancel={finAppui}
-                onClick={() => clicNiveau(niv.prof)}>
-                <span className="mvb-nom">{n ? n.label : 'choisir…'}</span>
-              </button>
-            );
-          })}
+    {/* ── Pied : sortir, régler, et le pas-à-pas des sujets ──────────────── */}
+    <div className={'sticky-footer mv-pied-wrap' + (compact ? ' compact' : '')}>
+      <div className="sticky-footer-inner row wide">
+        <div className="mv-pied">
+          <button className="mv-pied-btn" onClick={onBack}
+            title="Quitter Mind Vector" aria-label="Quitter Mind Vector">
+            {MV_PICTO.porte}{!compact && <span>Quitter</span>}
+          </button>
+          <button className="mv-pied-btn" onClick={() => setPopupQui(true)}
+            title="Paramètres — profil évalué, invitations, sujets ouverts" aria-label="Paramètres">
+            {MV_PICTO.roue}{!compact && <span>Paramètres</span>}
+          </button>
+          <div className="mv-pied-spacer"/>
+          {!compact && (
+            <span className="mv-pied-etat" style={{color: enVol > 0 ? '#ffb340' : 'rgba(125,217,64,.85)'}}>
+              {enVol > 0 ? 'Enregistrement…' : 'Tout est enregistré ✓'}
+            </span>
+          )}
+          {/* Appui court : le sujet d'à côté. Appui long : l'arbre entier. */}
+          <button className="mv-pied-nav" title="Sujet précédent — appui long : aller à un sujet"
+            aria-label="Sujet précédent"
+            onContextMenu={e => e.preventDefault()}
+            onPointerDown={debutFleche} onPointerUp={finFleche} onPointerCancel={finFleche}
+            onClick={() => clicFleche(-1)}>{MV_PICTO.gauche}</button>
+          <button className="mv-pied-nav" title="Sujet suivant — appui long : aller à un sujet"
+            aria-label="Sujet suivant"
+            onContextMenu={e => e.preventDefault()}
+            onPointerDown={debutFleche} onPointerUp={finFleche} onPointerCancel={finFleche}
+            onClick={() => clicFleche(1)}>{MV_PICTO.droite}</button>
         </div>
-      ) : (
-        <span style={{fontSize:11.5,fontWeight:700,color: enVol > 0 ? '#ffb340' : 'rgba(125,217,64,.85)'}}>
-          {enVol > 0 ? 'Enregistrement…' : 'Tout est enregistré ✓'}
-        </span>
-      )}
-    </StickyFooter>
+      </div>
+    </div>
     </>
   );
 }
