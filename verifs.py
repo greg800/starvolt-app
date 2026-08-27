@@ -15,16 +15,24 @@ cassé la prod :
      → React le démonte/remonte à chaque frappe ; les clics tombent sur un
        nœud détaché. Vécu sur les boutons de mise en forme de la description
        fournisseur.
+  3. empreinte SRI qui ne correspond pas au fichier servi par le CDN
+     → le navigateur bloque le script SANS erreur parlante. Vécu le 2026-08-27 :
+       une seule empreinte fausse sur huit (canvas-confetti) et tous les boutons
+       de confirmation du tunnel étaient morts depuis quatorze jours, parce que
+       `confetti(...)` est appelé en première ligne de leur handler.
 
 Le découpage s'appuie sur la convention du fichier : les composants sont
 déclarés en colonne 0 (`function NomDuComposant(`) et leur corps est indenté
 de 2 espaces. Les hooks au premier niveau du composant sont donc à l'indent 2.
 
-Usage :  python3 verifs.py [fichier.html]
+Usage :  python3 verifs.py [fichier.html] [--hors-ligne]
 Sortie :  0 = rien à signaler, 1 = au moins un problème.
 """
+import base64
+import hashlib
 import re
 import sys
+import urllib.request
 
 HOOK = re.compile(r'^  (?:const|let|var)?\s*.*?\buse(?:State|Effect|LayoutEffect|Memo|Ref|Callback|Context|Reducer|ImperativeHandle)\s*\(')
 # `return` au premier niveau du composant : soit `  return`, soit `  if (…) return …`
@@ -63,7 +71,44 @@ def composants(src: str):
         yield nom, i, lignes[i:fin]
 
 
-def controler(chemin: str) -> int:
+# Balise <script src=…> ou <link href=…> portant un attribut integrity.
+BALISE_SRI = re.compile(
+    r'<(?:script|link)\b[^>]*?(?:src|href)="([^"]+)"[^>]*?integrity="([^"]+)"[^>]*>',
+    re.S)
+
+
+def controler_sri(html: str):
+    """Recalcule chaque empreinte SRI en téléchargeant la ressource.
+
+    Une empreinte ne se devine pas et ne se recopie pas : elle se calcule. Ce
+    contrôle est le seul moyen de le garantir avant la mise en prod.
+    Renvoie (erreurs, ligne_de_panne_reseau).
+    """
+    erreurs = []
+    for m in BALISE_SRI.finditer(html):
+        url, attendu = m.group(1), m.group(2).strip()
+        ligne = html[:m.start()].count('\n') + 1
+        algo, _, _ = attendu.partition('-')
+        if algo not in ('sha256', 'sha384', 'sha512'):
+            erreurs.append((ligne, 'SRI', f'algorithme inconnu « {algo} »', url))
+            continue
+        try:
+            with urllib.request.urlopen(url, timeout=20) as r:
+                contenu = r.read()
+        except Exception as e:                       # réseau absent ou CDN K.-O.
+            return erreurs, f'{type(e).__name__}: {e}'
+        reel = algo + '-' + base64.b64encode(
+            hashlib.new(algo, contenu).digest()).decode()
+        if reel != attendu:
+            erreurs.append((
+                ligne, 'SRI',
+                'empreinte fausse — le navigateur BLOQUERA cette ressource. '
+                f'Attendu par la page : {attendu} / réel : {reel}',
+                url))
+    return erreurs, None
+
+
+def controler(chemin: str, hors_ligne: bool = False) -> int:
     html = open(chemin, encoding='utf-8').read()
     src, decalage = extraire_script(html)
     if not src:
@@ -105,6 +150,13 @@ def controler(chemin: str) -> int:
                         'perdus)' % imbrique,
                         l.strip()[:80]))
 
+    panne_reseau = None
+    if hors_ligne:
+        panne_reseau = 'contrôle SRI sauté (--hors-ligne)'
+    else:
+        erreurs_sri, panne_reseau = controler_sri(html)
+        erreurs.extend(erreurs_sri)
+
     def afficher(titre, liste):
         print('%s : %d\n' % (titre, len(liste)))
         for ligne, comp, quoi, extrait in sorted(liste):
@@ -116,11 +168,17 @@ def controler(chemin: str) -> int:
         afficher('ERREURS (bloquant — plantage en prod)', erreurs)
     if avertissements:
         afficher('AVERTISSEMENTS (non bloquant)', avertissements)
+    if panne_reseau:
+        print(f'⚠ empreintes SRI NON vérifiées ({panne_reseau}) — à relancer '
+              'connecté avant toute mise en prod.\n')
     if not erreurs:
-        print('verifs : OK — aucun hook après return anticipé.'
+        print('verifs : OK — aucun hook après return anticipé'
+              + ('' if panne_reseau else ', empreintes SRI conformes') + '.'
               + (' %d avertissement(s) à traiter un jour.' % len(avertissements) if avertissements else ''))
     return 1 if erreurs else 0
 
 
 if __name__ == '__main__':
-    sys.exit(controler(sys.argv[1] if len(sys.argv) > 1 else 'starvolt.html'))
+    args = [a for a in sys.argv[1:] if not a.startswith('--')]
+    sys.exit(controler(args[0] if args else 'starvolt.html',
+                       hors_ligne='--hors-ligne' in sys.argv))
