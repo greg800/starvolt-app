@@ -52,8 +52,14 @@
 
   <!-- Canvas Confetti (fireworks) -->
   <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.3/dist/confetti.browser.min.js"
-          integrity="sha384-sPwMflxqfAN+Q5mvlkLmHiX3PORGbZSXHiSGPTXT9VHCD/AB+b+r+vJWsqprv+7k"
+          integrity="sha384-Rv68Y7adOjMMJc1/xFMcdNvXre/HF51to4GZjBALmXr7ABnVl5V4UajJwBu7zbhN"
           crossorigin="anonymous"></script>
+  <!-- Filet de sécurité : les confettis sont décoratifs, mais ils sont appelés
+       en première ligne de boutons métier (« Je change de fournisseur », panier).
+       Si le CDN tombe ou que l'empreinte SRI ne colle plus, `confetti` n'existe
+       pas, le handler lève une ReferenceError et le clic ne fait RIEN. Vécu le
+       2026-08-27. Un no-op garde le parcours cliquable, sans les paillettes. -->
+  <script>if (typeof window.confetti !== 'function') window.confetti = function(){};</script>
 
   <!-- Leaflet (carte France interactive) -->
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
