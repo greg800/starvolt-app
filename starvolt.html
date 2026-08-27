@@ -5211,6 +5211,18 @@ async function loadProdProfil(site) {
 // 1ter) Capacité de stockage thermique pilotable du logement (kWh), estimée depuis les
 //    équipements déclarés au parcours (chauffage / ECS électriques × surface). Sert de proxy
 //    de la « capacité de stockage thermique » quand le client possède déjà une box Comwatt.
+// Une box est-elle PRÉSENTE chez le client ? Au panier (DIY compris : elle pilote
+// tout autant) ou DÉJÀ INSTALLÉE. C'est cette notion qui ouvre le pilotage du
+// stockage et le droit à la cagnotte Flex.
+// À ne pas confondre avec « box à FACTURER », qui elle ne regarde que le panier
+// et exclut le DIY : une box déjà installée ne se refacture pas.
+function boxPresente(site) {
+  const cart = localStorage.getItem('starvolt_box_chosen');
+  return !!cart
+      || localStorage.getItem('starvolt_solar_chosen') === 'solar_box'
+      || site?.box_comwatt_existante === true;
+}
+
 function thermalPotentialKwh(site) {
   // Saisie manuelle prioritaire (crayon de la tuile « Déjà installé ») : le
   // parcours ne repose pas toujours les questions dont dépend la déduction,
@@ -5453,9 +5465,7 @@ function buildSiteBalance({ site, prodProfil, tariffs, spotMap, globalVars, pvKw
   // ajoutait une batterie ou du stockage thermique ne voyait aucune économie
   // supplémentaire, le moteur tournant en mode « pilotage désactivé » (2026-08-27).
   // baseTariffOnly : facture de RÉFÉRENCE (état actuel du client) → pas de pilotage, tarif courant.
-  const hasBoxLS = !baseTariffOnly && (!!localStorage.getItem('starvolt_box_chosen')
-                || localStorage.getItem('starvolt_solar_chosen') === 'solar_box'
-                || site.box_comwatt_existante === true);
+  const hasBoxLS = !baseTariffOnly && boxPresente(site);
   // Les deux optimisations de la box ne sont PLUS réglables : elles découlent de la
   // présence d'une box, point. Elles étaient pilotées par des cases à cocher (admin +
   // « Activation des services ») qui se sont retrouvées à false en base et coupaient
@@ -5537,10 +5547,12 @@ function deriveSiteImpact({ balance, site, prodProfil, tariffs, spotMap, globalV
             ? Math.round((baseTariff.abo_annuel||0) + (site?.conso_annuelle_kwh||0)*(baseTariff.prix_hp||0))
             : null));
 
-  // Flex revenue (cagnotte flexibilité) — si box au panier OU flexibilité seule activée, + service activé.
+  // Flex revenue (cagnotte flexibilité) — si une box est PRÉSENTE (panier ou déjà
+  // installée) OU flexibilité seule activée, + service activé.
   // La cagnotte n'est comptée qu'une seule fois (box et flex-seule ne se cumulent pas).
-  const _boxLS = localStorage.getItem('starvolt_box_chosen');
-  const _hasBox = (_boxLS && _boxLS!=='diy') || localStorage.getItem('starvolt_solar_chosen')==='solar_box';
+  // La box déjà installée y donne droit : le pilotage de la flexibilité ne dépend
+  // pas de qui a payé le matériel (arbitrage Greg, 2026-08-27).
+  const _hasBox = boxPresente(site);
   const _flexOnly = !!localStorage.getItem('starvolt_flex_only_chosen');
   const _optiFlex = !!(globalVars?.opti_flex) && (_hasBox || _flexOnly);
   const _ratio = (globalVars?.ratio_puissance_stockage??50)/100;
@@ -8296,8 +8308,11 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onOnboardingQ
                   const _baseT=computeBaseline({site,prodProfil:prodProfilData,tariffs,spotMap,globalVars,thermKwh});
                   const _impT=deriveSiteImpact({balance,site,prodProfil:prodProfilData,tariffs,spotMap,globalVars,batKwh,thermKwh,baselineBill:_baseT?.bill??null,baselineConso:_baseT?.conso??null});
                   const _boxLS=localStorage.getItem('starvolt_box_chosen');
-                  // hasBox : box choisie seule OU incluse dans solar_box (DIY exclu — son investissement est géré séparément)
-                  const hasBox=(_boxLS&&_boxLS!=='diy')||localStorage.getItem('starvolt_solar_chosen')==='solar_box';
+                  // hasBoxFacturable : box À FACTURER (DIY exclu — son investissement est géré
+                  // séparément, et une box déjà installée ne se refacture pas).
+                  const hasBoxFacturable=(_boxLS&&_boxLS!=='diy')||localStorage.getItem('starvolt_solar_chosen')==='solar_box';
+                  // hasBox : box PRÉSENTE — c'est elle qui ouvre les services (Flex).
+                  const hasBox=boxPresente(site);
                   const hasAcc=localStorage.getItem('starvolt_acc_chosen')==='true';
                   const flexRevenue=_impT.flexRev;
                   const accSavings=_impT.accRev;
@@ -8324,7 +8339,7 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onOnboardingQ
                   // On ne facture QUE le surplus au-delà de l'équipement déjà installé (baseline).
                   const _pvInv = interpPrix(billableDelta(pvKwc, site?.pv_existant_kwc), prixMat?.pv_prices||[]);
                   const _batInv = interpPrix(billableDelta(batKwh, site?.batterie_existante_kwh), prixMat?.bat_prices||[]);
-                  const _boxInv = hasBox ? ((prixMat?.box_prix||500)+(prixMat?.box_installation||100)) : 0;
+                  const _boxInv = hasBoxFacturable ? ((prixMat?.box_prix||500)+(prixMat?.box_installation||100)) : 0;
                   const totalInvestissement = _pvInv + _batInv + _boxInv;
                   // Toujours écrire (même 0) pour éviter que l'ancienne valeur persiste
                   localStorage.setItem('starvolt_investissement_total',String(Math.round(totalInvestissement)));
