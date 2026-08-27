@@ -50,9 +50,16 @@
           integrity="sha384-vtjasyidUo0kW94K5MXDXntzOJpQgBKXmE7e2Ga4LG0skTTLeBi97eFAXsqewJjw"
           crossorigin="anonymous"></script>
 
-  <!-- Canvas Confetti (fireworks) -->
-  <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.3/dist/confetti.browser.min.js"
-          integrity="sha384-Rv68Y7adOjMMJc1/xFMcdNvXre/HF51to4GZjBALmXr7ABnVl5V4UajJwBu7zbhN"
+  <!-- Canvas Confetti (fireworks)
+       PAS de `.min.js` ici, et c'est volontaire : ce fichier n'existe PAS dans le
+       paquet npm, jsDelivr le fabrique à la volée avec Terser et estampille sa
+       version dans la bannière. Quand jsDelivr passe de Terser 5.37 à 5.39, un
+       octet change, l'empreinte SRI ne colle plus et le navigateur BLOQUE le
+       script. Constaté le 2026-08-27 : les deux variantes ne diffèrent que par
+       ce numéro de version. `confetti.browser.js` est, lui, un fichier réellement
+       publié — vérifié identique au tarball npm signé. -->
+  <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.3/dist/confetti.browser.js"
+          integrity="sha384-/Ko/tqVwPYurnBe+Mj8WWw+39WmyOZn/kU+neqXn4hRxGI575k07mB/hIekAT51+"
           crossorigin="anonymous"></script>
   <!-- Filet de sécurité : les confettis sont décoratifs, mais ils sont appelés
        en première ligne de boutons métier (« Je change de fournisseur », panier).
@@ -5205,6 +5212,11 @@ async function loadProdProfil(site) {
 //    équipements déclarés au parcours (chauffage / ECS électriques × surface). Sert de proxy
 //    de la « capacité de stockage thermique » quand le client possède déjà une box Comwatt.
 function thermalPotentialKwh(site) {
+  // Saisie manuelle prioritaire (crayon de la tuile « Déjà installé ») : le
+  // parcours ne repose pas toujours les questions dont dépend la déduction,
+  // et le conseiller doit pouvoir corriger ce qu'il voit chez le client.
+  const saisi = site?.stockage_thermique_existant_kwh;
+  if (saisi != null && saisi !== '' && !isNaN(parseFloat(saisi))) return Math.max(0, parseFloat(saisi));
   const idx = site?.flex_surface === 'small' ? 0 : site?.flex_surface === 'medium' ? 1 : 2;
   let kw = 0;
   if (site?.flex_chauffage === 'elec' || site?.flex_chauffage === 'pac') kw += [3, 7, 12][idx];
@@ -6830,6 +6842,120 @@ function BilanMarkdown({ text, fontSize = 13.5 }){
   return <div style={{fontSize,lineHeight:1.55,color:'rgba(255,255,255,.85)'}}>{out}</div>;
 }
 
+// ─── Équipement déjà installé — affichage + saisie manuelle ───────────────────
+// La tuile est TOUJOURS affichée, même vide : c'est la base de référence de tous
+// les calculs (on ne facture que le surplus au-delà d'elle), donc son absence
+// d'affichage cachait une donnée structurante.
+// Le crayon existe parce que le parcours ne repose pas toujours toutes les
+// questions : constat 2026-08-27, en repassant le parcours pour retirer PV et
+// batterie, celle de la box n'était pas reposée — la box restait déclarée sans
+// aucun moyen de l'enlever.
+function EquipementExistantTile({ site, updateSite }) {
+  const [edit, setEdit] = useState(false);
+  const [pv, setPv]     = useState('');
+  const [bat, setBat]   = useState('');
+  const [box, setBox]   = useState(false);
+  const [therm, setTherm] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  const pvEx   = Math.max(0, parseFloat(site?.pv_existant_kwc) || 0);
+  const batEx  = Math.max(0, parseFloat(site?.batterie_existante_kwh) || 0);
+  const boxEx  = site?.box_comwatt_existante === true;
+  const thermEx = thermalPotentialKwh(site);
+  // Valeur déduite du logement, affichée en repère quand rien n'est saisi à la main.
+  const thermDeduit = thermalPotentialKwh({ ...site, stockage_thermique_existant_kwh: null });
+  const vide = pvEx <= 0 && batEx <= 0 && !boxEx;
+
+  const ouvrir = () => {
+    setPv(pvEx > 0 ? String(pvEx) : '');
+    setBat(batEx > 0 ? String(batEx) : '');
+    setBox(boxEx);
+    setTherm(site?.stockage_thermique_existant_kwh != null ? String(site.stockage_thermique_existant_kwh) : '');
+    setEdit(true);
+  };
+
+  const enregistrer = async () => {
+    setSaving(true);
+    // Champ vidé pour PV / batterie ⇒ 0 (« le client n'en a pas »), pas null qui
+    // signifie « on ne sait pas » et laisse traîner l'ancienne valeur.
+    // Thermique vidé ⇒ null, ce qui rend la main à la déduction du logement.
+    const nb = v => { const n = parseFloat(String(v).replace(',', '.')); return isNaN(n) ? 0 : Math.max(0, n); };
+    await updateSite({
+      pv_existant_kwc: nb(pv),
+      batterie_existante_kwh: nb(bat),
+      box_comwatt_existante: box,
+      stockage_thermique_existant_kwh: String(therm).trim() === '' ? null : nb(therm),
+    });
+    setSaving(false);
+    setEdit(false);
+  };
+
+  const chip = { display:'flex', alignItems:'center', gap:6, background:'rgba(255,255,255,.05)', border:'1px solid rgba(255,255,255,.12)', borderRadius:8, padding:'5px 10px', fontSize:12, color:'white', fontWeight:700 };
+  const lbl  = { fontSize:9, fontWeight:700, letterSpacing:'.06em', textTransform:'uppercase', color:'rgba(255,255,255,.45)', marginBottom:3 };
+  const champ = { flex:'1 1 108px', minWidth:96 };
+
+  return (
+    <div style={{ background:'rgba(255,180,64,.06)', border:'1px solid rgba(255,180,64,.25)', borderRadius:10, padding:'8px 12px', display:'flex', flexDirection:'column', gap:6 }}>
+      <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+        <div style={{ fontSize:10, fontWeight:800, letterSpacing:'.06em', textTransform:'uppercase', color:'rgba(255,180,64,.85)', flex:1 }}>Déjà installé chez le client</div>
+        {!edit && (
+          <button onClick={ouvrir} title="Saisir l'équipement à la main"
+            style={{ background:'transparent', border:'none', color:'rgba(255,180,64,.85)', cursor:'pointer', fontSize:13, padding:'0 2px', lineHeight:1 }}>✏️</button>
+        )}
+      </div>
+
+      {!edit ? (
+        vide ? (
+          <div style={{ fontSize:12, color:'rgba(255,255,255,.4)' }}>Rien de déclaré — au crayon pour saisir.</div>
+        ) : (
+          <div style={{ display:'flex', gap:8, flexWrap:'wrap' }}>
+            {pvEx > 0 && <div style={chip}>☀️ PV {pvEx.toLocaleString('fr-FR')} kWc</div>}
+            {batEx > 0 && <div style={chip}>🔋 Batterie {batEx.toLocaleString('fr-FR')} kWh</div>}
+            {boxEx && <div style={chip}><img src="/comwatt-box.png" style={{width:14,height:14,objectFit:'contain'}} onError={e=>e.target.style.display='none'}/>Box Comwatt</div>}
+            {boxEx && thermEx > 0 && <div style={chip}>♨️ Thermique {thermEx.toLocaleString('fr-FR')} kWh</div>}
+          </div>
+        )
+      ) : (
+        <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
+          <div style={{ display:'flex', gap:8, flexWrap:'wrap' }}>
+            <div style={champ}>
+              <div style={lbl}>☀️ PV kWc</div>
+              <input className="inp" type="number" min="0" step="0.5" placeholder="0" value={pv}
+                onChange={e=>setPv(e.target.value)} style={{ height:30, fontSize:12, textAlign:'center' }}/>
+            </div>
+            <div style={champ}>
+              <div style={lbl}>🔋 Batterie kWh</div>
+              <input className="inp" type="number" min="0" step="0.5" placeholder="0" value={bat}
+                onChange={e=>setBat(e.target.value)} style={{ height:30, fontSize:12, textAlign:'center' }}/>
+            </div>
+            <div style={champ}>
+              <div style={lbl}>♨️ Thermique kWh</div>
+              <input className="inp" type="number" min="0" step="1" placeholder={thermDeduit > 0 ? String(thermDeduit) : '0'} value={therm}
+                onChange={e=>setTherm(e.target.value)} style={{ height:30, fontSize:12, textAlign:'center' }}/>
+            </div>
+          </div>
+          <label style={{ display:'flex', alignItems:'center', gap:8, fontSize:12, color:'white', cursor:'pointer' }}>
+            <input type="checkbox" checked={box} onChange={e=>setBox(e.target.checked)} style={{ width:16, height:16, accentColor:'#ffb440', cursor:'pointer' }}/>
+            <img src="/comwatt-box.png" style={{width:14,height:14,objectFit:'contain'}} onError={e=>e.target.style.display='none'}/>
+            Box Comwatt déjà installée
+          </label>
+          <div style={{ fontSize:10, color:'rgba(255,255,255,.4)', lineHeight:1.4 }}>
+            Thermique vide = déduit du logement{thermDeduit > 0 ? ` (${thermDeduit} kWh)` : ''}.
+            {!box && ' Il n’entre dans les calculs qu’avec une box.'}
+          </div>
+          <div style={{ display:'flex', gap:8 }}>
+            <button className="btn btn-yes" style={{ flex:1, height:32, fontSize:12 }} disabled={saving}
+              onClick={enregistrer}>{saving ? 'Enregistrement…' : 'Enregistrer'}</button>
+            {/* .btn impose width:100% — sans largeur explicite, « Annuler » mange la rangée. */}
+            <button className="btn" style={{ flex:'0 0 92px', width:92, height:32, fontSize:12, background:'rgba(255,255,255,.08)', color:'rgba(255,255,255,.7)' }}
+              disabled={saving} onClick={()=>setEdit(false)}>Annuler</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function MonSiteScreen({ user, userProfile, onBack, onSimulations, onOnboardingQuestions, onOptimisation, onParcoursAuto, consoPrete = true, cartVersion=0, can = () => true }) {
   const[sites,setSites]=useState(null);
   const[activeId,setActiveId]=useState(null);
@@ -8199,24 +8325,8 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onOnboardingQ
                   // Toujours écrire (même 0) pour éviter que l'ancienne valeur persiste
                   localStorage.setItem('starvolt_investissement_total',String(Math.round(totalInvestissement)));
                   return(<>
-                    {/* ── Équipement DÉJÀ installé (déclaré au parcours) — base de référence ── */}
-                    {(()=>{
-                      const _pvEx=Math.max(0,parseFloat(site?.pv_existant_kwc)||0);
-                      const _batEx=Math.max(0,parseFloat(site?.batterie_existante_kwh)||0);
-                      const _boxEx=site?.box_comwatt_existante===true;
-                      if(_pvEx<=0&&_batEx<=0&&!_boxEx) return null;
-                      const chip={display:'flex',alignItems:'center',gap:6,background:'rgba(255,255,255,.05)',border:'1px solid rgba(255,255,255,.12)',borderRadius:8,padding:'5px 10px',fontSize:12,color:'white',fontWeight:700};
-                      return(
-                        <div style={{background:'rgba(255,180,64,.06)',border:'1px solid rgba(255,180,64,.25)',borderRadius:10,padding:'8px 12px',display:'flex',flexDirection:'column',gap:6}}>
-                          <div style={{fontSize:10,fontWeight:800,letterSpacing:'.06em',textTransform:'uppercase',color:'rgba(255,180,64,.85)'}}>Déjà installé chez le client</div>
-                          <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
-                            {_pvEx>0 && <div style={chip}>☀️ PV {(_pvEx).toLocaleString('fr-FR')} kWc</div>}
-                            {_batEx>0 && <div style={chip}>🔋 Batterie {(_batEx).toLocaleString('fr-FR')} kWh</div>}
-                            {_boxEx && <div style={chip}><img src="/comwatt-box.png" style={{width:14,height:14,objectFit:'contain'}} onError={e=>e.target.style.display='none'}/>Box Comwatt</div>}
-                          </div>
-                        </div>
-                      );
-                    })()}
+                    {/* ── Équipement DÉJÀ installé — base de référence, éditable au crayon ── */}
+                    <EquipementExistantTile site={site} updateSite={updateSite}/>
                     {/* ── Rangée 1 : PROFIL · kWc · Autoconso · Autoprod (si solaire au panier) ── */}
                     <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
                       {/* ACHATS */}
