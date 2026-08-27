@@ -1531,22 +1531,33 @@
     .mv-head-logo { flex: 0 0 auto; background: none; border: none; padding: 0; cursor: pointer;
       font-family: inherit; font-size: 18px; font-weight: 900; color: #fff; line-height: 1; white-space: nowrap; }
     .mv-head-logo .accent { color: var(--green); }
-    .mv-head-qui { flex: 0 1 auto; min-width: 0; display: flex; align-items: center; gap: 6px;
-      background: rgba(125,217,64,.16); border: 1px solid rgba(125,217,64,.5); border-radius: 20px;
-      padding: 5px 12px; color: #fff; font-weight: 800; font-size: 13px; cursor: pointer;
-      font-family: inherit; overflow: hidden; }
-    .mv-head-qui.crayon { background: rgba(255,255,255,.12); border-color: rgba(255,255,255,.22); }
-    /* Étiquette de lecture, plus un bouton : pas de curseur main, pas de survol. */
-    div.mv-head-qui { cursor: default; }
-    .mv-head-qui .mv-mode-ico { display: flex; align-items: center; flex: 0 0 auto; color: #fff; }
+    /* Le profil étudié est un repère, pas la vedette : simple mention légère,
+       sans cadre. Encadré, il se disputait la vue avec le titre du sujet — qui
+       est LA chose à lire. */
+    .mv-head-qui { flex: 0 1 auto; min-width: 0; display: flex; align-items: baseline; gap: 5px;
+      background: none; border: none; padding: 0; cursor: default;
+      font-family: inherit; font-size: 12.5px; font-weight: 700;
+      color: rgba(255,255,255,.72); overflow: hidden; }
+    .mv-head-qui-lab { flex: 0 0 auto; font-weight: 600; color: rgba(255,255,255,.42); white-space: nowrap; }
+    .mv-head-qui .mv-mode-ico { display: flex; align-self: center; flex: 0 0 auto;
+      color: rgba(255,255,255,.5); }
     .mv-head-qui .nom { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .mv-head-spacer { flex: 1 1 auto; }
     .mv-head-tools { flex: 0 0 auto; display: flex; align-items: center; gap: 8px; }
-    .mv-head-titre { font-size: clamp(19px, 4.8vw, 27px); font-weight: 900; color: #fff;
-      line-height: 1.15; display: flex; align-items: center; gap: 8px; min-width: 0; }
+
+    /* Le sujet courant : filet vert à gauche + titre le plus gros de l'écran.
+       L'œil doit s'y poser en premier, avant le logo et avant le profil. */
+    .mv-head-sujet { position: relative; padding-left: 13px; min-width: 0; }
+    .mv-head-sujet::before {
+      content: ''; position: absolute; left: 0; top: 3px; bottom: 3px;
+      width: 3px; border-radius: 3px; background: var(--green);
+    }
+    .mv-head-titre { font-size: clamp(23px, 6vw, 32px); font-weight: 900; color: #fff;
+      line-height: 1.1; letter-spacing: -.015em;
+      display: flex; align-items: center; gap: 8px; min-width: 0; }
     .mv-head-titre.lien { background: none; border: none; padding: 0; font-family: inherit; cursor: pointer; text-align: left; }
     .mv-head-titre.lien:hover { color: var(--green); }
-    .mv-head-num { font-size: .6em; font-weight: 800; color: rgba(255,255,255,.6); white-space: nowrap; }
+    .mv-head-num { font-size: .55em; font-weight: 800; color: rgba(255,255,255,.6); white-space: nowrap; }
 
     /* ── Image de synthèse : feuille claire, imprimable en A4 ──────────────── */
     /* Image de synthèse : pleine page blanche, corps défilant + pied collant. */
@@ -1634,15 +1645,19 @@
       .syn-bloc, .syn-sujet { break-inside: avoid; }
       @page { size: A4; margin: 9mm; }
     }
-    .mv-head-desc { font-size: clamp(13px, 3.4vw, 15.5px); color: rgba(255,255,255,.74); line-height: 1.45; margin-top: 4px; }
+    .mv-head-desc { font-size: clamp(13px, 3.4vw, 15.5px); color: rgba(255,255,255,.66); line-height: 1.45; margin-top: 4px; }
     @media (max-width: 899px) {
-      /* La personne analysée prime : on lui laisse la largeur, et le compte
-         connecté se réduit à sa pastille (pas de nom en double avec la barre). */
-      .mv-head-logo { font-size: 16px; }
+      /* Le titre du sujet prime : tout ce qui l'entoure s'efface d'un cran. Le
+         profil se réduit à son seul nom (« Profil étudié : » ne tiendrait pas),
+         et le compte connecté à sa pastille. */
+      .mv-head { gap: 7px; }
+      .mv-head-logo { font-size: 15px; color: rgba(255,255,255,.82); }
+      .mv-head-qui { font-size: 12px; }
       .mv-head-qui .nom { max-width: 44vw; }
       .mv-head .user-chip span { display: none; }
       .mv-head .user-chip { max-width: none; padding: 4px; }
       .mv-head-tools { gap: 6px; }
+      .mv-head-sujet { padding-left: 10px; }
     }
 
     /* Fiche documentaire du sujet */
@@ -21994,10 +22009,12 @@ function AdminMindVectorScreen({ user, profile, onBack, onFeedback, chipName, av
             Mind <span className="accent">Vector</span>
           </button>
           {/* Le profil retenu se LIT ici et se CHANGE dans « Paramètres », au pied
-              de la page : un même bouton qui affiche et qui règle se lisait mal. */}
-          <div className={'mv-head-qui' + (mode === 'saisie' ? ' crayon' : '')}
-            title={mode === 'saisie' ? 'Rédaction des questions' : 'Profil évalué — se change dans Paramètres'}>
+              de la page : un même bouton qui affiche et qui règle se lisait mal.
+              Sur petit écran le nom vient seul — la mention n'y tiendrait pas. */}
+          <div className="mv-head-qui"
+            title={mode === 'saisie' ? 'Rédaction des questions' : 'Profil étudié — se change dans Paramètres'}>
             <span className="mv-mode-ico">{mode === 'saisie' ? MV_PICTO.crayon : MV_PICTO.oeil}</span>
+            {!compact && <span className="mv-head-qui-lab">Profil étudié :</span>}
             <span className="nom">{personne ? `${personne.prenom} ${personne.nom}` : (mode === 'reponse' ? 'choisir qui répond' : '—')}</span>
           </div>
           <div className="mv-head-spacer"/>
