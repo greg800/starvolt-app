@@ -4064,7 +4064,7 @@ function clearPanierLS(){
   // Réinitialise les flags services à leurs valeurs par défaut (pas de suppression du cache)
   try{
     const cache=(()=>{try{return JSON.parse(localStorage.getItem('starvolt_global_vars_cache'));}catch{return {};}})();
-    localStorage.setItem('starvolt_global_vars_cache',JSON.stringify({...cache,opti_solaire:true,opti_tarif:true,opti_flex:false,opti_acc:false}));
+    localStorage.setItem('starvolt_global_vars_cache',JSON.stringify({...cache,opti_flex:false,opti_acc:false}));
   }catch{}
   // Notifie MonSiteScreen (et tout autre composant monté) de remettre PV/stockage à zéro
   window.dispatchEvent(new Event('starvolt_panier_cleared'));
@@ -5127,12 +5127,12 @@ function computeCombinedOptimization(consoProfile, prodNorm, pvKwc, batKwh, ther
 //    Le cache est la SEULE source de vérité pour opti_* (mis à jour en temps réel au
 //    clic) ; la DB peut être périmée. Tout écran qui calcule des économies DOIT passer
 //    par ici, sinon il diverge (bug panier -416 vs Mon site -676).
+//    opti_solaire / opti_tarif ne figurent plus ici : ce ne sont plus des réglages,
+//    buildSiteBalance les déduit de la présence d'une box.
 function mergeGlobalVars(data) {
   const cached = (()=>{ try { return JSON.parse(localStorage.getItem('starvolt_global_vars_cache')); } catch { return null; } })();
   if (!data) return cached;
   return { ...data,
-    opti_solaire: cached?.opti_solaire ?? data.opti_solaire ?? true,
-    opti_tarif:   cached?.opti_tarif   ?? data.opti_tarif   ?? true,
     opti_flex:    cached?.opti_flex    ?? data.opti_flex    ?? false,
     opti_acc:     cached?.opti_acc     ?? data.opti_acc     ?? false,
   };
@@ -5448,15 +5448,19 @@ function buildSiteBalance({ site, prodProfil, tariffs, spotMap, globalVars, pvKw
   // reconstruit, pas d'existant à déduire (bk/tk directs, moteur classique).
   const bkEff = reconstructed ? (bk - batExist)   : bk;
   const tkEff = reconstructed ? (tk - thermExist) : tk;
-  // Le stockage ne se pilote que si une box Starvolt est au panier.
+  // Le stockage ne se pilote que s'il y a une box — au panier OU DÉJÀ INSTALLÉE chez
+  // le client. L'existante manquait ici : un client équipé d'une box Comwatt qui
+  // ajoutait une batterie ou du stockage thermique ne voyait aucune économie
+  // supplémentaire, le moteur tournant en mode « pilotage désactivé » (2026-08-27).
   // baseTariffOnly : facture de RÉFÉRENCE (état actuel du client) → pas de pilotage, tarif courant.
   const hasBoxLS = !baseTariffOnly && (!!localStorage.getItem('starvolt_box_chosen')
-                || localStorage.getItem('starvolt_solar_chosen') === 'solar_box');
-  const eg = globalVars ? {
-    ...globalVars,
-    opti_tarif:   hasBoxLS ? (globalVars.opti_tarif   ?? true) : false,
-    opti_solaire: hasBoxLS ? (globalVars.opti_solaire ?? true) : false,
-  } : globalVars;
+                || localStorage.getItem('starvolt_solar_chosen') === 'solar_box'
+                || site.box_comwatt_existante === true);
+  // Les deux optimisations de la box ne sont PLUS réglables : elles découlent de la
+  // présence d'une box, point. Elles étaient pilotées par des cases à cocher (admin +
+  // « Activation des services ») qui se sont retrouvées à false en base et coupaient
+  // tout déplacement d'énergie sans que rien ne l'indique à l'écran.
+  const eg = globalVars ? { ...globalVars, opti_tarif: hasBoxLS, opti_solaire: hasBoxLS } : globalVars;
   const optiChosen = !baseTariffOnly && !!localStorage.getItem('starvolt_optimisation_chosen');
   const optiId = optiChosen ? localStorage.getItem('starvolt_optimisation_tariff_id') : null;
   const effId = optiId || site.tarif_id;
@@ -7782,7 +7786,7 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onOnboardingQ
                     <select className="inp inp-sel" style={{fontSize:13,padding:'6px 30px 6px 10px',maxWidth:200,flexShrink:0}} value={activeId||''} onChange={e=>{
    clearPanierLS();
    persistActiveSite(e.target.value);
-   const _reset={id:1,opti_solaire:true,opti_tarif:true,opti_flex:false,opti_acc:false};
+   const _reset={id:1,opti_flex:false,opti_acc:false};
    sb.from('parametres_nationaux').upsert(_reset,{onConflict:'id'});
    setGlobalVars(v=>({...v,..._reset}));
    setPvKwc('0'); setBatKwh('0'); setThermKwh('0');
@@ -8388,9 +8392,11 @@ function MonSiteScreen({ user, userProfile, onBack, onSimulations, onOnboardingQ
                           {(()=>{
                             const hasStorage=(parseFloat(batKwh)||0)>0||(parseFloat(thermKwh)||0)>0;
                             const hasPV=(parseFloat(pvKwc)||0)>0;
+                            // opti_solaire / opti_tarif ne sont plus des bascules : la box
+                            // les applique d'office. Les laisser ici les rendait décochables
+                            // alors que le moteur ne les lit plus — case morte, et surtout
+                            // c'est ainsi qu'elles étaient passées à false en base.
                             return[
-                              {key:'opti_solaire', label:'☀️ Optimisation solaire', enabled:hasBox&&hasStorage&&hasPV, def:true},
-                              {key:'opti_tarif',   label:'⚡ Optimisation tarifaire', enabled:hasBox&&hasStorage, def:true},
                               {key:'opti_flex',    label:'🔄 Flex', enabled:hasBox&&hasStorage, def:false},
                               {key:'opti_acc',     label:'🤝 ACC', enabled:hasAcc, def:true},
                             ];
@@ -10547,8 +10553,6 @@ function GlobalVarsScreen({ onBack }) {
           taux_inflation_electricite_2: n.taux_inflation_electricite_2 ?? 0,
           prix_rachat_injection:        n.prix_rachat_injection        ?? 0.04,
           autoconso_sans_box:           n.autoconso_sans_box           ?? 70,
-          opti_solaire:                 n.opti_solaire                 ?? true,
-          opti_tarif:                   n.opti_tarif                   ?? true,
         });
         setLoading(false);
       });
@@ -10568,8 +10572,6 @@ function GlobalVarsScreen({ onBack }) {
       taux_inflation_electricite_2: num(globalForm.taux_inflation_electricite_2),
       prix_rachat_injection:        num(globalForm.prix_rachat_injection),
       autoconso_sans_box:           num(globalForm.autoconso_sans_box),
-      opti_solaire:                 !!globalForm.opti_solaire,
-      opti_tarif:                   !!globalForm.opti_tarif,
       updated_at: new Date().toISOString(),
     }).eq('id', 1);
     setSavingGlobal(false);
@@ -10594,31 +10596,16 @@ function GlobalVarsScreen({ onBack }) {
       </div>
 
       <div className="card" style={{padding:'12px 14px',marginBottom:8}}>
-        {/* ── Optimisation par la box ── */}
+        {/* ── Optimisation par la box ──
+            Plus de cases à cocher : l'optimisation solaire et l'optimisation tarif
+            réseau découlent de la présence d'une box, elles ne se règlent pas. Les
+            deux réglages s'étaient retrouvés à false en base, ce qui annulait
+            silencieusement tout gain de stockage (constat 2026-08-27). */}
         <div style={SL}>Optimisation par la box</div>
-        <div style={{display:'flex',flexDirection:'column',gap:10,marginBottom:14}}>
-          {[
-            ['opti_solaire','Optimisation solaire','Charge le stockage depuis le surplus PV, décharge pour couvrir les déficits'],
-            ['opti_tarif',  'Optimisation tarif réseau','Charge le stockage en heures creuses ou bon marché, décharge en heures de pointe'],
-          ].map(([key, label, desc]) => (
-            <label key={key} style={{display:'flex',alignItems:'flex-start',gap:10,cursor:'pointer',userSelect:'none'}}>
-              <input
-                type="checkbox"
-                checked={!!globalForm[key]}
-                onChange={e=>setGlobalForm(p=>({...p,[key]:e.target.checked}))}
-                style={{marginTop:2,width:16,height:16,accentColor:'#7dd940',flexShrink:0}}
-              />
-              <div>
-                <div style={{fontSize:13,color:'white',fontWeight:700}}>{label}</div>
-                <div style={{fontSize:10,color:'rgba(255,255,255,.4)',marginTop:1}}>{desc}</div>
-              </div>
-            </label>
-          ))}
-          {!globalForm.opti_solaire && !globalForm.opti_tarif && (
-            <div style={{fontSize:10,color:'rgba(255,160,80,.8)',padding:'4px 8px',background:'rgba(255,160,80,.08)',borderRadius:6,border:'1px solid rgba(255,160,80,.2)'}}>
-              ⚠ Aucune optimisation activée — la box ne fait aucun déplacement de charge
-            </div>
-          )}
+        <div style={{fontSize:11,color:'rgba(255,255,255,.45)',lineHeight:1.5,marginBottom:14}}>
+          Dès qu'une box est présente — au panier ou déjà installée — elle charge le
+          stockage sur le surplus solaire et sur les heures bon marché, et le décharge
+          aux heures de pointe. Automatique, sans réglage.
         </div>
 
         {/* ── Hypothèses stockage ── */}
@@ -12023,12 +12010,12 @@ function BoxSimScreen({ user, userProfile, onBack, onPanier, onMonSite, onCartUp
         <div className="sticky-footer">
           <div className="sticky-footer-inner row">
             <BackButton onClick={onBack}/>
-            <button onClick={() => { localStorage.setItem('starvolt_box_chosen','free'); localStorage.removeItem('starvolt_box_saving'); localStorage.removeItem('starvolt_baisse_facture'); setPanierServicesChecked({opti_tarif:true,opti_flex:true}); setChosen('free'); if(siteFlex){const kw=applyExistingFlex(siteFlex);const fg=Math.round(kw*14+(parseFloat((()=>{try{return JSON.parse(localStorage.getItem('starvolt_solar_defaults'))||{};}catch{return{};}})().batKwh)||0)*storageRatio*27);const bs=fg+(shiftSaving||0);if(bs>0)localStorage.setItem('starvolt_box_saving',String(bs));setJustConfirmed(true);if(onCartUpdate)onCartUpdate();}else{setShowThermForm(true);} }}
+            <button onClick={() => { localStorage.setItem('starvolt_box_chosen','free'); localStorage.removeItem('starvolt_box_saving'); localStorage.removeItem('starvolt_baisse_facture'); setPanierServicesChecked({opti_flex:true}); setChosen('free'); if(siteFlex){const kw=applyExistingFlex(siteFlex);const fg=Math.round(kw*14+(parseFloat((()=>{try{return JSON.parse(localStorage.getItem('starvolt_solar_defaults'))||{};}catch{return{};}})().batKwh)||0)*storageRatio*27);const bs=fg+(shiftSaving||0);if(bs>0)localStorage.setItem('starvolt_box_saving',String(bs));setJustConfirmed(true);if(onCartUpdate)onCartUpdate();}else{setShowThermForm(true);} }}
               style={{ flex:1, background:'rgba(255,255,255,.07)', border:'2px solid rgba(125,217,64,.55)', borderRadius:14, color:'white', padding:'13px 8px', cursor:'pointer', fontFamily:'inherit', textAlign:'center', lineHeight:1.3 }}>
               <div style={{ fontSize:17, fontWeight:900, color:'#7dd940', marginBottom:3 }}>🎁 Box gratuite</div>
               <div style={{ fontSize:12, color:'rgba(255,255,255,.75)' }}>Cagnotte reversée 3 ans</div>
             </button>
-            <button onClick={() => { localStorage.setItem('starvolt_box_chosen','buy'); localStorage.removeItem('starvolt_box_saving'); localStorage.removeItem('starvolt_baisse_facture'); setPanierServicesChecked({opti_tarif:true,opti_flex:true}); setChosen('buy'); if(siteFlex){const kw=applyExistingFlex(siteFlex);const fg=Math.round(kw*14+(parseFloat((()=>{try{return JSON.parse(localStorage.getItem('starvolt_solar_defaults'))||{};}catch{return{};}})().batKwh)||0)*storageRatio*27);const bs=fg+(shiftSaving||0);if(bs>0)localStorage.setItem('starvolt_box_saving',String(bs));setJustConfirmed(true);if(onCartUpdate)onCartUpdate();}else{setShowThermForm(true);} }}
+            <button onClick={() => { localStorage.setItem('starvolt_box_chosen','buy'); localStorage.removeItem('starvolt_box_saving'); localStorage.removeItem('starvolt_baisse_facture'); setPanierServicesChecked({opti_flex:true}); setChosen('buy'); if(siteFlex){const kw=applyExistingFlex(siteFlex);const fg=Math.round(kw*14+(parseFloat((()=>{try{return JSON.parse(localStorage.getItem('starvolt_solar_defaults'))||{};}catch{return{};}})().batKwh)||0)*storageRatio*27);const bs=fg+(shiftSaving||0);if(bs>0)localStorage.setItem('starvolt_box_saving',String(bs));setJustConfirmed(true);if(onCartUpdate)onCartUpdate();}else{setShowThermForm(true);} }}
               style={{ flex:1, background:'rgba(255,255,255,.07)', border:'2px solid rgba(255,215,0,.4)', borderRadius:14, color:'white', padding:'13px 8px', cursor:'pointer', fontFamily:'inherit', textAlign:'center', lineHeight:1.3 }}>
               <div style={{ fontSize:17, fontWeight:900, color:'#fbbf24', marginBottom:2 }}>📦 Acheter</div>
               <div style={{ fontSize:18, fontWeight:900, color:'white', marginBottom:2 }}>600 €</div>
@@ -12852,7 +12839,7 @@ function SolarSimScreen({ user, userProfile, onBack, onPanier, onMonSite, onCart
     localStorage.setItem('starvolt_solar_chosen','solar_box');
     localStorage.removeItem('starvolt_box_chosen');
     localStorage.removeItem('starvolt_box_saving');
-    setPanierServicesChecked({opti_solaire:true,opti_tarif:true,opti_flex:true});
+    setPanierServicesChecked({opti_flex:true});
     // 2) Optimisation PV×batterie (étoile qui tourne) si on a tout ce qu'il faut
     let bestPv='6', bestBat='10';
     if (prixMat && prodData && siteRef?.site?.conso_profil) {
@@ -13191,7 +13178,7 @@ function PanierScreen({ user, onBack, onGoTo, onMonSite }) {
     clearPanierLS(); // vide LS + solar_defaults + dispatch starvolt_panier_cleared
     setItems({ optimisation:false, acc:false, box:false, diy:false, solar:false, flexOnly:false });
     // Réinitialise les services cochés quand on vide le panier
-    sb.from('parametres_nationaux').upsert({id:1,opti_solaire:true,opti_tarif:true,opti_flex:false,opti_acc:false},{onConflict:'id'});
+    sb.from('parametres_nationaux').upsert({id:1,opti_flex:false,opti_acc:false},{onConflict:'id'});
   };
 
   // Année 1 = pas d'inflation ; année N = (N-1) augmentations
