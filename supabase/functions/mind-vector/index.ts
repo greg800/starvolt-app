@@ -231,18 +231,24 @@ async function askClaude(system: string, userContent: string, tools?: any[], max
 // l'assistant tel quel — donc de garder ET de re-sérialiser tout cela. Une
 // boucle de six tours faisait grossir la charge à chaque passage, et Supabase a
 // fini par tuer l'isolat (« not enough compute resources », sans exception
-// applicative dans les journaux). On s'autorise UNE reprise, pas six : au-delà,
-// le sujet est rendu inabouti et l'écran le relancera plus tard, ce qui coûte
-// un appel de plus mais ne fait pas tomber une série de soixante sujets.
+// applicative dans les journaux). Trois reprises : assez pour qu'un sujet
+// difficile aboutisse, assez peu pour que la charge reste bornée.
+//
+// ⚠️ `max_tokens` compte la RÉFLEXION autant que la réponse. Les sorties
+// mesurées montent à 3 000 jetons ; l'avoir baissé à 4 000 pour économiser de
+// la mémoire coupait les sujets difficiles au milieu de leur raisonnement, et
+// le tour revenait sans appel d'outil — donc « aucun classement », en ayant
+// pourtant payé. La mémoire se gagne sur l'ENTRÉE (nombre de recherches,
+// reprises bornées), jamais sur ce plafond-là.
 async function askClaudeWeb(
   system: string, question: string, tools: any[],
-  modele: string, recherchesMax: number, maxTokens = 4000,
+  modele: string, recherchesMax: number, maxTokens = 8000,
 ) {
   const cap = MODELES_RECHERCHE[modele] || MODELES_RECHERCHE[MODEL];
   const outilWeb = { type: cap.outil, name: "web_search", max_uses: recherchesMax };
   const messages: any[] = [{ role: "user", content: question }];
   let jsonRes: any = null;
-  for (let tour = 0; tour < 2; tour++) {
+  for (let tour = 0; tour < 3; tour++) {
     const corps: any = {
       model: modele,
       max_tokens: maxTokens,
@@ -805,8 +811,22 @@ async function publicPosition(body: any, caller: { id: string; email: string }):
   }
   const appel = (jsonRes?.content || []).find((c: any) => c.type === "tool_use" && c.name === "report_position");
   if (!appel) {
+    // ⚠️ Une réponse inexploitable a quand même été FACTURÉE. Ne pas la
+    // journaliser laissait dépenser sans trace : le compteur de l'écran et
+    // `ai_usage_log` montraient zéro pendant qu'Anthropic débitait. On enregistre
+    // le coût d'abord, on rend l'erreur ensuite.
+    const u = jsonRes?.usage || {};
+    const perdu = await loggerCout(u, caller.email, FEATURE_PUBLIC, modele,
+                                   Number(u?.server_tool_use?.web_search_requests) || 0);
     const texte = (jsonRes?.content || []).filter((c: any) => c.type === "text").map((c: any) => c.text).join(" ").trim();
-    return json({ error: "vide", message: texte.slice(0, 300) || "Claude n'a rien renvoyé d'exploitable." }, 502);
+    // Dire POURQUOI : « max_tokens » = réponse coupée, « pause_turn » = le
+    // modèle cherchait encore. Sans ce mot, l'écran ne montre qu'un échec muet.
+    return json({
+      error: "vide",
+      message: `Réponse sans classement (${jsonRes?.stop_reason || "raison inconnue"})`
+             + (texte ? ` — ${texte.slice(0, 200)}` : "")
+             + ` · ${(perdu / USD_PER_EUR).toFixed(3)} € tout de même facturés`,
+    }, 502);
   }
 
   const a = appel.input || {};
