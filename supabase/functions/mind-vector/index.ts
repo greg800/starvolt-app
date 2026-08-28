@@ -225,15 +225,24 @@ async function askClaude(system: string, userContent: string, tools?: any[], max
 // c'est « j'ai encore du travail ». On renvoie le tour tel quel et le serveur
 // reprend où il s'est arrêté ; sans cette boucle la réponse revient tronquée,
 // sans appel d'outil, et l'écran croit à un échec.
+// ⚠️ Budget mémoire. Une réponse avec recherche web ramène le TEXTE de chaque
+// résultat : 50 000 jetons d'entrée mesurés, soit des centaines de kilo-octets
+// de JSON. Sur `pause_turn`, reprendre la main impose de renvoyer le tour de
+// l'assistant tel quel — donc de garder ET de re-sérialiser tout cela. Une
+// boucle de six tours faisait grossir la charge à chaque passage, et Supabase a
+// fini par tuer l'isolat (« not enough compute resources », sans exception
+// applicative dans les journaux). On s'autorise UNE reprise, pas six : au-delà,
+// le sujet est rendu inabouti et l'écran le relancera plus tard, ce qui coûte
+// un appel de plus mais ne fait pas tomber une série de soixante sujets.
 async function askClaudeWeb(
   system: string, question: string, tools: any[],
-  modele: string, recherchesMax: number, maxTokens = 8000,
+  modele: string, recherchesMax: number, maxTokens = 4000,
 ) {
   const cap = MODELES_RECHERCHE[modele] || MODELES_RECHERCHE[MODEL];
   const outilWeb = { type: cap.outil, name: "web_search", max_uses: recherchesMax };
   const messages: any[] = [{ role: "user", content: question }];
   let jsonRes: any = null;
-  for (let tour = 0; tour < 6; tour++) {
+  for (let tour = 0; tour < 2; tour++) {
     const corps: any = {
       model: modele,
       max_tokens: maxTokens,

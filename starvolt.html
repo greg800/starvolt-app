@@ -22036,29 +22036,49 @@ function AdminMindVectorScreen({ user, profile, onBack, onFeedback, chipName, av
       jeton = rafraichie?.session?.access_token || null;
     } catch { /* on part avec le jeton courant */ }
     // `rechMsg` lu depuis cette fonction resterait figé à sa valeur d'avant la
-    // boucle : l'échec se suit dans une variable locale, pas dans l'état.
-    let faits = 0, echec = false;
+    // boucle : l'avancement se suit dans des variables locales, pas dans l'état.
+    //
+    // Un sujet qui échoue ne fait plus tomber la série. Une recherche sur
+    // soixante sujets rencontre forcément un incident — Supabase qui recycle
+    // son isolat, une page qui ne répond pas — et perdre cinquante-huit sujets
+    // pour un raté est un mauvais marché. On réessaie une fois, puis on note et
+    // on passe au suivant ; le compte-rendu final dit ce qui manque, et
+    // relancer ne refera que les sujets restés vides.
+    let faits = 0, rates = 0, dernierEchec = null;
+    const chercherUn = async (id) => {
+      const { data, error } = await sb.functions.invoke('mind-vector', {
+        body: { action: 'public_position', personne_id: personne.id, node_id: id,
+                model: rechModele, recherches_max: rechNb },
+        ...(jeton ? { headers: { Authorization: `Bearer ${jeton}` } } : {}),
+      });
+      return (error || data?.error) ? { erreur: await mvMessageErreur(error, data) } : { data };
+    };
     try {
       for (const id of sujetsARemplir) {
         if (stopRef.current) break;
         setRechSujet(id);
-        const { data, error } = await sb.functions.invoke('mind-vector', {
-          body: { action: 'public_position', personne_id: personne.id, node_id: id,
-                  model: rechModele, recherches_max: rechNb },
-          ...(jeton ? { headers: { Authorization: `Bearer ${jeton}` } } : {}),
-        });
-        if (error || data?.error) {
-          setRechMsg({ type:'err', texte: await mvMessageErreur(error, data) });
-          echec = true;
-          break;
+        let r = await chercherUn(id);
+        if (r.erreur && !stopRef.current) {
+          // Une seconde chance, après une pause : l'isolat qui vient d'être
+          // recyclé repart généralement sain.
+          await new Promise(ok => setTimeout(ok, 2500));
+          r = await chercherUn(id);
         }
-        setRecherches(r => ({ ...r, [id]: data }));
-        setRechCout(c => c + (data?.cost?.eur || 0));
+        if (r.erreur) {
+          rates++; dernierEchec = r.erreur;
+          setRechMsg({ type:'err', texte: `${rates} sujet${rates > 1 ? 's' : ''} en échec — ${r.erreur}` });
+          continue;
+        }
+        setRecherches(m => ({ ...m, [id]: r.data }));
+        setRechCout(c => c + (r.data?.cost?.eur || 0));
         faits++;
       }
-      if (!echec) setRechMsg({ type:'ok', texte:
-        stopRef.current ? `Recherche interrompue après ${faits} sujet${faits > 1 ? 's' : ''}.`
-                        : `Recherche terminée : ${faits} sujet${faits > 1 ? 's' : ''} examiné${faits > 1 ? 's' : ''}.` });
+      const fin = stopRef.current
+        ? `Recherche interrompue après ${faits} sujet${faits > 1 ? 's' : ''}.`
+        : `Recherche terminée : ${faits} sujet${faits > 1 ? 's' : ''} examiné${faits > 1 ? 's' : ''}.`;
+      setRechMsg(rates
+        ? { type:'err', texte: `${fin} ${rates} en échec (relancez pour ne reprendre que ceux-là) — ${dernierEchec}` }
+        : { type:'ok', texte: fin });
     } finally {
       clearInterval(horloge);
       setRechEnCours(false); setRechSujet(null);
