@@ -22044,7 +22044,7 @@ function AdminMindVectorScreen({ user, profile, onBack, onFeedback, chipName, av
     // pour un raté est un mauvais marché. On réessaie une fois, puis on note et
     // on passe au suivant ; le compte-rendu final dit ce qui manque, et
     // relancer ne refera que les sujets restés vides.
-    let faits = 0, rates = 0, dernierEchec = null;
+    let faits = 0, rates = 0, suite = 0, bloque = false, dernierEchec = null;
     const chercherUn = async (id) => {
       const { data, error } = await sb.functions.invoke('mind-vector', {
         body: { action: 'public_position', personne_id: personne.id, node_id: id,
@@ -22065,19 +22065,27 @@ function AdminMindVectorScreen({ user, profile, onBack, onFeedback, chipName, av
           r = await chercherUn(id);
         }
         if (r.erreur) {
-          rates++; dernierEchec = r.erreur;
+          rates++; suite++; dernierEchec = r.erreur;
           setRechMsg({ type:'err', texte: `${rates} sujet${rates > 1 ? 's' : ''} en échec — ${r.erreur}` });
+          // Trois échecs d'affilée ne sont plus des incidents : c'est une panne
+          // qui vaut pour tous les sujets — crédits épuisés, session perdue,
+          // API en dérangement. Continuer ferait tourner l'écran pendant des
+          // minutes pour n'obtenir que la même erreur soixante fois.
+          if (suite >= 3) { bloque = true; break; }
           continue;
         }
+        suite = 0;
         setRecherches(m => ({ ...m, [id]: r.data }));
         setRechCout(c => c + (r.data?.cost?.eur || 0));
         faits++;
       }
-      const fin = stopRef.current
-        ? `Recherche interrompue après ${faits} sujet${faits > 1 ? 's' : ''}.`
-        : `Recherche terminée : ${faits} sujet${faits > 1 ? 's' : ''} examiné${faits > 1 ? 's' : ''}.`;
+      const fin = bloque
+        ? `Recherche arrêtée après ${faits} sujet${faits > 1 ? 's' : ''} : trois échecs de suite, la panne vaut pour tous les sujets.`
+        : stopRef.current
+          ? `Recherche interrompue après ${faits} sujet${faits > 1 ? 's' : ''}.`
+          : `Recherche terminée : ${faits} sujet${faits > 1 ? 's' : ''} examiné${faits > 1 ? 's' : ''}.`;
       setRechMsg(rates
-        ? { type:'err', texte: `${fin} ${rates} en échec (relancez pour ne reprendre que ceux-là) — ${dernierEchec}` }
+        ? { type:'err', texte: `${fin} ${bloque ? 'Message de l’API : ' : `${rates} en échec (relancez pour ne reprendre que ceux-là) — `}${dernierEchec}` }
         : { type:'ok', texte: fin });
     } finally {
       clearInterval(horloge);
