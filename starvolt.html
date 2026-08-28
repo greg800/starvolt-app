@@ -505,6 +505,17 @@
       .lbl-sm { display: none; }
       .lbl-lg { display: inline; }
     }
+    /* Retour dans une barre de pied ordinaire (.btn, pas .cta) : en mobile il
+       n'est plus qu'une porte, et n'a donc pas à prendre la part d'une action
+       qui, elle, porte un mot. Il reprend sa part égale dès que le libellé
+       revient. Sélecteur aligné sur « .sticky-footer-inner.row .btn », qui
+       impose flex:1 et l'emporterait sur une simple classe. */
+    .sticky-footer-inner.row .btn-retour-pied {
+      flex: 0 0 auto; width: auto; padding-left: 16px; padding-right: 16px;
+    }
+    @media (min-width: 768px) {
+      .sticky-footer-inner.row .btn-retour-pied { flex: 1 1 0; }
+    }
 
     /* ── Comparatif fournisseurs ────────────────────────────────────────────
        Desktop : 2 puis 3 colonnes. Une offre par ligne obligeait à défiler
@@ -14494,8 +14505,11 @@ function AdminFacturesScreen({ onBack }) {
         </div>
       ) : edit ? (
         <div style={{padding:'0 16px'}}>
-          <button onClick={() => setEdit(null)} style={{background:'none',border:'none',color:'rgba(255,255,255,.5)',
-            fontSize:13,cursor:'pointer',padding:0,marginBottom:12,fontFamily:'inherit'}}>← Retour à la file</button>
+          <button onClick={() => setEdit(null)} title="Retour à la file" aria-label="Retour à la file"
+            style={{background:'none',border:'none',color:'rgba(255,255,255,.5)',display:'inline-flex',
+                    alignItems:'center',gap:6,fontSize:13,cursor:'pointer',padding:0,marginBottom:12,fontFamily:'inherit'}}>
+            <PictoPorte size={15} trait={2.1}/><span className="lbl-lg">Retour à la file</span>
+          </button>
 
           <div className="card" style={{padding:14, marginBottom:12}}>
             <div style={{fontSize:12, color:'rgba(255,255,255,.5)', lineHeight:1.6}}>
@@ -20149,7 +20163,10 @@ function ComprendreScoreScreen({ user, subject, score, total, results, isRevisio
     <StickyFooter row>
       {!mastered && <button className="btn" style={{flex:1,fontSize:13}} onClick={onRetry}>Réessayer</button>}
       {mastered && onNext && <button className="btn btn-yes" style={{flex:1,fontSize:13}} onClick={onNext}>Sujet suivant →</button>}
-      <button className="btn btn-primary" style={{flex:1,fontSize:13}} onClick={onHome}>Retour aux thèmes</button>
+      <button className="btn btn-primary btn-retour-pied" style={{fontSize:13}} onClick={onHome}
+        title="Retour aux thèmes" aria-label="Retour aux thèmes">
+        <PictoPorte size={17} trait={2.1}/><span className="lbl-lg">Retour aux thèmes</span>
+      </button>
     </StickyFooter>
     </>
   );
