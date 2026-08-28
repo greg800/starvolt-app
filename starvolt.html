@@ -1527,8 +1527,6 @@
     }
     .mv-pos-pictos img {
       width: 16px; height: 16px; object-fit: contain; pointer-events: auto;
-      border-radius: 3px; background: rgba(255,255,255,.92); padding: 1px;
-      box-shadow: 0 1px 3px rgba(0,0,0,.3);
     }
     .mv-sujet {
       min-width: 0; text-align: left;
@@ -1622,12 +1620,13 @@
     .syn-legende .syn-bulle { width: 11px; height: 11px; }
     /* Picto d'une organisation : il REMPLACE la bulle de couleur, il ne s'y
        ajoute pas — la case fait 18 px, il n'y a pas la place pour les deux.
-       La couleur de la série survit en liseré, seule chose qui distingue deux
-       séries tombées sur la même case. `flex-wrap` sur .syn-case fait grandir
-       la case plutôt que déborder quand plusieurs s'y retrouvent. */
-    .syn-picto { width: 13px; height: 13px; object-fit: contain; border-radius: 3px;
-      background: #fff; display: inline-block; flex-shrink: 0; }
-    .syn-legende .syn-picto { width: 16px; height: 16px; border-radius: 4px; }
+       Sans liseré (retiré à la demande) : le logo se suffit à lui-même pour
+       identifier la série, et la légende donne la correspondance. `flex-wrap`
+       sur .syn-case fait grandir la case plutôt que déborder quand plusieurs
+       s'y retrouvent. */
+    .syn-picto { width: 13px; height: 13px; object-fit: contain;
+      display: inline-block; flex-shrink: 0; }
+    .syn-legende .syn-picto { width: 16px; height: 16px; }
     /* Choix des profils comparés. `syn-no-print` : c'est une commande, elle n'a
        rien à faire sur la feuille imprimée. */
     .syn-choix { display: flex; flex-wrap: wrap; gap: 6px; align-items: center;
@@ -20887,7 +20886,6 @@ function MvSyntheseSheet({ personne, noeuds, cases, titres, auteurs, parNode, so
                 title={survol(txt)} onClick={choisir(n.id, 'case', p.n, 'Position ' + p.n, txt)}>
                 {ici.map((r, i) => r.logo
                   ? <img key={i} className="syn-picto" src={r.logo} alt={r.nom}
-                      style={{ boxShadow: `0 0 0 1.5px ${r.couleur}` }}
                       title={survol(nomDe(r.auteurId) || r.nom)}/>
                   : <span key={i} className="syn-bulle" style={{ background: r.couleur }}
                       title={survol(nomDe(r.auteurId) || r.nom)}/>)}
@@ -20947,8 +20945,7 @@ function MvSyntheseSheet({ personne, noeuds, cases, titres, auteurs, parNode, so
                 <button key={id} className="syn-chip" title="Retirer de la comparaison"
                   onClick={() => onBasculerProfil(id)}>
                   {f && f.logo_url
-                    ? <img className="syn-picto" src={f.logo_url} alt=""
-                           style={{ boxShadow: `0 0 0 2px ${s ? s.couleur : '#aaa'}` }}/>
+                    ? <img className="syn-picto" src={f.logo_url} alt=""/>
                     : <span className="syn-bulle" style={{ background: s ? s.couleur : '#aaa' }}/>}
                   {f ? mvNom(f) : 'Profil'}
                   <span className="syn-x">×</span>
@@ -20962,8 +20959,7 @@ function MvSyntheseSheet({ personne, noeuds, cases, titres, auteurs, parNode, so
           {auteurs.map(a => (
             <span key={a.id} className="syn-leg-item">
               {a.logo
-                ? <img className="syn-picto" src={a.logo} alt=""
-                       style={{ boxShadow: `0 0 0 2px ${a.couleur}` }}/>
+                ? <img className="syn-picto" src={a.logo} alt=""/>
                 : <span className="syn-bulle" style={{ background: a.couleur }}/>}
               {a.nom}{a.self ? ' (soi)' : ''}
             </span>
