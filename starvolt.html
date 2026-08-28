@@ -21099,6 +21099,18 @@ function AdminMindVectorScreen({ user, profile, onBack, onFeedback, chipName, av
     (data || []).forEach(r => {
       if (r.auteur_id === user?.id) { miennes[r.node_id] = r.pos; orig[r.node_id] = r.origine; }
       if (fiche.user_id && r.auteur_id === fiche.user_id) auto[r.node_id] = r.pos;
+      // Un profil PUBLIC n'a pas de titulaire : une personne morale ne se
+      // classe pas elle-même. Sa position documentée est celle qu'un admin a
+      // établie — quel que soit l'auteur, donc, sinon un non-admin ne voyait
+      // rien du tout (les 36 positions du RN étaient lisibles par la RLS et
+      // jetées ici). Elle prend le canal de l'auto-diagnostic, qui est
+      // exactement le bon : c'est la position DU profil, à distinguer de la
+      // mienne. Une position issue de la recherche l'emporte sur un classement
+      // manuel d'un tiers : elle est sourcée et datée.
+      if (fiche.est_public && !fiche.user_id
+          && (auto[r.node_id] === undefined || r.origine === 'recherche')) {
+        auto[r.node_id] = r.pos;
+      }
     });
     setReponses(miennes); setAutoDiag(auto); setOrigines(orig);
     // Le carnet de recherche voyage avec le profil : c'est lui qui alimente
