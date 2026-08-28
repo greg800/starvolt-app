@@ -22117,6 +22117,25 @@ function AdminMindVectorScreen({ user, profile, onBack, onFeedback, chipName, av
     .sort((a, b) => (b.est_public ? 1 : 0) - (a.est_public ? 1 : 0)
                  || mvNom(a).localeCompare(mvNom(b)));
 
+  // ⚠️ La liste des profils ne se chargeait QU'À l'ouverture du popup « pour
+  // qui » (son effet commence par `if (!popupQui) return`). Or la vue
+  // hélicoptère s'ouvre directement depuis le pied — et `ouvrirSynthese` ferme
+  // même ce popup : le menu de comparaison restait vide, sans rien signaler.
+  // On garantit la liste ici, sans la recharger si elle est déjà là.
+  // Rend la liste en plus de la poser dans l'état : `fiches` reste figé au
+  // rendu courant, donc la fraîchement chargée ne serait pas visible depuis
+  // l'appel qui vient de la demander.
+  const garantirProfilsComparables = async () => {
+    if (peutToutVoir) {
+      if (fiches.length) return fiches;
+      const { data } = await sb.from('mv_personnes').select('*').order('nom');
+      setFiches(data || []);
+      return data || [];
+    }
+    if (profilsAcces.length) return profilsAcces;
+    return await chargerAcces();
+  };
+
   // Cocher ou décocher recharge aussitôt : un menu qui ne fait que préparer un
   // état, en laissant l'utilisateur chercher le bouton qui l'applique, se lit
   // comme une panne.
@@ -22133,6 +22152,9 @@ function AdminMindVectorScreen({ user, profile, onBack, onFeedback, chipName, av
     const ids = (Array.isArray(idsArg) ? idsArg : synProfils).filter(id => id !== personne.id);
     setPopupQui(false); setPortrait(null);
     setSynthese({ chargement: true });
+    // Lancé en parallèle du chargement des positions : la liste ne sert qu'au
+    // menu, elle n'a pas à retarder la feuille.
+    const listePrete = garantirProfilsComparables();
     const { data, error } = await sb.rpc('mv_synthese', { p_personne_id: personne.id });
     const rows = (!error && data) ? [...data] : [];
     // Mes propres lignes absentes du retour : je les ajoute. `reponses` est
@@ -22148,8 +22170,10 @@ function AdminMindVectorScreen({ user, profile, onBack, onFeedback, chipName, av
     // Les profils superposés, un appel chacun et tous en parallèle : la
     // synthèse s'ouvre d'un clic, enchaîner les allers-retours la ferait
     // attendre autant de fois qu'on a coché de profils.
+    const dispo = await listePrete;
     const extras = (await Promise.all(ids.map(async (id) => {
-      const fiche = (fiches || []).find(f => f.id === id)
+      const fiche = (dispo || []).find(f => f.id === id)
+                 || (fiches || []).find(f => f.id === id)
                  || (profilsAcces || []).find(f => f.id === id) || null;
       const { data: d } = await sb.rpc('mv_synthese', { p_personne_id: id });
       const positions = consoliderProfil(d);
