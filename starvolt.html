@@ -15279,7 +15279,7 @@ function slugifyMd(label) {
 // Ces prompts se règlent sur LEUR propre page (Cyber-sécurité). Les répéter ici
 // donnait deux endroits pour la même valeur, donc deux vérités possibles.
 const AI_PROMPTS_AILLEURS = ['cyber_security', 'cyber_security_code',
-                             'mind_vector_fill', 'mind_vector_profil'];
+                             'mind_vector_fill', 'mind_vector_profil', 'mind_vector_public'];
 
 function AdminAIPromptsScreen({ onBack, onBilanData }) {
   const [rows, setRows] = useState(null);       // [{feature,label,system_prompt,updated_at,updated_by}]
@@ -20295,10 +20295,11 @@ function AdminMindVectorPromptsScreen({ onBack }) {
   const fmtDate = (d) => d ? new Date(d).toLocaleString('fr-FR',
     { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit' }) : '—';
 
-  const MIENS = ['mind_vector_fill', 'mind_vector_profil'];
+  const MIENS = ['mind_vector_fill', 'mind_vector_profil', 'mind_vector_public'];
   const EXPLICATIONS = {
     mind_vector_fill:   "Sert au bouton « 🤖 Remplissage auto » et à « Créer une branche » : il rédige les 5 positions d'un sujet et leurs titres.",
     mind_vector_profil: "Sert au CTA « Vos résultats » : il lit les positions retenues par une personne et en tire un portrait.",
+    mind_vector_public: "Sert à « Remplir automatiquement les positions de ce profil » : il cherche sur Internet la position d'un profil public, sujet par sujet. La chaîne #profil-public y est remplacée par le nom du profil et son contexte. Se règle aussi depuis la page de remplissage.",
   };
 
   const load = () => {
@@ -20475,6 +20476,18 @@ const MV_PRECISIONS = [
   { v: 20, titre: 'Nous nous connaissons peu',
     texte: 'Quelques échanges, une impression générale. Je réponds surtout à l’intuition.' },
 ];
+
+// Nom d'affichage d'un profil. Une personne morale n'a pas de prénom : son
+// intitulé vit tout entier dans `nom`, et `prenom` reste vide. Passer par ce
+// helper évite les « undefined Michelin » et les espaces en trop.
+const mvNom = (p) => !p ? ''
+  : (p.type_entite === 'morale'
+      ? String(p.nom || '').trim()
+      : [p.prenom, p.nom].filter(Boolean).join(' ').trim());
+
+// Longueur minimale du contexte d'une personne morale : deux entités peuvent
+// porter le même nom, et la recherche Internet part de ce texte.
+const MV_CONTEXTE_MIN = 20;
 
 // Pictos de mode, en SVG monochrome : les émojis équivalents sont rendus en
 // couleur par le système et deviennent illisibles sur fond sombre.
@@ -20768,7 +20781,7 @@ function MvSyntheseSheet({ personne, noeuds, cases, titres, auteurs, parNode, on
     <div className="syn-page">
       <div className={'syn-corps' + (compact && focus ? ' syn-dim' : '')}>
         <div className="syn-entete">
-          <div className="syn-titre">{personne.prenom} {personne.nom}</div>
+          <div className="syn-titre">{mvNom(personne)}</div>
           <div className="syn-sous">Mind Vector · synthèse des positions · {dateStr}</div>
         </div>
         {(enfants['_'] || []).map(r => renderNode(r, 0))}
@@ -20847,6 +20860,17 @@ function AdminMindVectorScreen({ user, profile, onBack, onFeedback, chipName, av
   const [auteursProfil, setAuteursProfil] = useState([]);  // qui a classé ce profil (mv_auteurs)
   const [popupPortee, setPopupPortee] = useState(null);    // choix des réponses à analyser
   const [portee, setPortee] = useState({ mode: 'moi' });   // portée retenue pour la dernière analyse
+  // ── Remplissage automatique d'un profil public ────────────────────────────
+  const [popupRemplir, setPopupRemplir] = useState(false);
+  const [promptPublic, setPromptPublic] = useState(null);  // texte du prompt, modifiable
+  const [promptSauve,  setPromptSauve]  = useState(null);  // { type, texte } après enregistrement
+  const [recherches,   setRecherches]   = useState({});    // nodeId → ligne mv_recherches
+  const [rechEnCours,  setRechEnCours]  = useState(false);
+  const [rechSujet,    setRechSujet]    = useState(null);  // nodeId en cours d'examen
+  const [rechChrono,   setRechChrono]   = useState(0);     // secondes écoulées
+  const [rechCout,     setRechCout]     = useState(0);     // € cumulés sur la session
+  const [rechMsg,      setRechMsg]      = useState(null);  // { type:'ok'|'err', texte }
+  const stopRef = useRef(false);                           // le bouton « Stop » de la boucle
   const [commentaire, setCommentaire] = useState(null);   // null = champ fermé
   const [exclusions, setExclusions] = useState([]);       // branches écartées pour cette personne
   const [popupQui, setPopupQui] = useState(false);
@@ -21442,7 +21466,7 @@ function AdminMindVectorScreen({ user, profile, onBack, onFeedback, chipName, av
   // suivant, gauche/haut = précédent. On s'efface dès qu'un champ est actif ou
   // qu'une fenêtre est ouverte.
   const clavierRef = useRef({});
-  clavierRef.current = { versVoisin, posEdit, bloque: popupQui || !!dialogue || docOuvert || renomme != null || !!portrait || arbre || demPrecision || !!popupPortee };
+  clavierRef.current = { versVoisin, posEdit, bloque: popupQui || !!dialogue || docOuvert || renomme != null || !!portrait || arbre || demPrecision || !!popupPortee || popupRemplir };
   useEffect(() => {
     if (compact) return;
     const onKey = (e) => {
@@ -21591,7 +21615,7 @@ function AdminMindVectorScreen({ user, profile, onBack, onFeedback, chipName, av
   // Réservé aux admins. Le CASCADE emporte réponses et invitations.
   const supprimerFicheManuelle = async () => {
     if (!personne || personne.user_id) return;
-    const qui = [personne.prenom, personne.nom].filter(Boolean).join(' ') || 'ce profil';
+    const qui = mvNom(personne) || 'ce profil';
     if (!window.confirm(`Supprimer définitivement « ${qui} » et toutes les réponses saisies ? Cette action est irréversible.`)) return;
     setBusyQui(true); setErrQui(null);
     const { error } = await sb.from('mv_personnes').delete().eq('id', personne.id);
@@ -21715,17 +21739,34 @@ function AdminMindVectorScreen({ user, profile, onBack, onFeedback, chipName, av
     return data;
   };
 
+  // Deux formulaires derrière un bouton radio. Une personne morale n'a ni
+  // prénom ni e-mail : elle a un intitulé et, obligatoirement, du contexte —
+  // « Renault » ne désigne rien à soi seul, et c'est ce texte qui part en
+  // recherche Internet.
   const creerPersonne = async () => {
     const f = formQui; if (!f) return;
-    const prenom = (f.prenom || '').trim();
+    const morale = f.type_entite === 'morale';
     const nom    = (f.nom || '').trim();
-    const email  = (f.email || '').trim();
-    if (!prenom || !nom || !email) { setErrQui('Prénom, nom et e-mail sont obligatoires.'); return; }
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { setErrQui("Cette adresse e-mail n'a pas l'air valide."); return; }
+    const contexte = (f.commentaire || '').trim();
+    let prenom = '', email = '';
+    if (morale) {
+      if (!nom) { setErrQui("L'intitulé de l'entité est obligatoire."); return; }
+      if (contexte.length < MV_CONTEXTE_MIN) {
+        setErrQui(`Le contexte doit faire au moins ${MV_CONTEXTE_MIN} caractères (${contexte.length} pour l'instant) : il lève les ambiguïtés entre homonymes.`);
+        return;
+      }
+    } else {
+      prenom = (f.prenom || '').trim();
+      email  = (f.email || '').trim();
+      if (!prenom || !nom || !email) { setErrQui('Prénom, nom et e-mail sont obligatoires.'); return; }
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { setErrQui("Cette adresse e-mail n'a pas l'air valide."); return; }
+    }
     setBusyQui(true); setErrQui(null);
     const { data, error } = await sb.from('mv_personnes').insert({
       prenom, nom, email,
-      commentaire: (f.commentaire || '').trim() || null,
+      type_entite: morale ? 'morale' : 'physique',
+      est_public: !!f.est_public,
+      commentaire: contexte || null,
       exclusions: exclusionsParDefaut(),
       created_by: user?.email || null,
     }).select().single();
@@ -21741,6 +21782,13 @@ function AdminMindVectorScreen({ user, profile, onBack, onFeedback, chipName, av
   // une vide — « cette personne n'a rien choisi » se lit alors comme tel.
   const repondre = async (pos) => {
     if (!personne || !sel) return;
+    // Un profil public se CONSULTE. La base refuserait l'écriture de toute
+    // façon (ni sa fiche, ni une invitation, ni un rôle admin) : on le dit
+    // plutôt que de laisser tomber une erreur RLS sur un clic.
+    if (personne.est_public && !peutEditer) {
+      setErreur("Ce profil public se consulte : seuls les administrateurs le renseignent.");
+      return;
+    }
     const efface = reponses[sel] === pos;
     setReponses(r => {
       const n = { ...r };
@@ -21808,6 +21856,97 @@ function AdminMindVectorScreen({ user, profile, onBack, onFeedback, chipName, av
       (parNode[r.node_id] = parNode[r.node_id] || []).push({ auteurId: r.auteur_id, pos: r.pos, couleur: coul[r.auteur_id], nom: map.get(r.auteur_id).nom });
     });
     setSynthese({ auteurs, parNode });
+  };
+
+  // ── Remplissage automatique d'un profil public ────────────────────────────
+  // Ouvrir la page : on charge le prompt (modifiable) et le carnet de la
+  // dernière recherche. Le tableau doit être là AVANT qu'on relance quoi que
+  // ce soit — c'est la mémoire de ce qui a déjà été cherché.
+  const ouvrirRemplir = async () => {
+    if (!personne) return;
+    setPopupQui(false); setPopupRemplir(true); setRechMsg(null); setPromptSauve(null);
+    const { data: pr } = await sb.rpc('get_ai_prompts');
+    const p = (pr || []).find(r => r.feature === 'mind_vector_public');
+    setPromptPublic(p ? p.system_prompt : '');
+    const { data: rs } = await sb.from('mv_recherches').select('*').eq('personne_id', personne.id);
+    const m = {}; (rs || []).forEach(r => { m[r.node_id] = r; });
+    setRecherches(m);
+  };
+
+  const enregistrerPromptPublic = async () => {
+    setPromptSauve(null);
+    const { error } = await sb.rpc('set_ai_prompt', { p_feature: 'mind_vector_public', p_prompt: promptPublic || '' });
+    setPromptSauve(error ? { type:'err', texte: error.message } : { type:'ok', texte: 'Consignes enregistrées.' });
+  };
+
+  // Les sujets à chercher : ceux du parcours retenu pour ce profil, dont la
+  // position n'est PAS déjà renseignée — le prompt le dit, l'écran le tient.
+  const sujetsARemplir = aClasser.filter(id => reponses[id] === undefined);
+
+  // Un appel par sujet. La boucle vit dans l'écran et non dans la fonction
+  // edge : c'est ce qui permet de voir le tableau se remplir, et de s'arrêter.
+  const lancerRecherche = async () => {
+    if (!personne || rechEnCours) return;
+    stopRef.current = false;
+    setRechEnCours(true); setRechMsg(null); setRechChrono(0); setRechCout(0);
+    const debut = Date.now();
+    const horloge = setInterval(() => setRechChrono(Math.round((Date.now() - debut) / 1000)), 1000);
+    // La boucle dure des minutes : un jeton frais au départ, passé
+    // explicitement, évite qu'elle meure en route sur un 401.
+    let jeton = null;
+    try {
+      const { data: rafraichie } = await sb.auth.refreshSession();
+      jeton = rafraichie?.session?.access_token || null;
+    } catch { /* on part avec le jeton courant */ }
+    // `rechMsg` lu depuis cette fonction resterait figé à sa valeur d'avant la
+    // boucle : l'échec se suit dans une variable locale, pas dans l'état.
+    let faits = 0, echec = false;
+    try {
+      for (const id of sujetsARemplir) {
+        if (stopRef.current) break;
+        setRechSujet(id);
+        const { data, error } = await sb.functions.invoke('mind-vector', {
+          body: { action: 'public_position', personne_id: personne.id, node_id: id },
+          ...(jeton ? { headers: { Authorization: `Bearer ${jeton}` } } : {}),
+        });
+        if (error || data?.error) {
+          setRechMsg({ type:'err', texte: await mvMessageErreur(error, data) });
+          echec = true;
+          break;
+        }
+        setRecherches(r => ({ ...r, [id]: data }));
+        setRechCout(c => c + (data?.cost?.eur || 0));
+        faits++;
+      }
+      if (!echec) setRechMsg({ type:'ok', texte:
+        stopRef.current ? `Recherche interrompue après ${faits} sujet${faits > 1 ? 's' : ''}.`
+                        : `Recherche terminée : ${faits} sujet${faits > 1 ? 's' : ''} examiné${faits > 1 ? 's' : ''}.` });
+    } finally {
+      clearInterval(horloge);
+      setRechEnCours(false); setRechSujet(null);
+    }
+  };
+
+  // Cocher « mettre cette réponse à jour » écrit vraiment la réponse : c'est le
+  // seul geste qui fait passer un brouillon en position retenue. Décocher la
+  // retire, pour que la case dise toujours la vérité sur l'état du profil.
+  const retenirRecherche = async (id, coche) => {
+    const r = recherches[id];
+    if (!r || !personne || !r.pos) return;
+    setRecherches(m => ({ ...m, [id]: { ...m[id], retenu: coche } }));
+    setReponses(m => { const n = { ...m }; if (coche) n[id] = r.pos; else delete n[id]; return n; });
+    setEnVol(v => v + 1);
+    const { error } = coche
+      ? await sb.from('mv_reponses').upsert(
+          { personne_id: personne.id, node_id: id, pos: r.pos, auteur_id: user?.id,
+            updated_at: new Date().toISOString(), updated_by: user?.email || null },
+          { onConflict: 'personne_id,node_id,auteur_id' })
+      : await sb.from('mv_reponses').delete()
+          .eq('personne_id', personne.id).eq('node_id', id).eq('auteur_id', user?.id);
+    setEnVol(v => v - 1);
+    if (error) { setRechMsg({ type:'err', texte: error.message }); return; }
+    await sb.from('mv_recherches').update({ retenu: coche })
+      .eq('personne_id', personne.id).eq('node_id', id);
   };
 
   // ── Portrait : ce que l'ensemble des positions retenues dit de la personne ─
@@ -22183,7 +22322,7 @@ function AdminMindVectorScreen({ user, profile, onBack, onFeedback, chipName, av
             title={mode === 'saisie' ? 'Rédaction des questions' : 'Profil étudié — se change dans Paramètres'}>
             <span className="mv-mode-ico">{mode === 'saisie' ? MV_PICTO.crayon : MV_PICTO.oeil}</span>
             {!compact && <span className="mv-head-qui-lab">Profil étudié :</span>}
-            <span className="nom">{personne ? `${personne.prenom} ${personne.nom}` : (mode === 'reponse' ? 'choisir qui répond' : '—')}</span>
+            <span className="nom">{personne ? mvNom(personne) : (mode === 'reponse' ? 'choisir qui répond' : '—')}</span>
           </div>
           <div className="mv-head-spacer"/>
           <div className="mv-head-tools">
@@ -22389,7 +22528,7 @@ function AdminMindVectorScreen({ user, profile, onBack, onFeedback, chipName, av
           <div style={{display:'flex',alignItems:'flex-start',gap:12}}>
             <div style={{flex:1,minWidth:0}}>
               <div style={{fontSize:19,fontWeight:900,color:'#fff',lineHeight:1.2}}>
-                Portrait — {personne ? `${personne.prenom} ${personne.nom}` : ''}
+                Portrait — {mvNom(personne)}
               </div>
               {portrait.sujets && (
                 <div style={{fontSize:11.5,color:'rgba(255,255,255,.45)',marginTop:3}}>
@@ -22542,36 +22681,93 @@ function AdminMindVectorScreen({ user, profile, onBack, onFeedback, chipName, av
 
           {formQui ? (
             <div style={{display:'flex',flexDirection:'column',gap:11}}>
-              <div style={{fontSize:13,fontWeight:800,color:'#fff'}}>Ajouter une personne sans compte</div>
-              <div>
-                <label>Prénom *</label>
-                <input autoFocus value={formQui.prenom || ''}
-                  onChange={e => setFormQui(f => ({ ...f, prenom: e.target.value }))}/>
+              <div style={{fontSize:13,fontWeight:800,color:'#fff'}}>Ajouter un profil sans compte Starvolt</div>
+
+              {/* Personne physique ou morale : deux formulaires, un seul choix. */}
+              <div style={{display:'flex',gap:8}}>
+                {[{ k:'physique', t:'Personne physique', d:'Un individu' },
+                  { k:'morale',   t:'Personne morale',   d:'Entreprise, parti, institution…' }].map(o => (
+                  <label key={o.k} className="mv-choix"
+                    style={{flex:'1 1 0',minWidth:0,display:'flex',alignItems:'flex-start',gap:8,cursor:'pointer',
+                            padding:'9px 11px',borderRadius:12,
+                            background: (formQui.type_entite || 'physique') === o.k ? 'rgba(125,217,64,.13)' : 'rgba(255,255,255,.06)',
+                            border: '1px solid ' + ((formQui.type_entite || 'physique') === o.k ? 'rgba(125,217,64,.5)' : 'rgba(255,255,255,.14)')}}>
+                    <input type="radio" name="mv-entite" checked={(formQui.type_entite || 'physique') === o.k}
+                      style={{marginTop:2,width:15,height:15,accentColor:'#7dd940',flexShrink:0}}
+                      onChange={() => setFormQui(f => ({ ...f, type_entite: o.k, est_public: o.k === 'morale' ? true : f.est_public }))}/>
+                    <span style={{minWidth:0}}>
+                      <span style={{display:'block',fontSize:12.5,fontWeight:700,color:'#fff'}}>{o.t}</span>
+                      <span style={{display:'block',fontSize:10.5,color:'rgba(255,255,255,.5)',marginTop:2,lineHeight:1.4}}>{o.d}</span>
+                    </span>
+                  </label>
+                ))}
               </div>
-              <div>
-                <label>Nom *</label>
-                <input value={formQui.nom || ''}
-                  onChange={e => setFormQui(f => ({ ...f, nom: e.target.value }))}/>
-              </div>
-              <div>
-                <label>E-mail *</label>
-                <input type="email" value={formQui.email || ''}
-                  onChange={e => setFormQui(f => ({ ...f, email: e.target.value }))}/>
-              </div>
-              <div>
-                <label>Commentaire <span style={{textTransform:'none',letterSpacing:0,fontWeight:600}}>(facultatif)</span></label>
-                <textarea className="mv-dialogue-zone" rows={2} value={formQui.commentaire || ''}
-                  placeholder="Contexte : d'où vient cette personne, pourquoi son avis nous intéresse…"
-                  onChange={e => setFormQui(f => ({ ...f, commentaire: e.target.value }))}/>
-              </div>
+
+              {formQui.type_entite === 'morale' ? (
+                <>
+                  <div>
+                    <label>Nom de l'entité *</label>
+                    <input autoFocus value={formQui.nom || ''} placeholder="ex. Fédération française du bâtiment"
+                      onChange={e => setFormQui(f => ({ ...f, nom: e.target.value }))}/>
+                  </div>
+                  <div>
+                    <label>Contexte * <span style={{textTransform:'none',letterSpacing:0,fontWeight:600}}>({MV_CONTEXTE_MIN} caractères minimum)</span></label>
+                    <textarea className="mv-dialogue-zone" rows={3} value={formQui.commentaire || ''}
+                      placeholder="De quelle entité s'agit-il exactement ? Secteur, pays, période, ce qui la distingue d'une homonyme."
+                      onChange={e => setFormQui(f => ({ ...f, commentaire: e.target.value }))}/>
+                    <div style={{fontSize:10.5,marginTop:4,lineHeight:1.45,
+                                 color: (formQui.commentaire || '').trim().length >= MV_CONTEXTE_MIN ? 'rgba(125,217,64,.85)' : 'rgba(255,255,255,.45)'}}>
+                      {(formQui.commentaire || '').trim().length} / {MV_CONTEXTE_MIN} — deux entités peuvent porter le même nom ; c'est ce texte qui les départage, y compris pour la recherche automatique.
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div>
+                    <label>Prénom *</label>
+                    <input autoFocus value={formQui.prenom || ''}
+                      onChange={e => setFormQui(f => ({ ...f, prenom: e.target.value }))}/>
+                  </div>
+                  <div>
+                    <label>Nom *</label>
+                    <input value={formQui.nom || ''}
+                      onChange={e => setFormQui(f => ({ ...f, nom: e.target.value }))}/>
+                  </div>
+                  <div>
+                    <label>E-mail *</label>
+                    <input type="email" value={formQui.email || ''}
+                      onChange={e => setFormQui(f => ({ ...f, email: e.target.value }))}/>
+                  </div>
+                  <div>
+                    <label>Commentaire <span style={{textTransform:'none',letterSpacing:0,fontWeight:600}}>(facultatif)</span></label>
+                    <textarea className="mv-dialogue-zone" rows={2} value={formQui.commentaire || ''}
+                      placeholder="Contexte : d'où vient cette personne, pourquoi son avis nous intéresse…"
+                      onChange={e => setFormQui(f => ({ ...f, commentaire: e.target.value }))}/>
+                  </div>
+                </>
+              )}
+
+              {/* Le drapeau qui ouvre la fiche à tous. La base le refuse à qui
+                  n'est pas admin, quoi que l'écran envoie. */}
+              <label className="mv-choix" style={{display:'flex',alignItems:'flex-start',gap:9,cursor:'pointer',
+                             padding:'10px 12px',borderRadius:12,
+                             background:'rgba(255,255,255,.06)',border:'1px solid rgba(255,255,255,.14)'}}>
+                <input type="checkbox" checked={!!formQui.est_public}
+                  style={{marginTop:2,width:17,height:17,accentColor:'#7dd940',flexShrink:0}}
+                  onChange={e => setFormQui(f => ({ ...f, est_public: e.target.checked }))}/>
+                <span style={{minWidth:0}}>
+                  <span style={{display:'block',fontSize:13,fontWeight:700,color:'#fff'}}>Profil public</span>
+                  <span style={{display:'block',fontSize:10.5,color:'rgba(255,255,255,.5)',marginTop:2,lineHeight:1.45}}>
+                    Une personne ou une entité connue de tous : sa fiche et ses positions deviennent consultables
+                    par tous les comptes, et seuls les admins peuvent les renseigner. À réserver à ce qui est
+                    déjà public — ne cochez pas pour un particulier.
+                  </span>
+                </span>
+              </label>
+
               {errQui && <div style={{fontSize:12,fontWeight:700,color:'#ff8a8a'}}>{errQui}</div>}
-              <div style={{display:'flex',gap:9}}>
-                <button className="btn btn-yes" style={{flex:'1 1 0',width:'auto',fontSize:13,padding:'10px 0'}}
-                  disabled={busyQui} onClick={creerPersonne}>
-                  {busyQui ? <><StarSpinner size={14} color="#1a4500"/> Création…</> : 'Créer et sélectionner'}
-                </button>
-                <button className="btn btn-no" style={{flex:'0 0 auto',width:'auto',fontSize:13,padding:'10px 16px'}}
-                  disabled={busyQui} onClick={() => { setFormQui(null); setErrQui(null); }}>Retour</button>
+              <div style={{fontSize:10.5,color:'rgba(255,255,255,.4)',lineHeight:1.45}}>
+                Les boutons de création sont en bas de page.
               </div>
             </div>
           ) : (
@@ -22588,7 +22784,7 @@ function AdminMindVectorScreen({ user, profile, onBack, onFeedback, chipName, av
                         <optgroup label="Personnes ajoutées à la main" style={{background:'#0d2430'}}>
                           {fiches.filter(f => !f.user_id).map(f => (
                             <option key={f.id} value={'f:' + f.id} style={{background:'#0d2430'}}>
-                              {f.prenom} {f.nom} — {f.email}
+                              {mvNom(f)}{f.est_public ? ' — profil public' : (f.email ? ' — ' + f.email : '')}
                             </option>
                           ))}
                         </optgroup>
@@ -22603,7 +22799,7 @@ function AdminMindVectorScreen({ user, profile, onBack, onFeedback, chipName, av
                     </select>
                     <button className="btn btn-no" title="Ajouter une personne qui n'a pas de compte"
                       style={{flex:'0 0 auto',width:'auto',fontSize:17,fontWeight:900,padding:'0 14px'}}
-                      onClick={() => { setErrQui(null); setFormQui({ prenom:'', nom:'', email:'', commentaire:'' }); }}>＋</button>
+                      onClick={() => { setErrQui(null); setFormQui({ type_entite:'physique', est_public:false, prenom:'', nom:'', email:'', commentaire:'' }); }}>＋</button>
                     {personne && !personne.user_id && peutEditer && (
                       <button className="btn btn-no" title="Supprimer ce profil ajouté à la main et ses réponses"
                         style={{flex:'0 0 auto',width:'auto',fontSize:17,fontWeight:900,padding:'0 14px',
@@ -22616,18 +22812,36 @@ function AdminMindVectorScreen({ user, profile, onBack, onFeedback, chipName, av
                     value={personne ? personne.id : ''} onChange={e => choisirProfil(e.target.value)}>
                     {profilsAcces.map(f => (
                       <option key={f.id} value={f.id} style={{background:'#0d2430'}}>
-                        {f.prenom} {f.nom}{f.is_own ? ' (moi)' : ''}
+                        {mvNom(f)}{f.is_own ? ' (moi)' : f.est_public ? ' — profil public' : ''}
                       </option>
                     ))}
                   </select>
                 ) : (
                   <div style={{fontSize:14,fontWeight:800,color:'#fff',padding:'2px 0'}}>
-                    {personne ? `${personne.prenom} ${personne.nom}` : '—'}
+                    {personne ? mvNom(personne) : '—'}
                   </div>
                 )}
               </div>
 
-              {/* ── A bis. La précision que j'accorde à MON regard ──────────── */}
+              {/* ── A bis. Remplir ce profil depuis Internet ─────────────────── */}
+              {/* Réservé aux profils publics : lancer une recherche nominative
+                  sur un particulier ne serait pas de la documentation. La base
+                  et la fonction edge le refusent aussi. */}
+              {personne && peutEditer && (
+                <div>
+                  <button className="btn btn-no" style={{width:'100%',fontSize:13,padding:'11px 0'}}
+                    disabled={!personne.est_public} onClick={ouvrirRemplir}>
+                    🔎 Remplir automatiquement les positions de ce profil
+                  </button>
+                  {!personne.est_public && (
+                    <div style={{fontSize:10.5,color:'rgba(255,255,255,.68)',marginTop:6,lineHeight:1.45}}>
+                      Réservé aux profils publics. Une recherche Internet au nom d'un particulier n'est pas une documentation.
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* ── A ter. La précision que j'accorde à MON regard ───────────── */}
               {personne && !(personne.user_id && personne.user_id === user?.id) && (
                 <div style={{background:'rgba(255,255,255,.06)',border:'1px solid rgba(255,255,255,.14)',
                              borderRadius:12,padding:'11px 13px'}}>
@@ -22794,14 +23008,185 @@ function AdminMindVectorScreen({ user, profile, onBack, onFeedback, chipName, av
           )}
         </div>
 
-        {/* Pied collant, pleine largeur */}
+        {/* Pied collant, pleine largeur. Deux boutons et pas quatre : le
+            formulaire de création portait les siens dans le corps défilant,
+            en double des Retour / OK d'en bas. Ici le pied dit ce que fait
+            l'écran qu'on regarde. */}
         <div style={{flexShrink:0,borderTop:'1px solid rgba(255,255,255,.14)',background:'rgba(4,44,56,.55)'}}>
           <div style={{display:'flex',gap:10,padding:'12px 18px',width:'100%',maxWidth:640,margin:'0 auto',boxSizing:'border-box'}}>
             <button className="btn btn-no" style={{flex:'0 0 auto',width:'auto',padding:'12px 22px'}}
-              title="Retour" aria-label="Retour" disabled={busyQui} onClick={fermerPage}>
+              title="Retour" aria-label="Retour" disabled={busyQui}
+              onClick={() => { if (formQui) { setFormQui(null); setErrQui(null); } else fermerPage(); }}>
               <PictoPorte size={17} trait={2.1}/><span className="lbl-lg">Retour</span>
             </button>
-            <button className="btn btn-yes" style={{flex:1}} disabled={busyQui} onClick={fermerPage}>OK</button>
+            {formQui ? (
+              <button className="btn btn-yes" style={{flex:1}} disabled={busyQui} onClick={creerPersonne}>
+                {busyQui ? <><StarSpinner size={14} color="#1a4500"/> Création…</> : 'Créer et sélectionner'}
+              </button>
+            ) : (
+              <button className="btn btn-yes" style={{flex:1}} disabled={busyQui} onClick={fermerPage}>OK</button>
+            )}
+          </div>
+        </div>
+      </div>
+    )}
+
+    {/* ── Remplir automatiquement les positions d'un profil public ────────── */}
+    {popupRemplir && (
+      <div style={{position:'fixed',inset:0,zIndex:9650,display:'flex',flexDirection:'column',
+                   background:'linear-gradient(145deg, #065060 0%, #0a9b8c 50%, #0b8264 100%)'}}>
+        <div style={{flexShrink:0,padding:'16px 18px 11px',borderBottom:'1px solid rgba(255,255,255,.14)'}}>
+          <div style={{fontSize:18,fontWeight:900,color:'#fff'}}>Remplir automatiquement les positions de ce profil</div>
+          <div style={{fontSize:12,color:'rgba(255,255,255,.75)',marginTop:3,lineHeight:1.45}}>
+            {mvNom(personne)} — {sujetsARemplir.length} sujet{sujetsARemplir.length > 1 ? 's' : ''} non renseigné{sujetsARemplir.length > 1 ? 's' : ''}.
+            Ce qui est déjà classé n'est pas touché.
+          </div>
+        </div>
+
+        <div className="mv-page" style={{flex:1,minHeight:0,overflowY:'auto',width:'100%',maxWidth:900,margin:'0 auto',
+                     boxSizing:'border-box',padding:'14px 18px 24px',display:'flex',flexDirection:'column',gap:15}}>
+
+          {/* Les consignes, modifiables ici comme dans l'écran des prompts. */}
+          <div>
+            <label>Consignes pour remplir automatiquement les positions d'un profil</label>
+            {promptPublic === null ? (
+              <div style={{fontSize:11.5,color:'rgba(255,255,255,.4)'}}>Chargement des consignes…</div>
+            ) : (
+              <>
+                <textarea className="mv-dialogue-zone" rows={10} value={promptPublic}
+                  style={{fontSize:12,lineHeight:1.5}}
+                  onChange={e => { setPromptPublic(e.target.value); setPromptSauve(null); }}/>
+                <div style={{display:'flex',alignItems:'center',gap:10,marginTop:7}}>
+                  <button className="btn btn-no" style={{width:'auto',fontSize:12.5,padding:'8px 16px'}}
+                    onClick={enregistrerPromptPublic}>Enregistrer les consignes</button>
+                  {promptSauve && (
+                    <span style={{fontSize:12,fontWeight:700,color: promptSauve.type === 'ok' ? '#5fd38a' : '#ff8a8a'}}>
+                      {promptSauve.texte}
+                    </span>
+                  )}
+                </div>
+                <div style={{fontSize:10.5,color:'rgba(255,255,255,.5)',marginTop:6,lineHeight:1.45}}>
+                  <strong style={{color:'#a3ed6a'}}>#profil-public</strong> est remplacé, à chaque recherche, par le nom
+                  du profil et le contexte saisi à sa création. {promptPublic.includes('#profil-public')
+                    ? '' : '⚠️ Ce jeton a disparu du texte : le modèle ne saura pas de qui l’on parle.'}
+                </div>
+              </>
+            )}
+          </div>
+
+          {/* Lancer, chronométrer, arrêter. */}
+          <div style={{display:'flex',alignItems:'center',gap:10,flexWrap:'wrap'}}>
+            <button className="btn btn-yes" style={{width:'auto',fontSize:13,padding:'11px 20px'}}
+              disabled={rechEnCours || !sujetsARemplir.length} onClick={lancerRecherche}>
+              {rechEnCours ? <><StarSpinner size={14} color="#1a4500"/> Recherche…</> : '🔎 Lancer cette recherche'}
+            </button>
+            <span style={{fontSize:15,fontWeight:900,color:'#fff',fontVariantNumeric:'tabular-nums'}}>
+              {String(Math.floor(rechChrono / 60)).padStart(2,'0')}:{String(rechChrono % 60).padStart(2,'0')}
+            </span>
+            <button className="btn btn-no" style={{width:'auto',fontSize:13,padding:'11px 18px',
+                     color:'#ff8a8a',borderColor:'rgba(255,138,106,.5)'}}
+              disabled={!rechEnCours} onClick={() => { stopRef.current = true; }}>■ Stop</button>
+            {rechCout > 0 && (
+              <span style={{fontSize:11.5,color:'rgba(255,255,255,.55)',fontWeight:700}}>
+                {rechCout.toFixed(3)} € dépensés
+              </span>
+            )}
+          </div>
+          {rechEnCours && rechSujet && (
+            <div style={{fontSize:11.5,color:'rgba(255,255,255,.6)',marginTop:-8}}>
+              En cours : {(parId[rechSujet] || {}).label || '…'}
+            </div>
+          )}
+          {rechMsg && (
+            <div style={{fontSize:12.5,fontWeight:700,marginTop:-8,
+                         color: rechMsg.type === 'ok' ? '#5fd38a' : '#ff8a8a'}}>{rechMsg.texte}</div>
+          )}
+          {!sujetsARemplir.length && (
+            <div style={{fontSize:11.5,color:'rgba(255,255,255,.6)',marginTop:-8}}>
+              Tous les sujets ouverts sont déjà renseignés sur ce profil : il n'y a rien à chercher.
+            </div>
+          )}
+
+          {/* Le carnet de recherche. Persisté : rouvrir la page le retrouve. */}
+          <div>
+            <label>Ce que la recherche a trouvé</label>
+            {Object.keys(recherches).length === 0 ? (
+              <div style={{fontSize:11.5,color:'rgba(255,255,255,.45)',lineHeight:1.5}}>
+                Aucune recherche pour ce profil pour l'instant.
+              </div>
+            ) : (
+              <div style={{overflowX:'auto',background:'rgba(0,0,0,.18)',border:'1px solid rgba(255,255,255,.12)',
+                           borderRadius:10}}>
+                <table style={{width:'100%',borderCollapse:'collapse',fontSize:12,color:'#fff',minWidth:720}}>
+                  <thead>
+                    <tr style={{textAlign:'left',color:'rgba(255,255,255,.55)',fontSize:10.5,textTransform:'uppercase',letterSpacing:.5}}>
+                      <th style={{padding:'8px 10px',fontWeight:800}}>Sujet</th>
+                      <th style={{padding:'8px 10px',fontWeight:800}}>Position trouvée</th>
+                      <th style={{padding:'8px 10px',fontWeight:800}}>Précision</th>
+                      <th style={{padding:'8px 10px',fontWeight:800}}>Source</th>
+                      <th style={{padding:'8px 10px',fontWeight:800}}>Recherché le</th>
+                      <th style={{padding:'8px 10px',fontWeight:800}}>Mettre à jour</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {Object.entries(recherches).map(([id, r]) => {
+                      const n = parId[id];
+                      const titre = r.pos ? (titres[id + ':' + r.pos] || '').trim() : '';
+                      return (
+                        <tr key={id} style={{borderTop:'1px solid rgba(255,255,255,.09)',
+                                             background: rechSujet === id ? 'rgba(125,217,64,.10)' : 'transparent'}}>
+                          <td style={{padding:'8px 10px',fontWeight:700,minWidth:150}}>{n ? n.label : '(sujet supprimé)'}</td>
+                          <td style={{padding:'8px 10px',minWidth:170}}>
+                            {r.pos ? <><strong>{r.pos}</strong>{titre ? ` — ${titre}` : ''}</>
+                                   : <span style={{color:'rgba(255,255,255,.45)'}}>rien de concluant</span>}
+                            {r.extrait && (
+                              <div style={{fontSize:10.5,color:'rgba(255,255,255,.5)',marginTop:3,lineHeight:1.45}}>{r.extrait}</div>
+                            )}
+                          </td>
+                          <td style={{padding:'8px 10px',fontWeight:900,whiteSpace:'nowrap',
+                                      color: r.taux >= 80 ? '#a3ed6a' : r.taux >= 40 ? '#ffcf7a' : 'rgba(255,255,255,.45)'}}>
+                            {r.taux} %
+                          </td>
+                          <td style={{padding:'8px 10px',maxWidth:200}}>
+                            {r.url
+                              ? <a href={r.url} target="_blank" rel="noopener noreferrer"
+                                   style={{color:'#a3ed6a',wordBreak:'break-word'}}>{r.source || r.url}</a>
+                              : <span style={{color:'rgba(255,255,255,.35)'}}>—</span>}
+                          </td>
+                          <td style={{padding:'8px 10px',whiteSpace:'nowrap',color:'rgba(255,255,255,.6)'}}>
+                            {r.cherche_le ? new Date(r.cherche_le).toLocaleString('fr-FR',
+                              { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' }) : '—'}
+                          </td>
+                          <td style={{padding:'8px 10px',textAlign:'center'}}>
+                            <input type="checkbox" checked={!!r.retenu} disabled={!r.pos}
+                              title={r.pos ? 'Écrire cette position comme réponse du profil'
+                                           : 'Rien à reporter : la recherche n’a pas conclu'}
+                              style={{width:16,height:16,accentColor:'#7dd940',cursor: r.pos ? 'pointer' : 'not-allowed'}}
+                              onChange={e => retenirRecherche(id, e.target.checked)}/>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            <div style={{fontSize:10.5,color:'rgba(255,255,255,.5)',marginTop:7,lineHeight:1.45}}>
+              Cocher une ligne écrit la position comme réponse de ce profil ; décocher la retire.
+              Sous 40 % de précision, la recherche ne propose rien — une case vide vaut mieux qu'une case inventée.
+            </div>
+          </div>
+        </div>
+
+        <div style={{flexShrink:0,borderTop:'1px solid rgba(255,255,255,.14)',background:'rgba(4,44,56,.55)'}}>
+          <div style={{display:'flex',gap:10,padding:'12px 18px',width:'100%',maxWidth:900,margin:'0 auto',boxSizing:'border-box'}}>
+            <button className="btn btn-no" style={{flex:'0 0 auto',width:'auto',padding:'12px 22px'}}
+              title="Retour" aria-label="Retour" disabled={rechEnCours}
+              onClick={() => { setPopupRemplir(false); setPopupQui(true); }}>
+              <PictoPorte size={17} trait={2.1}/><span className="lbl-lg">Retour</span>
+            </button>
+            <button className="btn btn-yes" style={{flex:1}} disabled={rechEnCours}
+              onClick={() => setPopupRemplir(false)}>OK</button>
           </div>
         </div>
       </div>
@@ -22815,7 +23200,7 @@ function AdminMindVectorScreen({ user, profile, onBack, onFeedback, chipName, av
         onClick={() => setDemPrecision(false)}>
         <div className="mv-dialogue" style={{maxWidth:450,maxHeight:'88vh',overflowY:'auto'}} onClick={e => e.stopPropagation()}>
           <div style={{fontSize:16,fontWeight:900,color:'#fff',lineHeight:1.3}}>
-            À quel point connaissez-vous {personne.prenom} {personne.nom} ?
+            À quel point connaissez-vous {mvNom(personne)} ?
           </div>
           <div style={{fontSize:12.5,color:'rgba(255,255,255,.75)',lineHeight:1.5}}>
             Vous vous apprêtez à classer quelqu'un d'autre que vous. Personne ne connaît personne

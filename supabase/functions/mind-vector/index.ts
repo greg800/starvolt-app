@@ -31,6 +31,31 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const FEATURE = "mind_vector_fill";
 const FEATURE_PROFIL = "mind_vector_profil";
 const FEATURE_INVITE = "mind_vector_invite";
+const FEATURE_PUBLIC = "mind_vector_public";
+
+// Recherche web côté serveur : Anthropic exécute la requête, on ne fournit
+// aucune clé de moteur. `_20260209` filtre dynamiquement les résultats avant
+// qu'ils n'entrent dans le contexte — disponible sur Opus 4.7.
+const OUTIL_WEB = { type: "web_search_20260209", name: "web_search", max_uses: 8 };
+
+// Repli si le prompt n'a pas été semé (migration_mind_vector_public.sql).
+const DEFAULT_PUBLIC_PROMPT =
+  `Tu documentes la position publique d'une personnalité ou d'une organisation
+sur un sujet donné, en cherchant sur Internet.
+
+LE PROFIL ÉTUDIÉ
+#profil-public
+
+On te donne UN sujet et ses cinq positions possibles. Cherche ce que ce profil
+a dit, écrit ou fait qui permet de le situer, puis choisis la position qui lui
+correspond. Chaque réponse porte un pourcentage de précision : 100 % pour une
+prise de position explicite et sourcée, 70–90 % pour une déduction sans effort
+à partir de propos documentés, 40–60 % pour de simples indices. En dessous de
+40 %, ne renseigne PAS la position — une case vide vaut mieux qu'une case
+inventée. Ne devine jamais à partir de ce que « les gens comme lui » pensent.
+
+Rends la position, la précision, l'URL de la source, son nom, et une ou deux
+phrases de justification, en appelant l'outil prévu à cet effet.`;
 
 // Repli si le prompt n'a pas encore été semé en base.
 const DEFAULT_PROFIL_PROMPT =
@@ -164,6 +189,40 @@ async function askClaude(system: string, userContent: string, tools?: any[], max
     body: JSON.stringify(corps),
   });
   return { ok: res.ok, jsonRes: await res.json() };
+}
+
+// Variante avec recherche web. Un outil serveur peut atteindre sa limite
+// d'itérations et rendre `stop_reason: "pause_turn"` : ce n'est pas une erreur,
+// c'est « j'ai encore du travail ». On renvoie le tour tel quel et le serveur
+// reprend où il s'est arrêté ; sans cette boucle la réponse revient tronquée,
+// sans appel d'outil, et l'écran croit à un échec.
+async function askClaudeWeb(system: string, question: string, tools: any[], maxTokens = 8000) {
+  const messages: any[] = [{ role: "user", content: question }];
+  let jsonRes: any = null;
+  for (let tour = 0; tour < 6; tour++) {
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "x-api-key": ANTHROPIC_API_KEY!,
+        "anthropic-version": "2023-06-01",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        model: MODEL,
+        max_tokens: maxTokens,
+        thinking: { type: "adaptive" },
+        system,
+        messages,
+        tools: [OUTIL_WEB, ...tools],
+        tool_choice: { type: "auto" },
+      }),
+    });
+    if (!res.ok) return { ok: false, jsonRes: await res.json() };
+    jsonRes = await res.json();
+    if (jsonRes?.stop_reason !== "pause_turn") return { ok: true, jsonRes };
+    messages.push({ role: "assistant", content: jsonRes.content });
+  }
+  return { ok: true, jsonRes };
 }
 
 async function loggerCout(usage: any, email: string, feature: string) {
@@ -589,6 +648,140 @@ async function profil(body: any, caller: { id: string; email: string }): Promise
                 cost: { usd: costUsd, eur: costUsd / USD_PER_EUR } });
 }
 
+// ── action "public_position" ────────────────────────────────────────────────
+// Cherche sur Internet la position d'un profil PUBLIC sur UN sujet. Un sujet
+// par appel : la recherche prend des dizaines de secondes, et l'écran doit
+// pouvoir montrer l'avancement et s'arrêter en cours de route. Le résultat est
+// un BROUILLON (mv_recherches) — le passage en réponse ferme reste un geste.
+//
+// ⚠️ Réservé aux fiches marquées `est_public`. Lancer une recherche Internet
+// nominative sur un particulier — les comptes Starvolt portent nom et e-mail —
+// serait une collecte de données personnelles, pas une documentation. La garde
+// est ici parce que le service_role contourne la RLS.
+async function publicPosition(body: any, caller: { id: string; email: string }): Promise<Response> {
+  const personneId = String(body?.personne_id || "").trim();
+  const nodeId     = String(body?.node_id || "").trim();
+  if (!UUID.test(personneId) || !UUID.test(nodeId)) {
+    return json({ error: "bad_request", message: "Profil ou sujet invalide." }, 400);
+  }
+
+  const fiche = ((await dbSelect(
+    `mv_personnes?id=eq.${personneId}&select=id,prenom,nom,commentaire,est_public,type_entite&limit=1`,
+  )) || [])[0];
+  if (!fiche) return json({ error: "bad_request", message: "Profil introuvable." }, 400);
+  if (!fiche.est_public) {
+    return json({
+      error: "forbidden",
+      message: "La recherche automatique n'est ouverte qu'aux profils publics : "
+             + "chercher sur Internet au nom d'un particulier n'est pas de la documentation.",
+    }, 403);
+  }
+
+  const noeuds = (await dbSelect("mv_nodes?select=id,parent_id,label,description&limit=500")) || [];
+  const parId: Record<string, any> = {};
+  for (const n of noeuds) parId[n.id] = n;
+  const sujet = parId[nodeId];
+  if (!sujet) return json({ error: "bad_request", message: "Sujet introuvable." }, 400);
+  const chemin: string[] = [];
+  for (let cur = sujet, g = 0; cur && g < 40; g++) {
+    chemin.unshift(cur.label); cur = cur.parent_id ? parId[cur.parent_id] : null;
+  }
+
+  const ps = ((await dbSelect(
+    `mv_positions?node_id=eq.${nodeId}&select=pos,titre,content&order=pos`,
+  )) || []);
+  if (!ps.length) return json({ error: "vide", message: "Ce sujet n'a pas de positions rédigées." }, 422);
+
+  // Qui est ce profil : l'intitulé et le contexte saisi à la création. Sans le
+  // commentaire, deux homonymes publics sont indiscernables — c'est pour ça
+  // qu'il est obligatoire sur une personne morale.
+  const identite = (fiche.type_entite === "morale"
+    ? String(fiche.nom || "").trim()
+    : [fiche.prenom, fiche.nom].filter(Boolean).join(" ").trim())
+    + (fiche.commentaire ? `\n(${String(fiche.commentaire).replace(/\s+/g, " ").trim()})` : "");
+
+  let systemPrompt = DEFAULT_PUBLIC_PROMPT;
+  try {
+    const pr = await dbSelect(`ai_prompts?feature=eq.${FEATURE_PUBLIC}&select=system_prompt`);
+    const p = Array.isArray(pr) ? pr[0] : null;
+    if (p?.system_prompt) systemPrompt = p.system_prompt;
+  } catch { /* repli sur le prompt codé */ }
+  // Le jeton du prompt : c'est ici que le profil entre dans les consignes.
+  systemPrompt = systemPrompt.split("#profil-public").join(identite);
+
+  const outil = {
+    name: "report_position",
+    description: "Rendre la position trouvée pour ce profil sur ce sujet, avec sa source.",
+    input_schema: {
+      type: "object",
+      properties: {
+        pos:     { type: ["integer", "null"], description: "Position retenue de 1 à 5, ou null si rien de solide." },
+        taux:    { type: "integer", description: "Précision de 0 à 100. Sous 40, laisser pos à null." },
+        url:     { type: ["string", "null"], description: "URL de la source principale." },
+        source:  { type: ["string", "null"], description: "Nom de la source (média, institution, auteur)." },
+        extrait: { type: "string", description: "Une ou deux phrases : ce qui fonde le classement, ou pourquoi rien n'a été trouvé." },
+      },
+      required: ["pos", "taux", "extrait"],
+    },
+  };
+
+  const question =
+    `SUJET : ${chemin.join(" › ")}` +
+    (sujet.description ? `\n(${String(sujet.description).replace(/\s+/g, " ").trim()})` : "") +
+    `\n\nLES CINQ POSITIONS POSSIBLES :\n` +
+    ps.map((p: any) =>
+      `${p.pos}. ${p.titre || "(sans titre)"} — ${String(p.content || "").replace(/\s+/g, " ").trim()}`,
+    ).join("\n") +
+    `\n\nCherche sur Internet, puis appelle report_position.`;
+
+  const { ok, jsonRes } = await askClaudeWeb(systemPrompt, question, [outil]);
+  if (!ok) {
+    return json({ error: "ai_error", message: jsonRes?.error?.message || "Appel Claude en échec." }, 502);
+  }
+  const appel = (jsonRes?.content || []).find((c: any) => c.type === "tool_use" && c.name === "report_position");
+  if (!appel) {
+    const texte = (jsonRes?.content || []).filter((c: any) => c.type === "text").map((c: any) => c.text).join(" ").trim();
+    return json({ error: "vide", message: texte.slice(0, 300) || "Claude n'a rien renvoyé d'exploitable." }, 502);
+  }
+
+  const a = appel.input || {};
+  const taux = Math.max(0, Math.min(100, Number(a.taux) || 0));
+  // La règle du prompt est aussi tenue ici : sous 40 %, pas de position. Un
+  // modèle qui l'oublierait ne doit pas pouvoir remplir une case sur une
+  // intuition.
+  let pos: number | null = Number.isInteger(a.pos) ? Number(a.pos) : null;
+  if (pos !== null && (pos < 1 || pos > 5)) pos = null;
+  if (taux < 40) pos = null;
+
+  const ligne = {
+    personne_id: personneId,
+    node_id: nodeId,
+    pos,
+    taux,
+    url: a.url ? String(a.url).slice(0, 2000) : null,
+    source: a.source ? String(a.source).slice(0, 300) : null,
+    extrait: String(a.extrait || "").slice(0, 2000),
+    retenu: false,
+    cherche_le: new Date().toISOString(),
+  };
+  try {
+    await fetch(`${SUPABASE_URL}/rest/v1/mv_recherches?on_conflict=personne_id,node_id`, {
+      method: "POST",
+      headers: {
+        apikey: SERVICE_ROLE,
+        Authorization: `Bearer ${SERVICE_ROLE}`,
+        "Content-Type": "application/json",
+        Prefer: "resolution=merge-duplicates,return=minimal",
+      },
+      body: JSON.stringify(ligne),
+    });
+  } catch { /* le résultat est rendu même si la mémorisation échoue */ }
+
+  const usage = jsonRes?.usage || {};
+  const costUsd = await loggerCout(usage, caller.email, FEATURE_PUBLIC);
+  return json({ ...ligne, usage, cost: { usd: costUsd, eur: costUsd / USD_PER_EUR } });
+}
+
 // ── action "branche" ────────────────────────────────────────────────────────
 // Crée d'un coup plusieurs sujets sous une même branche, chacun avec ses 5
 // positions. Lit d'abord TOUT ce qui existe déjà pour ne pas reposer une
@@ -905,6 +1098,14 @@ async function handle(req: Request): Promise<Response> {
   }
   if (body?.action === "rescan")  return await rescan(caller.email);
   if (body?.action === "branche") return await branche(body, caller.email);
+  // Un appel par sujet : le plafond horaire doit tenir un arbre entier, tout en
+  // bornant la dépense si une boucle d'écran s'emballe.
+  if (body?.action === "public_position") {
+    if (await checkRateLimit(FEATURE_PUBLIC, caller.email, 150)) {
+      return json({ error: "rate_limited", message: "Limite de 150 recherches par heure atteinte." }, 429);
+    }
+    return await publicPosition(body, caller);
+  }
   return await generer(body, caller.email);
 }
 
