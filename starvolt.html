@@ -22045,6 +22045,10 @@ function AdminMindVectorScreen({ user, profile, onBack, onFeedback, chipName, av
     // on passe au suivant ; le compte-rendu final dit ce qui manque, et
     // relancer ne refera que les sujets restés vides.
     let faits = 0, rates = 0, suite = 0, bloque = false, dernierEchec = null;
+    // `enregistres` compte les positions réellement écrites en base, `nonEcrits`
+    // celles trouvées que l'écriture a refusées : sans cette distinction, un
+    // « 36 sujets examinés » laisserait croire à 36 réponses enregistrées.
+    let enregistres = 0, nonEcrits = 0;
     const chercherUn = async (id) => {
       const { data, error } = await sb.functions.invoke('mind-vector', {
         body: { action: 'public_position', personne_id: personne.id, node_id: id,
@@ -22078,14 +22082,35 @@ function AdminMindVectorScreen({ user, profile, onBack, onFeedback, chipName, av
         setRecherches(m => ({ ...m, [id]: r.data }));
         setRechCout(c => c + (r.data?.cost?.eur || 0));
         faits++;
+        // Une position trouvée s'enregistre AUSSITÔT, sujet par sujet. Elle
+        // restait auparavant en brouillon jusqu'à ce qu'on coche les lignes une
+        // à une : LFI puis le RN ont dû être reportés à la main par une passe
+        // SQL. Écrire ici plutôt qu'en fin de boucle, c'est aussi ce qui met le
+        // travail à l'abri d'un Stop, d'un onglet fermé ou d'une panne au
+        // vingtième sujet.
+        if (r.data?.pos) {
+          const msg = await appliquerRecherche(id, r.data, true);
+          if (msg) { nonEcrits++; dernierEchec = `position trouvée mais non enregistrée — ${msg}`; }
+          else enregistres++;
+        }
       }
-      const fin = bloque
-        ? `Recherche arrêtée après ${faits} sujet${faits > 1 ? 's' : ''} : trois échecs de suite, la panne vaut pour tous les sujets.`
+      const s = n => n > 1 ? 's' : '';
+      const entete = bloque
+        ? `Recherche arrêtée après ${faits} sujet${s(faits)} : trois échecs de suite, la panne vaut pour tous les sujets.`
         : stopRef.current
-          ? `Recherche interrompue après ${faits} sujet${faits > 1 ? 's' : ''}.`
-          : `Recherche terminée : ${faits} sujet${faits > 1 ? 's' : ''} examiné${faits > 1 ? 's' : ''}.`;
-      setRechMsg(rates
-        ? { type:'err', texte: `${fin} ${bloque ? 'Message de l’API : ' : `${rates} en échec (relancez pour ne reprendre que ceux-là) — `}${dernierEchec}` }
+          ? `Recherche interrompue après ${faits} sujet${s(faits)}.`
+          : `Recherche terminée : ${faits} sujet${s(faits)} examiné${s(faits)}.`;
+      // Le compte des positions écrites se dit toujours, y compris à zéro : sur
+      // un profil discret la recherche peut n'avoir rien conclu nulle part, et
+      // « 12 sujets examinés » seul laisserait croire à 12 réponses.
+      const fin = `${entete} ${enregistres} position${s(enregistres)} enregistrée${s(enregistres)}.`;
+      const souci = bloque
+        ? `Message de l’API : ${dernierEchec}`
+        : rates
+          ? `${rates} sujet${s(rates)} en échec (relancez pour ne reprendre que ceux-là) — ${dernierEchec}`
+          : `${nonEcrits} position${s(nonEcrits)} trouvée${s(nonEcrits)} mais non enregistrée${s(nonEcrits)} — ${dernierEchec}`;
+      setRechMsg((rates || nonEcrits)
+        ? { type:'err', texte: `${fin} ${souci}` }
         : { type:'ok', texte: fin });
     } finally {
       clearInterval(horloge);
@@ -22093,28 +22118,49 @@ function AdminMindVectorScreen({ user, profile, onBack, onFeedback, chipName, av
     }
   };
 
-  // Cocher « mettre cette réponse à jour » écrit vraiment la réponse : c'est le
-  // seul geste qui fait passer un brouillon en position retenue. Décocher la
-  // retire, pour que la case dise toujours la vérité sur l'état du profil.
-  const retenirRecherche = async (id, coche) => {
-    const r = recherches[id];
-    if (!r || !personne || !r.pos) return;
-    setRecherches(m => ({ ...m, [id]: { ...m[id], retenu: coche } }));
-    setReponses(m => { const n = { ...m }; if (coche) n[id] = r.pos; else delete n[id]; return n; });
-    setEnVol(v => v + 1);
+  // Écrit — ou retire — la réponse issue d'un brouillon de recherche.
+  //
+  // La ligne est passée en ARGUMENT et non relue dans `recherches` : appelée
+  // depuis la boucle de recherche, l'état ne contient pas encore le sujet qui
+  // vient d'être trouvé (le setState de l'itération n'a pas été rendu).
+  // Rend null si tout s'est bien passé, le message d'erreur sinon.
+  const appliquerRecherche = async (id, ligne, coche) => {
+    if (!ligne || !personne || !ligne.pos) return null;
+    setRecherches(m => ({ ...m, [id]: { ...(m[id] || ligne), retenu: coche } }));
+    setReponses(m => { const n = { ...m }; if (coche) n[id] = ligne.pos; else delete n[id]; return n; });
     setOrigines(m => { const n = { ...m }; if (coche) n[id] = 'recherche'; else delete n[id]; return n; });
+    setEnVol(v => v + 1);
     const { error } = coche
       ? await sb.from('mv_reponses').upsert(
-          { personne_id: personne.id, node_id: id, pos: r.pos, auteur_id: user?.id,
+          { personne_id: personne.id, node_id: id, pos: ligne.pos, auteur_id: user?.id,
             origine: 'recherche',
             updated_at: new Date().toISOString(), updated_by: user?.email || null },
           { onConflict: 'personne_id,node_id,auteur_id' })
       : await sb.from('mv_reponses').delete()
           .eq('personne_id', personne.id).eq('node_id', id).eq('auteur_id', user?.id);
     setEnVol(v => v - 1);
-    if (error) { setRechMsg({ type:'err', texte: error.message }); return; }
+    if (error) {
+      // Revenir en arrière. L'affichage optimiste se justifiait tant qu'un
+      // humain regardait la case qu'il venait de cocher ; la boucle, elle,
+      // tourne sans témoin — laisser l'écran annoncer 36 réponses que la base
+      // n'a pas, et sortir ces sujets du parcours « à classer », serait pire
+      // que l'erreur elle-même.
+      setRecherches(m => ({ ...m, [id]: { ...(m[id] || ligne), retenu: !coche } }));
+      setReponses(m => { const n = { ...m }; if (coche) delete n[id]; else n[id] = ligne.pos; return n; });
+      setOrigines(m => { const n = { ...m }; if (coche) delete n[id]; else n[id] = 'recherche'; return n; });
+      return error.message;
+    }
     await sb.from('mv_recherches').update({ retenu: coche })
       .eq('personne_id', personne.id).eq('node_id', id);
+    return null;
+  };
+
+  // La case reste le moyen de REVENIR sur une position trouvée : la recherche
+  // enregistre désormais elle-même (cf. `lancerRecherche`), mais décocher retire
+  // la réponse, pour que la case dise toujours la vérité sur l'état du profil.
+  const retenirRecherche = async (id, coche) => {
+    const msg = await appliquerRecherche(id, recherches[id], coche);
+    if (msg) setRechMsg({ type:'err', texte: msg });
   };
 
   // ── Portrait : ce que l'ensemble des positions retenues dit de la personne ─
@@ -23409,7 +23455,7 @@ function AdminMindVectorScreen({ user, profile, onBack, onFeedback, chipName, av
                           </td>
                           <td style={{padding:'8px 10px',textAlign:'center'}}>
                             <input type="checkbox" checked={!!r.retenu} disabled={!r.pos}
-                              title={r.pos ? 'Écrire cette position comme réponse du profil'
+                              title={r.pos ? 'Position enregistrée comme réponse du profil — décocher pour la retirer'
                                            : 'Rien à reporter : la recherche n’a pas conclu'}
                               style={{width:16,height:16,accentColor:'#7dd940',cursor: r.pos ? 'pointer' : 'not-allowed'}}
                               onChange={e => retenirRecherche(id, e.target.checked)}/>
@@ -23422,7 +23468,7 @@ function AdminMindVectorScreen({ user, profile, onBack, onFeedback, chipName, av
               </div>
             )}
             <div style={{fontSize:10.5,color:'rgba(255,255,255,.5)',marginTop:7,lineHeight:1.45}}>
-              Cocher une ligne écrit la position comme réponse de ce profil ; décocher la retire.
+              Chaque position trouvée est enregistrée comme réponse du profil au fil de la recherche ; décocher une ligne la retire.
               Sous 40 % de précision, la recherche ne propose rien — une case vide vaut mieux qu'une case inventée.
             </div>
           </div>

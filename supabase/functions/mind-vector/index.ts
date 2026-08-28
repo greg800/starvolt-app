@@ -716,7 +716,11 @@ async function profil(body: any, caller: { id: string; email: string }): Promise
 // Cherche sur Internet la position d'un profil PUBLIC sur UN sujet. Un sujet
 // par appel : la recherche prend des dizaines de secondes, et l'écran doit
 // pouvoir montrer l'avancement et s'arrêter en cours de route. Le résultat est
-// un BROUILLON (mv_recherches) — le passage en réponse ferme reste un geste.
+// écrit dans mv_recherches, qui garde le détail (extrait, précision, source) ;
+// c'est l'ÉCRAN qui promeut aussitôt la position en réponse ferme, sujet par
+// sujet (`appliquerRecherche`). La fonction ne le fait pas elle-même : elle
+// ignore si l'appelant a déjà classé ce sujet à la main, et un classement à la
+// main prime toujours sur une recherche.
 //
 // ⚠️ Réservé aux fiches marquées `est_public`. Lancer une recherche Internet
 // nominative sur un particulier — les comptes Starvolt portent nom et e-mail —
