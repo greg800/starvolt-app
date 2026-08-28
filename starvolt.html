@@ -1516,6 +1516,20 @@
        déjà blanche, un cadre blanc ne se verrait pas. */
     .mv-pos.encadre         { box-shadow: inset 0 0 0 2.5px #fff; border-color: rgba(255,255,255,.55); }
     .mv-pos.repondu.encadre { box-shadow: 0 6px 22px rgba(0,0,0,.28), inset 0 0 0 2.5px #1f7a1f; }
+    /* Pictos des organisations qui tiennent cette position. Hors du flux : la
+       case est déjà au plancher de lisibilité, lui prendre de la hauteur
+       rognerait le texte. `pointer-events:none` pour ne pas voler le clic qui
+       ouvre la case — sauf aux images, qui doivent pouvoir montrer leur nom. */
+    .mv-pos-pictos {
+      position: absolute; right: 6px; bottom: 5px; z-index: 2;
+      display: flex; gap: 3px; align-items: center;
+      pointer-events: none;
+    }
+    .mv-pos-pictos img {
+      width: 16px; height: 16px; object-fit: contain; pointer-events: auto;
+      border-radius: 3px; background: rgba(255,255,255,.92); padding: 1px;
+      box-shadow: 0 1px 3px rgba(0,0,0,.3);
+    }
     .mv-sujet {
       min-width: 0; text-align: left;
       padding-left: 13px; border-left: 1px solid rgba(255,255,255,.18);
@@ -20667,7 +20681,7 @@ function mvArbrePlat(liste) {
 // la fois (c'est la case la plus chargée qui la fixe), et transmise ici.
 function MvPosition({
   p, texte, titre, renomme, brouillonTitre, actif, ouvert, taille, deborde, longueurMax,
-  repondu, encadre, lecture,
+  repondu, encadre, lecture, pictos,
   zoneRef, refCorps, onOuvrir, onBasculer, onEcrire, onSauver, onFermer,
   onRenommer, onTitre, onValiderTitre, onAnnulerTitre,
 }) {
@@ -20704,6 +20718,19 @@ function MvPosition({
           </button>
         )}
       </div>
+      {/* Les organisations qui se tiennent SUR cette position. Posé en absolu,
+          au coin bas-droit : dans le flux, ce bandeau volerait de la hauteur à
+          une case dont le texte est déjà descendu au plancher de 14 px. À
+          gauche du « voir + », qui occupe le bas-centre. Une liste, et non un
+          picto seul, parce que plusieurs profils peuvent être comparés d'un
+          coup — et `title` nomme ce que 16 px ne peuvent pas dire. */}
+      {!!(pictos && pictos.length) && (
+        <div className="mv-pos-pictos">
+          {pictos.map(o => (
+            <img key={o.id || o.url} src={o.url} alt={o.nom} title={o.nom}/>
+          ))}
+        </div>
+      )}
       <div className={'mv-pos-corps' + (deborde && !libre ? ' coupe' : '')} ref={refCorps}>
         {actif ? (
           <div onClick={e => e.stopPropagation()}>
@@ -21120,6 +21147,19 @@ function AdminMindVectorScreen({ user, profile, onBack, onFeedback, chipName, av
     const { data: rs } = await sb.from('mv_recherches').select('*').eq('personne_id', fiche.id);
     const m = {}; (rs || []).forEach(r => { m[r.node_id] = r; });
     setRecherches(m);
+  };
+
+  // Les organisations qui tiennent CETTE position sur CE sujet.
+  //
+  // Aujourd'hui le seul profil consulté, mais la fonction rend déjà un TABLEAU :
+  // la comparaison à plusieurs profils se branchera ici sans toucher au rendu.
+  // Réservé aux personnes morales — un picto sur une personne physique
+  // reviendrait à mettre un visage sur une évaluation nominative.
+  const pictosPosition = (nodeId, pos) => {
+    if (mode !== 'reponse' || !personne) return null;
+    if (personne.type_entite !== 'morale' || !personne.logo_url) return null;
+    if (autoDiag[nodeId] !== pos) return null;
+    return [{ id: personne.id, url: personne.logo_url, nom: mvNom(personne) }];
   };
 
   // ── Chargement ────────────────────────────────────────────────────────────
@@ -21882,6 +21922,11 @@ function AdminMindVectorScreen({ user, profile, onBack, onFeedback, chipName, av
     setBusyQui(true); setErrQui(null);
     const { data, error } = await sb.from('mv_personnes').insert({
       prenom, nom, email,
+      // Le picto n'a de sens que pour une organisation : en poser un sur une
+      // personne physique reviendrait à mettre un visage sur une évaluation
+      // nominative. On le remet donc à null hors du cas moral, même si le
+      // formulaire en gardait un d'un aller-retour entre les deux onglets.
+      logo_url: morale ? (f.logo_url || null) : null,
       type_entite: morale ? 'morale' : 'physique',
       est_public: !!f.est_public,
       commentaire: contexte || null,
@@ -22512,6 +22557,7 @@ function AdminMindVectorScreen({ user, profile, onBack, onFeedback, chipName, av
           lecture={mode === 'reponse'}
           repondu={mode === 'reponse' && reponses[sel] === p.n}
           encadre={mode === 'reponse' && autoDiag[sel] === p.n}
+          pictos={pictosPosition(sel, p.n)}
           zoneRef={zoneRef}
           refCorps={el => { corpsRefs.current[p.n] = el; }}
           onOuvrir={() => {
@@ -22959,6 +23005,33 @@ function AdminMindVectorScreen({ user, profile, onBack, onFeedback, chipName, av
                     <div style={{fontSize:10.5,marginTop:4,lineHeight:1.45,
                                  color: (formQui.commentaire || '').trim().length >= MV_CONTEXTE_MIN ? 'rgba(125,217,64,.85)' : 'rgba(255,255,255,.45)'}}>
                       {(formQui.commentaire || '').trim().length} / {MV_CONTEXTE_MIN} — deux entités peuvent porter le même nom ; c'est ce texte qui les départage, y compris pour la recherche automatique.
+                    </div>
+                  </div>
+                  <div>
+                    <label>Picto <span style={{textTransform:'none',letterSpacing:0,fontWeight:600}}>(facultatif)</span></label>
+                    <div style={{display:'flex',alignItems:'center',gap:10}}>
+                      {formQui.logo_url
+                        ? <img src={formQui.logo_url} alt="" style={{width:34,height:34,objectFit:'contain',flexShrink:0,
+                                 borderRadius:6,background:'rgba(255,255,255,.9)',padding:2}}/>
+                        : <span style={{width:34,height:34,borderRadius:6,flexShrink:0,display:'grid',placeItems:'center',
+                                 background:'rgba(255,255,255,.06)',border:'1px dashed rgba(255,255,255,.25)',
+                                 fontSize:15,color:'rgba(255,255,255,.35)'}}>?</span>}
+                      <input type="file" accept="image/*" style={{fontSize:11,flex:1,minWidth:0}}
+                        onChange={async e => {
+                          const file = e.target.files?.[0]; if (!file) return;
+                          setBusyQui(true); setErrQui(null);
+                          try {
+                            const url = await uploadLearnImage(file);
+                            setFormQui(f => ({ ...f, logo_url: url }));
+                          } catch (err) { setErrQui('Picto : ' + err.message); }
+                          setBusyQui(false);
+                        }}/>
+                      {formQui.logo_url && (
+                        <button type="button" className="btn btn-no" style={{width:'auto',flex:'0 0 auto',padding:'6px 10px',fontSize:11}}
+                          onClick={() => setFormQui(f => ({ ...f, logo_url: null }))}>Retirer</button>)}
+                    </div>
+                    <div style={{fontSize:10.5,marginTop:4,lineHeight:1.45,color:'rgba(255,255,255,.45)'}}>
+                      Affiché au coin des positions de cette organisation, dans les deux vues. Il sera vu à 16 px : un symbole carré passe, un nom écrit non.
                     </div>
                   </div>
                 </>
