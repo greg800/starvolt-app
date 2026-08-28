@@ -21,7 +21,27 @@ const EMAIL_FROM = Deno.env.get("EMAIL_FROM") ?? "Starvolt <noreply@starvolt.fr>
 const MODEL = "claude-opus-4-7";
 const USD_PER_EUR = 0.92;
 const PRICES: Record<string, { in: number; out: number }> = {
-  "claude-opus-4-7": { in: 5, out: 25 },
+  "claude-opus-4-8":  { in: 5, out: 25 },
+  "claude-opus-4-7":  { in: 5, out: 25 },
+  "claude-sonnet-5":  { in: 3, out: 15 },
+  "claude-haiku-4-5": { in: 1, out: 5 },
+};
+
+// Une requête de recherche web est facturée à part des jetons : 10 $ les 1 000.
+// Sans cette ligne le compteur de l'écran mentait par omission — il ne comptait
+// que le texte, jamais les recherches qui l'avaient produit.
+const USD_PAR_RECHERCHE = 0.01;
+
+// Les modèles ouverts au remplissage automatique, et la version de l'outil de
+// recherche que chacun sait utiliser. `_20260209` filtre les résultats avant
+// qu'ils n'entrent dans le contexte — c'est ce qui borne la facture, puisque
+// 87 % du coût mesuré vient des jetons d'entrée. Haiku 4.5 n'a que la version
+// de base : moins cher au jeton, mais sans ce filtrage.
+const MODELES_RECHERCHE: Record<string, string> = {
+  "claude-opus-4-8":  "web_search_20260209",
+  "claude-opus-4-7":  "web_search_20260209",
+  "claude-sonnet-5":  "web_search_20260209",
+  "claude-haiku-4-5": "web_search_20250305",
 };
 
 // Tout identifiant venu du client part dans une URL PostgREST : on ne laisse
@@ -34,9 +54,11 @@ const FEATURE_INVITE = "mind_vector_invite";
 const FEATURE_PUBLIC = "mind_vector_public";
 
 // Recherche web côté serveur : Anthropic exécute la requête, on ne fournit
-// aucune clé de moteur. `_20260209` filtre dynamiquement les résultats avant
-// qu'ils n'entrent dans le contexte — disponible sur Opus 4.7.
-const OUTIL_WEB = { type: "web_search_20260209", name: "web_search", max_uses: 8 };
+// aucune clé de moteur. Le nombre de recherches est le premier levier de coût,
+// avant même le choix du modèle : chaque recherche verse ses résultats dans le
+// contexte, et l'entrée fait 87 % de la facture.
+const RECHERCHES_DEFAUT = 4;
+const RECHERCHES_MAX = 10;
 
 // Repli si le prompt n'a pas été semé (migration_mind_vector_public.sql).
 const DEFAULT_PUBLIC_PROMPT =
@@ -196,7 +218,15 @@ async function askClaude(system: string, userContent: string, tools?: any[], max
 // c'est « j'ai encore du travail ». On renvoie le tour tel quel et le serveur
 // reprend où il s'est arrêté ; sans cette boucle la réponse revient tronquée,
 // sans appel d'outil, et l'écran croit à un échec.
-async function askClaudeWeb(system: string, question: string, tools: any[], maxTokens = 8000) {
+async function askClaudeWeb(
+  system: string, question: string, tools: any[],
+  modele: string, recherchesMax: number, maxTokens = 8000,
+) {
+  const outilWeb = {
+    type: MODELES_RECHERCHE[modele],
+    name: "web_search",
+    max_uses: recherchesMax,
+  };
   const messages: any[] = [{ role: "user", content: question }];
   let jsonRes: any = null;
   for (let tour = 0; tour < 6; tour++) {
@@ -208,12 +238,16 @@ async function askClaudeWeb(system: string, question: string, tools: any[], maxT
         "content-type": "application/json",
       },
       body: JSON.stringify({
-        model: MODEL,
+        model: modele,
         max_tokens: maxTokens,
         thinking: { type: "adaptive" },
+        // Choisir une position parmi cinq et citer sa source ne demande pas la
+        // profondeur maximale : `high` (le défaut) payait du raisonnement dont
+        // la tâche n'a pas besoin.
+        output_config: { effort: "medium" },
         system,
         messages,
-        tools: [OUTIL_WEB, ...tools],
+        tools: [outilWeb, ...tools],
         tool_choice: { type: "auto" },
       }),
     });
@@ -225,11 +259,15 @@ async function askClaudeWeb(system: string, question: string, tools: any[], maxT
   return { ok: true, jsonRes };
 }
 
-async function loggerCout(usage: any, email: string, feature: string) {
-  const price = PRICES[MODEL] || { in: 0, out: 0 };
+// `modele` et `recherches` sont facultatifs : les actions historiques tournent
+// toutes sur MODEL et n'appellent aucun outil serveur.
+async function loggerCout(usage: any, email: string, feature: string,
+                          modele: string = MODEL, recherches = 0) {
+  const price = PRICES[modele] || { in: 0, out: 0 };
   const costUsd =
     ((usage?.input_tokens || 0) / 1e6) * price.in +
-    ((usage?.output_tokens || 0) / 1e6) * price.out;
+    ((usage?.output_tokens || 0) / 1e6) * price.out +
+    recherches * USD_PAR_RECHERCHE;
   try {
     await fetch(`${SUPABASE_URL}/rest/v1/ai_usage_log`, {
       method: "POST",
@@ -241,7 +279,7 @@ async function loggerCout(usage: any, email: string, feature: string) {
       },
       body: JSON.stringify({
         feature,
-        model: MODEL,
+        model: modele,
         input_tokens: usage?.input_tokens || 0,
         output_tokens: usage?.output_tokens || 0,
         cost_usd: Number(costUsd.toFixed(6)),
@@ -734,7 +772,14 @@ async function publicPosition(body: any, caller: { id: string; email: string }):
     ).join("\n") +
     `\n\nCherche sur Internet, puis appelle report_position.`;
 
-  const { ok, jsonRes } = await askClaudeWeb(systemPrompt, question, [outil]);
+  // Le modèle et le nombre de recherches viennent de l'écran, mais c'est ici
+  // qu'ils sont bornés : une valeur libre venue du client choisirait un modèle
+  // hors tarif — donc un coût que le compteur ne saurait pas calculer.
+  const modele = MODELES_RECHERCHE[String(body?.model || "")] ? String(body.model) : MODEL;
+  const recherchesMax = Math.max(1, Math.min(RECHERCHES_MAX,
+    Number.isFinite(Number(body?.recherches_max)) ? Math.round(Number(body.recherches_max)) : RECHERCHES_DEFAUT));
+
+  const { ok, jsonRes } = await askClaudeWeb(systemPrompt, question, [outil], modele, recherchesMax);
   if (!ok) {
     return json({ error: "ai_error", message: jsonRes?.error?.message || "Appel Claude en échec." }, 502);
   }
@@ -778,8 +823,10 @@ async function publicPosition(body: any, caller: { id: string; email: string }):
   } catch { /* le résultat est rendu même si la mémorisation échoue */ }
 
   const usage = jsonRes?.usage || {};
-  const costUsd = await loggerCout(usage, caller.email, FEATURE_PUBLIC);
-  return json({ ...ligne, usage, cost: { usd: costUsd, eur: costUsd / USD_PER_EUR } });
+  const recherches = Number(usage?.server_tool_use?.web_search_requests) || 0;
+  const costUsd = await loggerCout(usage, caller.email, FEATURE_PUBLIC, modele, recherches);
+  return json({ ...ligne, usage, modele, recherches,
+                cost: { usd: costUsd, eur: costUsd / USD_PER_EUR } });
 }
 
 // ── action "branche" ────────────────────────────────────────────────────────

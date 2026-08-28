@@ -1559,6 +1559,7 @@
     /* Le sujet courant : filet vert à gauche + titre le plus gros de l'écran.
        L'œil doit s'y poser en premier, avant le logo et avant le profil. */
     .mv-head-sujet { position: relative; padding-left: 13px; min-width: 0; }
+    .mv-head-ligne { display: flex; align-items: center; min-width: 0; }
     .mv-head-sujet::before {
       content: ''; position: absolute; left: 0; top: 3px; bottom: 3px;
       width: 3px; border-radius: 3px; background: var(--green);
@@ -1926,6 +1927,37 @@
     @media (max-width: 899px) {
       .mv-pied { gap: 6px; }
       .mv-pied-btn, .mv-pied-nav { height: 34px; padding: 0 2px; }
+    }
+
+    /* ── Position trouvée sur Internet : l'œil, et sa fiche de source ───────
+       L'œil se pose à côté de l'intitulé du sujet, dans l'écran principal comme
+       dans la vue hélicoptère. La fiche s'ouvre en bas — au-dessus du pied, pas
+       dessous : le pied est fixe et l'aurait recouverte. */
+    .mv-oeil {
+      flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center;
+      margin-left: 6px; width: 26px; height: 26px; padding: 0; border-radius: 8px;
+      background: rgba(125,217,64,.16); border: 1px solid rgba(125,217,64,.45);
+      color: #d6ffb0; cursor: pointer; vertical-align: middle;
+    }
+    .mv-oeil:hover { background: rgba(125,217,64,.3); }
+    .syn-oeil {
+      display: inline-flex; align-items: center; justify-content: center;
+      margin-left: 5px; width: 21px; height: 21px; padding: 0; border-radius: 6px;
+      background: rgba(13,45,62,.10); border: 1px solid rgba(13,45,62,.35);
+      color: #0d2d3e; cursor: pointer; vertical-align: middle;
+    }
+    .mv-source-bas {
+      position: fixed; left: 0; right: 0; z-index: 9500;
+      bottom: calc(64px + env(safe-area-inset-bottom, 0px));
+      width: 100%; max-width: 640px; margin: 0 auto; box-sizing: border-box;
+      padding: 13px 16px 14px;
+      background: #0b3441; border-top: 1px solid rgba(255,255,255,.18);
+      border-radius: 16px 16px 0 0; box-shadow: 0 -14px 38px rgba(0,0,0,.45);
+    }
+    .mv-source-t { font-size: 13px; font-weight: 900; color: #fff; margin-bottom: 6px; line-height: 1.35; }
+    .mv-source-x {
+      font-size: 12.5px; line-height: 1.55; color: rgba(255,255,255,.8); margin-bottom: 10px;
+      white-space: pre-wrap; max-height: 34vh; overflow-y: auto;
     }
 
     /* ── Arbre complet (appui long sur une flèche) ─────────────────────────── */
@@ -20489,6 +20521,26 @@ const mvNom = (p) => !p ? ''
 // porter le même nom, et la recherche Internet part de ce texte.
 const MV_CONTEXTE_MIN = 20;
 
+// Modèles ouverts au remplissage automatique, avec leur tarif au million de
+// jetons. Mesure faite le 2026-08-28 sur 20 sujets réels : 62 800 jetons
+// d'entrée et 1 900 de sortie par sujet, soit 87 % de la facture du côté de
+// l'entrée. C'est donc le prix d'ENTRÉE qui départage ces modèles, pas celui de
+// la sortie — et le nombre de recherches pèse autant que le choix du modèle.
+const MV_MODELES = [
+  { id:'claude-opus-4-8',  nom:'Opus 4.8',  in:5, out:25,
+    note:"Le plus capable, au même tarif qu'Opus 4.7." },
+  { id:'claude-opus-4-7',  nom:'Opus 4.7',  in:5, out:25,
+    note:"Celui de la première recherche." },
+  { id:'claude-sonnet-5',  nom:'Sonnet 5',  in:3, out:15,
+    note:"Annoncé au niveau d'Opus sur ce travail, pour 40 % de moins." },
+  { id:'claude-haiku-4-5', nom:'Haiku 4.5', in:1, out:5,
+    note:"Le moins cher au jeton, mais sans le filtrage des résultats de recherche : le gain peut repartir en jetons d'entrée." },
+];
+const MV_USD_RECHERCHE = 0.01;   // 10 $ les 1 000 requêtes de recherche web
+const MV_USD_PAR_EUR   = 0.92;   // même convention que la fonction edge
+// Profil de référence si l'on n'a encore rien mesuré (cf. la mesure ci-dessus).
+const MV_JETONS_DEFAUT = { entree: 62800, sortie: 1900, recherches: 8 };
+
 // Pictos de mode, en SVG monochrome : les émojis équivalents sont rendus en
 // couleur par le système et deviennent illisibles sur fond sombre.
 const MV_PICTO = {
@@ -20687,7 +20739,23 @@ function MvPosition({
 // sujet en échelle de 5 cases (un mot par extrême), et une bulle de couleur par
 // auteur — orange pour soi. Les noms des autres évaluateurs en bas.
 const SYN_CASE_BG = ['#e8f0ff', '#eef2f9', '#f2f2f2', '#fdf3e6', '#ffedd0'];
-function MvSyntheseSheet({ personne, noeuds, cases, titres, auteurs, parNode, onClose, compact }) {
+// Une fiche de source, mise en forme pour le panneau du bas : ce qui a fondé la
+// position, sa précision, d'où elle vient et quand. Partagée avec l'écran
+// principal, qui affiche exactement les mêmes lignes.
+function mvFicheSource(r) {
+  const quand = r.cherche_le
+    ? new Date(r.cherche_le).toLocaleString('fr-FR',
+        { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit' })
+    : null;
+  return [
+    (r.extrait || '').trim(),
+    `Précision de la trouvaille : ${r.taux} %`,
+    r.source ? `Source : ${r.source}` : null,
+    quand ? `Recherche du ${quand}` : null,
+  ].filter(Boolean).join('\n\n');
+}
+
+function MvSyntheseSheet({ personne, noeuds, cases, titres, auteurs, parNode, sources, onClose, compact }) {
   const [focus, setFocus] = useState(null);          // mobile : élément mis en avant
   const [astuce, setAstuce] = useState(false);       // conseil de lecture au 1er chargement
   const rowRef = useRef(null);
@@ -20731,6 +20799,12 @@ function MvSyntheseSheet({ personne, noeuds, cases, titres, auteurs, parNode, on
       rowRef.current.scrollIntoView({ block: 'center', behavior: 'smooth' });
   }, [focus && focus.rowId, focus && focus.kind, focus && focus.pos]);
 
+  const sourceEnFocus = (n, r) => ({
+    rowId: n.id, kind: 'source', pos: null,
+    titre: `${n.label} — position ${r.pos} trouvée sur Internet`,
+    texte: mvFicheSource(r), url: r.url || null,
+  });
+
   const sujetRow = (n) => {
     const reps = parNode[n.id] || [];
     const desc = (n.description || '').trim();
@@ -20739,7 +20813,19 @@ function MvSyntheseSheet({ personne, noeuds, cases, titres, auteurs, parNode, on
       <div className={'syn-sujet' + (estActive ? ' syn-row-actif' : '')} key={'s' + n.id} ref={estActive ? rowRef : null}>
         <div className={'syn-sujet-t' + (actif(n.id, 'titre') ? ' syn-clic' : '')}
           title={survol(n.label + (desc ? '\n' + desc : ''))}
-          onClick={choisir(n.id, 'titre', null, n.label, desc || n.label)}>{n.label}</div>
+          onClick={choisir(n.id, 'titre', null, n.label, desc || n.label)}>
+          {n.label}
+          {sources && sources[n.id] && (
+            /* Position trouvée sur Internet : l'œil ouvre sa source. Actif aux
+               deux formats — sur grand écran aussi, où le reste de la feuille
+               se contente d'une infobulle. */
+            <button className="syn-oeil syn-no-print" title="Position trouvée sur Internet — voir la source"
+              aria-label="Voir la source de cette position"
+              onClick={e => { e.stopPropagation(); setFocus(sourceEnFocus(n, sources[n.id])); }}>
+              {MV_PICTO.oeil}
+            </button>
+          )}
+        </div>
         <div className={'syn-pole g' + (actif(n.id, 'pole', 1) ? ' syn-clic' : '')} title={survol(pole(n.id, 1))}
           onClick={choisir(n.id, 'pole', 1, pole(n.id, 1) || 'Extrême gauche', contenu(n.id, 1) || pole(n.id, 1))}>{pole(n.id, 1) || '—'}</div>
         <div className="syn-cases">
@@ -20798,6 +20884,14 @@ function MvSyntheseSheet({ personne, noeuds, cases, titres, auteurs, parNode, on
         <div className="syn-bas syn-no-print">
           <div className="syn-bas-t">{focus.titre}</div>
           <div className="syn-bas-x">{focus.texte}</div>
+          {focus.url && (
+            <div style={{marginBottom:10}}>
+              <a href={focus.url} target="_blank" rel="noopener noreferrer"
+                 style={{fontSize:12.5,fontWeight:800,color:'#1a6b3a',wordBreak:'break-word'}}>
+                Ouvrir la source ↗
+              </a>
+            </div>
+          )}
           <button className="syn-close" onClick={() => setFocus(null)}>Fermer</button>
         </div>
       ) : (
@@ -20870,6 +20964,11 @@ function AdminMindVectorScreen({ user, profile, onBack, onFeedback, chipName, av
   const [rechChrono,   setRechChrono]   = useState(0);     // secondes écoulées
   const [rechCout,     setRechCout]     = useState(0);     // € cumulés sur la session
   const [rechMsg,      setRechMsg]      = useState(null);  // { type:'ok'|'err', texte }
+  const [rechModele,   setRechModele]   = useState(MV_MODELES[2].id);   // Sonnet 5 par défaut
+  const [rechNb,       setRechNb]       = useState(4);     // recherches web par sujet
+  const [profilJetons, setProfilJetons] = useState(null);  // { entree, sortie, appels } mesurés
+  const [origines,     setOrigines]     = useState({});    // idNoeud → 'recherche' si la réponse en vient
+  const [detailRech,   setDetailRech]   = useState(null);  // fiche de source ouverte en bas d'écran
   const stopRef = useRef(false);                           // le bouton « Stop » de la boucle
   const [commentaire, setCommentaire] = useState(null);   // null = champ fermé
   const [exclusions, setExclusions] = useState([]);       // branches écartées pour cette personne
@@ -20995,13 +21094,20 @@ function AdminMindVectorScreen({ user, profile, onBack, onFeedback, chipName, av
     setPortee({ mode: 'moi' });
     chargerPrecision(fiche);
     const { data } = await sb.from('mv_reponses')
-      .select('node_id,pos,auteur_id').eq('personne_id', fiche.id);
-    const miennes = {}, auto = {};
+      .select('node_id,pos,auteur_id,origine').eq('personne_id', fiche.id);
+    const miennes = {}, auto = {}, orig = {};
     (data || []).forEach(r => {
-      if (r.auteur_id === user?.id) miennes[r.node_id] = r.pos;
+      if (r.auteur_id === user?.id) { miennes[r.node_id] = r.pos; orig[r.node_id] = r.origine; }
       if (fiche.user_id && r.auteur_id === fiche.user_id) auto[r.node_id] = r.pos;
     });
-    setReponses(miennes); setAutoDiag(auto);
+    setReponses(miennes); setAutoDiag(auto); setOrigines(orig);
+    // Le carnet de recherche voyage avec le profil : c'est lui qui alimente
+    // l'œil à côté d'un sujet, dans les deux vues, pas seulement la page de
+    // remplissage. Table réservée aux admins — les autres reçoivent zéro ligne
+    // et l'œil ne s'affiche simplement pas.
+    const { data: rs } = await sb.from('mv_recherches').select('*').eq('personne_id', fiche.id);
+    const m = {}; (rs || []).forEach(r => { m[r.node_id] = r; });
+    setRecherches(m);
   };
 
   // ── Chargement ────────────────────────────────────────────────────────────
@@ -21804,12 +21910,15 @@ function AdminMindVectorScreen({ user, profile, onBack, onFeedback, chipName, av
         return n;
       });
     }
+    // Cliquer une case reprend la main sur la recherche : la réponse redevient
+    // un choix, et l'œil qui menait à la source disparaît.
+    setOrigines(m => { const n = { ...m }; delete n[sel]; return n; });
     setEnVol(v => v + 1);
     const { error } = efface
       ? await sb.from('mv_reponses').delete()
           .eq('personne_id', personne.id).eq('node_id', sel).eq('auteur_id', user?.id)
       : await sb.from('mv_reponses').upsert(
-          { personne_id: personne.id, node_id: sel, pos, auteur_id: user?.id,
+          { personne_id: personne.id, node_id: sel, pos, auteur_id: user?.id, origine: null,
             updated_at: new Date().toISOString(), updated_by: user?.email || null },
           { onConflict: 'personne_id,node_id,auteur_id' });
     setEnVol(v => v - 1);
@@ -21868,9 +21977,37 @@ function AdminMindVectorScreen({ user, profile, onBack, onFeedback, chipName, av
     const { data: pr } = await sb.rpc('get_ai_prompts');
     const p = (pr || []).find(r => r.feature === 'mind_vector_public');
     setPromptPublic(p ? p.system_prompt : '');
-    const { data: rs } = await sb.from('mv_recherches').select('*').eq('personne_id', personne.id);
-    const m = {}; (rs || []).forEach(r => { m[r.node_id] = r; });
-    setRecherches(m);
+    // Le devis part de VOS recherches passées, pas d'une estimation de table :
+    // le journal donne le vrai nombre de jetons par sujet.
+    const { data: us } = await sb.rpc('get_ai_usage_summary');
+    const u = (us || []).find(r => r.feature === 'mind_vector_public');
+    setProfilJetons(u && Number(u.calls) > 0
+      ? { entree: Number(u.input_tokens) / Number(u.calls),
+          sortie: Number(u.output_tokens) / Number(u.calls),
+          appels: Number(u.calls), recherches: MV_JETONS_DEFAUT.recherches }
+      : { ...MV_JETONS_DEFAUT, appels: 0 });
+  };
+
+  // Les sujets dont MA réponse vient d'une recherche, et dont on a encore la
+  // fiche de source. C'est ce qui décide de l'œil, dans les deux vues.
+  const sourcesRecherche = useMemo(() => {
+    const m = {};
+    Object.keys(origines).forEach(id => {
+      if (origines[id] === 'recherche' && recherches[id]) m[id] = recherches[id];
+    });
+    return m;
+  }, [origines, recherches]);
+
+  // Ce que coûterait un sujet avec le modèle et le nombre de recherches
+  // retenus. Les jetons d'entrée suivent à peu près le nombre de recherches —
+  // c'est ce qui entre dans le contexte — d'où la mise à l'échelle.
+  const devisSujet = (modeleId, nbRecherches) => {
+    const m = MV_MODELES.find(x => x.id === modeleId) || MV_MODELES[0];
+    const ref = profilJetons || { ...MV_JETONS_DEFAUT, appels: 0 };
+    const echelle = nbRecherches / (ref.recherches || MV_JETONS_DEFAUT.recherches);
+    const usd = (ref.entree * echelle * m.in + ref.sortie * m.out) / 1e6
+              + nbRecherches * MV_USD_RECHERCHE;
+    return usd / MV_USD_PAR_EUR;
   };
 
   const enregistrerPromptPublic = async () => {
@@ -21906,7 +22043,8 @@ function AdminMindVectorScreen({ user, profile, onBack, onFeedback, chipName, av
         if (stopRef.current) break;
         setRechSujet(id);
         const { data, error } = await sb.functions.invoke('mind-vector', {
-          body: { action: 'public_position', personne_id: personne.id, node_id: id },
+          body: { action: 'public_position', personne_id: personne.id, node_id: id,
+                  model: rechModele, recherches_max: rechNb },
           ...(jeton ? { headers: { Authorization: `Bearer ${jeton}` } } : {}),
         });
         if (error || data?.error) {
@@ -21936,9 +22074,11 @@ function AdminMindVectorScreen({ user, profile, onBack, onFeedback, chipName, av
     setRecherches(m => ({ ...m, [id]: { ...m[id], retenu: coche } }));
     setReponses(m => { const n = { ...m }; if (coche) n[id] = r.pos; else delete n[id]; return n; });
     setEnVol(v => v + 1);
+    setOrigines(m => { const n = { ...m }; if (coche) n[id] = 'recherche'; else delete n[id]; return n; });
     const { error } = coche
       ? await sb.from('mv_reponses').upsert(
           { personne_id: personne.id, node_id: id, pos: r.pos, auteur_id: user?.id,
+            origine: 'recherche',
             updated_at: new Date().toISOString(), updated_by: user?.email || null },
           { onConflict: 'personne_id,node_id,auteur_id' })
       : await sb.from('mv_reponses').delete()
@@ -22355,21 +22495,35 @@ function AdminMindVectorScreen({ user, profile, onBack, onFeedback, chipName, av
           // Le livre ne s'affiche que s'il y a vraiment quelque chose à lire —
           // sinon c'est une promesse vide. Vaut dans les deux modes.
           const documente = !!(selNoeud.contenu || selNoeud.image_url);
+          // Une position trouvée sur Internet ne se lit pas comme une position
+          // choisie : l'œil ouvre la source qui l'a fondée.
+          const rech = origines[selNoeud.id] === 'recherche' ? recherches[selNoeud.id] : null;
           return (
             <div className="mv-head-sujet">
-              {documente ? (
-                <button className="mv-head-titre lien" onClick={() => setDocOuvert(true)}
-                  title="Lire la documentation de ce sujet">
-                  {selNoeud.label}
-                  {compteurSujet && <span className="mv-head-num">({compteurSujet})</span>}
-                  <span className="mv-livre">{MV_PICTO.livre}</span>
-                </button>
-              ) : (
-                <div className="mv-head-titre">
-                  {selNoeud.label}
-                  {compteurSujet && <span className="mv-head-num">({compteurSujet})</span>}
-                </div>
-              )}
+              {/* Titre et œil sur la même ligne : l'œil ne peut pas vivre DANS
+                  le titre, qui est parfois lui-même un bouton. */}
+              <div className="mv-head-ligne">
+                {documente ? (
+                  <button className="mv-head-titre lien" onClick={() => setDocOuvert(true)}
+                    title="Lire la documentation de ce sujet">
+                    {selNoeud.label}
+                    {compteurSujet && <span className="mv-head-num">({compteurSujet})</span>}
+                    <span className="mv-livre">{MV_PICTO.livre}</span>
+                  </button>
+                ) : (
+                  <div className="mv-head-titre">
+                    {selNoeud.label}
+                    {compteurSujet && <span className="mv-head-num">({compteurSujet})</span>}
+                  </div>
+                )}
+                {rech && (
+                  <button className="mv-oeil" title="Position trouvée sur Internet — voir la source"
+                    aria-label="Voir la source de cette position"
+                    onClick={() => setDetailRech({ ...rech, label: selNoeud.label })}>
+                    {MV_PICTO.oeil}
+                  </button>
+                )}
+              </div>
               {selNoeud.description && <div className="mv-head-desc">{selNoeud.description}</div>}
             </div>
           );
@@ -22638,7 +22792,8 @@ function AdminMindVectorScreen({ user, profile, onBack, onFeedback, chipName, av
       </div>
     ) : (
       <MvSyntheseSheet personne={personne} noeuds={noeuds} cases={cases} titres={titres}
-        auteurs={synthese.auteurs} parNode={synthese.parNode} compact={compact} onClose={() => setSynthese(null)}/>
+        auteurs={synthese.auteurs} parNode={synthese.parNode} sources={sourcesRecherche}
+        compact={compact} onClose={() => setSynthese(null)}/>
     ))}
 
     {/* ── Conseil de navigation au lancement ──────────────────────────────── */}
@@ -23031,6 +23186,25 @@ function AdminMindVectorScreen({ user, profile, onBack, onFeedback, chipName, av
       </div>
     )}
 
+    {/* ── La source d'une position trouvée sur Internet ───────────────────── */}
+    {/* Même geste que dans la vue hélicoptère : la fiche s'ouvre en bas de
+        l'écran et se ferme d'un bouton, sans quitter le sujet qu'on lit. */}
+    {detailRech && (
+      <div className="mv-source-bas">
+        <div className="mv-source-t">
+          {detailRech.label} — position {detailRech.pos} trouvée sur Internet
+        </div>
+        <div className="mv-source-x">{mvFicheSource(detailRech)}</div>
+        {detailRech.url && (
+          <a href={detailRech.url} target="_blank" rel="noopener noreferrer"
+             style={{display:'block',fontSize:12.5,fontWeight:800,color:'#a3ed6a',
+                     wordBreak:'break-word',marginBottom:10}}>Ouvrir la source ↗</a>
+        )}
+        <button className="btn btn-yes" style={{width:'100%',fontSize:13,padding:'10px 0'}}
+          onClick={() => setDetailRech(null)}>Fermer</button>
+      </div>
+    )}
+
     {/* ── Remplir automatiquement les positions d'un profil public ────────── */}
     {popupRemplir && (
       <div style={{position:'fixed',inset:0,zIndex:9650,display:'flex',flexDirection:'column',
@@ -23072,6 +23246,54 @@ function AdminMindVectorScreen({ user, profile, onBack, onFeedback, chipName, av
                 </div>
               </>
             )}
+          </div>
+
+          {/* Le devis. Deux réglages, et ce qu'ils coûtent — mesuré sur les
+              recherches déjà faites, pas estimé de mémoire. */}
+          <div style={{background:'rgba(255,255,255,.06)',border:'1px solid rgba(255,255,255,.14)',
+                       borderRadius:12,padding:'12px 13px'}}>
+            <div style={{display:'flex',gap:10,flexWrap:'wrap'}}>
+              <div style={{flex:'1 1 220px',minWidth:0}}>
+                <label>Modèle</label>
+                <select className="inp" style={{width:'100%',fontSize:13,padding:'10px 12px'}}
+                  value={rechModele} disabled={rechEnCours}
+                  onChange={e => setRechModele(e.target.value)}>
+                  {MV_MODELES.map(m => (
+                    <option key={m.id} value={m.id} style={{background:'#0d2430'}}>
+                      {m.nom} — {devisSujet(m.id, rechNb).toFixed(2)} € / sujet
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div style={{flex:'0 1 190px',minWidth:0}}>
+                <label>Recherches par sujet</label>
+                <select className="inp" style={{width:'100%',fontSize:13,padding:'10px 12px'}}
+                  value={rechNb} disabled={rechEnCours}
+                  onChange={e => setRechNb(Number(e.target.value))}>
+                  {[2,3,4,6,8,10].map(n => (
+                    <option key={n} value={n} style={{background:'#0d2430'}}>{n}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            <div style={{fontSize:11,color:'rgba(255,255,255,.6)',marginTop:9,lineHeight:1.5}}>
+              {(MV_MODELES.find(m => m.id === rechModele) || {}).note}
+            </div>
+            <div style={{display:'flex',alignItems:'baseline',justifyContent:'space-between',gap:10,marginTop:9,
+                         paddingTop:9,borderTop:'1px solid rgba(255,255,255,.12)'}}>
+              <span style={{fontSize:12,fontWeight:700,color:'rgba(255,255,255,.6)'}}>
+                {sujetsARemplir.length} sujet{sujetsARemplir.length > 1 ? 's' : ''} à chercher
+              </span>
+              <span style={{fontSize:15,fontWeight:900,color:'#fff'}}>
+                ≈ {(devisSujet(rechModele, rechNb) * sujetsARemplir.length).toFixed(2)} €
+              </span>
+            </div>
+            <div style={{fontSize:10.5,color:'rgba(255,255,255,.45)',marginTop:6,lineHeight:1.45}}>
+              {profilJetons && profilJetons.appels > 0
+                ? `Estimation d'après vos ${profilJetons.appels} recherches déjà faites (${Math.round(profilJetons.entree).toLocaleString('fr-FR')} jetons d'entrée par sujet en moyenne).`
+                : "Estimation d'après une mesure de référence, faute d'historique."}
+              {' '}Le nombre de recherches pèse autant que le modèle : ce sont les pages lues qui coûtent, pas la réponse écrite.
+            </div>
           </div>
 
           {/* Lancer, chronométrer, arrêter. */}
