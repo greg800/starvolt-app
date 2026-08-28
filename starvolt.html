@@ -1877,40 +1877,44 @@
     .mv-plein.compact .mv-pos-tete { margin-bottom: 5px; padding-bottom: 4px; }
 
     /* ── Pied de Mind Vector ────────────────────────────────────────────────
-       Quatre gestes seulement : sortir, régler, sujet précédent, sujet suivant.
+       Cinq gestes : sortir, régler, vue hélicoptère, sujet précédent, sujet
+       suivant. Les cinq se partagent la ligne à parts égales — un cinquième
+       chacun, quelle que soit la largeur de l'écran : le pouce vise une cible
+       large, et aucun geste ne s'annonce plus important qu'un autre.
        Sur petit écran le glissé du pouce suffit à parcourir l'arbre : le pied se
-       fait le plus plat possible pour laisser la hauteur aux textes. */
+       fait le plus plat possible pour laisser la hauteur aux textes, et les
+       libellés tombent — il ne reste que les pictos. */
     .mv-pied-wrap.compact { padding: 7px 10px calc(7px + env(safe-area-inset-bottom, 0px)); }
-    .mv-pied { flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: 8px; }
-    .mv-pied-btn {
-      flex: 0 0 auto; display: flex; align-items: center; justify-content: center; gap: 7px;
-      padding: 9px 22px; border-radius: 12px; line-height: 1;
-      background: rgba(255,255,255,.09); border: 1px solid rgba(255,255,255,.18);
-      color: #fff; font-family: inherit; font-size: 12.5px; font-weight: 800;
+    .mv-pied { flex: 1 1 auto; min-width: 0; display: flex; align-items: stretch; gap: 8px; }
+    .mv-pied-btn, .mv-pied-nav {
+      flex: 1 1 0; width: 0; min-width: 0;   /* width:0 : cinq parts vraiment égales,
+                                                sinon le contenu élargit les plus bavards */
+      display: flex; align-items: center; justify-content: center; gap: 7px;
+      height: 38px; padding: 0 6px; border-radius: 12px; line-height: 1;
+      font-family: inherit; font-size: 12.5px; font-weight: 800;
       cursor: pointer; transition: background .15s, border-color .15s;
       -webkit-user-select: none; user-select: none; -webkit-touch-callout: none;
     }
+    .mv-pied-btn {
+      background: rgba(255,255,255,.09); border: 1px solid rgba(255,255,255,.18); color: #fff;
+    }
     .mv-pied-btn:hover { background: rgba(255,255,255,.16); }
-    .mv-pied-spacer { flex: 1 1 auto; min-width: 0; }
+    .mv-pied-btn:disabled { opacity: .35; cursor: not-allowed; }
+    /* Le libellé cède avant le picto : à l'étroit il s'abrège au lieu de
+       déborder ou de pousser la rangée. */
+    .mv-pied-btn span {
+      min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .mv-pied-btn svg, .mv-pied-nav svg { flex: 0 0 auto; }
     .mv-pied-etat { font-size: 11.5px; font-weight: 700; white-space: nowrap; }
     .mv-pied-nav {
-      flex: 0 0 auto; display: flex; align-items: center; justify-content: center;
-      width: 82px; height: 38px; padding: 0; border-radius: 12px;
-      background: rgba(125,217,64,.16); border: 1px solid rgba(125,217,64,.5);
-      color: #d6ffb0; cursor: pointer; transition: background .15s;
-      -webkit-user-select: none; user-select: none; -webkit-touch-callout: none;
+      background: rgba(125,217,64,.16); border: 1px solid rgba(125,217,64,.5); color: #d6ffb0;
     }
     .mv-pied-nav:hover { background: rgba(125,217,64,.28); }
     .mv-pied-nav:disabled { opacity: .3; cursor: not-allowed; }
     @media (max-width: 899px) {
-      /* Le pouce vise une cible large bien plus sûrement qu'une cible haute, et
-         la largeur ne coûte rien ici : les quatre boutons se partagent toute la
-         ligne, à hauteur inchangée. Les flèches, les plus sollicitées, prennent
-         la plus grosse part. */
       .mv-pied { gap: 6px; }
-      .mv-pied-btn { flex: 1 1 0; min-width: 0; padding: 7px 0; }
-      .mv-pied-nav { flex: 1.5 1 0; width: auto; height: 34px; }
-      .mv-pied-spacer { flex: 0 0 2px; }
+      .mv-pied-btn, .mv-pied-nav { height: 34px; padding: 0 2px; }
     }
 
     /* ── Arbre complet (appui long sur une flèche) ─────────────────────────── */
@@ -20483,6 +20487,22 @@ const MV_PICTO = {
       <path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1.03 1.56V21a2 2 0 1 1-4 0v-.09A1.7 1.7 0 0 0 9 19.4a1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-1.56-1.03H3a2 2 0 1 1 0-4h.09A1.7 1.7 0 0 0 4.6 9a1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1.03-1.56V3a2 2 0 1 1 4 0v.09A1.7 1.7 0 0 0 15 4.6a1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.7 1.7 0 0 0 19.4 9v.01a1.7 1.7 0 0 0 1.56 1.02H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.51 1Z"/>
     </svg>
   ),
+  // Hélicoptère : prendre de la hauteur sur le profil — toutes les réponses de
+  // tous les évaluateurs sur une seule page. Trait blanc, fond transparent,
+  // comme les quatre autres pictos du pied.
+  helico: (
+    <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor"
+      strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M2.6 4.3h18.8"/>
+      <path d="M12 4.3v2.3"/>
+      <rect x="4.2" y="6.6" width="10.4" height="6.4" rx="3.2"/>
+      <path d="M14.6 9.1h6.6"/>
+      <path d="M20.7 6.9v4.4"/>
+      <path d="M4.6 16.6h10.6"/>
+      <path d="M7.4 13 6.5 16.6"/>
+      <path d="M12.2 13l.9 3.6"/>
+    </svg>
+  ),
   // Chevrons du pas-à-pas : sujet précédent / sujet suivant.
   gauche: (
     <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor"
@@ -22234,10 +22254,8 @@ function AdminMindVectorScreen({ user, profile, onBack, onFeedback, chipName, av
               disabled={portraitEnCours} onClick={ouvrirAnalyse}>
               {portraitEnCours ? <><StarSpinner size={15} color="#1a4500"/> Analyse…</> : '✨ Vos résultats'}
             </button>
-            {peutGererProfil && (
-              <button className="btn btn-no" style={{width:'auto',fontSize:13,padding:'10px 20px'}}
-                onClick={ouvrirSynthese}>🖼️ Image de synthèse de ce profil</button>
-            )}
+            {/* L'image de synthèse a quitté cet écran : elle vit dans le bouton
+                « Vue hélicoptère » du pied, présent partout. */}
             <button className="btn btn-no" style={{width:'auto',fontSize:12.5,padding:'8px 16px'}}
               onClick={() => setRestantes(false)}>Revoir mes réponses</button>
             <div style={{fontSize:11,color:'rgba(255,255,255,.35)',lineHeight:1.5,maxWidth:380}}>
@@ -22719,10 +22737,8 @@ function AdminMindVectorScreen({ user, profile, onBack, onFeedback, chipName, av
                   {portraitEnCours ? <><StarSpinner size={14} color="#1a4500"/> Analyse…</> : '✨ Lancer l\'analyse'}
                 </button>
               )}
-              {personne && peutGererProfil && (
-                <button className="btn btn-no" style={{width:'100%',fontSize:13,padding:'11px 0'}}
-                  disabled={!classees} onClick={ouvrirSynthese}>🖼️ Image de synthèse de ce profil</button>
-              )}
+              {/* Plus de bouton d'image de synthèse ici : « Vue hélicoptère »,
+                  dans le pied, l'ouvre depuis n'importe quel écran. */}
               {personne && !classees && !auteursProfil.length && (
                 <div style={{fontSize:10.5,color:'rgba(255,255,255,.68)',lineHeight:1.45,marginTop:-6}}>
                   Classez au moins un sujet pour lancer une analyse.
@@ -22953,9 +22969,18 @@ function AdminMindVectorScreen({ user, profile, onBack, onFeedback, chipName, av
       </div>
     )}
 
-    {/* ── Pied : sortir, régler, et le pas-à-pas des sujets ──────────────── */}
+    {/* ── Pied : sortir, régler, prendre de la hauteur, et le pas-à-pas ───── */}
+    {/* Cinq boutons d'égale largeur, un cinquième de la ligne chacun : aucun
+        n'est plus important qu'un autre, et le pouce vise une cible large.
+        L'état d'enregistrement passe au-dessus — dans la rangée, il volait sa
+        part aux boutons. */}
     <div className={'sticky-footer mv-pied-wrap' + (compact ? ' compact' : '')}>
-      <div className="sticky-footer-inner row wide">
+      <div className="sticky-footer-inner row wide" style={{flexDirection:'column',alignItems:'stretch',gap:5}}>
+        {!compact && (
+          <span className="mv-pied-etat" style={{textAlign:'right',color: enVol > 0 ? '#ffb340' : 'rgba(125,217,64,.85)'}}>
+            {enVol > 0 ? 'Enregistrement…' : 'Tout est enregistré ✓'}
+          </span>
+        )}
         <div className="mv-pied">
           <button className="mv-pied-btn" onClick={onBack}
             title="Quitter Mind Vector" aria-label="Quitter Mind Vector">
@@ -22965,12 +22990,16 @@ function AdminMindVectorScreen({ user, profile, onBack, onFeedback, chipName, av
             title="Paramètres — profil évalué, invitations, sujets ouverts" aria-label="Paramètres">
             {MV_PICTO.roue}{!compact && <span>Paramètres</span>}
           </button>
-          <div className="mv-pied-spacer"/>
-          {!compact && (
-            <span className="mv-pied-etat" style={{color: enVol > 0 ? '#ffb340' : 'rgba(125,217,64,.85)'}}>
-              {enVol > 0 ? 'Enregistrement…' : 'Tout est enregistré ✓'}
-            </span>
-          )}
+          {/* Éteint sur le profil d'un autre : la vue d'ensemble des évaluations
+              reçues n'appartient qu'à son titulaire (garde tenue en base par
+              mv_synthese — le bouton ne fait que le dire). */}
+          <button className="mv-pied-btn" onClick={ouvrirSynthese} disabled={!personne || !peutGererProfil}
+            title={!personne || peutGererProfil
+              ? 'Vue hélicoptère — toutes les réponses de ce profil sur une page'
+              : "Vue hélicoptère — réservée au titulaire du profil"}
+            aria-label="Vue hélicoptère">
+            {MV_PICTO.helico}{!compact && <span>Vue hélicoptère</span>}
+          </button>
           {/* Appui court : le sujet d'à côté. Appui long : l'arbre entier. */}
           <button className="mv-pied-nav" title="Sujet précédent — appui long : aller à un sujet"
             aria-label="Sujet précédent"
