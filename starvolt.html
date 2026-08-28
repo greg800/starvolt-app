@@ -21901,7 +21901,7 @@ function AdminMindVectorScreen({ user, profile, onBack, onFeedback, chipName, av
   // prénom ni e-mail : elle a un intitulé et, obligatoirement, du contexte —
   // « Renault » ne désigne rien à soi seul, et c'est ce texte qui part en
   // recherche Internet.
-  const creerPersonne = async () => {
+  const enregistrerPersonne = async () => {
     const f = formQui; if (!f) return;
     const morale = f.type_entite === 'morale';
     const nom    = (f.nom || '').trim();
@@ -21918,6 +21918,18 @@ function AdminMindVectorScreen({ user, profile, onBack, onFeedback, chipName, av
       email  = (f.email || '').trim();
       if (!prenom || !nom || !email) { setErrQui('Prénom, nom et e-mail sont obligatoires.'); return; }
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { setErrQui("Cette adresse e-mail n'a pas l'air valide."); return; }
+    }
+    // Fiche existante : mêmes règles, autre verbe. La validation ci-dessus a
+    // déjà tout tranché, il ne reste qu'à choisir insert ou update.
+    if (f.id) {
+      await modifierPersonne(f, {
+        prenom, nom, email,
+        logo_url: morale ? (f.logo_url || null) : null,
+        type_entite: morale ? 'morale' : 'physique',
+        est_public: !!f.est_public,
+        commentaire: contexte || null,
+      });
+      return;
     }
     setBusyQui(true); setErrQui(null);
     const { data, error } = await sb.from('mv_personnes').insert({
@@ -21938,6 +21950,27 @@ function AdminMindVectorScreen({ user, profile, onBack, onFeedback, chipName, av
     setFiches(l => [...l, data]);
     setFormQui(null);
     selectionner(data);
+  };
+
+  // Modifier une fiche existante. Le même formulaire sert aux deux gestes : les
+  // règles de validation (contexte obligatoire sur une morale, e-mail sur une
+  // physique) valent à la modification comme à la création, et les dédoubler
+  // serait le meilleur moyen de les laisser diverger.
+  //
+  // `exclusions` et `created_by` ne sont PAS touchés : le premier est le
+  // réglage de navigation du titulaire, le second dit qui a créé la fiche —
+  // une modification ne réécrit ni l'un ni l'autre.
+  const modifierPersonne = async (f, champs) => {
+    setBusyQui(true); setErrQui(null);
+    const { data, error } = await sb.from('mv_personnes')
+      .update(champs).eq('id', f.id).select().single();
+    setBusyQui(false);
+    if (error) { setErrQui(error.message); return; }
+    setFiches(l => l.map(x => (x.id === data.id ? data : x)));
+    // La fiche affichée doit suivre, sinon le picto tout juste téléversé ne
+    // paraîtrait qu'au prochain changement de profil.
+    if (personne?.id === data.id) setPersonne(data);
+    setFormQui(null);
   };
 
   // Un seul choix par sujet : la clé primaire (personne, sujet) s'en charge en
@@ -22968,7 +23001,9 @@ function AdminMindVectorScreen({ user, profile, onBack, onFeedback, chipName, av
 
           {formQui ? (
             <div style={{display:'flex',flexDirection:'column',gap:11}}>
-              <div style={{fontSize:13,fontWeight:800,color:'#fff'}}>Ajouter un profil sans compte Starvolt</div>
+              <div style={{fontSize:13,fontWeight:800,color:'#fff'}}>
+                {formQui.id ? `Modifier « ${mvNom(formQui)} »` : 'Ajouter un profil sans compte Starvolt'}
+              </div>
 
               {/* Personne physique ou morale : deux formulaires, un seul choix. */}
               <div style={{display:'flex',gap:8}}>
@@ -23114,6 +23149,25 @@ function AdminMindVectorScreen({ user, profile, onBack, onFeedback, chipName, av
                     <button className="btn btn-no" title="Ajouter une personne qui n'a pas de compte"
                       style={{flex:'0 0 auto',width:'auto',fontSize:17,fontWeight:900,padding:'0 14px'}}
                       onClick={() => { setErrQui(null); setFormQui({ type_entite:'physique', est_public:false, prenom:'', nom:'', email:'', commentaire:'' }); }}>＋</button>
+                    {/* Modifier la fiche retenue — c'est par là qu'une organisation
+                        déjà créée reçoit son picto. Réservé aux fiches sans compte :
+                        celles d'un compte Starvolt tiennent leur identité du compte,
+                        et la réécrire ici la ferait diverger. */}
+                    {personne && !personne.user_id && peutEditer && (
+                      <button className="btn btn-no" title="Modifier ce profil : intitulé, contexte, picto"
+                        style={{flex:'0 0 auto',width:'auto',fontSize:15,fontWeight:900,padding:'0 14px'}}
+                        disabled={busyQui}
+                        onClick={() => { setErrQui(null); setFormQui({
+                          id: personne.id,
+                          type_entite: personne.type_entite || 'physique',
+                          est_public: !!personne.est_public,
+                          prenom: personne.prenom || '',
+                          nom: personne.nom || '',
+                          email: personne.email || '',
+                          commentaire: personne.commentaire || '',
+                          logo_url: personne.logo_url || null,
+                        }); }}>✎</button>
+                    )}
                     {personne && !personne.user_id && peutEditer && (
                       <button className="btn btn-no" title="Supprimer ce profil ajouté à la main et ses réponses"
                         style={{flex:'0 0 auto',width:'auto',fontSize:17,fontWeight:900,padding:'0 14px',
@@ -23334,8 +23388,10 @@ function AdminMindVectorScreen({ user, profile, onBack, onFeedback, chipName, av
               <PictoPorte size={17} trait={2.1}/><span className="lbl-lg">Retour</span>
             </button>
             {formQui ? (
-              <button className="btn btn-yes" style={{flex:1}} disabled={busyQui} onClick={creerPersonne}>
-                {busyQui ? <><StarSpinner size={14} color="#1a4500"/> Création…</> : 'Créer et sélectionner'}
+              <button className="btn btn-yes" style={{flex:1}} disabled={busyQui} onClick={enregistrerPersonne}>
+                {busyQui
+                  ? <><StarSpinner size={14} color="#1a4500"/> {formQui.id ? 'Enregistrement…' : 'Création…'}</>
+                  : (formQui.id ? 'Enregistrer les modifications' : 'Créer et sélectionner')}
               </button>
             ) : (
               <button className="btn btn-yes" style={{flex:1}} disabled={busyQui} onClick={fermerPage}>OK</button>
