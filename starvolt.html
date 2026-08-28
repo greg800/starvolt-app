@@ -1620,6 +1620,27 @@
       margin: 12px 0 4px; padding-top: 10px; border-top: 1px solid rgba(13,45,62,.12); }
     .syn-leg-item { display: flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 700; color: #324a52; }
     .syn-legende .syn-bulle { width: 11px; height: 11px; }
+    /* Picto d'une organisation : il REMPLACE la bulle de couleur, il ne s'y
+       ajoute pas — la case fait 18 px, il n'y a pas la place pour les deux.
+       La couleur de la série survit en liseré, seule chose qui distingue deux
+       séries tombées sur la même case. `flex-wrap` sur .syn-case fait grandir
+       la case plutôt que déborder quand plusieurs s'y retrouvent. */
+    .syn-picto { width: 13px; height: 13px; object-fit: contain; border-radius: 3px;
+      background: #fff; display: inline-block; flex-shrink: 0; }
+    .syn-legende .syn-picto { width: 16px; height: 16px; border-radius: 4px; }
+    /* Choix des profils comparés. `syn-no-print` : c'est une commande, elle n'a
+       rien à faire sur la feuille imprimée. */
+    .syn-choix { display: flex; flex-wrap: wrap; gap: 6px; align-items: center;
+      justify-content: center; margin-bottom: 10px; }
+    .syn-choix select { font-family: inherit; font-size: 11.5px; font-weight: 700; color: #26424b;
+      background: #fff; border: 1px solid rgba(13,45,62,.25); border-radius: 8px;
+      padding: 6px 9px; cursor: pointer; max-width: 100%; }
+    .syn-chip { display: inline-flex; align-items: center; gap: 5px; font-family: inherit;
+      font-size: 11.5px; font-weight: 700; color: #26424b; background: rgba(13,45,62,.06);
+      border: 1px solid rgba(13,45,62,.18); border-radius: 999px; padding: 4px 9px 4px 6px;
+      cursor: pointer; }
+    .syn-chip:hover { background: rgba(255,77,77,.1); border-color: rgba(255,77,77,.4); }
+    .syn-chip .syn-x { font-size: 13px; line-height: 1; color: #8a9aa1; }
     /* Pied collant, façon appli */
     .syn-pied { flex: 0 0 auto; display: flex; gap: 8px; padding: 8px 14px;
       border-top: 1px solid rgba(13,45,62,.14); background: #fff;
@@ -20782,7 +20803,8 @@ function mvFicheSource(r) {
   ].filter(Boolean).join('\n\n');
 }
 
-function MvSyntheseSheet({ personne, noeuds, cases, titres, auteurs, parNode, sources, onClose, compact }) {
+function MvSyntheseSheet({ personne, noeuds, cases, titres, auteurs, parNode, sources, onClose, compact,
+                           profilsDispo, choisis, onBasculerProfil }) {
   const [focus, setFocus] = useState(null);          // mobile : élément mis en avant
   const [astuce, setAstuce] = useState(false);       // conseil de lecture au 1er chargement
   const rowRef = useRef(null);
@@ -20863,8 +20885,12 @@ function MvSyntheseSheet({ personne, noeuds, cases, titres, auteurs, parNode, so
             return (
               <div className={'syn-case' + (actif(n.id, 'case', p.n) ? ' syn-clic' : '')} key={p.n} style={{ background: SYN_CASE_BG[p.n - 1] }}
                 title={survol(txt)} onClick={choisir(n.id, 'case', p.n, 'Position ' + p.n, txt)}>
-                {ici.map((r, i) =>
-                  <span key={i} className="syn-bulle" style={{ background: r.couleur }} title={survol(nomDe(r.auteurId) || r.nom)}/>)}
+                {ici.map((r, i) => r.logo
+                  ? <img key={i} className="syn-picto" src={r.logo} alt={r.nom}
+                      style={{ boxShadow: `0 0 0 1.5px ${r.couleur}` }}
+                      title={survol(nomDe(r.auteurId) || r.nom)}/>
+                  : <span key={i} className="syn-bulle" style={{ background: r.couleur }}
+                      title={survol(nomDe(r.auteurId) || r.nom)}/>)}
               </div>
             );
           })}
@@ -20897,11 +20923,48 @@ function MvSyntheseSheet({ personne, noeuds, cases, titres, auteurs, parNode, so
           <div className="syn-titre">{mvNom(personne)}</div>
           <div className="syn-sous">Mind Vector · synthèse des positions · {dateStr}</div>
         </div>
+        {/* Comparer à d'autres profils. Le profil courant n'est pas dans la
+            liste : il est le sujet de la feuille, pas une option. Le menu se
+            remet à vide après chaque choix — il sert à AJOUTER, les pastilles
+            en dessous disent ce qui est retenu et se cliquent pour retirer. */}
+        {onBasculerProfil && (
+          <div className="syn-choix syn-no-print">
+            <select value="" onChange={e => { if (e.target.value) onBasculerProfil(e.target.value); }}>
+              <option value="">＋ comparer à un autre profil…</option>
+              {(profilsDispo || []).filter(f => !(choisis || []).includes(f.id)).map(f => (
+                <option key={f.id} value={f.id}>
+                  {mvNom(f)}{f.est_public ? ' — profil public' : ''}
+                </option>
+              ))}
+            </select>
+            {/* Un profil retenu puis devenu le profil COURANT sort de la liste
+                des disponibles : sa pastille doit partir avec, sinon elle
+                afficherait une comparaison qui n'est plus calculée. */}
+            {(choisis || []).filter(id => (profilsDispo || []).some(x => x.id === id)).map(id => {
+              const f = (profilsDispo || []).find(x => x.id === id);
+              const s = (auteurs || []).find(a => a.id === 'p:' + id);
+              return (
+                <button key={id} className="syn-chip" title="Retirer de la comparaison"
+                  onClick={() => onBasculerProfil(id)}>
+                  {f && f.logo_url
+                    ? <img className="syn-picto" src={f.logo_url} alt=""
+                           style={{ boxShadow: `0 0 0 2px ${s ? s.couleur : '#aaa'}` }}/>
+                    : <span className="syn-bulle" style={{ background: s ? s.couleur : '#aaa' }}/>}
+                  {f ? mvNom(f) : 'Profil'}
+                  <span className="syn-x">×</span>
+                </button>
+              );
+            })}
+          </div>
+        )}
         {(enfants['_'] || []).map(r => renderNode(r, 0))}
         <div className="syn-legende">
           {auteurs.map(a => (
             <span key={a.id} className="syn-leg-item">
-              <span className="syn-bulle" style={{ background: a.couleur }}/>
+              {a.logo
+                ? <img className="syn-picto" src={a.logo} alt=""
+                       style={{ boxShadow: `0 0 0 2px ${a.couleur}` }}/>
+                : <span className="syn-bulle" style={{ background: a.couleur }}/>}
               {a.nom}{a.self ? ' (soi)' : ''}
             </span>
           ))}
@@ -21016,6 +21079,10 @@ function AdminMindVectorScreen({ user, profile, onBack, onFeedback, chipName, av
   const [tip, setTip] = useState(false);              // conseil de navigation au lancement
   const [tipNoPlus, setTipNoPlus] = useState(false);  // « ne plus montrer ce conseil »
   const [synthese, setSynthese] = useState(null);     // image de synthèse : {chargement}|{erreur}|{auteurs,parNode}
+  // Profils SUPERPOSÉS à la synthèse, en plus du profil courant. Vide par
+  // défaut : « celui de la personne connectée est sélectionné seul ». Se
+  // superposent en général des organisations, pour voir où l'on se situe.
+  const [synProfils, setSynProfils] = useState([]);
   const [msgAuto,  setMsgAuto]  = useState(null);  // { type:'ok'|'err', texte } affiché dans le dialogue
   const [glisse,   setGlisse]   = useState(null);  // id de la branche en cours de déplacement
   const [cible,    setCible]    = useState(null);  // id survolé comme destination ('_' = racine)
@@ -22024,8 +22091,46 @@ function AdminMindVectorScreen({ user, profile, onBack, onFeedback, chipName, av
   // ne lui rend rien, on complète donc avec ce qu'on a déjà sous la main plutôt
   // que d'afficher une page vide.
   const PALETTE_SYNTH = ['#3b82f6','#8b5cf6','#14b8a6','#ec4899','#eab308','#ef4444','#0ea5e9','#a855f7'];
-  const ouvrirSynthese = async () => {
+  // Un profil superposé se réduit à UNE série : sa position sur chaque sujet.
+  // L'auto-diagnostic fait foi quand il existe — quelqu'un qui s'est classé
+  // lui-même prime sur le regard d'un tiers. À défaut, la première ligne : sur
+  // une organisation, toutes viennent de la documentation d'un admin et se
+  // valent. ⚠️ Deux admins en désaccord sur un sujet : le premier arrivé gagne,
+  // silencieusement. Acceptable tant que la documentation est tenue à une
+  // seule main ; à revoir si plusieurs admins documentent la même organisation.
+  const consoliderProfil = (rows) => {
+    const parNode = {};
+    (rows || []).forEach(r => {
+      if (r.pos == null) return;
+      if (parNode[r.node_id] === undefined || r.is_self) parNode[r.node_id] = r.pos;
+    });
+    return parNode;
+  };
+
+  // Les profils qu'on peut superposer : ceux auxquels j'ai accès, moins celui
+  // déjà affiché — il est le sujet de la feuille, pas une option. Un admin voit
+  // toutes les fiches ; les autres, ce que `mv_profils_acces()` leur rend (leur
+  // fiche, leurs invitations, les profils publics). Les publics d'abord : ce
+  // sont eux qu'on vient comparer, les fiches nominatives sont du bruit ici.
+  const profilsSuperposables = (peutToutVoir ? (fiches || []) : (profilsAcces || []))
+    .filter(f => f.id !== personne?.id)
+    .sort((a, b) => (b.est_public ? 1 : 0) - (a.est_public ? 1 : 0)
+                 || mvNom(a).localeCompare(mvNom(b)));
+
+  // Cocher ou décocher recharge aussitôt : un menu qui ne fait que préparer un
+  // état, en laissant l'utilisateur chercher le bouton qui l'applique, se lit
+  // comme une panne.
+  const basculerProfilSynthese = (id) => {
+    const suite = synProfils.includes(id)
+      ? synProfils.filter(x => x !== id)
+      : [...synProfils, id];
+    setSynProfils(suite);
+    ouvrirSynthese(suite);
+  };
+
+  const ouvrirSynthese = async (idsArg) => {
     if (!personne) return;
+    const ids = (Array.isArray(idsArg) ? idsArg : synProfils).filter(id => id !== personne.id);
     setPopupQui(false); setPortrait(null);
     setSynthese({ chargement: true });
     const { data, error } = await sb.rpc('mv_synthese', { p_personne_id: personne.id });
@@ -22040,7 +22145,20 @@ function AdminMindVectorScreen({ user, profile, onBack, onFeedback, chipName, av
                     nom: moi, is_self: !!personne.user_id && personne.user_id === user?.id });
       });
     }
-    if (!rows.length) {
+    // Les profils superposés, un appel chacun et tous en parallèle : la
+    // synthèse s'ouvre d'un clic, enchaîner les allers-retours la ferait
+    // attendre autant de fois qu'on a coché de profils.
+    const extras = (await Promise.all(ids.map(async (id) => {
+      const fiche = (fiches || []).find(f => f.id === id)
+                 || (profilsAcces || []).find(f => f.id === id) || null;
+      const { data: d } = await sb.rpc('mv_synthese', { p_personne_id: id });
+      const positions = consoliderProfil(d);
+      // Un profil sans une seule position n'apporte rien qu'une ligne de
+      // légende vide : on ne le retient pas.
+      return Object.keys(positions).length ? { id, fiche, positions } : null;
+    }))).filter(Boolean);
+
+    if (!rows.length && !extras.length) {
       setSynthese({ erreur: error ? error.message : "Rien à montrer : aucune réponse sur ce profil." });
       return;
     }
@@ -22049,10 +22167,28 @@ function AdminMindVectorScreen({ user, profile, onBack, onFeedback, chipName, av
     const auteurs = [...map.values()].sort((a, b) => (b.self ? 1 : 0) - (a.self ? 1 : 0) || (a.nom || '').localeCompare(b.nom || ''));
     let ci = 0;
     auteurs.forEach(a => { a.couleur = a.self ? '#f7941e' : PALETTE_SYNTH[ci++ % PALETTE_SYNTH.length]; });
+    // Une série par profil superposé, à la suite des auteurs et sur le MÊME
+    // compteur de palette : deux séries ne doivent jamais partager une couleur,
+    // c'est tout ce qui les distingue quand elles tombent sur la même case.
+    extras.forEach(x => {
+      auteurs.push({
+        id: 'p:' + x.id,
+        nom: x.fiche ? mvNom(x.fiche) : 'Profil',
+        self: false, profil: true,
+        logo: x.fiche?.logo_url || null,
+        couleur: PALETTE_SYNTH[ci++ % PALETTE_SYNTH.length],
+      });
+    });
     const coul = {}; auteurs.forEach(a => { coul[a.id] = a.couleur; });
     const parNode = {};
     rows.forEach(r => {
       (parNode[r.node_id] = parNode[r.node_id] || []).push({ auteurId: r.auteur_id, pos: r.pos, couleur: coul[r.auteur_id], nom: map.get(r.auteur_id).nom });
+    });
+    extras.forEach(x => {
+      const s = auteurs.find(a => a.id === 'p:' + x.id);
+      Object.entries(x.positions).forEach(([nodeId, pos]) => {
+        (parNode[nodeId] = parNode[nodeId] || []).push({ auteurId: s.id, pos, couleur: s.couleur, nom: s.nom, logo: s.logo });
+      });
     });
     setSynthese({ auteurs, parNode });
   };
@@ -22958,6 +23094,8 @@ function AdminMindVectorScreen({ user, profile, onBack, onFeedback, chipName, av
     ) : (
       <MvSyntheseSheet personne={personne} noeuds={noeuds} cases={cases} titres={titres}
         auteurs={synthese.auteurs} parNode={synthese.parNode} sources={sourcesRecherche}
+        profilsDispo={profilsSuperposables} choisis={synProfils}
+        onBasculerProfil={basculerProfilSynthese}
         compact={compact} onClose={() => setSynthese(null)}/>
     ))}
 
