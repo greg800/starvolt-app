@@ -21539,14 +21539,26 @@ function AdminMindVectorScreen({ user, profile, onBack, onFeedback, chipName, av
     finally { setInviteBusy(false); }
   };
 
+  // Révoquer emporte les évaluations : c'est un déclencheur en base qui s'en
+  // charge (mv_acces_purge), pour que ce soit vrai par quelque chemin qu'on
+  // passe. On le dit ici, parce que c'est irréversible.
   const revoquer = async (ev) => {
     if (!personne) return;
     const qui = [ev.prenom, ev.nom].filter(Boolean).join(' ') || ev.email || 'cette personne';
-    if (!window.confirm(`Retirer ${qui} des personnes autorisées à évaluer ce profil ?`)) return;
+    const n = Number(ev.repondu) || 0;
+    if (!window.confirm(
+      `Retirer ${qui} des personnes autorisées à évaluer ce profil ?\n\n` +
+      (n ? `Ses ${n} réponse${n > 1 ? 's' : ''} seront supprimées` : 'Ses réponses éventuelles seront supprimées') +
+      " : elles ne compteront plus ni dans l'analyse ni dans la vue hélicoptère. C'est définitif.")) return;
     const { error } = await sb.from('mv_acces').delete()
       .eq('personne_id', personne.id).eq('evaluateur_id', ev.evaluateur_id);
     if (error) { setInviteMsg({ type:'err', texte: error.message }); return; }
+    setInviteMsg({ type:'ok', texte: `${qui} et ses réponses ont été retirés de ce profil.` });
     chargerEvaluateurs(personne);
+    // La liste des auteurs pilote le choix de portée de l'analyse : elle doit
+    // oublier l'évaluateur tout de suite, sans rouvrir la page.
+    sb.rpc('mv_auteurs', { p_personne_id: personne.id })
+      .then(({ data, error: e }) => setAuteursProfil((!e && data) ? data : []));
   };
 
   // Supprimer un profil ajouté à la main (sans compte) et toutes ses données.
