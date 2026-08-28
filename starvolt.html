@@ -20424,6 +20424,23 @@ const MV_POSITIONS = [
 const MV_MAX = 200;            // longueur conseillée d'une position
 const MV_DEGRADE = 'linear-gradient(90deg,#7fb2ff,#a8c0e6,#cbcbcb,#eec98d,#ffb340)';
 
+// Précision d'une évaluation : à quel point celui qui répond estime connaître
+// la personne qu'il classe. Plafond volontaire à 80 % — c'est la valeur de
+// l'auto-évaluation, et personne ne se voit entièrement soi-même. L'analyse
+// pondère les réponses avec ce chiffre quand plusieurs personnes ont répondu.
+const MV_PRECISION_SOI  = 80;  // auto-évaluation
+const MV_PRECISION_TIERS = 60; // évaluation d'un tiers, tant qu'il n'a rien dit
+const MV_PRECISIONS = [
+  { v: 80, titre: 'Je la connais intimement',
+    texte: "Depuis longtemps, dans plusieurs contextes, y compris ce qu'elle ne montre pas. C'est le niveau d'une auto-évaluation : même sur soi, on ne dépasse pas 80 %." },
+  { v: 60, titre: 'Je suis un proche',
+    texte: 'Famille, ami de longue date, collègue au quotidien. Je vois beaucoup de choses, mais pas tout.' },
+  { v: 40, titre: 'Je la côtoie dans un seul cadre',
+    texte: 'Le travail, le sport, un cercle amical. Une bonne part de sa vie et de ses idées m’échappe.' },
+  { v: 20, titre: 'Nous nous connaissons peu',
+    texte: 'Quelques échanges, une impression générale. Je réponds surtout à l’intuition.' },
+];
+
 // Pictos de mode, en SVG monochrome : les émojis équivalents sont rendus en
 // couleur par le système et deviennent illisibles sur fond sombre.
 const MV_PICTO = {
@@ -20779,6 +20796,11 @@ function AdminMindVectorScreen({ user, profile, onBack, onFeedback, chipName, av
   const [restantes,  setRestantes]  = useState(false);  // « ne montrer que ce qui reste à renseigner »
   const [portrait,   setPortrait]   = useState(null);   // { texte } ou { erreur }
   const [portraitEnCours, setPortraitEnCours] = useState(false);
+  const [maPrecision, setMaPrecision] = useState(null); // précision que J'accorde à MON évaluation de ce profil
+  const [demPrecision, setDemPrecision] = useState(false); // popup de réglage de cette précision
+  const [auteursProfil, setAuteursProfil] = useState([]);  // qui a classé ce profil (mv_auteurs)
+  const [popupPortee, setPopupPortee] = useState(null);    // choix des réponses à analyser
+  const [portee, setPortee] = useState({ mode: 'moi' });   // portée retenue pour la dernière analyse
   const [commentaire, setCommentaire] = useState(null);   // null = champ fermé
   const [exclusions, setExclusions] = useState([]);       // branches écartées pour cette personne
   const [popupQui, setPopupQui] = useState(false);
@@ -20871,8 +20893,37 @@ function AdminMindVectorScreen({ user, profile, onBack, onFeedback, chipName, av
     if (error) setErrQui(error.message);
   };
 
+  // ── Précision de MON évaluation sur ce profil ──────────────────────────────
+  // Un même profil peut être classé par plusieurs personnes ; toutes ne se
+  // valent pas. Chacun dit donc, avant de commencer, la précision qu'il accorde
+  // à son propre regard. On ne pose la question que pour quelqu'un d'AUTRE :
+  // se classer soi-même vaut 80 %, il n'y a rien à demander.
+  const ecrirePrecision = async (fiche, taux) => {
+    if (!fiche || !user?.id) return;
+    setMaPrecision(taux);
+    const { error } = await sb.from('mv_precisions').upsert(
+      { personne_id: fiche.id, auteur_id: user.id, taux, updated_at: new Date().toISOString() },
+      { onConflict: 'personne_id,auteur_id' });
+    if (error) setErrQui(error.message);
+  };
+
+  const chargerPrecision = async (fiche) => {
+    if (!fiche || !user?.id) return;
+    const soi = !!fiche.user_id && fiche.user_id === user.id;
+    const { data, error } = await sb.from('mv_precisions').select('taux')
+      .eq('personne_id', fiche.id).eq('auteur_id', user.id).maybeSingle();
+    // Table absente (migration pas passée) : on n'ouvre surtout pas un popup
+    // qui ne pourrait rien enregistrer.
+    if (error) { setMaPrecision(soi ? MV_PRECISION_SOI : MV_PRECISION_TIERS); return; }
+    if (data) { setMaPrecision(data.taux); return; }
+    if (soi) { ecrirePrecision(fiche, MV_PRECISION_SOI); return; }
+    setMaPrecision(null); setDemPrecision(true);
+  };
+
   const chargerReponses = async (fiche) => {
     setExclusions(Array.isArray(fiche.exclusions) ? fiche.exclusions : []);
+    setPortee({ mode: 'moi' });
+    chargerPrecision(fiche);
     const { data } = await sb.from('mv_reponses')
       .select('node_id,pos,auteur_id').eq('personne_id', fiche.id);
     const miennes = {}, auto = {};
@@ -21345,7 +21396,7 @@ function AdminMindVectorScreen({ user, profile, onBack, onFeedback, chipName, av
   // suivant, gauche/haut = précédent. On s'efface dès qu'un champ est actif ou
   // qu'une fenêtre est ouverte.
   const clavierRef = useRef({});
-  clavierRef.current = { versVoisin, posEdit, bloque: popupQui || !!dialogue || docOuvert || renomme != null || !!portrait || arbre };
+  clavierRef.current = { versVoisin, posEdit, bloque: popupQui || !!dialogue || docOuvert || renomme != null || !!portrait || arbre || demPrecision || !!popupPortee };
   useEffect(() => {
     if (compact) return;
     const onKey = (e) => {
@@ -21547,9 +21598,15 @@ function AdminMindVectorScreen({ user, profile, onBack, onFeedback, chipName, av
     })();
   }, [popupQui]);
 
-  // Dès qu'un profil qu'on gère est retenu, on liste ses évaluateurs.
+  // Dès qu'un profil qu'on gère est retenu, on liste ses évaluateurs — et qui
+  // a effectivement répondu, pour savoir s'il y a une portée à choisir avant
+  // l'analyse (et pour l'ouvrir même quand c'est un tiers, seul, qui a classé).
   useEffect(() => {
-    if (popupQui && personne && peutGererProfil) chargerEvaluateurs(personne);
+    if (!(popupQui && personne)) return;
+    if (!peutGererProfil) { setAuteursProfil([]); return; }
+    chargerEvaluateurs(personne);
+    sb.rpc('mv_auteurs', { p_personne_id: personne.id })
+      .then(({ data, error }) => setAuteursProfil((!error && data) ? data : []));
   }, [popupQui, personne, peutGererProfil]);
 
   // Un compte Starvolt n'a qu'une fiche : on la retrouve, sinon on la crée.
@@ -21682,11 +21739,13 @@ function AdminMindVectorScreen({ user, profile, onBack, onFeedback, chipName, av
   // `commentaire` non défini = on garde celui déjà en base. La fonction edge ne
   // rappelle l'IA que si les réponses, le prompt ou le commentaire ont bougé :
   // rouvrir ses résultats ne coûte donc rien.
-  const demanderPortrait = async (commentaire) => {
+  const demanderPortrait = async (commentaire, porteeArg) => {
     if (!personne || portraitEnCours) return;
+    const p = porteeArg || portee;
+    if (porteeArg) setPortee(porteeArg);
     setPortraitEnCours(true);
-    setPortrait(p => ({ ...(p || {}), chargement: true }));
-    const corps = { action: 'profil', personne_id: personne.id };
+    setPortrait(x => ({ ...(x || {}), chargement: true }));
+    const corps = { action: 'profil', personne_id: personne.id, portee: p };
     // On n'accepte QUE du texte : branché directement sur un onClick, cette
     // fonction recevait l'événement React, qui partait dans le corps JSON et
     // faisait échouer la sérialisation (structure circulaire).
@@ -21697,7 +21756,36 @@ function AdminMindVectorScreen({ user, profile, onBack, onFeedback, chipName, av
       setPortrait({ erreur: await mvMessageErreur(error, data) });
       return;
     }
-    setPortrait({ texte: data.texte, sujets: data.sujets, commentaire: data.commentaire || '', cache: !!data.cache });
+    setPortrait({ texte: data.texte, sujets: data.sujets, provenance: data.provenance,
+                  commentaire: data.commentaire || '', cache: !!data.cache });
+  };
+
+  // ── Sur quelles réponses analyser ? ───────────────────────────────────────
+  // Tant qu'une seule personne a répondu, la question ne se pose pas. Dès qu'il
+  // y en a plusieurs, le titulaire du profil (ou un superadmin) choisit :
+  // l'auto-évaluation seule, tout le monde pondéré, ou une liste d'évaluateurs.
+  // Un simple invité, lui, n'a droit qu'à ses propres réponses — c'est la règle
+  // portée par la base, on ne lui montre donc rien à choisir.
+  const ouvrirAnalyse = async () => {
+    if (!personne || portraitEnCours) return;
+    if (!peutGererProfil) { setPopupQui(false); demanderPortrait(undefined, { mode: 'moi' }); return; }
+    const { data, error } = await sb.rpc('mv_auteurs', { p_personne_id: personne.id });
+    const liste = (!error && data) ? data : [];
+    setAuteursProfil(liste);
+    if (liste.length <= 1) {
+      setPopupQui(false);
+      demanderPortrait(undefined, { mode: liste.length === 1 ? 'tous' : 'moi' });
+      return;
+    }
+    setPopupPortee({ mode: 'tous', choix: new Set(liste.map(a => a.auteur_id)) });
+  };
+
+  const lancerPortee = () => {
+    const p = popupPortee; if (!p) return;
+    const choisis = [...p.choix];
+    if (p.mode === 'choix' && !choisis.length) return;
+    setPopupPortee(null); setPopupQui(false);
+    demanderPortrait(undefined, p.mode === 'choix' ? { mode: 'choix', auteurs: choisis } : { mode: p.mode });
   };
 
   // Fermer le portrait rend la main sur l'arbre : rester sur « il ne reste rien »
@@ -22027,7 +22115,7 @@ function AdminMindVectorScreen({ user, profile, onBack, onFeedback, chipName, av
             {toutRenseigne && !compact && (
               <button className="btn btn-yes" style={{width:'auto',fontSize:12,padding:'6px 12px'}}
                 title="Revoir le portrait tiré de vos positions"
-                onClick={() => demanderPortrait()}>✨ Résultats</button>
+                onClick={ouvrirAnalyse}>✨ Résultats</button>
             )}
             {onFeedback && (
               <div style={{display:'flex',alignItems:'center',gap:2}}>
@@ -22143,7 +22231,7 @@ function AdminMindVectorScreen({ user, profile, onBack, onFeedback, chipName, av
               {reste.length === 0 && `${ordreParcours.filter(id => aDesPositions(id)).length} sujets classés.`}
             </div>
             <button className="btn btn-yes" style={{width:'auto',fontSize:14,padding:'12px 26px'}}
-              disabled={portraitEnCours} onClick={() => demanderPortrait()}>
+              disabled={portraitEnCours} onClick={ouvrirAnalyse}>
               {portraitEnCours ? <><StarSpinner size={15} color="#1a4500"/> Analyse…</> : '✨ Vos résultats'}
             </button>
             {peutGererProfil && (
@@ -22232,7 +22320,8 @@ function AdminMindVectorScreen({ user, profile, onBack, onFeedback, chipName, av
               </div>
               {portrait.sujets && (
                 <div style={{fontSize:11.5,color:'rgba(255,255,255,.45)',marginTop:3}}>
-                  D'après {portrait.sujets} sujet{portrait.sujets > 1 ? 's' : ''} classé{portrait.sujets > 1 ? 's' : ''}.
+                  D'après {portrait.sujets} sujet{portrait.sujets > 1 ? 's' : ''} classé{portrait.sujets > 1 ? 's' : ''}
+                  {portrait.provenance ? `, sur ${portrait.provenance}` : ''}.
                   Une lecture, pas un verdict.
                 </div>
               )}
@@ -22465,6 +22554,23 @@ function AdminMindVectorScreen({ user, profile, onBack, onFeedback, chipName, av
                 )}
               </div>
 
+              {/* ── A bis. La précision que j'accorde à MON regard ──────────── */}
+              {personne && !(personne.user_id && personne.user_id === user?.id) && (
+                <div style={{background:'rgba(255,255,255,.06)',border:'1px solid rgba(255,255,255,.14)',
+                             borderRadius:12,padding:'11px 13px'}}>
+                  <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:10}}>
+                    <span style={{fontSize:12,fontWeight:700,color:'rgba(255,255,255,.6)'}}>Précision de mon évaluation</span>
+                    <button className="btn btn-no" style={{width:'auto',fontSize:13,fontWeight:900,padding:'6px 14px'}}
+                      onClick={() => setDemPrecision(true)}>
+                      {maPrecision ? `${maPrecision} %` : 'à définir'}
+                    </button>
+                  </div>
+                  <div style={{fontSize:10.5,color:'rgba(255,255,255,.4)',marginTop:6,lineHeight:1.45}}>
+                    À quel point vous connaissez cette personne. Quand plusieurs évaluations sont analysées ensemble, elles sont pondérées par ce chiffre.
+                  </div>
+                </div>
+              )}
+
               {/* ── B. Qui peut évaluer ce profil ───────────────────────────── */}
               {peutGererProfil && (
                 <div>
@@ -22608,8 +22714,8 @@ function AdminMindVectorScreen({ user, profile, onBack, onFeedback, chipName, av
               {/* ── F. L'analyse ────────────────────────────────────────────── */}
               {personne && (
                 <button className="btn btn-yes" style={{width:'100%',fontSize:13,padding:'11px 0'}}
-                  disabled={portraitEnCours || !classees}
-                  onClick={() => { setPopupQui(false); demanderPortrait(); }}>
+                  disabled={portraitEnCours || (!classees && !auteursProfil.length)}
+                  onClick={ouvrirAnalyse}>
                   {portraitEnCours ? <><StarSpinner size={14} color="#1a4500"/> Analyse…</> : '✨ Lancer l\'analyse'}
                 </button>
               )}
@@ -22617,9 +22723,14 @@ function AdminMindVectorScreen({ user, profile, onBack, onFeedback, chipName, av
                 <button className="btn btn-no" style={{width:'100%',fontSize:13,padding:'11px 0'}}
                   disabled={!classees} onClick={ouvrirSynthese}>🖼️ Image de synthèse de ce profil</button>
               )}
-              {personne && !classees && (
+              {personne && !classees && !auteursProfil.length && (
                 <div style={{fontSize:10.5,color:'rgba(255,255,255,.68)',lineHeight:1.45,marginTop:-6}}>
                   Classez au moins un sujet pour lancer une analyse.
+                </div>
+              )}
+              {personne && auteursProfil.length > 1 && (
+                <div style={{fontSize:10.5,color:'rgba(255,255,255,.68)',lineHeight:1.45,marginTop:-6}}>
+                  {auteursProfil.length} personnes ont classé ce profil : l'analyse vous demandera lesquelles retenir.
                 </div>
               )}
 
@@ -22635,6 +22746,111 @@ function AdminMindVectorScreen({ user, profile, onBack, onFeedback, chipName, av
             <button className="btn btn-no" style={{flex:'0 0 auto',width:'auto',padding:'12px 22px'}}
               disabled={busyQui} onClick={fermerPage}>← Retour</button>
             <button className="btn btn-yes" style={{flex:1}} disabled={busyQui} onClick={fermerPage}>OK</button>
+          </div>
+        </div>
+      </div>
+    )}
+
+    {/* ── Quelle précision pour MON évaluation de ce profil ? ─────────────── */}
+    {/* Posée avant de commencer à classer quelqu'un d'autre : c'est ce chiffre
+        qui pondérera mes réponses face à celles des autres évaluateurs. */}
+    {demPrecision && personne && (
+      <div style={{position:'fixed',inset:0,zIndex:9750,background:'rgba(3,12,18,.86)',backdropFilter:'blur(4px)',WebkitBackdropFilter:'blur(4px)',display:'flex',alignItems:'center',justifyContent:'center',padding:16}}
+        onClick={() => setDemPrecision(false)}>
+        <div className="mv-dialogue" style={{maxWidth:450,maxHeight:'88vh',overflowY:'auto'}} onClick={e => e.stopPropagation()}>
+          <div style={{fontSize:16,fontWeight:900,color:'#fff',lineHeight:1.3}}>
+            À quel point connaissez-vous {personne.prenom} {personne.nom} ?
+          </div>
+          <div style={{fontSize:12.5,color:'rgba(255,255,255,.75)',lineHeight:1.5}}>
+            Vous vous apprêtez à classer quelqu'un d'autre que vous. Personne ne connaît personne
+            à 100 % : dites la précision que vous accordez à votre propre regard. Quand plusieurs
+            évaluations sont analysées ensemble, elles sont pondérées par ce chiffre.
+          </div>
+          {MV_PRECISIONS.map(o => (
+            <button key={o.v} className={'btn ' + (maPrecision === o.v ? 'btn-yes' : 'btn-no')}
+              style={{width:'100%',padding:'10px 13px',justifyContent:'flex-start',alignItems:'baseline',
+                      gap:11,textAlign:'left',whiteSpace:'normal'}}
+              onClick={() => { ecrirePrecision(personne, o.v); setDemPrecision(false); }}>
+              <span style={{flex:'0 0 auto',fontSize:15,fontWeight:900}}>{o.v} %</span>
+              <span style={{minWidth:0,lineHeight:1.4}}>
+                <span style={{display:'block',fontSize:12.5,fontWeight:800}}>{o.titre}</span>
+                <span style={{display:'block',fontSize:11,fontWeight:600,opacity:.72,marginTop:2}}>{o.texte}</span>
+              </span>
+            </button>
+          ))}
+          <button className="btn btn-no" style={{width:'100%',fontSize:12,padding:'8px 0',opacity:.65}}
+            onClick={() => setDemPrecision(false)}>Plus tard</button>
+        </div>
+      </div>
+    )}
+
+    {/* ── Sur quelles réponses lancer l'analyse ? ─────────────────────────── */}
+    {popupPortee && (
+      <div style={{position:'fixed',inset:0,zIndex:9750,background:'rgba(3,12,18,.86)',backdropFilter:'blur(4px)',WebkitBackdropFilter:'blur(4px)',display:'flex',alignItems:'center',justifyContent:'center',padding:16}}
+        onClick={() => setPopupPortee(null)}>
+        <div className="mv-dialogue" style={{maxWidth:470,maxHeight:'88vh',overflowY:'auto'}} onClick={e => e.stopPropagation()}>
+          <div style={{fontSize:16,fontWeight:900,color:'#fff'}}>Quelles réponses analyser ?</div>
+          <div style={{fontSize:12.5,color:'rgba(255,255,255,.75)',lineHeight:1.5}}>
+            {auteursProfil.length} personnes ont classé ce profil. Le portrait peut se fonder sur
+            la seule auto-évaluation, sur l'ensemble des regards, ou sur ceux que vous retenez.
+          </div>
+          {[
+            { k:'auto',  t:"Seulement l'auto-évaluation",
+              d:"Ce que la personne dit d'elle-même, sans le regard des autres.",
+              off: !auteursProfil.some(a => a.is_self),
+              offTexte: "Personne ne s'est encore auto-évalué sur ce profil." },
+            { k:'tous',  t:'Toutes les réponses de ce profil',
+              d:'Les avis sont moyennés sujet par sujet, pondérés par la précision que chacun a déclarée.' },
+            { k:'choix', t:'Seulement certains évaluateurs',
+              d:'Vous choisissez qui compte ; les retenus sont pondérés de la même façon.' },
+          ].map(o => (
+            <label key={o.k} className="mv-choix"
+              style={{display:'flex',alignItems:'flex-start',gap:9,padding:'10px 12px',borderRadius:12,
+                      cursor: o.off ? 'not-allowed' : 'pointer', opacity: o.off ? .45 : 1,
+                      background: popupPortee.mode === o.k ? 'rgba(125,217,64,.13)' : 'rgba(255,255,255,.06)',
+                      border: '1px solid ' + (popupPortee.mode === o.k ? 'rgba(125,217,64,.5)' : 'rgba(255,255,255,.14)')}}>
+              <input type="radio" name="mv-portee" disabled={o.off} checked={popupPortee.mode === o.k}
+                style={{marginTop:2,width:16,height:16,accentColor:'#7dd940',flexShrink:0}}
+                onChange={() => setPopupPortee(p => ({ ...p, mode: o.k }))}/>
+              <span style={{minWidth:0}}>
+                <span style={{display:'block',fontSize:13,fontWeight:700,color:'#fff'}}>{o.t}</span>
+                <span style={{display:'block',fontSize:10.5,color:'rgba(255,255,255,.5)',marginTop:2,lineHeight:1.45}}>
+                  {o.off ? o.offTexte : o.d}
+                </span>
+              </span>
+            </label>
+          ))}
+
+          {popupPortee.mode === 'choix' && (
+            <div style={{display:'flex',flexDirection:'column',gap:5,maxHeight:220,overflowY:'auto',
+                         background:'rgba(0,0,0,.18)',border:'1px solid rgba(255,255,255,.12)',
+                         borderRadius:10,padding:'8px 10px'}}>
+              {auteursProfil.map(a => (
+                <label key={a.auteur_id} className="mv-choix"
+                  style={{display:'flex',alignItems:'center',gap:8,cursor:'pointer',fontSize:12.5,color:'#fff'}}>
+                  <input type="checkbox" checked={popupPortee.choix.has(a.auteur_id)}
+                    style={{width:15,height:15,accentColor:'#7dd940',flexShrink:0}}
+                    onChange={() => setPopupPortee(p => {
+                      const n = new Set(p.choix);
+                      n.has(a.auteur_id) ? n.delete(a.auteur_id) : n.add(a.auteur_id);
+                      return { ...p, choix: n };
+                    })}/>
+                  <span style={{flex:1,minWidth:0,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
+                    {a.is_self ? `${a.nom} (auto-évaluation)` : a.nom}
+                    <span style={{color:'rgba(255,255,255,.45)',fontWeight:700}}> — {a.repondu} sujet{Number(a.repondu) > 1 ? 's' : ''}</span>
+                  </span>
+                  <span style={{flexShrink:0,fontSize:11.5,fontWeight:900,color:'#a3ed6a'}}>{a.taux} %</span>
+                </label>
+              ))}
+            </div>
+          )}
+
+          <div style={{display:'flex',gap:9}}>
+            <button className="btn btn-no" style={{flex:'0 0 auto',width:'auto',fontSize:13,padding:'11px 18px'}}
+              onClick={() => setPopupPortee(null)}>Annuler</button>
+            <button className="btn btn-yes" style={{flex:1,fontSize:13,padding:'11px 0'}}
+              disabled={popupPortee.mode === 'choix' && popupPortee.choix.size === 0}
+              onClick={lancerPortee}>✨ Lancer l'analyse</button>
           </div>
         </div>
       </div>

@@ -24,6 +24,10 @@ const PRICES: Record<string, { in: number; out: number }> = {
   "claude-opus-4-7": { in: 5, out: 25 },
 };
 
+// Tout identifiant venu du client part dans une URL PostgREST : on ne laisse
+// passer que la forme d'un uuid.
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 const FEATURE = "mind_vector_fill";
 const FEATURE_PROFIL = "mind_vector_profil";
 const FEATURE_INVITE = "mind_vector_invite";
@@ -379,18 +383,85 @@ async function generer(body: any, email: string): Promise<Response> {
 }
 
 // ── action "profil" ─────────────────────────────────────────────────────────
-// Ouverte à tout utilisateur connecté, mais STRICTEMENT sur ses propres
-// classements : on lit les réponses dont il est l'auteur, jamais celles d'un
-// autre. Le service_role contourne la RLS, c'est donc ici que la garde se joue.
+// Par défaut STRICTEMENT sur les classements de l'appelant : le service_role
+// contourne la RLS, c'est donc ici que la garde se joue. `portee` permet
+// d'élargir — mais seulement au propriétaire du profil ou à un superadmin, la
+// même règle que mv_synthese : personne ne lit les évaluations reçues par un
+// autre.
+//   moi   — mes classements seuls (défaut, comportement historique)
+//   auto  — l'auto-évaluation de la personne
+//   tous  — tous les évaluateurs, pondérés par leur précision
+//   choix — les évaluateurs nommés dans portee.auteurs, pondérés de même
 async function profil(body: any, caller: { id: string; email: string }): Promise<Response> {
   const personneId = String(body?.personne_id || "").trim();
   if (!personneId) return json({ error: "bad_request", message: "Personne manquante." }, 400);
+  if (!UUID.test(personneId)) return json({ error: "bad_request", message: "Personne invalide." }, 400);
+
+  const fiche = ((await dbSelect(
+    `mv_personnes?id=eq.${personneId}&select=id,user_id&limit=1`,
+  )) || [])[0];
+  if (!fiche) return json({ error: "bad_request", message: "Profil introuvable." }, 400);
+
+  const portee = body?.portee || {};
+  const mode = ["moi", "auto", "tous", "choix"].includes(String(portee?.mode)) ? String(portee.mode) : "moi";
+  if (mode !== "moi") {
+    const proprio = !!fiche.user_id && fiche.user_id === caller.id;
+    if (!proprio && !(await estSuperadmin(caller.id))) {
+      return json({
+        error: "forbidden",
+        message: "Seul le titulaire du profil peut analyser les évaluations reçues.",
+      }, 403);
+    }
+  }
+
+  // Les auteurs retenus. `null` = tout le monde.
+  let auteurs: string[] | null = null;
+  if (mode === "moi") auteurs = [caller.id];
+  else if (mode === "auto") auteurs = [fiche.user_id || caller.id];
+  else if (mode === "choix") {
+    auteurs = (Array.isArray(portee.auteurs) ? portee.auteurs : []).map(String).filter((a) => UUID.test(a));
+    if (!auteurs.length) return json({ error: "bad_request", message: "Aucun évaluateur retenu." }, 400);
+  }
 
   const reps = (await dbSelect(
-    `mv_reponses?personne_id=eq.${personneId}&auteur_id=eq.${caller.id}&select=node_id,pos`,
+    `mv_reponses?personne_id=eq.${personneId}` +
+    (auteurs ? `&auteur_id=in.(${auteurs.join(",")})` : "") +
+    `&select=node_id,pos,auteur_id`,
   )) || [];
   if (!reps.length) {
     return json({ error: "vide", message: "Aucune réponse à analyser." }, 422);
+  }
+
+  // ── Pondération ───────────────────────────────────────────────────────────
+  // Chaque évaluateur a dit la précision qu'il accordait à son propre regard.
+  // Sur un sujet classé par plusieurs, la position retenue est la moyenne
+  // pondérée par ces précisions, arrondie au rang le plus proche. Les valeurs
+  // par défaut reprennent la règle posée à l'origine : 80 % pour la personne
+  // elle-même, 60 % pour un tiers.
+  const idsPresents = [...new Set(reps.map((r: any) => r.auteur_id))].filter((a) => UUID.test(String(a)));
+  const prec: Record<string, number> = {};
+  for (const p of (await dbSelect(
+    `mv_precisions?personne_id=eq.${personneId}&select=auteur_id,taux`,
+  )) || []) prec[p.auteur_id] = Number(p.taux) || 0;
+  const poids = (id: string) => prec[id] || (fiche.user_id && fiche.user_id === id ? 80 : 60);
+
+  const nomAuteur: Record<string, string> = {};
+  if (idsPresents.length) {
+    for (const p of (await dbSelect(
+      `profiles?id=in.(${idsPresents.join(",")})&select=id,prenom,nom`,
+    )) || []) {
+      nomAuteur[p.id] = [p.prenom, p.nom].filter(Boolean).join(" ").trim();
+    }
+  }
+  const libelle = (id: string) =>
+    (fiche.user_id && fiche.user_id === id) ? "auto-évaluation" : (nomAuteur[id] || "un évaluateur");
+
+  // node_id → avis de chaque auteur, puis position retenue.
+  const parNoeud: Record<string, { auteur: string; pos: number; w: number }[]> = {};
+  for (const r of reps) {
+    const w = poids(r.auteur_id);
+    if (w <= 0) continue;   // précision nulle = voix qui ne pèse pas
+    (parNoeud[r.node_id] = parNoeud[r.node_id] || []).push({ auteur: r.auteur_id, pos: Number(r.pos), w });
   }
 
   const noeuds    = (await dbSelect("mv_nodes?select=id,parent_id,label,description&limit=500")) || [];
@@ -405,19 +476,31 @@ async function profil(body: any, caller: { id: string; email: string }): Promise
   };
 
   const blocs: string[] = [];
-  for (const r of reps) {
-    const n = parId[r.node_id];
+  const retenues: string[] = [];   // pour la signature du cache
+  for (const [nodeId, avis] of Object.entries(parNoeud)) {
+    const n = parId[nodeId];
     if (!n) continue;
-    const ps = positions.filter((p: any) => p.node_id === r.node_id).sort((a: any, b: any) => a.pos - b.pos);
-    const retenue = ps.find((p: any) => p.pos === r.pos);
+    const somme = avis.reduce((s, a) => s + a.w, 0);
+    const moyenne = avis.reduce((s, a) => s + a.pos * a.w, 0) / somme;
+    const pos = Math.min(5, Math.max(1, Math.round(moyenne)));
+    const ps = positions.filter((p: any) => p.node_id === nodeId).sort((a: any, b: any) => a.pos - b.pos);
+    const retenue = ps.find((p: any) => p.pos === pos);
     if (!retenue) continue;
+    retenues.push(`${nodeId}:${pos}`);
     // On donne aussi les deux extrêmes : sans eux, « position 4 » ne dit rien.
     const p1 = ps.find((p: any) => p.pos === 1), p5 = ps.find((p: any) => p.pos === 5);
+    // Plusieurs regards sur le même sujet : on les nomme. L'écart entre eux dit
+    // quelque chose que la moyenne, seule, effacerait.
+    const detail = avis.length > 1
+      ? `\n  Avis : ${avis.map((a) => `${libelle(a.auteur)} → ${a.pos} (précision ${a.w} %)`).join(", ")}` +
+        `\n  Position pondérée : ${moyenne.toFixed(2)} → ${pos}`
+      : "";
     blocs.push(
       `SUJET : ${chemin(n)}` +
       (n.description ? `\n  (${String(n.description).replace(/\s+/g, " ").trim()})` : "") +
       (p1 || p5 ? `\n  Éventail : 1 = ${p1?.titre || "?"} … 5 = ${p5?.titre || "?"}` : "") +
-      `\n  RETENU → position ${r.pos}${retenue.titre ? ` « ${retenue.titre} »` : ""} : ` +
+      detail +
+      `\n  RETENU → position ${pos}${retenue.titre ? ` « ${retenue.titre} »` : ""} : ` +
       String(retenue.content || "").replace(/\s+/g, " ").trim(),
     );
   }
@@ -437,17 +520,39 @@ async function profil(body: any, caller: { id: string; email: string }): Promise
     `mv_portraits?personne_id=eq.${personneId}&auteur_id=eq.${caller.id}&select=texte,signature,commentaire`,
   )) || [])[0] || null;
   const commentaire = String(body?.commentaire ?? stocke?.commentaire ?? "").trim();
+  // La portée entre dans la signature : passer de « moi seul » à « tout le
+  // monde » change le portrait, et doit donc bien relancer l'analyse.
   const signature = JSON.stringify({
-    r: reps.map((r: any) => `${r.node_id}:${r.pos}`).sort(),
+    r: retenues.sort(),
     p: versionPrompt,
     c: commentaire,
+    m: mode,
+    a: (auteurs || [...idsPresents]).map(String).sort(),
   });
+  // Ce que l'appelant verra en tête du portrait : sur quoi il a été bâti.
+  const nbAuteurs = idsPresents.length;
+  const provenance = mode === "moi" ? "mes réponses"
+    : mode === "auto" ? "l'auto-évaluation"
+    : `${nbAuteurs} évaluation${nbAuteurs > 1 ? "s" : ""}`;
+
   if (stocke && stocke.signature === signature && !body?.forcer) {
-    return json({ texte: stocke.texte, sujets: blocs.length, commentaire, cache: true });
+    return json({ texte: stocke.texte, sujets: blocs.length, auteurs: nbAuteurs, provenance, commentaire, cache: true });
   }
+
+  // Quand plusieurs personnes ont répondu, le modèle doit savoir d'où sort la
+  // position retenue — sans quoi il lirait les avis divergents comme des
+  // contradictions de la personne elle-même.
+  const preambule = nbAuteurs > 1
+    ? `Ce portrait croise ${nbAuteurs} regards sur la même personne : son auto-évaluation ` +
+      `et/ou celle de proches. Chaque évaluateur a estimé la précision de son propre regard ` +
+      `(80 % pour une auto-évaluation, moins pour un tiers) ; la position retenue est la moyenne ` +
+      `pondérée par ces précisions. Là où les avis divergent, dis-le : l'écart entre la façon ` +
+      `dont la personne se voit et celle dont on la voit fait partie du portrait.\n\n`
+    : "";
 
   const { ok, jsonRes } = await askClaude(
     systemPrompt,
+    preambule +
     `Voici les ${blocs.length} positions retenues.\n\n${blocs.join("\n\n")}` +
     (commentaire
       ? `\n\n=== CE QUE LA PERSONNE A RÉPONDU AU PORTRAIT PRÉCÉDENT ===\n${commentaire}\n` +
@@ -480,7 +585,8 @@ async function profil(body: any, caller: { id: string; email: string }): Promise
 
   const usage = jsonRes?.usage || {};
   const costUsd = await loggerCout(usage, caller.email, FEATURE_PROFIL);
-  return json({ texte, sujets: blocs.length, commentaire, usage, cost: { usd: costUsd, eur: costUsd / USD_PER_EUR } });
+  return json({ texte, sujets: blocs.length, auteurs: nbAuteurs, provenance, commentaire, usage,
+                cost: { usd: costUsd, eur: costUsd / USD_PER_EUR } });
 }
 
 // ── action "branche" ────────────────────────────────────────────────────────
@@ -707,6 +813,14 @@ async function isAdminOrSuperadmin(userId: string): Promise<boolean> {
   const rows = await dbSelect(`profiles?id=eq.${userId}&select=role&limit=1`);
   const role = Array.isArray(rows) ? rows[0]?.role : null;
   return role === "admin" || role === "superadmin";
+}
+
+// Élargir une analyse aux évaluations reçues par quelqu'un d'autre est un droit
+// de superadmin — la même borne que mv_synthese et mv_auteurs. Un admin simple
+// peut évaluer autrui, pas lire ce que les autres en pensent.
+async function estSuperadmin(userId: string): Promise<boolean> {
+  const rows = await dbSelect(`profiles?id=eq.${userId}&select=role&limit=1`);
+  return (Array.isArray(rows) ? rows[0]?.role : null) === "superadmin";
 }
 
 async function checkRateLimit(feature: string, userEmail: string, maxPerHour: number): Promise<boolean> {
