@@ -32,16 +32,23 @@ const PRICES: Record<string, { in: number; out: number }> = {
 // que le texte, jamais les recherches qui l'avaient produit.
 const USD_PAR_RECHERCHE = 0.01;
 
-// Les modèles ouverts au remplissage automatique, et la version de l'outil de
-// recherche que chacun sait utiliser. `_20260209` filtre les résultats avant
-// qu'ils n'entrent dans le contexte — c'est ce qui borne la facture, puisque
-// 87 % du coût mesuré vient des jetons d'entrée. Haiku 4.5 n'a que la version
-// de base : moins cher au jeton, mais sans ce filtrage.
-const MODELES_RECHERCHE: Record<string, string> = {
-  "claude-opus-4-8":  "web_search_20260209",
-  "claude-opus-4-7":  "web_search_20260209",
-  "claude-sonnet-5":  "web_search_20260209",
-  "claude-haiku-4-5": "web_search_20250305",
+// Les modèles ouverts au remplissage automatique. Deux choses varient d'un
+// modèle à l'autre, et les confondre coûte un 400 :
+//   · `outil` — la version de la recherche web. `_20260209` filtre les
+//     résultats avant qu'ils n'entrent dans le contexte, ce qui borne la
+//     facture (87 % du coût mesuré est en entrée). Haiku 4.5 n'a que la version
+//     de base : moins cher au jeton, mais sans ce filtrage.
+//   · `adaptatif` — le raisonnement adaptatif et le réglage `effort` sont
+//     apparus avec la génération 4.6. Sur Haiku 4.5 les deux sont refusés
+//     (« adaptive thinking is not supported on this model ») : on retombe sur
+//     le raisonnement à budget, sa forme d'époque. Le laisser réfléchir un peu
+//     n'est pas un luxe — sans cela le modèle rend régulièrement un appel
+//     d'outil vide.
+const MODELES_RECHERCHE: Record<string, { outil: string; adaptatif: boolean }> = {
+  "claude-opus-4-8":  { outil: "web_search_20260209", adaptatif: true },
+  "claude-opus-4-7":  { outil: "web_search_20260209", adaptatif: true },
+  "claude-sonnet-5":  { outil: "web_search_20260209", adaptatif: true },
+  "claude-haiku-4-5": { outil: "web_search_20250305", adaptatif: false },
 };
 
 // Tout identifiant venu du client part dans une URL PostgREST : on ne laisse
@@ -222,14 +229,30 @@ async function askClaudeWeb(
   system: string, question: string, tools: any[],
   modele: string, recherchesMax: number, maxTokens = 8000,
 ) {
-  const outilWeb = {
-    type: MODELES_RECHERCHE[modele],
-    name: "web_search",
-    max_uses: recherchesMax,
-  };
+  const cap = MODELES_RECHERCHE[modele] || MODELES_RECHERCHE[MODEL];
+  const outilWeb = { type: cap.outil, name: "web_search", max_uses: recherchesMax };
   const messages: any[] = [{ role: "user", content: question }];
   let jsonRes: any = null;
   for (let tour = 0; tour < 6; tour++) {
+    const corps: any = {
+      model: modele,
+      max_tokens: maxTokens,
+      system,
+      messages,
+      tools: [outilWeb, ...tools],
+      tool_choice: { type: "auto" },
+    };
+    if (cap.adaptatif) {
+      corps.thinking = { type: "adaptive" };
+      // Choisir une position parmi cinq et citer sa source ne demande pas la
+      // profondeur maximale : `high` (le défaut) payait du raisonnement dont la
+      // tâche n'a pas besoin.
+      corps.output_config = { effort: "medium" };
+    } else {
+      // Génération d'avant l'adaptatif : budget explicite, obligatoirement
+      // inférieur à max_tokens. `effort` n'existe pas non plus ici.
+      corps.thinking = { type: "enabled", budget_tokens: 2000 };
+    }
     const res = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
@@ -237,19 +260,7 @@ async function askClaudeWeb(
         "anthropic-version": "2023-06-01",
         "content-type": "application/json",
       },
-      body: JSON.stringify({
-        model: modele,
-        max_tokens: maxTokens,
-        thinking: { type: "adaptive" },
-        // Choisir une position parmi cinq et citer sa source ne demande pas la
-        // profondeur maximale : `high` (le défaut) payait du raisonnement dont
-        // la tâche n'a pas besoin.
-        output_config: { effort: "medium" },
-        system,
-        messages,
-        tools: [outilWeb, ...tools],
-        tool_choice: { type: "auto" },
-      }),
+      body: JSON.stringify(corps),
     });
     if (!res.ok) return { ok: false, jsonRes: await res.json() };
     jsonRes = await res.json();
