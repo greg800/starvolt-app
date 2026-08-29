@@ -1720,6 +1720,29 @@
       border-top: 1px solid rgba(255,255,255,.12);
       -webkit-overflow-scrolling: touch;
     }
+    /* Classement du positionnement politique. Une jauge centrée sur zéro : le
+       score va de -100 à +100, et l'œil doit voir de quel côté du milieu on est
+       avant même de lire le chiffre. */
+    .pol-ligne { display: flex; align-items: center; gap: 10px; padding: 5px 0; }
+    .pol-nom   { flex: 0 0 34%; min-width: 0; font-size: 12.5px; font-weight: 700; color: #fff;
+                 overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .pol-piste { flex: 1 1 auto; position: relative; height: 13px; border-radius: 7px;
+                 background: rgba(255,255,255,.09); overflow: hidden; }
+    .pol-piste::after { content: ''; position: absolute; left: 50%; top: 0; bottom: 0;
+                        width: 1px; background: rgba(255,255,255,.28); }
+    .pol-barre { position: absolute; top: 2px; bottom: 2px; border-radius: 5px; }
+    .pol-barre.pos { background: #7dd940; }
+    .pol-barre.neg { background: #e8825f; }
+    .pol-val   { flex: 0 0 52px; text-align: right; font-size: 12.5px; font-weight: 900;
+                 font-variant-numeric: tabular-nums; }
+    .pol-sujets{ flex: 0 0 auto; font-size: 10px; color: rgba(255,255,255,.42); }
+    @media (max-width: 899px) {
+      /* Sur petit écran le nom passe sur deux lignes plutôt que d'être coupé :
+         « Le rassemblement n… » ne dit plus de quel parti il s'agit. */
+      .pol-nom { flex-basis: 40%; font-size: 11.5px; white-space: normal; line-height: 1.15; }
+      .pol-sujets { display: none; }
+    }
+
     /* La description est bornée à deux lignes : elle explique, elle ne doit pas
        manger la hauteur des 5 cases qui sont l'objet de l'écran. */
     .mv-sujet-desc {
@@ -15345,7 +15368,8 @@ function slugifyMd(label) {
 // Ces prompts se règlent sur LEUR propre page (Cyber-sécurité). Les répéter ici
 // donnait deux endroits pour la même valeur, donc deux vérités possibles.
 const AI_PROMPTS_AILLEURS = ['cyber_security', 'cyber_security_code',
-                             'mind_vector_fill', 'mind_vector_profil', 'mind_vector_public'];
+                             'mind_vector_fill', 'mind_vector_profil', 'mind_vector_public',
+                             'mind_vector_politique'];
 
 function AdminAIPromptsScreen({ onBack, onBilanData }) {
   const [rows, setRows] = useState(null);       // [{feature,label,system_prompt,updated_at,updated_by}]
@@ -20361,11 +20385,12 @@ function AdminMindVectorPromptsScreen({ onBack }) {
   const fmtDate = (d) => d ? new Date(d).toLocaleString('fr-FR',
     { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit' }) : '—';
 
-  const MIENS = ['mind_vector_fill', 'mind_vector_profil', 'mind_vector_public'];
+  const MIENS = ['mind_vector_fill', 'mind_vector_profil', 'mind_vector_public', 'mind_vector_politique'];
   const EXPLICATIONS = {
     mind_vector_fill:   "Sert au bouton « 🤖 Remplissage auto » et à « Créer une branche » : il rédige les 5 positions d'un sujet et leurs titres.",
     mind_vector_profil: "Sert au CTA « Vos résultats » : il lit les positions retenues par une personne et en tire un portrait.",
     mind_vector_public: "Sert à « Remplir automatiquement les positions de ce profil » : il cherche sur Internet la position d'un profil public, sujet par sujet. La chaîne #profil-public y est remplacée par le nom du profil et son contexte. Se règle aussi depuis la page de remplissage.",
+    mind_vector_politique: "Sert au bouton « 🗳️ Positionnement politique » : il explique de quels partis les réponses d'un profil le rapprochent. Le classement chiffré est calculé côté serveur et lui est fourni — il ne le recalcule pas.",
   };
 
   const load = () => {
@@ -20802,6 +20827,35 @@ function mvFicheSource(r) {
   ].filter(Boolean).join('\n\n');
 }
 
+// Classement de proximité politique : une jauge par parti, centrée sur zéro.
+// Partagé par la page dédiée et la fin du portrait — le même chiffre doit se
+// lire de la même façon aux deux endroits. Le score arrive calculé du serveur :
+// rien n'est recalculé ici, l'écran ne fait que le montrer.
+function MvClassementPolitique({ scores }) {
+  if (!scores || !scores.length) return null;
+  return (
+    <div style={{margin:'2px 0 4px'}}>
+      {scores.map(s => {
+        const v = Math.max(-100, Math.min(100, Number(s.score) || 0));
+        const large = Math.abs(v) / 2;   // la demi-piste vaut 100 %
+        return (
+          <div className="pol-ligne" key={s.id || s.nom}>
+            <span className="pol-nom" title={s.nom}>{s.nom}</span>
+            <span className="pol-piste">
+              <span className={'pol-barre ' + (v >= 0 ? 'pos' : 'neg')}
+                style={v >= 0 ? { left: '50%', width: large + '%' } : { right: '50%', width: large + '%' }}/>
+            </span>
+            <span className="pol-val" style={{ color: v >= 0 ? '#7dd940' : '#e8825f' }}>
+              {v > 0 ? '+' : ''}{v} %
+            </span>
+            <span className="pol-sujets">{s.sujets} sujet{s.sujets > 1 ? 's' : ''}</span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function MvSyntheseSheet({ personne, noeuds, cases, titres, auteurs, parNode, sources, onClose, compact,
                            profilsDispo, choisis, onBasculerProfil }) {
   const [focus, setFocus] = useState(null);          // mobile : élément mis en avant
@@ -21035,6 +21089,10 @@ function AdminMindVectorScreen({ user, profile, onBack, onFeedback, chipName, av
   const [restantes,  setRestantes]  = useState(false);  // « ne montrer que ce qui reste à renseigner »
   const [portrait,   setPortrait]   = useState(null);   // { texte } ou { erreur }
   const [portraitEnCours, setPortraitEnCours] = useState(false);
+  // Analyse politique : le même profil, croisé avec les positions des partis.
+  // Elle vit dans sa propre page, ET se lit à la suite du portrait.
+  const [politique,  setPolitique]  = useState(null);   // { texte, scores } ou { erreur }
+  const [politiqueEnCours, setPolitiqueEnCours] = useState(false);
   const [maPrecision, setMaPrecision] = useState(null); // précision que J'accorde à MON évaluation de ce profil
   const [demPrecision, setDemPrecision] = useState(false); // popup de réglage de cette précision
   const [auteursProfil, setAuteursProfil] = useState([]);  // qui a classé ce profil (mv_auteurs)
@@ -21687,7 +21745,7 @@ function AdminMindVectorScreen({ user, profile, onBack, onFeedback, chipName, av
   // suivant, gauche/haut = précédent. On s'efface dès qu'un champ est actif ou
   // qu'une fenêtre est ouverte.
   const clavierRef = useRef({});
-  clavierRef.current = { versVoisin, posEdit, bloque: popupQui || !!dialogue || docOuvert || renomme != null || !!portrait || arbre || demPrecision || !!popupPortee || popupRemplir };
+  clavierRef.current = { versVoisin, posEdit, bloque: popupQui || !!dialogue || docOuvert || renomme != null || !!portrait || !!politique || arbre || demPrecision || !!popupPortee || popupRemplir };
   useEffect(() => {
     if (compact) return;
     const onKey = (e) => {
@@ -22434,6 +22492,27 @@ function AdminMindVectorScreen({ user, profile, onBack, onFeedback, chipName, av
                   commentaire: data.commentaire || '', cache: !!data.cache });
   };
 
+  // ── Analyse du positionnement politique ───────────────────────────────────
+  // Le score est calculé côté serveur, pas par le modèle : il doit être le même
+  // à chaque ouverture. L'écran ne fait que l'afficher. Même portée que le
+  // portrait — analyser un profil sur d'autres réponses que celles du portrait
+  // donnerait deux textes qui se contredisent dans la même page.
+  const demanderPolitique = async () => {
+    if (!personne || politiqueEnCours) return;
+    setPopupQui(false);          // le résultat s'ouvre à la place des réglages
+    setPolitiqueEnCours(true);
+    setPolitique({ chargement: true });
+    const { data, error } = await sb.functions.invoke('mind-vector', {
+      body: { action: 'politique', personne_id: personne.id, portee },
+    });
+    setPolitiqueEnCours(false);
+    if (error || data?.error) { setPolitique({ erreur: await mvMessageErreur(error, data) }); return; }
+    setPolitique({ texte: data.texte, scores: data.scores || [], sujets: data.sujets, cache: !!data.cache });
+    // Le portrait déjà ouvert doit montrer la nouvelle analyse à sa suite sans
+    // qu'on ait à le relancer.
+    setPortrait(p => p && !p.chargement ? { ...p, politique: data.texte, politique_scores: data.scores } : p);
+  };
+
   // ── Sur quelles réponses analyser ? ───────────────────────────────────────
   // Tant qu'une seule personne a répondu, la question ne se pose pas. Dès qu'il
   // y en a plusieurs, le titulaire du profil (ou un superadmin) choisit :
@@ -23026,7 +23105,21 @@ function AdminMindVectorScreen({ user, profile, onBack, onFeedback, chipName, av
                 </div>
               : portrait.erreur
                 ? <div style={{fontSize:13,fontWeight:700,color:'#ff8a8a',lineHeight:1.5}}>{portrait.erreur}</div>
-                : <BilanMarkdown text={portrait.texte} fontSize={14}/>}
+                : <>
+                    <BilanMarkdown text={portrait.texte} fontSize={14}/>
+                    {/* L'analyse politique, quand elle a été faite, se lit à la
+                        suite du portrait : c'est le même profil, la même page. */}
+                    {portrait.politique && (
+                      <div style={{marginTop:20,paddingTop:15,borderTop:'1px solid rgba(255,255,255,.16)'}}>
+                        <div style={{fontSize:16,fontWeight:900,color:'#fff',marginBottom:9}}>
+                          Positionnement politique
+                        </div>
+                        <MvClassementPolitique scores={portrait.politique_scores}/>
+                        <div style={{height:10}}/>
+                        <BilanMarkdown text={portrait.politique} fontSize={14}/>
+                      </div>
+                    )}
+                  </>}
           </div>
 
           {/* Le portrait pose une question : il faut pouvoir y répondre, et la
@@ -23060,6 +23153,50 @@ function AdminMindVectorScreen({ user, profile, onBack, onFeedback, chipName, av
                 </div>
               </div>
             )
+          )}
+        </div>
+      </div>
+    )}
+
+    {/* ── Positionnement politique ────────────────────────────────────────── */}
+    {politique && (
+      <div style={{position:'fixed',inset:0,zIndex:9660,background:'rgba(3,12,18,.9)',backdropFilter:'blur(4px)',WebkitBackdropFilter:'blur(4px)',display:'flex',alignItems:'center',justifyContent:'center',padding:16}}
+        onClick={() => { if (!politique.chargement) setPolitique(null); }}>
+        <div className="mv-fiche" onClick={e => e.stopPropagation()}>
+          <div style={{display:'flex',alignItems:'flex-start',gap:12}}>
+            <div style={{flex:1,minWidth:0}}>
+              <div style={{fontSize:19,fontWeight:900,color:'#fff',lineHeight:1.2}}>
+                Positionnement politique — {mvNom(personne)}
+              </div>
+              <div style={{fontSize:11.5,color:'rgba(255,255,255,.45)',marginTop:3,lineHeight:1.45}}>
+                {politique.sujets ? `${politique.sujets} sujet${politique.sujets > 1 ? 's' : ''} classé${politique.sujets > 1 ? 's' : ''}, croisé${politique.sujets > 1 ? 's' : ''} avec les positions enregistrées des partis. ` : ''}
+                +100 % : les mêmes réponses partout. -100 % : les positions les plus éloignées possibles.
+              </div>
+            </div>
+            {!politique.chargement && (
+              <button className="btn btn-no" style={{flex:'0 0 auto',width:'auto',fontSize:13,padding:'7px 13px'}}
+                onClick={() => setPolitique(null)}>Fermer</button>
+            )}
+          </div>
+          <div className="mv-fiche-corps">
+            {politique.chargement
+              ? <div style={{textAlign:'center',padding:'30px 0'}}>
+                  <StarSpinner size={30}/>
+                  <div style={{fontSize:12.5,color:'rgba(255,255,255,.5)',marginTop:12}}>
+                    Comparaison avec les positions des partis…
+                  </div>
+                </div>
+              : politique.erreur
+                ? <div style={{fontSize:13,fontWeight:700,color:'#ff8a8a',lineHeight:1.5}}>{politique.erreur}</div>
+                : <>
+                    <MvClassementPolitique scores={politique.scores}/>
+                    <div style={{height:1,background:'rgba(255,255,255,.12)',margin:'13px 0'}}/>
+                    <BilanMarkdown text={politique.texte} fontSize={14}/>
+                  </>}
+          </div>
+          {!politique.chargement && (
+            <button className="btn btn-yes" style={{width:'100%',fontSize:13,padding:'11px 0',marginTop:12}}
+              onClick={() => setPolitique(null)}>Fermer</button>
           )}
         </div>
       </div>
@@ -23507,13 +23644,21 @@ function AdminMindVectorScreen({ user, profile, onBack, onFeedback, chipName, av
                 </span>
               </label>
 
-              {/* ── F. L'analyse ────────────────────────────────────────────── */}
+              {/* ── F. Les deux analyses ────────────────────────────────────── */}
               {personne && (
-                <button className="btn btn-yes" style={{width:'100%',fontSize:13,padding:'11px 0'}}
-                  disabled={portraitEnCours || (!classees && !auteursProfil.length)}
-                  onClick={ouvrirAnalyse}>
-                  {portraitEnCours ? <><StarSpinner size={14} color="#1a4500"/> Analyse…</> : '✨ Lancer l\'analyse'}
-                </button>
+                <div style={{display:'flex',gap:9}}>
+                  <button className="btn btn-yes" style={{flex:'1 1 0',width:'auto',fontSize:13,padding:'11px 0'}}
+                    disabled={portraitEnCours || (!classees && !auteursProfil.length)}
+                    onClick={ouvrirAnalyse}>
+                    {portraitEnCours ? <><StarSpinner size={14} color="#1a4500"/> Analyse…</> : '✨ Lancer l\'analyse'}
+                  </button>
+                  <button className="btn btn-no" style={{flex:'1 1 0',width:'auto',fontSize:13,padding:'11px 0'}}
+                    title="Croiser vos réponses avec celles des partis enregistrés"
+                    disabled={politiqueEnCours || (!classees && !auteursProfil.length)}
+                    onClick={demanderPolitique}>
+                    {politiqueEnCours ? <><StarSpinner size={14}/> Analyse…</> : '🗳️ Positionnement politique'}
+                  </button>
+                </div>
               )}
               {/* Plus de bouton d'image de synthèse ici : « Vue hélicoptère »,
                   dans le pied, l'ouvre depuis n'importe quel écran. */}

@@ -55,10 +55,16 @@ const MODELES_RECHERCHE: Record<string, { outil: string; adaptatif: boolean }> =
 // passer que la forme d'un uuid.
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+// ⚠️ Le catalogue se lit d'un bloc, avec une borne explicite. Elle valait 500 ;
+// l'arbre est monté à 430 positions le 2026-08-29 et une borne atteinte ne
+// lèverait AUCUNE erreur : des sujets disparaîtraient simplement des analyses.
+// 3 000 laisse de la marge ; si l'arbre s'en approche, il faudra paginer.
+
 const FEATURE = "mind_vector_fill";
 const FEATURE_PROFIL = "mind_vector_profil";
 const FEATURE_INVITE = "mind_vector_invite";
 const FEATURE_PUBLIC = "mind_vector_public";
+const FEATURE_POLITIQUE = "mind_vector_politique";
 
 // Recherche web côté serveur : Anthropic exécute la requête, on ne fournit
 // aucune clé de moteur. Le nombre de recherches est le premier levier de coût,
@@ -319,10 +325,10 @@ async function loggerCout(usage: any, email: string, feature: string,
 // ── action "rescan" ─────────────────────────────────────────────────────────
 async function rescan(email: string): Promise<Response> {
   const noeuds = (await dbSelect(
-    "mv_nodes?select=id,parent_id,label,description&order=ordre&limit=500",
+    "mv_nodes?select=id,parent_id,label,description&order=ordre&limit=3000",
   )) || [];
   const positions = (await dbSelect(
-    "mv_positions?select=node_id,pos,titre,content&order=node_id,pos&limit=500",
+    "mv_positions?select=node_id,pos,titre,content&order=node_id,pos&limit=3000",
   )) || [];
 
   const parId: Record<string, any> = {};
@@ -515,25 +521,40 @@ async function generer(body: any, email: string): Promise<Response> {
 //   auto  — l'auto-évaluation de la personne
 //   tous  — tous les évaluateurs, pondérés par leur précision
 //   choix — les évaluateurs nommés dans portee.auteurs, pondérés de même
-async function profil(body: any, caller: { id: string; email: string }): Promise<Response> {
-  const personneId = String(body?.personne_id || "").trim();
-  if (!personneId) return json({ error: "bad_request", message: "Personne manquante." }, 400);
-  if (!UUID.test(personneId)) return json({ error: "bad_request", message: "Personne invalide." }, 400);
+// Ce que `caller` a le droit de lire du profil `personneId`, et les avis
+// regroupés par sujet. PARTAGÉ par « profil » et « politique » : les deux
+// analyses doivent porter sur exactement le même profil, sinon le portrait et
+// l'analyse politique, affichés dans la même page, se contrediraient.
+// Rend `{ erreur }` — une réponse HTTP toute faite — ou le contexte.
+type CtxReponses = {
+  erreur?: Response;
+  fiche?: any;
+  mode?: string;
+  auteurs?: string[] | null;
+  idsPresents?: string[];
+  libelle?: (id: string) => string;
+  parNoeud?: Record<string, { auteur: string; pos: number; w: number }[]>;
+};
 
+async function contexteReponses(
+  personneId: string,
+  caller: { id: string; email: string },
+  portee: any,
+): Promise<CtxReponses> {
   const fiche = ((await dbSelect(
-    `mv_personnes?id=eq.${personneId}&select=id,user_id&limit=1`,
+    `mv_personnes?id=eq.${personneId}&select=id,user_id,nom,prenom,type_entite&limit=1`,
   )) || [])[0];
-  if (!fiche) return json({ error: "bad_request", message: "Profil introuvable." }, 400);
+  if (!fiche) return { erreur: json({ error: "bad_request", message: "Profil introuvable." }, 400) };
 
-  const portee = body?.portee || {};
-  const mode = ["moi", "auto", "tous", "choix"].includes(String(portee?.mode)) ? String(portee.mode) : "moi";
+  const p = portee || {};
+  const mode = ["moi", "auto", "tous", "choix"].includes(String(p?.mode)) ? String(p.mode) : "moi";
   if (mode !== "moi") {
     const proprio = !!fiche.user_id && fiche.user_id === caller.id;
     if (!proprio && !(await estSuperadmin(caller.id))) {
-      return json({
+      return { erreur: json({
         error: "forbidden",
         message: "Seul le titulaire du profil peut analyser les évaluations reçues.",
-      }, 403);
+      }, 403) };
     }
   }
 
@@ -542,8 +563,8 @@ async function profil(body: any, caller: { id: string; email: string }): Promise
   if (mode === "moi") auteurs = [caller.id];
   else if (mode === "auto") auteurs = [fiche.user_id || caller.id];
   else if (mode === "choix") {
-    auteurs = (Array.isArray(portee.auteurs) ? portee.auteurs : []).map(String).filter((a) => UUID.test(a));
-    if (!auteurs.length) return json({ error: "bad_request", message: "Aucun évaluateur retenu." }, 400);
+    auteurs = (Array.isArray(p.auteurs) ? p.auteurs : []).map(String).filter((a: string) => UUID.test(a));
+    if (!auteurs.length) return { erreur: json({ error: "bad_request", message: "Aucun évaluateur retenu." }, 400) };
   }
 
   const reps = (await dbSelect(
@@ -552,7 +573,7 @@ async function profil(body: any, caller: { id: string; email: string }): Promise
     `&select=node_id,pos,auteur_id`,
   )) || [];
   if (!reps.length) {
-    return json({ error: "vide", message: "Aucune réponse à analyser." }, 422);
+    return { erreur: json({ error: "vide", message: "Aucune réponse à analyser." }, 422) };
   }
 
   // ── Pondération ───────────────────────────────────────────────────────────
@@ -563,23 +584,23 @@ async function profil(body: any, caller: { id: string; email: string }): Promise
   // elle-même, 60 % pour un tiers.
   const idsPresents = [...new Set(reps.map((r: any) => r.auteur_id))].filter((a) => UUID.test(String(a)));
   const prec: Record<string, number> = {};
-  for (const p of (await dbSelect(
+  for (const q of (await dbSelect(
     `mv_precisions?personne_id=eq.${personneId}&select=auteur_id,taux`,
-  )) || []) prec[p.auteur_id] = Number(p.taux) || 0;
+  )) || []) prec[q.auteur_id] = Number(q.taux) || 0;
   const poids = (id: string) => prec[id] || (fiche.user_id && fiche.user_id === id ? 80 : 60);
 
   const nomAuteur: Record<string, string> = {};
   if (idsPresents.length) {
-    for (const p of (await dbSelect(
+    for (const q of (await dbSelect(
       `profiles?id=in.(${idsPresents.join(",")})&select=id,prenom,nom`,
     )) || []) {
-      nomAuteur[p.id] = [p.prenom, p.nom].filter(Boolean).join(" ").trim();
+      nomAuteur[q.id] = [q.prenom, q.nom].filter(Boolean).join(" ").trim();
     }
   }
   const libelle = (id: string) =>
     (fiche.user_id && fiche.user_id === id) ? "auto-évaluation" : (nomAuteur[id] || "un évaluateur");
 
-  // node_id → avis de chaque auteur, puis position retenue.
+  // node_id → avis de chaque auteur.
   const parNoeud: Record<string, { auteur: string; pos: number; w: number }[]> = {};
   for (const r of reps) {
     const w = poids(r.auteur_id);
@@ -587,8 +608,32 @@ async function profil(body: any, caller: { id: string; email: string }): Promise
     (parNoeud[r.node_id] = parNoeud[r.node_id] || []).push({ auteur: r.auteur_id, pos: Number(r.pos), w });
   }
 
-  const noeuds    = (await dbSelect("mv_nodes?select=id,parent_id,label,description&limit=500")) || [];
-  const positions = (await dbSelect("mv_positions?select=node_id,pos,titre,content&limit=500")) || [];
+  return { fiche, mode, auteurs, idsPresents, libelle, parNoeud };
+}
+
+// Position retenue par sujet : moyenne pondérée des avis, arrondie et bornée.
+function retenuesParSujet(parNoeud: Record<string, { pos: number; w: number }[]>): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const [nodeId, avis] of Object.entries(parNoeud)) {
+    const somme = avis.reduce((s, a) => s + a.w, 0);
+    if (!somme) continue;
+    const moyenne = avis.reduce((s, a) => s + a.pos * a.w, 0) / somme;
+    out[nodeId] = Math.min(5, Math.max(1, Math.round(moyenne)));
+  }
+  return out;
+}
+
+async function profil(body: any, caller: { id: string; email: string }): Promise<Response> {
+  const personneId = String(body?.personne_id || "").trim();
+  if (!personneId) return json({ error: "bad_request", message: "Personne manquante." }, 400);
+  if (!UUID.test(personneId)) return json({ error: "bad_request", message: "Personne invalide." }, 400);
+
+  const ctx = await contexteReponses(personneId, caller, body?.portee);
+  if (ctx.erreur) return ctx.erreur;
+  const { fiche, mode, auteurs, idsPresents, libelle, parNoeud } = ctx as Required<CtxReponses>;
+
+  const noeuds  = (await dbSelect("mv_nodes?select=id,parent_id,label,description&limit=3000")) || [];
+  const positions = (await dbSelect("mv_positions?select=node_id,pos,titre,content&limit=3000")) || [];
   const parId: Record<string, any> = {};
   for (const n of noeuds) parId[n.id] = n;
   const chemin = (n: any) => {
@@ -640,8 +685,14 @@ async function profil(body: any, caller: { id: string; email: string }): Promise
   // Portrait déjà en mémoire ? On ne repaie un appel que si quelque chose a
   // bougé : les réponses, le prompt, ou le commentaire laissé par l'intéressé.
   const stocke = ((await dbSelect(
-    `mv_portraits?personne_id=eq.${personneId}&auteur_id=eq.${caller.id}&select=texte,signature,commentaire`,
+    `mv_portraits?personne_id=eq.${personneId}&auteur_id=eq.${caller.id}` +
+    `&select=texte,signature,commentaire,politique_texte,politique_scores`,
   )) || [])[0] || null;
+  // L'analyse politique, si elle a déjà été faite, se lit à la suite du
+  // portrait : c'est la même page. Elle ne dépend pas du portrait et n'est donc
+  // jamais recalculée ici — on la ressert telle quelle.
+  const politiqueTexte = stocke?.politique_texte || null;
+  const politiqueScores = stocke?.politique_scores || null;
   const commentaire = String(body?.commentaire ?? stocke?.commentaire ?? "").trim();
   // La portée entre dans la signature : passer de « moi seul » à « tout le
   // monde » change le portrait, et doit donc bien relancer l'analyse.
@@ -659,7 +710,8 @@ async function profil(body: any, caller: { id: string; email: string }): Promise
     : `${nbAuteurs} évaluation${nbAuteurs > 1 ? "s" : ""}`;
 
   if (stocke && stocke.signature === signature && !body?.forcer) {
-    return json({ texte: stocke.texte, sujets: blocs.length, auteurs: nbAuteurs, provenance, commentaire, cache: true });
+    return json({ texte: stocke.texte, sujets: blocs.length, auteurs: nbAuteurs, provenance, commentaire,
+                  politique: politiqueTexte, politique_scores: politiqueScores, cache: true });
   }
 
   // Quand plusieurs personnes ont répondu, le modèle doit savoir d'où sort la
@@ -709,6 +761,215 @@ async function profil(body: any, caller: { id: string; email: string }): Promise
   const usage = jsonRes?.usage || {};
   const costUsd = await loggerCout(usage, caller.email, FEATURE_PROFIL);
   return json({ texte, sujets: blocs.length, auteurs: nbAuteurs, provenance, commentaire, usage,
+                politique: politiqueTexte, politique_scores: politiqueScores,
+                cost: { usd: costUsd, eur: costUsd / USD_PER_EUR } });
+}
+
+// ── action "politique" ──────────────────────────────────────────────────────
+// De quels partis les opinions d'un profil le rapprochent-elles ? On croise ses
+// positions retenues avec celles de TOUTES les personnes morales, et on rend un
+// texte qui explique le classement.
+//
+// ⚠️ Le CHIFFRE est calculé ici, pas par le modèle. Un modèle de langage compte
+// mal, et surtout il recompterait différemment d'une fois sur l'autre : le score
+// doit être reproductible et vérifiable. Le modèle ne fait que l'expliquer.
+//
+// Barème, par sujet commun : même position = +100 %, un rang d'écart = +50 %,
+// deux rangs = 0 %, trois = -50 %, quatre (les deux extrêmes) = -100 %. Le score
+// du parti est la moyenne sur les sujets communs. D'où l'échelle demandée :
+// +100 % « toutes les réponses identiques », -100 % « toutes aussi éloignées
+// que possible ».
+const PROXIMITE = (a: number, b: number) => 1 - Math.abs(a - b) / 2;
+
+// Repli si le prompt n'a pas été semé (migration_mind_vector_politique_analyse.sql).
+const DEFAULT_POLITIQUE_PROMPT =
+  `Tu expliques à quelqu'un de quels partis politiques ses opinions le rapprochent,
+à partir d'un calcul déjà fait, que tu ne dois ni refaire ni discuter.
+
+Produis en français, en Markdown léger (## titres, **gras**, - listes) :
+## Le parti le plus proche — lequel, son score, ce que ça veut dire et ce que ça
+ne veut pas dire.
+## Ce qui vous rapproche — 3 à 6 points d'accord, sujet par sujet.
+## Ce qui vous en sépare — les principaux désaccords avec ce même parti.
+## Les autres partis, du plus proche au plus éloigné — un paragraphe chacun.
+## Ce qu'il faut en retenir — la ligne de force, et la confiance à accorder au
+résultat vu le nombre de sujets comparés.
+
+Règles : tu ne juges aucune opinion et ne conseilles aucun vote ; tu tutoies la
+personne ; français simple et sobre, aucun mot anglais ; n'invente aucune
+position ; dis-le si moins de huit sujets ont pu être comparés.`;
+
+async function politique(body: any, caller: { id: string; email: string }): Promise<Response> {
+  const personneId = String(body?.personne_id || "").trim();
+  if (!personneId) return json({ error: "bad_request", message: "Personne manquante." }, 400);
+  if (!UUID.test(personneId)) return json({ error: "bad_request", message: "Personne invalide." }, 400);
+
+  const ctx = await contexteReponses(personneId, caller, body?.portee);
+  if (ctx.erreur) return ctx.erreur;
+  const { fiche, mode, auteurs, idsPresents, parNoeud } = ctx as Required<CtxReponses>;
+  const miennes = retenuesParSujet(parNoeud);
+  if (!Object.keys(miennes).length) {
+    return json({ error: "vide", message: "Aucune réponse exploitable." }, 422);
+  }
+
+  // Les partis = les personnes morales, moins le profil analysé lui-même
+  // (comparer La France insoumise à elle-même donnerait +100 % et ne dirait rien).
+  const morales = (await dbSelect(
+    "mv_personnes?type_entite=eq.morale&select=id,nom,commentaire&limit=200",
+  )) || [];
+  const partis = morales.filter((m: any) => m.id !== personneId);
+  if (!partis.length) {
+    return json({ error: "vide", message: "Aucun profil d'organisation à comparer." }, 422);
+  }
+
+  // ⚠️ On lit les réponses des partis SANS filtrer sur l'auteur : une position de
+  // parti est un fait documenté, pas un avis de l'appelant, et elle a le plus
+  // souvent été saisie par quelqu'un d'autre. Quand plusieurs lignes existent
+  // pour le même sujet, celle issue d'une recherche sourcée prime ; à défaut, la
+  // plus récente.
+  const repsPartis = (await dbSelect(
+    `mv_reponses?personne_id=in.(${partis.map((p: any) => p.id).join(",")})` +
+    `&select=personne_id,node_id,pos,origine,updated_at&limit=30000`,
+  )) || [];
+  const leurs: Record<string, Record<string, number>> = {};
+  const meilleur: Record<string, { r: number; d: string }> = {};
+  for (const r of repsPartis) {
+    const cle = `${r.personne_id}:${r.node_id}`;
+    const rang = r.origine === "recherche" ? 2 : 1;
+    const date = String(r.updated_at || "");
+    const en_place = meilleur[cle];
+    if (en_place && (en_place.r > rang || (en_place.r === rang && en_place.d >= date))) continue;
+    meilleur[cle] = { r: rang, d: date };
+    (leurs[r.personne_id] = leurs[r.personne_id] || {})[r.node_id] = Number(r.pos);
+  }
+
+  const classement = partis.map((p: any) => {
+    const communs = Object.keys(miennes).filter((id) => leurs[p.id]?.[id] != null);
+    const total = communs.reduce((s, id) => s + PROXIMITE(miennes[id], leurs[p.id][id]), 0);
+    return {
+      id: p.id,
+      nom: String(p.nom || "").trim(),
+      contexte: String(p.commentaire || "").trim(),
+      sujets: communs.length,
+      score: communs.length ? Math.round((total / communs.length) * 100) : null,
+      communs,
+    };
+  }).filter((c) => c.score !== null)
+    .sort((a, b) => (b.score as number) - (a.score as number));
+
+  if (!classement.length) {
+    return json({
+      error: "vide",
+      message: "Aucun sujet en commun entre ce profil et les partis enregistrés.",
+    }, 422);
+  }
+
+  // ── Le dossier remis au modèle ────────────────────────────────────────────
+  const noeuds    = (await dbSelect("mv_nodes?select=id,parent_id,label&limit=3000")) || [];
+  const positions = (await dbSelect("mv_positions?select=node_id,pos,titre,content&limit=3000")) || [];
+  const parId: Record<string, any> = {};
+  for (const n of noeuds) parId[n.id] = n;
+  const chemin = (n: any) => {
+    const out: string[] = [];
+    let cur = n;
+    for (let g = 0; cur && g < 40; g++) { out.unshift(cur.label); cur = cur.parent_id ? parId[cur.parent_id] : null; }
+    return out.join(" › ");
+  };
+  const titre = (nodeId: string, pos: number) => {
+    const p = positions.find((q: any) => q.node_id === nodeId && q.pos === pos);
+    return p?.titre ? String(p.titre).replace(/^\[|\]$/g, "") : `position ${pos}`;
+  };
+  const texteDe = (nodeId: string, pos: number) => {
+    const p = positions.find((q: any) => q.node_id === nodeId && q.pos === pos);
+    return String(p?.content || "").replace(/\s+/g, " ").replace(/\*\*/g, "").trim();
+  };
+
+  const nomProfil = [fiche.prenom, fiche.nom].filter(Boolean).join(" ").trim() || "ce profil";
+  const dossier: string[] = [];
+  dossier.push(
+    `PROFIL ANALYSÉ : ${nomProfil}` +
+    (fiche.type_entite === "morale" ? " (une organisation, pas une personne)" : "") +
+    `\nSujets classés par ce profil : ${Object.keys(miennes).length}.`,
+  );
+  dossier.push(
+    "CLASSEMENT CALCULÉ (chiffres définitifs, à reprendre tels quels)\n" +
+    classement.map((c, i) =>
+      `${i + 1}. ${c.nom} : ${c.score! >= 0 ? "+" : ""}${c.score} % sur ${c.sujets} sujet${c.sujets > 1 ? "s" : ""} comparé${c.sujets > 1 ? "s" : ""}`,
+    ).join("\n"),
+  );
+  for (const c of classement) {
+    const lignes = c.communs.map((id) => {
+      const mien = miennes[id], sien = leurs[c.id][id];
+      const ecart = Math.abs(mien - sien);
+      return { id, mien, sien, ecart };
+    }).sort((a, b) => a.ecart - b.ecart);
+    dossier.push(
+      `=== ${c.nom} — ${c.score! >= 0 ? "+" : ""}${c.score} % ===` +
+      (c.contexte ? `\n(${c.contexte})` : "") +
+      "\n" + lignes.map((l) =>
+        `- ${chemin(parId[l.id]) || "sujet inconnu"}\n` +
+        `    le profil : ${l.mien} « ${titre(l.id, l.mien)} » — ${texteDe(l.id, l.mien)}\n` +
+        `    le parti  : ${l.sien} « ${titre(l.id, l.sien)} »` +
+        (l.ecart ? ` — ${texteDe(l.id, l.sien)}` : " (même position)") +
+        `\n    écart : ${l.ecart} rang${l.ecart > 1 ? "s" : ""} (${PROXIMITE(l.mien, l.sien) >= 0 ? "+" : ""}${Math.round(PROXIMITE(l.mien, l.sien) * 100)} %)`,
+      ).join("\n"),
+    );
+  }
+
+  let systemPrompt = DEFAULT_POLITIQUE_PROMPT;
+  let versionPrompt = "defaut";
+  try {
+    const pr = await dbSelect(`ai_prompts?feature=eq.${FEATURE_POLITIQUE}&select=system_prompt,updated_at`);
+    const p = Array.isArray(pr) ? pr[0] : null;
+    if (p?.system_prompt) { systemPrompt = p.system_prompt; versionPrompt = String(p.updated_at || ""); }
+  } catch { /* repli sur le prompt codé */ }
+
+  // Même principe de cache que le portrait : on ne repaie que si le profil, les
+  // positions des partis ou le prompt ont bougé. Les positions des partis entrent
+  // dans la signature — sans elles, documenter un parti ne rafraîchirait rien.
+  const signature = JSON.stringify({
+    r: Object.entries(miennes).map(([k, v]) => `${k}:${v}`).sort(),
+    q: classement.map((c) => `${c.id}:${c.score}:${c.sujets}`).sort(),
+    p: versionPrompt,
+    m: mode,
+    a: (auteurs || [...idsPresents]).map(String).sort(),
+  });
+  const scores = classement.map((c) => ({ id: c.id, nom: c.nom, score: c.score, sujets: c.sujets }));
+  const stocke = ((await dbSelect(
+    `mv_portraits?personne_id=eq.${personneId}&auteur_id=eq.${caller.id}&select=politique_texte,politique_signature`,
+  )) || [])[0] || null;
+  if (stocke?.politique_texte && stocke.politique_signature === signature && !body?.forcer) {
+    return json({ texte: stocke.politique_texte, scores, sujets: Object.keys(miennes).length, cache: true });
+  }
+
+  const { ok, jsonRes } = await askClaude(systemPrompt, dossier.join("\n\n"), undefined, 12000);
+  if (!ok) return json({ error: "ai_error", message: jsonRes?.error?.message || "Appel Claude en échec." }, 502);
+  const texte = (jsonRes?.content || [])
+    .filter((c: any) => c.type === "text").map((c: any) => c.text).join("\n").trim();
+  if (!texte) return json({ error: "vide", message: "Claude n'a rien renvoyé." }, 502);
+
+  // La ligne peut ne pas exister encore (analyse politique lancée avant tout
+  // portrait) : `texte` et `signature` du portrait ont un défaut en base.
+  try {
+    await fetch(`${SUPABASE_URL}/rest/v1/mv_portraits?on_conflict=personne_id,auteur_id`, {
+      method: "POST",
+      headers: {
+        apikey: SERVICE_ROLE,
+        Authorization: `Bearer ${SERVICE_ROLE}`,
+        "Content-Type": "application/json",
+        Prefer: "resolution=merge-duplicates,return=minimal",
+      },
+      body: JSON.stringify({
+        personne_id: personneId, auteur_id: caller.id,
+        politique_texte: texte, politique_signature: signature, politique_scores: scores,
+        updated_at: new Date().toISOString(),
+      }),
+    });
+  } catch { /* l'analyse est rendue même si la mémorisation échoue */ }
+
+  const usage = jsonRes?.usage || {};
+  const costUsd = await loggerCout(usage, caller.email, FEATURE_POLITIQUE);
+  return json({ texte, scores, sujets: Object.keys(miennes).length, usage,
                 cost: { usd: costUsd, eur: costUsd / USD_PER_EUR } });
 }
 
@@ -745,7 +1006,7 @@ async function publicPosition(body: any, caller: { id: string; email: string }):
     }, 403);
   }
 
-  const noeuds = (await dbSelect("mv_nodes?select=id,parent_id,label,description&limit=500")) || [];
+  const noeuds = (await dbSelect("mv_nodes?select=id,parent_id,label,description&limit=3000")) || [];
   const parId: Record<string, any> = {};
   for (const n of noeuds) parId[n.id] = n;
   const sujet = parId[nodeId];
@@ -884,8 +1145,8 @@ async function branche(body: any, email: string): Promise<Response> {
   if (!label) return json({ error: "bad_request", message: "Intitulé manquant." }, 400);
 
   // Le catalogue existant : intitulé complet et titres des 5 positions.
-  const noeuds    = (await dbSelect("mv_nodes?select=id,parent_id,label&limit=500")) || [];
-  const positions = (await dbSelect("mv_positions?select=node_id,pos,titre&limit=500")) || [];
+  const noeuds    = (await dbSelect("mv_nodes?select=id,parent_id,label&limit=3000")) || [];
+  const positions = (await dbSelect("mv_positions?select=node_id,pos,titre&limit=3000")) || [];
   const parId: Record<string, any> = {};
   for (const n of noeuds) parId[n.id] = n;
   const chemin = (n: any) => {
@@ -1182,6 +1443,15 @@ async function handle(req: Request): Promise<Response> {
       return json({ error: "rate_limited", message: "Limite de 5 portraits par heure atteinte." }, 429);
     }
     return await profil(body, caller);
+  }
+
+  // Même porte que le portrait : chacun sur ses propres classements, la portée
+  // élargie restant réservée au titulaire du profil.
+  if (body?.action === "politique") {
+    if (await checkRateLimit(FEATURE_POLITIQUE, caller.email, 5)) {
+      return json({ error: "rate_limited", message: "Limite de 5 analyses politiques par heure atteinte." }, 429);
+    }
+    return await politique(body, caller);
   }
 
   if (!(await isAdminOrSuperadmin(caller.id))) {
