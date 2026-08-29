@@ -21106,6 +21106,8 @@ function AdminMindVectorScreen({ user, profile, onBack, onFeedback, chipName, av
   const [rechEnCours,  setRechEnCours]  = useState(false);
   const [rechSujet,    setRechSujet]    = useState(null);  // nodeId en cours d'examen
   const [rechChrono,   setRechChrono]   = useState(0);     // secondes écoulées
+  const [rechSujetSec, setRechSujetSec] = useState(0);     // secondes sur le sujet en cours
+  const debutSujetRef = useRef(0);
   const [rechCout,     setRechCout]     = useState(0);     // € cumulés sur la session
   const [rechMsg,      setRechMsg]      = useState(null);  // { type:'ok'|'err', texte }
   const [rechModele,   setRechModele]   = useState(MV_MODELES[2].id);   // Sonnet 5 par défaut
@@ -22331,7 +22333,13 @@ function AdminMindVectorScreen({ user, profile, onBack, onFeedback, chipName, av
     stopRef.current = false;
     setRechEnCours(true); setRechMsg(null); setRechChrono(0); setRechCout(0);
     const debut = Date.now();
-    const horloge = setInterval(() => setRechChrono(Math.round((Date.now() - debut) / 1000)), 1000);
+    debutSujetRef.current = debut;
+    const horloge = setInterval(() => {
+      setRechChrono(Math.round((Date.now() - debut) / 1000));
+      // Le temps passé SUR LE SUJET EN COURS, et pas seulement le temps total :
+      // sans lui, une boucle bloquée et une boucle lente se ressemblent.
+      setRechSujetSec(Math.round((Date.now() - debutSujetRef.current) / 1000));
+    }, 1000);
     // La boucle dure des minutes : un jeton frais au départ, passé
     // explicitement, évite qu'elle meure en route sur un 401.
     let jeton = null;
@@ -22353,18 +22361,50 @@ function AdminMindVectorScreen({ user, profile, onBack, onFeedback, chipName, av
     // celles trouvées que l'écriture a refusées : sans cette distinction, un
     // « 36 sujets examinés » laisserait croire à 36 réponses enregistrées.
     let enregistres = 0, nonEcrits = 0;
+    // ⚠️ Un appel qui ne rendrait JAMAIS rien gèlerait la boucle pour de bon :
+    // la série est protégée contre l'échec, pas contre le silence. Le délai de
+    // garde transforme un blocage en échec ordinaire, que la mécanique
+    // existante sait déjà réessayer puis dépasser.
+    //
+    // ⚠️ Le calibrer sur des DURÉES MESURÉES, pas sur une intuition. Relevé du
+    // 2026-08-29 (Les Républicains, Sonnet 5, 4 recherches) : 4 min, 27 s,
+    // **5 min 21 s**, 8 s, 39 s. La durée ne suit pas la taille : le sujet de
+    // 5 min 21 n'a coûté que 24 000 jetons d'entrée quand celui de 4 min en
+    // pesait 140 000 — c'est la recherche web qui traîne, pas le texte à lire.
+    // Un garde-fou à 5 min aurait donc tué un sujet qui allait aboutir.
+    // 10 min : au-delà du pire cas connu, et assez bas pour qu'un vrai blocage
+    // ne fige pas l'écran indéfiniment.
+    const DELAI_SUJET = 600000;
     const chercherUn = async (id) => {
-      const { data, error } = await sb.functions.invoke('mind-vector', {
+      let sablier;
+      const appel = sb.functions.invoke('mind-vector', {
         body: { action: 'public_position', personne_id: personne.id, node_id: id,
                 model: rechModele, recherches_max: rechNb },
         ...(jeton ? { headers: { Authorization: `Bearer ${jeton}` } } : {}),
       });
+      // L'appel abandonné peut très bien aboutir plus tard : on l'ignore, mais
+      // on avale son rejet éventuel, sinon la console se remplit d'erreurs non
+      // rattrapées bien après que le sujet a été classé en échec.
+      appel.catch(() => {});
+      const garde = new Promise(ok => {
+        sablier = setTimeout(() => ok({ dehors: true }), DELAI_SUJET);
+      });
+      // `.catch` sur la course elle-même : un rejet remonterait sinon jusqu'au
+      // `try` qui entoure toute la boucle et emporterait les sujets restants,
+      // alors qu'un sujet raté ne doit coûter que ce sujet.
+      const res = await Promise.race([appel, garde]).catch(e => ({ error: e }));
+      clearTimeout(sablier);
+      if (res?.dehors) {
+        return { erreur: `pas de réponse après ${Math.round(DELAI_SUJET / 1000)} s — sujet abandonné` };
+      }
+      const { data, error } = res;
       return (error || data?.error) ? { erreur: await mvMessageErreur(error, data) } : { data };
     };
     try {
       for (const id of sujetsARemplir) {
         if (stopRef.current) break;
         setRechSujet(id);
+        debutSujetRef.current = Date.now(); setRechSujetSec(0);
         let r = await chercherUn(id);
         if (r.erreur && !stopRef.current) {
           // Une seconde chance, après une pause : l'isolat qui vient d'être
@@ -22418,7 +22458,7 @@ function AdminMindVectorScreen({ user, profile, onBack, onFeedback, chipName, av
         : { type:'ok', texte: fin });
     } finally {
       clearInterval(horloge);
-      setRechEnCours(false); setRechSujet(null);
+      setRechEnCours(false); setRechSujet(null); setRechSujetSec(0);
     }
   };
 
@@ -23835,6 +23875,12 @@ function AdminMindVectorScreen({ user, profile, onBack, onFeedback, chipName, av
           {rechEnCours && rechSujet && (
             <div style={{fontSize:11.5,color:'rgba(255,255,255,.6)',marginTop:-8}}>
               En cours : {(parId[rechSujet] || {}).label || '…'}
+              {/* Seuil à 4 min : des sujets à 5 min 21 ont été mesurés et ont
+                  abouti. Alerter plus tôt ferait crier au blocage pour du
+                  travail normal. */}
+              {' '}<span style={{color: rechSujetSec > 240 ? '#e8825f' : 'rgba(255,255,255,.4)'}}>
+                ({rechSujetSec} s{rechSujetSec > 240 ? ' — inhabituellement long, mais ça arrive' : ''})
+              </span>
             </div>
           )}
           {rechMsg && (
