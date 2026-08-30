@@ -1520,14 +1520,28 @@
        case est déjà au plancher de lisibilité, lui prendre de la hauteur
        rognerait le texte. `pointer-events:none` pour ne pas voler le clic qui
        ouvre la case — sauf aux images, qui doivent pouvoir montrer leur nom. */
+    /* Dans la ligne de titre, calé à droite. `flex-shrink: 0` sur la bande et
+       `min-width: 0` sur l'intitulé (déjà posé) : c'est le TITRE qui se coupe
+       en ellipse quand la place manque, jamais les pictos — un logo à moitié
+       rogné ne se reconnaît plus, un titre tronqué reste lisible. */
+    /* UNE seule ligne, jamais de repli. Mesuré : dix logos qui passent à la
+       ligne dans une colonne au cinquième de l'écran font un en-tête de 193 px,
+       qui mange la case entière. Au-delà de quatre, on compte le reste dans une
+       pastille « +N » dont l'infobulle nomme les absents : rien n'est perdu, la
+       hauteur ne bouge pas, et aucun logo n'est rogné. */
     .mv-pos-pictos {
-      position: absolute; right: 6px; bottom: 5px; z-index: 2;
-      display: flex; gap: 3px; align-items: center;
-      pointer-events: none;
+      flex: 0 0 auto; display: flex; gap: 3px; align-items: center;
     }
     .mv-pos-pictos img {
-      width: 16px; height: 16px; object-fit: contain; pointer-events: auto;
+      width: 16px; height: 16px; object-fit: contain; border-radius: 3px;
+      background: rgba(255,255,255,.9);
     }
+    .mv-pos-plus {
+      font-size: 9px; font-weight: 900; letter-spacing: 0;
+      padding: 2px 4px; border-radius: 5px; white-space: nowrap;
+      background: rgba(255,255,255,.16); color: rgba(255,255,255,.8);
+    }
+    .mv-pos.repondu .mv-pos-plus { background: rgba(31,122,31,.14); color: #1f7a1f; }
     .mv-sujet {
       min-width: 0; text-align: left;
       padding-left: 13px; border-left: 1px solid rgba(255,255,255,.18);
@@ -20677,6 +20691,12 @@ const MV_TXT_MAX = 26;   // au dessus trois mots mangent toute la case
 const MV_TXT_LIBRE = 14; // case dépliée : plus de hauteur imposée, donc plus de
                          // mise à l'échelle — une taille de lecture fixe
 
+// Logos d'organisations montrés sur une position avant de basculer en « +N ».
+// Quatre tiennent sur une ligne dans une colonne au cinquième de l'écran
+// (4×16 px + 3 espaces = 73 px) ; au-delà l'en-tête se mettait à passer à la
+// ligne et atteignait 193 px de haut, mesuré, ce qui mangeait la case.
+const MV_PICTOS_MAX = 4;
+
 // Dernier endroit visité, pour rouvrir l'écran là où on l'avait laissé.
 const MV_CLE = 'starvolt_mv_etat';
 
@@ -20762,20 +20782,26 @@ function MvPosition({
             {titre || p.legende}
           </button>
         )}
+        {/* Les organisations qui se tiennent SUR cette position, à droite de
+            l'intitulé. Elles vivent dans la ligne de titre et non dans le corps :
+            la hauteur y est déjà prise par le numéro (18 px), donc rien n'est
+            volé au texte, qui est souvent au plancher de 14 px. Une liste et non
+            un picto seul — dix partis peuvent se ranger sur la même case — et
+            `title` nomme ce que 16 px ne peuvent pas dire. */}
+        {!!(pictos && pictos.length) && (
+          <span className="mv-pos-pictos">
+            {pictos.slice(0, MV_PICTOS_MAX).map(o => (
+              <img key={o.id || o.url} src={o.url} alt={o.nom} title={o.nom}/>
+            ))}
+            {pictos.length > MV_PICTOS_MAX && (
+              <span className="mv-pos-plus"
+                title={pictos.slice(MV_PICTOS_MAX).map(o => o.nom).join(', ')}>
+                +{pictos.length - MV_PICTOS_MAX}
+              </span>
+            )}
+          </span>
+        )}
       </div>
-      {/* Les organisations qui se tiennent SUR cette position. Posé en absolu,
-          au coin bas-droit : dans le flux, ce bandeau volerait de la hauteur à
-          une case dont le texte est déjà descendu au plancher de 14 px. À
-          gauche du « voir + », qui occupe le bas-centre. Une liste, et non un
-          picto seul, parce que plusieurs profils peuvent être comparés d'un
-          coup — et `title` nomme ce que 16 px ne peuvent pas dire. */}
-      {!!(pictos && pictos.length) && (
-        <div className="mv-pos-pictos">
-          {pictos.map(o => (
-            <img key={o.id || o.url} src={o.url} alt={o.nom} title={o.nom}/>
-          ))}
-        </div>
-      )}
       <div className={'mv-pos-corps' + (deborde && !libre ? ' coupe' : '')} ref={refCorps}>
         {actif ? (
           <div onClick={e => e.stopPropagation()}>
@@ -21093,6 +21119,11 @@ function AdminMindVectorScreen({ user, profile, onBack, onFeedback, chipName, av
   // Elle vit dans sa propre page, ET se lit à la suite du portrait.
   const [politique,  setPolitique]  = useState(null);   // { texte, scores } ou { erreur }
   const [politiqueEnCours, setPolitiqueEnCours] = useState(false);
+  // Comparaison aux partis : leurs logos se posent sur les positions qu'ils
+  // tiennent, une fois le questionnaire fini ET l'analyse lancée.
+  const [partis,    setPartis]    = useState([]);       // personnes morales publiques à logo
+  const [partisPos, setPartisPos] = useState({});       // idNoeud → { idParti: position }
+  const [analyseFaite, setAnalyseFaite] = useState(false);
   const [maPrecision, setMaPrecision] = useState(null); // précision que J'accorde à MON évaluation de ce profil
   const [demPrecision, setDemPrecision] = useState(false); // popup de réglage de cette précision
   const [auteursProfil, setAuteursProfil] = useState([]);  // qui a classé ce profil (mv_auteurs)
@@ -21270,7 +21301,41 @@ function AdminMindVectorScreen({ user, profile, onBack, onFeedback, chipName, av
     const { data: rs } = await sb.from('mv_recherches').select('*').eq('personne_id', fiche.id);
     const m = {}; (rs || []).forEach(r => { m[r.node_id] = r; });
     setRecherches(m);
+    // Une analyse a-t-elle déjà été lancée sur ce profil ? Les pictos des partis
+    // n'apparaissent qu'après — avant, ils souffleraient les réponses.
+    const { data: pf } = await sb.from('mv_portraits')
+      .select('texte,politique_texte').eq('personne_id', fiche.id).eq('auteur_id', user?.id || '');
+    const p0 = (pf || [])[0];
+    setAnalyseFaite(!!(p0 && ((p0.texte || '').trim() || (p0.politique_texte || '').trim())));
   };
+
+  // ── Les positions des partis, pour les pictos de comparaison ──────────────
+  // Chargées une fois : ce sont les mêmes quel que soit le profil consulté.
+  // Seules les personnes morales PUBLIQUES et pourvues d'un logo entrent ici —
+  // sans logo il n'y a rien à afficher, et le privé n'a rien à faire là.
+  useEffect(() => {
+    let vivant = true;
+    (async () => {
+      const { data: pp } = await sb.from('mv_personnes')
+        .select('id,nom,prenom,logo_url,type_entite,est_public')
+        .eq('type_entite', 'morale').eq('est_public', true);
+      const avecLogo = (pp || []).filter(p => p.logo_url);
+      if (!vivant || !avecLogo.length) return;
+      const { data: rr } = await sb.from('mv_reponses')
+        .select('personne_id,node_id,pos,origine')
+        .in('personne_id', avecLogo.map(p => p.id));
+      if (!vivant) return;
+      // Même règle que la fonction edge : une position issue de la recherche
+      // prime sur un classement manuel, sinon on garde la première venue.
+      const parNode = {};
+      (rr || []).forEach(r => {
+        const d = (parNode[r.node_id] = parNode[r.node_id] || {});
+        if (d[r.personne_id] === undefined || r.origine === 'recherche') d[r.personne_id] = r.pos;
+      });
+      setPartis(avecLogo); setPartisPos(parNode);
+    })();
+    return () => { vivant = false; };
+  }, []);
 
   // Les organisations qui tiennent CETTE position sur CE sujet.
   //
@@ -21280,9 +21345,23 @@ function AdminMindVectorScreen({ user, profile, onBack, onFeedback, chipName, av
   // reviendrait à mettre un visage sur une évaluation nominative.
   const pictosPosition = (nodeId, pos) => {
     if (mode !== 'reponse' || !personne) return null;
-    if (personne.type_entite !== 'morale' || !personne.logo_url) return null;
-    if (autoDiag[nodeId] !== pos) return null;
-    return [{ id: personne.id, url: personne.logo_url, nom: mvNom(personne) }];
+    // Cas historique : on consulte le profil d'une organisation, son propre
+    // logo marque la position qu'elle tient.
+    if (personne.type_entite === 'morale') {
+      if (!personne.logo_url || autoDiag[nodeId] !== pos) return null;
+      return [{ id: personne.id, url: personne.logo_url, nom: mvNom(personne) }];
+    }
+    // Cas de la comparaison : sur le profil d'une personne, les partis viennent
+    // se ranger sur leurs positions. **Seulement une fois tout renseigné et
+    // l'analyse lancée** — les montrer pendant la saisie soufflerait les
+    // réponses, et c'est précisément ce qu'on cherche à ne pas faire.
+    if (!toutRenseigne || !analyseFaite) return null;
+    const surCeSujet = partisPos[nodeId];
+    if (!surCeSujet) return null;
+    const liste = partis
+      .filter(p => surCeSujet[p.id] === pos)
+      .map(p => ({ id: p.id, url: p.logo_url, nom: mvNom(p) }));
+    return liste.length ? liste : null;
   };
 
   // ── Chargement ────────────────────────────────────────────────────────────
@@ -21903,7 +21982,7 @@ function AdminMindVectorScreen({ user, profile, onBack, onFeedback, chipName, av
     setBusyQui(false);
     if (error) { setErrQui(error.message); return; }
     setFiches(l => l.filter(f => f.id !== personne.id));
-    setPersonne(null); setReponses({}); setAutoDiag({});
+    setPersonne(null); setReponses({}); setAutoDiag({}); setAnalyseFaite(false);
     // On repart sur soi-même par défaut.
     try {
       const own = await ficheDuCompte({ id: user.id, prenom: profile?.prenom, nom: profile?.nom, pseudo: profile?.pseudo, email: user.email });
@@ -22529,7 +22608,9 @@ function AdminMindVectorScreen({ user, profile, onBack, onFeedback, chipName, av
       return;
     }
     setPortrait({ texte: data.texte, sujets: data.sujets, provenance: data.provenance,
-                  commentaire: data.commentaire || '', cache: !!data.cache });
+                  commentaire: data.commentaire || '', cache: !!data.cache,
+                  politique: data.politique || null, politique_scores: data.politique_scores || null });
+    setAnalyseFaite(true);   // les pictos des partis peuvent apparaître
   };
 
   // ── Analyse du positionnement politique ───────────────────────────────────
@@ -22548,6 +22629,7 @@ function AdminMindVectorScreen({ user, profile, onBack, onFeedback, chipName, av
     setPolitiqueEnCours(false);
     if (error || data?.error) { setPolitique({ erreur: await mvMessageErreur(error, data) }); return; }
     setPolitique({ texte: data.texte, scores: data.scores || [], sujets: data.sujets, cache: !!data.cache });
+    setAnalyseFaite(true);
     // Le portrait déjà ouvert doit montrer la nouvelle analyse à sa suite sans
     // qu'on ait à le relancer.
     setPortrait(p => p && !p.chargement ? { ...p, politique: data.texte, politique_scores: data.scores } : p);
