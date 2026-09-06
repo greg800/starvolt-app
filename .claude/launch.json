@@ -4,8 +4,25 @@
     {
       "name": "starvolt",
       "runtimeExecutable": "python3",
-      "runtimeArgs": ["-m", "http.server", "3055"],
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "3055"
+      ],
       "port": 3055,
+      "autoPort": false
+    },
+    {
+      "name": "socrate",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "3056",
+        "--directory",
+        "/Users/gregorylamotte/claude code/socrate-me"
+      ],
+      "port": 3056,
       "autoPort": false
     }
   ]
