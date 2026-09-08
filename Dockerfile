@@ -2,7 +2,7 @@ FROM node:20-alpine
 WORKDIR /app
 
 # Copie uniquement les fichiers nécessaires au serveur
-COPY server.js starvolt.html ./
+COPY server.js starvolt.html demopocflex.html ./
 COPY *.png ./
 COPY *.jpg ./
 COPY *.svg ./

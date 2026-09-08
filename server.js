@@ -59,6 +59,17 @@ http.createServer((req, res) => {
     return;
   }
 
+  // /demopocflex → maquette du parcours client Offre Flex (démonstrateur
+  // autonome, données fictives), mise en ligne pour la faire tester.
+  if (reqPath === '/demopocflex' || reqPath === '/demopocflex/') {
+    fs.readFile(path.join(__dirname, 'demopocflex.html'), 'utf-8', (err, data) => {
+      if (err) { res.writeHead(404); return res.end('Not found'); }
+      res.writeHead(200, { ...SECURITY_HEADERS, 'Content-Type': 'text/html; charset=utf-8' });
+      res.end(data);
+    });
+    return;
+  }
+
   // Tous les autres chemins → fichiers statiques (sw.js, manifest, images…)
   // On décode puis on vérifie que le chemin résolu reste dans __dirname
   // (protection path traversal : GET /../../etc/passwd doit être refusé).
