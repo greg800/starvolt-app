@@ -57,6 +57,22 @@ Deno.serve(async (req) => {
     const targetUserId = body?.target_user_id;
     if (!targetUserId) return jsonResp({ error: "no_target" }, 400);
 
+    // 3 bis) Autorisation objet : un admin ne peut pas se faire passer pour un
+    // autre admin ni pour un superadmin. Sans cette garde, la session obtenue
+    // aurait les droits de la cible (ex. superadmin), ce qui contourne les
+    // gardes is_superadmin() des RPC de gestion des rôles : n'importe quel
+    // admin pouvait s'auto-promouvoir. Seul un superadmin impersonne tout le
+    // monde. (Audit code du 2026-09-17.)
+    const tProfRes = await fetch(
+      `${SUPABASE_URL}/rest/v1/profiles?id=eq.${encodeURIComponent(String(targetUserId))}&select=role`,
+      { headers: { apikey: SERVICE_ROLE, Authorization: `Bearer ${SERVICE_ROLE}` } },
+    );
+    const tProfArr = await tProfRes.json().catch(() => []);
+    const targetRole = Array.isArray(tProfArr) ? tProfArr[0]?.role : null;
+    if ((targetRole === "admin" || targetRole === "superadmin") && role !== "superadmin") {
+      return jsonResp({ error: "forbidden_target", detail: "Seul un super admin peut se connecter en tant qu'admin ou super admin." }, 403);
+    }
+
     const targetRes = await fetch(
       `${SUPABASE_URL}/auth/v1/admin/users/${targetUserId}`,
       { headers: { apikey: SERVICE_ROLE, Authorization: `Bearer ${SERVICE_ROLE}` } },
