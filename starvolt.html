@@ -15110,17 +15110,36 @@ function ErrorJournalPanel() {
     setCopiedId('fail-' + r.id); setTimeout(() => setCopiedId(null), 2500);
   };
 
-  const clearAll = async () => {
-    if (!window.confirm('Vider tout le journal des erreurs ?')) return;
+  // Suppression : l'erreur du RPC n'est plus avalée (elle s'affiche ET part au
+  // journal), et la liste se vide localement dès le succès sans attendre le
+  // rechargement. La confirmation est intégrée au bouton (deux clics) plutôt
+  // que window.confirm : Chrome peut supprimer les boîtes de dialogue d'une
+  // page sans le dire, et le bouton semblait alors « sans effet ».
+  const [confirmClear, setConfirmClear] = useState(false);
+  useEffect(() => {
+    if (!confirmClear) return;
+    const t = setTimeout(() => setConfirmClear(false), 5000);
+    return () => clearTimeout(t);
+  }, [confirmClear]);
+  const runClear = async (id) => {
     setBusy(true);
-    await sb.rpc('clear_app_errors', { p_id: null });
-    setBusy(false); load();
+    const { error } = await sb.rpc('clear_app_errors', id ? { p_id: id } : {});
+    setBusy(false);
+    if (error) {
+      window.logAppError?.({ severity: 'majeur', module: 'admin · journal des erreurs',
+        message: `Suppression impossible (${error.message})`, detail: { id: id || 'tout', code: error.code, details: error.details, hint: error.hint } });
+      alert(`Impossible de supprimer : ${error.message}`);
+      return;
+    }
+    setRows(r => id ? (r || []).filter(x => x.id !== id) : []);
+    load();
   };
-  const clearOne = async (id) => {
-    setBusy(true);
-    await sb.rpc('clear_app_errors', { p_id: id });
-    setBusy(false); load();
+  const clearAll = () => {
+    if (!confirmClear) { setConfirmClear(true); return; }
+    setConfirmClear(false);
+    runClear(null);
   };
+  const clearOne = (id) => runClear(id);
 
   const total = rows?.length || 0;
   // Filtre « version en prod » : ne garder que les erreurs du build servi.
@@ -15151,7 +15170,9 @@ function ErrorJournalPanel() {
             </label>
             <div style={{ display:'flex', gap:8 }}>
               <button onClick={load} style={{ background:'rgba(255,255,255,.06)', border:'1px solid rgba(255,255,255,.16)', borderRadius:8, color:'rgba(255,255,255,.7)', fontSize:12, fontWeight:700, padding:'5px 10px', cursor:'pointer', fontFamily:'inherit' }}>↻ Rafraîchir</button>
-              {total > 0 && <button onClick={clearAll} disabled={busy} style={{ background:'rgba(255,93,93,.12)', border:'1px solid rgba(255,93,93,.3)', borderRadius:8, color:'#ff8a8a', fontSize:12, fontWeight:700, padding:'5px 10px', cursor:'pointer', fontFamily:'inherit' }}>Vider</button>}
+              {total > 0 && <button onClick={clearAll} disabled={busy} style={{ background: confirmClear ? 'rgba(255,93,93,.85)' : 'rgba(255,93,93,.12)', border:'1px solid rgba(255,93,93,.3)', borderRadius:8, color: confirmClear ? '#fff' : '#ff8a8a', fontSize:12, fontWeight:700, padding:'5px 10px', cursor:'pointer', fontFamily:'inherit', transition:'background .15s' }}>
+                {busy ? 'Suppression…' : confirmClear ? `Confirmer : vider ${total} erreur${total>1?'s':''} ?` : 'Vider'}
+              </button>}
             </div>
           </div>
 
