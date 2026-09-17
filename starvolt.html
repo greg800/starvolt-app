@@ -16597,6 +16597,32 @@ function AdminTariffsScreen({ onEdit, onNew, onBack, onFournisseurs }) {
   // définition, sinon la pastille admin et le filtrage divergeraient.
   const perime = tarifPerime;
   const nbPerimes = tariffs.filter(perime).length;
+  const [purge, setPurge] = useState(false);
+
+  // Archivage groupé des grilles périmées : même RPC que le bouton unitaire
+  // (archiver_tarif), donc même garantie — rien n'est effacé, la ligne passe
+  // en actif=false avec sa date de fin et les sites basculent sur le défaut.
+  const archiverPerimes = async () => {
+    const cibles = tariffs.filter(perime);
+    if (!cibles.length) return;
+    if (!confirm(`Supprimer de la liste ${cibles.length} tarif${cibles.length>1?'s':''} « MAJ nécessaire » ?\n\n`
+      + `Ils disparaîtront des listes et des comparatifs mais resteront en base (historique conservé, date de fin renseignée). `
+      + `Les sites qui les utilisent basculeront sur le tarif par défaut.`)) return;
+    setPurge(true);
+    let sites = 0; const echecs = [];
+    for (const t of cibles) {
+      const { data, error } = await sb.rpc('archiver_tarif', { p_id: t.id });
+      if (error) { echecs.push(`${t.fournisseur ? t.fournisseur + ' · ' : ''}${t.nom} : ${error.message}`); continue; }
+      const r = Array.isArray(data) ? data[0] : data;
+      sites += Number(r?.sites_reaffectes || 0);
+    }
+    setPurge(false);
+    await charger();
+    const ok = cibles.length - echecs.length;
+    alert(`${ok} tarif${ok>1?'s':''} archivé${ok>1?'s':''}.`
+      + (sites > 0 ? ` ${sites} site(s) basculé(s) sur le tarif par défaut.` : '')
+      + (echecs.length ? `\n\nÉchecs :\n${echecs.join('\n')}` : ''));
+  };
 
   // ── Import de PDF du comparateur ──────────────────────────────────────────
   // Un appel par fichier, en serie : chaque PDF pese plus d'un Mo et sa lecture
@@ -16670,6 +16696,13 @@ function AdminTariffsScreen({ onEdit, onNew, onBack, onFournisseurs }) {
               <span style={{color:'rgba(255,255,255,.35)',fontSize:18,marginLeft:10}}>›</span>
             </div>
           ))}
+          {nbPerimes > 0 && (
+            <button className="btn" disabled={purge} onClick={archiverPerimes}
+              style={{marginTop:6,fontSize:13,fontWeight:700,color:'#ffb3b3',
+                background:'rgba(220,50,50,.12)',border:'1px solid rgba(220,50,50,.45)'}}>
+              {purge ? 'Archivage…' : `🗑 Supprimer tarifs MAJ nécessaire (${nbPerimes})`}
+            </button>
+          )}
         </div>
       )}
     </div>
