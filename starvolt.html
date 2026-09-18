@@ -8355,6 +8355,33 @@ const tarifType = (t) => {
   if (t.prix_hc != null && parseFloat(t.prix_hc) !== parseFloat(t.prix_hp)) return 'hchp';
   return 'fixe';
 };
+// Provenance d'une grille, reconstituée à partir des traces laissées par
+// chaque chemin d'entrée : import du comparatif PDF (tarifs-import), lecture
+// d'une facture client (facture-ocr / tarif-valider) ou saisie au formulaire.
+const fmtDateHeure = (d) => d ? new Date(d).toLocaleString('fr-FR', { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit' }).replace(' ', ' à ') : '—';
+function tarifProvenance(t) {
+  if (!t) return null;
+  const par = (v) => v ? v.replace(/^import:/, '') : null;
+  let origine;
+  if (t.source === 'ocr' && (t.import_source || '').startsWith('pdf:')) {
+    origine = { icon:'📄', titre:'Importé du comparatif PDF',
+      texte:`« ${t.import_source.slice(4)} », le ${fmtDateHeure(t.verifie_le || t.created_at)}${par(t.verifie_par) ? ` par ${par(t.verifie_par)}` : ''}` };
+  } else if (t.source === 'ocr') {
+    if (t.statut === 'brouillon')
+      origine = { icon:'🧾', titre:'Lu sur une facture client (OCR)', texte:`Brouillon du ${fmtDateHeure(t.created_at)}, en attente de validation` };
+    else if (t.verifie_par === 'system:corroboration')
+      origine = { icon:'🧾', titre:'Lu sur des factures clients (OCR)', texte:`Corroboré par deux factures concordantes le ${fmtDateHeure(t.verifie_le)}` };
+    else
+      origine = { icon:'🧾', titre:'Lu sur une facture client (OCR)', texte:`Validé le ${fmtDateHeure(t.verifie_le || t.created_at)}${t.verifie_par ? ` par ${t.verifie_par}` : ''}` };
+  } else {
+    origine = { icon:'✍️', titre:'Saisi à la main', texte:`Créé le ${fmtDateHeure(t.created_at)}${t.modifie_par && Math.abs(new Date(t.last_modified) - new Date(t.created_at)) < 60000 ? ` par ${t.modifie_par}` : ''}` };
+  }
+  // Retouche manuelle postérieure à l'origine (plus d'une minute d'écart).
+  const ref = new Date(t.verifie_le || t.created_at);
+  const modif = t.last_modified && (new Date(t.last_modified) - ref) > 60000
+    ? `Modifié à la main le ${fmtDateHeure(t.last_modified)}${t.modifie_par ? ` par ${t.modifie_par}` : ''}` : null;
+  return { origine, modif, enService: t.date_debut, remplace: !!t.remplace_tarif_id };
+}
 const TARIF_TYPES = [
   { key:'fixe',      label:'Fixe' },
   { key:'hchp',      label:'HP-HC' },
@@ -16972,6 +16999,8 @@ function AdminTariffEditScreen({ tariff, onSave, onDelete, onBack }) {
       marge_fournisseur_ceur_kwh: isDyn ? n(f.marge_fournisseur_ceur_kwh) : null,
       bat_virtuelle: false, surcout_abonnement: null, acheminement_hp: null, acheminement_hc: null,
       last_modified: new Date().toISOString(),
+      // Signature de la retouche manuelle : lue dans la fiche (provenance).
+      modifie_par: (await sb.auth.getUser())?.data?.user?.email || null,
     };
     let err, id = tariff?.id;
     if (isNew) {
@@ -17016,6 +17045,28 @@ function AdminTariffEditScreen({ tariff, onSave, onDelete, onBack }) {
           <h1 className="welcome-title">{isNew ? 'Nouveau' : 'Modifier'}<br/><span className="accent">tarif</span></h1>
         </div>
         <div className="form-card">
+          {!isNew && (() => {
+            const pv = tarifProvenance(tariff);
+            if (!pv) return null;
+            return (
+              <div style={{marginBottom:14,padding:'10px 12px',borderRadius:10,background:'rgba(255,255,255,.05)',
+                border:'1px solid rgba(255,255,255,.12)',fontSize:12,lineHeight:1.5,color:'rgba(255,255,255,.75)'}}>
+                <div style={{fontSize:10.5,fontWeight:800,letterSpacing:.6,textTransform:'uppercase',color:'rgba(255,255,255,.4)',marginBottom:4}}>Source de la donnée</div>
+                <div style={{display:'flex',gap:8,alignItems:'flex-start'}}>
+                  <span style={{fontSize:16,lineHeight:1.2}}>{pv.origine.icon}</span>
+                  <div style={{minWidth:0}}>
+                    <div style={{fontWeight:700,color:'#fff'}}>{pv.origine.titre}</div>
+                    <div>{pv.origine.texte}</div>
+                    {pv.modif && <div style={{marginTop:3,color:'#ffb340'}}>{pv.modif}</div>}
+                    <div style={{marginTop:3,color:'rgba(255,255,255,.45)',fontSize:11}}>
+                      {pv.enService ? `En service depuis le ${new Date(pv.enService).toLocaleDateString('fr-FR')}` : ''}
+                      {pv.remplace ? `${pv.enService ? ' · ' : ''}Remplace une grille antérieure (clôturée, conservée en base)` : ''}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
           {/* Fournisseur et offre sont deux champs distincts : la recherche
              interroge les deux, et l'admin retrouve l'un sans fouiller l'autre. */}
          <TariffField label="Fournisseur" fkey="fournisseur" value={f.fournisseur} onChange={upd} placeholder="EDF"/>
