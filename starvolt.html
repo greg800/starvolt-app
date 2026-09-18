@@ -8345,6 +8345,22 @@ const offrePrimaryType = (o) => (o?.types_offre || []).find(t => AUTO_TYPE_SCREE
 // colonnes distinctes (la recherche interroge les deux séparément), mais à
 // l'écran « Tarif Bleu » seul n'identifie rien : on recompose.
 const tarifLabel = (t) => !t ? '' : (t.fournisseur ? `${t.fournisseur} ${t.nom}` : t.nom);
+// Type d'une grille : une seule définition, partagée par le formulaire admin
+// (valeur initiale du sélecteur) et les filtres de la liste. « multi » couvre
+// tout ce qui n'est ni fixe, ni HP/HC, ni dynamique : Tempo, week-end, saisons…
+const tarifType = (t) => {
+  if (!t) return 'fixe';
+  if (t.type_tarif === 'multi') return 'multi';
+  if (t.tarif_dynamique || t.type_tarif === 'dynamique') return 'dynamique';
+  if (t.prix_hc != null && parseFloat(t.prix_hc) !== parseFloat(t.prix_hp)) return 'hchp';
+  return 'fixe';
+};
+const TARIF_TYPES = [
+  { key:'fixe',      label:'Fixe' },
+  { key:'hchp',      label:'HP-HC' },
+  { key:'dynamique', label:'Dynamique' },
+  { key:'multi',     label:'Semi-dynamique' },
+];
 
 // ─── Grille de tarifs : brouillons issus de l'OCR ────────────────────────────
 // Une seule grille (tarifs_electricite). Un tarif lu sur une facture y entre
@@ -16604,13 +16620,60 @@ function AdminTariffsScreen({ onEdit, onNew, onBack, onFournisseurs }) {
   const [loading, setLoading] = useState(true);
   const [imports, setImports] = useState(null);   // { encours, total, fait, fichier, bilans[] }
   const fileRef = useRef(null);
+  // Contexte de chiffrage : le même que le comparateur (site de l'admin, spot,
+  // paramètres nationaux), pour classer la liste dans l'ordre exact où le
+  // client verrait ces offres — coût annuel croissant.
+  const [ref, setRef] = useState({ site: null, spotMap: null, nat: null });
+  const [fFourn, setFFourn] = useState('');       // '' = tous les fournisseurs
+  const [fType,  setFType]  = useState('');       // '' = tous les types
 
   // Les grilles archivees ne sont pas listees : elles ne servent qu'a expliquer
   // un chiffrage passe (cf. colonne actif).
   const charger = () => sb.from('tarifs_electricite')
     .select('*').eq('actif', true).order('created_at')
     .then(({ data }) => { setTariffs(data || []); setLoading(false); });
-  useEffect(() => { charger(); }, []);
+  useEffect(() => {
+    charger();
+    Promise.all([
+      sb.from('sites').select('id,nom,conso_profil,conso_annuelle_kwh,tarif_id,heure_debut_hc1,heure_fin_hc1,heure_debut_hc2,heure_fin_hc2,hc_debut1,hc_fin1,hc_debut2,hc_fin2')
+        .not('conso_profil', 'is', null).order('created_at'),
+      sb.rpc('get_spot_json'),
+      sb.from('parametres_nationaux').select('*').eq('id', 1).maybeSingle(),
+    ]).then(([{ data: sites }, { data: spotRows }, { data: nat }]) => {
+      const actif = localStorage.getItem('starvolt_active_site_id');
+      const site = (sites || []).find(x => x.id === actif) || (sites || [])[0] || null;
+      setRef({ site, spotMap: buildSpotMap(spotRows), nat: nat || null });
+    }).catch(() => {});
+  }, []);
+
+  // Coût annuel de chaque grille pour le site de référence, puis tri croissant.
+  // Une grille non chiffrable (dynamique sans spot, multi sans règle) va en fin
+  // de liste, par ordre alphabétique, plutôt que de disparaître.
+  const classement = useMemo(() => {
+    const { site, spotMap, nat } = ref;
+    const { kwh_hc, kwh_hp } = site?.conso_profil ? calcHcHp(site.conso_profil, site, nat) : { kwh_hc: 0, kwh_hp: 0 };
+    const kwhTotal = kwh_hc + kwh_hp;
+    const ctx = site?.conso_profil && spotMap && nat ? { consoProfile: site.conso_profil, spotMap, natParams: nat, site } : null;
+    const couts = new Map();
+    if (kwhTotal > 0) tariffs.forEach(t => {
+      const r = calcTariffCost(t, kwh_hc, kwh_hp, ctx);
+      if (r && Number.isFinite(r.total)) couts.set(t.id, Math.round(r.total));
+    });
+    const tries = [...tariffs].sort((a, b) => {
+      const ca = couts.get(a.id), cb = couts.get(b.id);
+      if (ca != null && cb != null && ca !== cb) return ca - cb;
+      if ((ca != null) !== (cb != null)) return ca != null ? -1 : 1;
+      return tarifLabel(a).localeCompare(tarifLabel(b), 'fr');
+    });
+    return { tries, couts, kwhTotal, kwh_hc, kwh_hp };
+  }, [tariffs, ref]);
+
+  const fournisseurs = useMemo(() =>
+    [...new Set(tariffs.map(t => (t.fournisseur || '').trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'fr')),
+    [tariffs]);
+  const visibles = classement.tries.filter(t =>
+    (!fFourn || (t.fournisseur || '').trim() === fFourn) && (!fType || tarifType(t) === fType));
+  const fmtEur = (v) => `${espMille(Math.round(v).toLocaleString('fr-FR'))} €/an`;
 
   const fmt = (ts) => ts ? new Date(ts).toLocaleDateString('fr-FR', {day:'2-digit',month:'2-digit',year:'2-digit'}) : '—';
 
@@ -16693,11 +16756,47 @@ function AdminTariffsScreen({ onEdit, onNew, onBack, onFournisseurs }) {
         </div>
       )}
       {imports && <ImportBilan etat={imports} onFermer={()=>setImports(null)}/>}
+      {!loading && (
+        <div style={{marginBottom:10}}>
+          <div style={{display:'flex',gap:6,alignItems:'center',marginBottom:6}}>
+            <select value={fFourn} onChange={e=>setFFourn(e.target.value)}
+              style={{flex:1,minWidth:0,background:'rgba(255,255,255,.08)',border:'1px solid rgba(255,255,255,.15)',borderRadius:8,
+                color:'#fff',fontSize:12.5,padding:'7px 8px',fontFamily:'inherit'}}>
+              <option value="" style={{color:'#000'}}>Tous les fournisseurs ({fournisseurs.length})</option>
+              {fournisseurs.map(f => <option key={f} value={f} style={{color:'#000'}}>{f}</option>)}
+            </select>
+            {(fFourn || fType) && <button onClick={()=>{setFFourn('');setFType('');}}
+              style={{background:'none',border:'1px solid rgba(255,255,255,.2)',borderRadius:8,color:'rgba(255,255,255,.7)',fontSize:12,padding:'6px 9px',cursor:'pointer',fontFamily:'inherit'}}>✕</button>}
+          </div>
+          <div style={{display:'flex',gap:5,flexWrap:'wrap'}}>
+            {[{key:'',label:'Tous'},...TARIF_TYPES].map(ty => {
+              const n = ty.key ? tariffs.filter(t=>tarifType(t)===ty.key).length : tariffs.length;
+              const on = fType === ty.key;
+              return <button key={ty.key} onClick={()=>setFType(ty.key)}
+                style={{fontSize:11.5,fontWeight:700,padding:'4px 9px',borderRadius:20,cursor:'pointer',fontFamily:'inherit',
+                  background:on?'var(--green)':'rgba(255,255,255,.08)',color:on?'#0a2a1a':'rgba(255,255,255,.75)',
+                  border:`1px solid ${on?'var(--green)':'rgba(255,255,255,.18)'}`}}>
+                {ty.label} <span style={{opacity:.65}}>{n}</span>
+              </button>;
+            })}
+          </div>
+          <div style={{fontSize:11,color:'rgba(255,255,255,.45)',marginTop:7,lineHeight:1.4}}>
+            {classement.kwhTotal > 0
+              ? <>Classés par coût annuel croissant pour <strong style={{color:'rgba(255,255,255,.7)'}}>{ref.site?.nom || 'votre site'}</strong> ({espMille(classement.kwhTotal.toLocaleString('fr-FR'))} kWh, {Math.round(classement.kwh_hc/classement.kwhTotal*100)} % en HC) — même calcul que le comparateur.</>
+              : <>Aucune consommation de référence sur votre compte : tri alphabétique. Les coûts s'affichent dès qu'un de vos sites a une courbe de charge.</>}
+            {' '}{visibles.length !== tariffs.length && <span>{visibles.length} / {tariffs.length} affichés.</span>}
+          </div>
+        </div>
+      )}
       {loading ? <div style={{textAlign:'center',padding:40}}><StarSpinner size={34}/></div> : (
         <div style={{display:'flex',flexDirection:'column',gap:8,marginBottom:80}}>
-          {tariffs.map(t => (
+          {visibles.length === 0 && <div style={{textAlign:'center',padding:24,fontSize:13,color:'rgba(255,255,255,.45)'}}>Aucun tarif ne correspond à ces filtres.</div>}
+          {visibles.map(t => {
+            const cout = classement.couts.get(t.id);
+            const type = tarifType(t);
+            return (
             <div key={t.id} className="tariff-row-item" onClick={()=>onEdit(t)}>
-              <div style={{flex:1}}>
+              <div style={{flex:1,minWidth:0}}>
                 <div className="tariff-row-name">
                   {t.fournisseur ? <span style={{color:'#7dd940'}}>{t.fournisseur} · </span> : null}{t.nom}
                 </div>
@@ -16706,17 +16805,27 @@ function AdminTariffsScreen({ onEdit, onNew, onBack, onFournisseurs }) {
                   {t.prix_hp ? ` · HP : ${t.prix_hp} €` : ''}
                   {t.prix_hc ? ` · HC : ${t.prix_hc} €` : ''}
                 </div>
-                <div className="tariff-row-badges">
-                  {t.tarif_dynamique && <span className="tariff-badge dyn">Dynamique</span>}
+                <div className="tariff-row-badges" style={{flexWrap:'wrap'}}>
+                  <span className={`tariff-badge${type==='dynamique'?' dyn':''}`}
+                    style={type==='dynamique'?undefined:{background:'rgba(255,255,255,.08)',color:'rgba(255,255,255,.65)',border:'1px solid rgba(255,255,255,.14)'}}>
+                    {TARIF_TYPES.find(x=>x.key===type)?.label}
+                  </span>
                   {t.bat_virtuelle && <span className="tariff-badge bat">Bat. virtuelle</span>}
                   {perime(t) && <span style={{background:'rgba(220,50,50,.9)',color:'#fff',fontSize:10,fontWeight:800,
                     borderRadius:6,padding:'2px 7px'}}>MAJ nécessaire</span>}
                 </div>
                 <div className="tariff-row-meta" style={{marginTop:3}}>Modifié : {fmt(t.last_modified)}</div>
               </div>
-              <span style={{color:'rgba(255,255,255,.35)',fontSize:18,marginLeft:10}}>›</span>
+              <div style={{display:'flex',alignItems:'center',gap:8,marginLeft:8,flexShrink:0}}>
+                {cout != null && <div style={{textAlign:'right'}}>
+                  <div style={{fontSize:13.5,fontWeight:800,color:'#fff'}}>{fmtEur(cout)}</div>
+                  <div style={{fontSize:10.5,color:'rgba(255,255,255,.45)'}}>{(cout/classement.kwhTotal*100).toFixed(1)} c€/kWh</div>
+                </div>}
+                <span style={{color:'rgba(255,255,255,.35)',fontSize:18}}>›</span>
+              </div>
             </div>
-          ))}
+            );
+          })}
           {nbPerimes > 0 && (
             <button className="btn" disabled={purge} onClick={archiverPerimes}
               style={{marginTop:6,fontSize:13,fontWeight:700,color:'#ffb3b3',
@@ -16771,13 +16880,7 @@ function TariffField({ label, fkey, type='text', placeholder='', value, onChange
 function AdminTariffEditScreen({ tariff, onSave, onDelete, onBack }) {
   const isNew = !tariff?.id;
 
-  const getInitType = (t) => {
-    if (!t) return 'fixe';
-    if (t.type_tarif === 'multi') return 'multi';
-    if (t.tarif_dynamique || t.type_tarif === 'dynamique') return 'dynamique';
-    if (t.prix_hc != null && parseFloat(t.prix_hc) !== parseFloat(t.prix_hp)) return 'hchp';
-    return 'fixe';
-  };
+  const getInitType = tarifType;   // définition unique, module-level
 
   const [f, setF] = useState({
     nom:                       tariff?.nom || '',
