@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Mon Énergie by CA — Programme de flexibilité (maquette)</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700&display=swap">
+<style>
+:root{
+  --teal:#1c7a68; --teal-dark:#0f5b4d; --teal-light:#d7efe8; --teal-ink:#0a4a40;
+  --red:#d63b4c; --red-dark:#a72536; --red-light:#fbe4e7; --blue:#2c63d6;
+  --ink:#1f2a37; --muted:#5f6b7a; --label:#6b7489; --bg:#f2f6f2; --bg2:#f3f4f6; --card:#fff; --line:#e4e7ec;
+  --amber:#e9a300; --pool:#d63b4c; --ecs:#8f5cf7; --frigo:#0a8a9a; --congel:#9b7a00; --four:#e5b400; --ecs2:#6d7590;
+  box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--bg:#1b1f1d}}
+:root[data-theme="dark"]{--bg:#1b1f1d}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);font-family:Montserrat,"Segoe UI",Arial,sans-serif;color:var(--ink);-webkit-font-smoothing:antialiased}
+.phone{max-width:430px;margin:0 auto;background:#f2f6f2;min-height:100vh;box-shadow:0 0 40px rgba(0,0,0,.2);position:relative}
+.statusbar{height:44px;display:flex;align-items:center;justify-content:space-between;padding:0 22px;font-weight:600;font-size:15px;position:sticky;top:env(safe-area-inset-top,0px);background:#f2f6f2;z-index:20}
+.statusbar span:last-child{font-size:12px}
+h1{font-size:34px;font-weight:700;margin:22px 22px 22px;letter-spacing:-.5px}
+.tabs{margin:0 22px;background:#fff;border-radius:40px;box-shadow:0 4px 14px rgba(0,0,0,.06);display:flex;padding:6px}
+.tabs span{flex:1;text-align:center;padding:12px 0;font-weight:600;font-size:15px;border-radius:40px}
+.tabs span.on{background:var(--teal);color:#fff}
+.range{display:flex;gap:10px;margin:26px 22px 0;align-items:center}
+.range b{width:44px;height:44px;border-radius:50%;background:#f0f2f4;display:flex;align-items:center;justify-content:center;font-weight:700;color:var(--teal-ink);flex:none}
+.range div{flex:1;background:#f0f2f4;border-radius:16px;text-align:center;padding:12px;font-weight:700;color:var(--teal-ink);font-size:18px}
+.sec{margin:34px 22px 0}
+.sec .cap{color:var(--label);font-weight:600;font-size:15px;letter-spacing:.3px;margin-bottom:14px}
+.sec .k{font-weight:600;font-size:15px}
+.sec .kv{font-weight:700;font-size:28px;margin:4px 0 16px}
+.box{border:1px solid var(--line);border-radius:16px;padding:14px 18px;background:#fff}
+.box .r{display:flex;align-items:center;gap:10px;margin:6px 0;font-size:15px;color:var(--muted)}
+.box .r i{width:12px;height:12px;border-radius:50%;display:block;flex:none}
+.box .r b{margin-left:auto;color:var(--ink);font-size:16px}
+.box .tot{display:flex;justify-content:space-between;align-items:center;margin-top:8px;font-weight:700;font-size:20px}
+.box .tot span:last-child{background:#dbeee0;color:var(--teal);padding:4px 10px;border-radius:6px}
+.ring{display:flex;justify-content:center;margin:30px 0 22px}
+.ring svg{width:200px;height:200px}
+.ring text{font-family:Montserrat,sans-serif}
+.pill{display:flex;align-items:center;justify-content:space-between;border-radius:40px;padding:6px;color:#fff;font-weight:700;font-size:20px;margin:0 22px}
+.pill b{width:44px;height:44px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:400;font-size:20px}
+.pill.g{background:#2e8571}.pill.g b{background:var(--teal-dark)}
+.pill.r{background:var(--red)}.pill.r b{background:var(--red-dark)}
+.link{text-align:center;margin:30px 22px 0;color:var(--teal);font-weight:700;font-size:22px;text-decoration:underline;line-height:1.3}
+.explain{color:var(--label);font-size:16px;line-height:1.5;margin-top:10px}
+.legend{background:#f0f2f4;border-radius:16px;padding:16px;display:inline-block;margin:22px 0 14px}
+.legend .d{font-weight:700;font-size:20px}.legend .s{color:var(--label);font-weight:600;font-size:15px;margin-bottom:12px}
+.legend .r{display:flex;align-items:center;gap:10px;font-size:15px;margin:8px 0}.legend .r i{width:14px;height:14px;border-radius:50%;display:block}
+.overview svg{width:100%;height:auto;display:block}
+.overview .yl{font-size:15px;margin-bottom:6px}
+.grey{background:var(--bg2);padding:34px 0 20px;margin-top:30px}
+.grey .cap{color:var(--label);font-weight:600;font-size:15px;letter-spacing:.3px;margin:0 22px 14px}
+.eq{margin:0 22px}
+.eq .cap{margin:34px 0 14px}
+.item{display:flex;align-items:center;gap:16px;background:linear-gradient(#fff,#f7f8fa);border-radius:22px;padding:22px 20px 22px 34px;margin-bottom:14px;box-shadow:0 8px 20px rgba(0,0,0,.05);position:relative;overflow:hidden}
+.item::before{content:"";position:absolute;left:0;top:0;bottom:0;width:22px;background:var(--c);border-radius:22px 0 0 22px}
+.item .ico{width:44px;height:44px;position:relative;color:#4a5568}
+.item .ico svg{width:34px;height:34px;stroke:#4a5568;fill:none;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+.item .ico::after{content:"";position:absolute;right:0;bottom:2px;width:12px;height:12px;border-radius:50%;background:#1a9a4a;box-shadow:0 0 0 4px #e3f3e8}
+.item .n{font-weight:700;font-size:22px}.item .w{color:var(--muted);font-size:17px;margin-top:4px}
+.item .go{margin-left:auto;width:44px;height:44px;border-radius:50%;background:#f0f2f4;display:flex;align-items:center;justify-content:center;color:var(--teal-ink);font-weight:700}
+
+/* ===== Widget Flex ===== */
+.flex{margin:30px 22px 0;background:#fff;border-radius:22px;box-shadow:0 8px 24px rgba(0,0,0,.06);overflow:hidden;position:relative}
+.flex::before{content:"";position:absolute;left:0;top:0;bottom:0;width:22px;background:var(--teal);border-radius:22px 0 0 22px}
+.flex .in{padding:22px 20px 22px 36px}
+.flex .title{display:flex;align-items:center;gap:10px;font-weight:700;font-size:22px}
+.flex .title svg{width:26px;height:26px;stroke:var(--teal);fill:none;stroke-width:2;stroke-linejoin:round}
+.flex .tag{margin-left:auto;background:var(--teal-light);color:var(--teal-dark);font-weight:700;font-size:12px;padding:4px 9px;border-radius:12px}
+.zone{padding:18px 0;border-top:1px solid var(--line)}
+.zone:first-of-type{border-top:none;padding-top:16px}
+.status{display:flex;align-items:center;gap:12px;cursor:pointer;user-select:none;-webkit-tap-highlight-color:transparent}
+.status .led{width:14px;height:14px;border-radius:50%;flex:none;transition:background .25s,box-shadow .25s}
+.status .txt{font-weight:700;font-size:22px}
+.status .hint{margin-left:auto;font-size:12px;color:var(--label)}
+.status[data-s="0"] .led{background:#1a9a4a;box-shadow:0 0 0 5px #e3f3e8}
+.status[data-s="1"] .led{background:var(--amber);box-shadow:0 0 0 5px #fbf1d6}
+.status[data-s="2"] .led{background:var(--red);box-shadow:0 0 0 5px var(--red-light)}
+.sub{font-size:14px;color:var(--muted);margin:8px 0 0 26px;line-height:1.4;min-height:18px}
+.gains{display:flex;justify-content:space-between;align-items:baseline}
+.gains .l{font-weight:600;font-size:16px}
+.gains .a{font-weight:700;font-size:28px;color:var(--teal);background:#dbeee0;padding:2px 12px;border-radius:8px}
+.gains .a small{font-size:14px;font-weight:600;margin-left:4px}
+.bar{height:10px;background:#eef0f3;border-radius:6px;margin-top:14px;overflow:hidden}
+.bar i{display:block;height:100%;width:0;background:var(--teal);border-radius:6px;transition:width .7s ease}
+.bar-l{display:flex;justify-content:space-between;font-size:13px;color:var(--label);margin-top:6px;font-weight:600}
+.ask{font-weight:600;font-size:16px;margin:0 0 14px}
+.thumbs{display:flex;gap:12px}
+.thumbs button{flex:1;height:68px;border:2px solid var(--line);background:#fafbfc;border-radius:18px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:border-color .2s,background .2s}
+.thumbs button svg{width:36px;height:36px;fill:none;stroke:#4a5568;stroke-width:1.9;stroke-linejoin:round;stroke-linecap:round}
+.thumbs button:focus-visible{outline:3px solid var(--teal);outline-offset:2px}
+.thumbs .up.sel{border-color:var(--teal);background:var(--teal-light)}.thumbs .up.sel svg{stroke:var(--teal-dark)}
+.thumbs .down.sel{border-color:var(--red);background:var(--red-light)}.thumbs .down.sel svg{stroke:var(--red-dark)}
+.fb{display:none;margin-top:16px}.fb.open{display:block}
+.fb label{display:block;font-size:14px;font-weight:600;margin-bottom:8px}
+.fb textarea{width:100%;min-height:90px;border:1px solid var(--line);border-radius:14px;padding:12px;font:inherit;font-size:15px;resize:vertical;background:#fafbfc}
+.fb textarea:focus{outline:2px solid var(--teal);border-color:transparent}
+.row{display:flex;gap:10px;margin-top:12px;align-items:center;flex-wrap:wrap}
+.btn{border:none;border-radius:40px;padding:13px 22px;font:inherit;font-size:15px;font-weight:700;cursor:pointer}
+.btn.send{background:var(--teal);color:#fff}
+.btn.urg{background:var(--red);color:#fff;display:none}
+.btn.urg.show{display:inline-flex;align-items:center;gap:6px}
+.btn.urg:disabled{background:#efb9c0;cursor:not-allowed}
+.btn:focus-visible{outline:3px solid #000;outline-offset:2px}
+.urg-note{font-size:12px;color:var(--label);flex-basis:100%;line-height:1.4}
+.done{display:none;margin-top:14px;background:#dbeee0;border-radius:14px;padding:12px 14px;font-size:14px;font-weight:600;color:var(--teal-dark)}
+.done.show{display:block}.done.urgent{background:var(--red-light);color:var(--red-dark)}
+
+.bottom{position:sticky;bottom:0;background:#fff;border-top:1px solid var(--line);display:flex;padding:12px 0 calc(6px + env(safe-area-inset-bottom,0px));z-index:20}
+.bottom div{flex:1;text-align:center;font-size:15px;color:var(--label);font-weight:500}
+.bottom div svg{width:30px;height:30px;stroke:var(--label);fill:none;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round;display:block;margin:0 auto 6px}
+.bottom div.on{color:var(--teal);font-weight:700}.bottom div.on svg{stroke:var(--teal)}
+.home{height:30px;background:#fff;display:flex;align-items:center;justify-content:center}.home i{width:120px;height:5px;border-radius:3px;background:#555;display:block}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+
+/* --- retour au parcours client (démonstrateur) --- */
+.applogo{display:inline-flex;align-items:center;justify-content:center;height:30px;padding:0 8px;background:#fff;border-radius:8px;box-shadow:0 1px 3px rgba(0,0,0,.18);cursor:pointer;text-decoration:none;-webkit-tap-highlight-color:transparent}
+.applogo img{height:22px;width:auto;display:block}
+.applogo:active{transform:scale(.96)}
+</style>
+</head>
+<body>
+<div class="phone">
+  <div class="statusbar"><span>15:07</span><a class="applogo" id="applogo" href="https://app.starvolt.fr/demopocflex#merci" title="Retour au parcours client"><img src="data:image/png;base64,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" alt="Mon énergie by Crédit Agricole"></a><span>5G ▮▮▮ 92</span></div>
+  <h1>Analyses</h1>
+  <div class="tabs"><span class="on">Jour</span><span>Semaine</span><span>Mois</span><span>Année</span></div>
+  <div class="range"><b>‹</b><div>Aujourd'hui</div><b>›</b></div>
+
+  <div class="sec">
+    <div class="cap">AUTONOMIE ÉNERGÉTIQUE</div>
+    <div class="k">Production</div><div class="kv">6,4 kWh</div>
+    <div class="box">
+      <div class="r"><i style="background:#2e8571"></i>Consommés sur place (91.5%)<b>5,8 kWh</b></div>
+      <div class="r"><i style="background:#cfeae1"></i>Revendus au réseau (8.5%)<b>0,5 kWh</b></div>
+      <div class="tot"><span>Revente</span><span>0,05 €</span></div>
+    </div>
+    <div class="ring"><svg viewBox="0 0 200 200" data-ring="91.5" data-c1="#2e8571" data-c2="#cfeae1" data-v="5,8 kWh"></svg></div>
+  </div>
+  <div class="pill g"><b>←</b>Consommés sur place<b>→</b></div>
+
+  <div class="sec">
+    <div class="k">Consommation</div><div class="kv">13,9 kWh</div>
+    <div class="box">
+      <div class="r"><i style="background:var(--red)"></i>Produits sur place (41.9%)<b>5,8 kWh</b></div>
+      <div class="r"><i style="background:#fbe4e7"></i>Achetés au fournisseur (58.1%)<b>8,1 kWh</b></div>
+      <div class="tot"><span>Économies</span><span>1,13 €</span></div>
+    </div>
+    <div class="ring"><svg viewBox="0 0 200 200" data-ring="41.9" data-c1="#d63b4c" data-c2="#fbe4e7" data-v="5,8 kWh" data-start="bottom"></svg></div>
+  </div>
+  <div class="pill r"><b>←</b>Produits sur place<b>→</b></div>
+
+  <div class="link">Comprendre les gains et les économies</div>
+
+  <div class="sec overview">
+    <div class="cap">VUE D'ENSEMBLE</div>
+    <div class="explain">Ce graphique montre l'énergie produite, consommée, stockée et utilisée dans votre maison au fil du temps. Les valeurs sont exprimées en watts.</div>
+    <div class="legend"><div class="d">18 septembre 2026</div><div class="s">Depuis 00h00</div>
+      <div class="r"><i style="background:#1c8a6e"></i>Production</div><div class="r"><i style="background:#d63b4c"></i>Consommation</div><div class="r"><i style="background:#2c63d6"></i>Échange réseau</div></div>
+    <div class="yl">Puissance (W)</div>
+    <svg id="ov" viewBox="0 0 380 260"></svg>
+  </div>
+
+  <div class="grey">
+    <div class="cap">TOP DES CONSOMMATIONS</div>
+    <div class="ring" style="margin-top:10px"><svg id="top" viewBox="0 0 200 200"></svg></div>
+    <div class="pill r"><b>←</b>Piscine<b>→</b></div>
+
+    <!-- ===== NOUVEAU WIDGET ===== -->
+    <section class="flex" aria-label="Programme de flexibilité">
+      <div class="in">
+        <div class="title"><svg viewBox="0 0 24 24"><path d="M13 2L4 14h7l-1 8 9-12h-7z"/></svg>Programme de flexibilité<span class="tag">Nouveau</span></div>
+
+        <div class="zone">
+          <div class="status" id="status" data-s="0" role="button" tabindex="0" aria-live="polite">
+            <span class="led"></span><span class="txt" id="statusTxt">En cours</span><span class="hint">toucher pour changer</span>
+          </div>
+          <div class="sub" id="statusSub">Vos équipements sont pilotés selon les besoins du réseau.</div>
+        </div>
+
+        <div class="zone">
+          <div class="gains"><span class="l">Gains annuels estimés</span><span class="a">146<small>€</small></span></div>
+          <div class="bar"><i id="gainBar"></i></div>
+          <div class="bar-l"><span>Déjà acquis : 108 €</span><span>Objectif : 146 €</span></div>
+        </div>
+
+        <div class="zone">
+          <p class="ask">Que pensez-vous du programme ?</p>
+          <div class="thumbs">
+            <button class="up" id="thUp" aria-label="Je suis satisfait"><svg viewBox="0 0 24 24"><path d="M7 10v11H3V10zM7 10l4-8c1.5 0 2.5 1 2.5 2.5V9h5.5a2 2 0 012 2.3l-1.2 7A2 2 0 0117.8 20H7"/></svg></button>
+            <button class="down" id="thDown" aria-label="Je ne suis pas satisfait"><svg viewBox="0 0 24 24"><path d="M17 14V3h4v11zM17 14l-4 8c-1.5 0-2.5-1-2.5-2.5V15H5a2 2 0 01-2-2.3l1.2-7A2 2 0 016.2 4H17"/></svg></button>
+          </div>
+          <div class="fb" id="fb">
+            <label for="fbText" id="fbLabel">Dites-nous ce qui vous plaît</label>
+            <textarea id="fbText" placeholder="Votre message pour l'équipe Mon Énergie…"></textarea>
+            <div class="row">
+              <button class="btn send" id="send">Envoyer</button>
+              <button class="btn urg" id="urg"><span>⚠</span> Urgent</button>
+              <span class="urg-note" id="urgNote"></span>
+            </div>
+          </div>
+          <div class="done" id="done"></div>
+        </div>
+      </div>
+    </section>
+
+    <div class="eq">
+      <div class="cap" style="margin-left:0">ÉQUIPEMENTS</div>
+      <div class="item" style="--c:var(--pool)"><div class="ico"><svg viewBox="0 0 24 24"><path d="M4 20c2-2 4-2 6 0s4 2 6 0 4-2 6 0M7 16V6a2 2 0 014 0M13 16V6a2 2 0 014 0M7 9h10M7 13h10"/></svg></div><div><div class="n">piscine</div><div class="w">9,03 kWh</div></div><div class="go">›</div></div>
+      <div class="item" style="--c:var(--ecs)"><div class="ico"><svg viewBox="0 0 24 24"><rect x="6" y="3" width="12" height="18" rx="2"/><path d="M12 9c-1.5 2-2 3-2 4a2 2 0 004 0c0-1-.5-2-2-4z"/></svg></div><div><div class="n">chauffe-eau</div><div class="w">1,44 kWh</div></div><div class="go">›</div></div>
+      <div class="item" style="--c:var(--frigo)"><div class="ico"><svg viewBox="0 0 24 24"><rect x="6" y="2" width="12" height="20" rx="2"/><path d="M6 10h12M9 6v2M9 14v3"/></svg></div><div><div class="n">Frigo</div><div class="w">1,12 kWh</div></div><div class="go">›</div></div>
+      <div class="item" style="--c:var(--congel)"><div class="ico"><svg viewBox="0 0 24 24"><path d="M8 3v4M14 3v4M6 7h10v3a5 5 0 01-10 0zM11 15v3l-3 3"/></svg></div><div><div class="n">congélateur</div><div class="w">482,23 Wh</div></div><div class="go">›</div></div>
+      <div class="item" style="--c:var(--four)"><div class="ico"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><rect x="6" y="9" width="9" height="7"/><path d="M18 9v1M18 12v1"/></svg></div><div><div class="n">four</div><div class="w">387,87 Wh</div></div><div class="go">›</div></div>
+      <div class="item" style="--c:var(--ecs2)"><div class="ico"><svg viewBox="0 0 24 24"><rect x="6" y="3" width="12" height="18" rx="2"/><path d="M12 9c-1.5 2-2 3-2 4a2 2 0 004 0c0-1-.5-2-2-4z"/></svg></div><div><div class="n">chauffe-eau Cuisine</div><div class="w">376,4 Wh</div></div><div class="go">›</div></div>
+      <div class="item" style="--c:#5b6480"><div class="ico"><svg viewBox="0 0 24 24"><path d="M3 16l2-6h12l3 6v3H3zM6 19a2 2 0 100 2M17 19a2 2 0 100 2M17 4v3M15 6h4"/></svg></div><div><div class="n">voiture électrique</div><div class="w">180,6 Wh</div></div><div class="go">›</div></div>
+    </div>
+  </div>
+
+  <div class="bottom">
+    <div><svg viewBox="0 0 24 24"><path d="M4 11l8-7 8 7v9H4zM9 15h6"/></svg>Accueil</div>
+    <div class="on"><svg viewBox="0 0 24 24"><path d="M6 20V12M12 20V4M18 20v-6"/></svg>Analyses</div>
+    <div><svg viewBox="0 0 24 24"><path d="M9 3v5M15 3v5M7 8h10v2a5 5 0 01-10 0zM12 15v6"/></svg>Équipements</div>
+    <div><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0116 0"/></svg>Profil</div>
+  </div>
+  <div class="home"><i></i></div>
+</div>
+
+<script>
+(function(){
+  const NS='http://www.w3.org/2000/svg';
+  const el=(t,a,p)=>{const e=document.createElementNS(NS,t);for(const k in a)e.setAttribute(k,a[k]);if(p)p.appendChild(e);return e;};
+  let seed=11;const rnd=()=>{seed=(seed*9301+49297)%233280;return seed/233280;};
+  const arc=(cx,cy,r,a0,a1)=>{const p=a=>[cx+r*Math.cos(a),cy+r*Math.sin(a)];const [x0,y0]=p(a0),[x1,y1]=p(a1);return `M${x0},${y0} A${r},${r} 0 ${a1-a0>Math.PI?1:0} 1 ${x1},${y1}`;};
+
+  // anneaux autonomie / consommation
+  document.querySelectorAll('svg[data-ring]').forEach(s=>{
+    const pct=+s.dataset.ring, gap=.06, start=s.dataset.start==='bottom'?Math.PI/2:-Math.PI/2;
+    const main=pct/100*2*Math.PI;
+    const a0=start-main/2, a1=start+main/2;
+    el('path',{d:arc(100,100,84,a0+gap,a1-gap),stroke:s.dataset.c1,'stroke-width':22,fill:'none','stroke-linecap':'round'},s);
+    el('path',{d:arc(100,100,84,a1+gap,a0+2*Math.PI-gap),stroke:s.dataset.c2,'stroke-width':22,fill:'none','stroke-linecap':'round'},s);
+    const t1=el('text',{x:100,y:98,'text-anchor':'middle','font-size':'22','font-weight':'700',fill:'#1f2a37'},s);t1.textContent=s.dataset.v;
+    const t2=el('text',{x:100,y:122,'text-anchor':'middle','font-size':'16',fill:'#5f6b7a'},s);t2.textContent=pct+' %';
+  });
+  // top des consommations (segments séparés)
+  (function(){const s=document.getElementById('top'),parts=[[64.8,'#d63b4c'],[8,'#8f5cf7'],[7.5,'#0a8a9a'],[3.5,'#9b7a00'],[2.8,'#e5b400'],[6,'#6d7590']];
+    let a=Math.PI/2+ (100-64.8)/100*Math.PI;const gap=.08;
+    parts.forEach(([p,c])=>{const b=a+p/100*2*Math.PI;el('path',{d:arc(100,100,84,a+gap/2,b-gap/2),stroke:c,'stroke-width':22,fill:'none','stroke-linecap':'round'},s);a=b;});
+    const t=el('text',{x:100,y:108,'text-anchor':'middle','font-size':'22','font-weight':'700',fill:'#1f2a37'},s);t.textContent='64.8 %';})();
+
+  // vue d'ensemble
+  (function(){const s=document.getElementById('ov'),L=48,R=372,T=10,B=220,n=216;
+    const px=i=>L+(R-L)*i/n, py=w=>{const zero=T+30;return zero-w/4600*(B-zero);}; // W négatif = conso (vers le bas)
+    [1000,0,-1000,-2000,-3000,-4000].forEach(v=>{el('line',{x1:L,x2:R,y1:py(v),y2:py(v),stroke:'#e0e0e0'},s);const t=el('text',{x:L-6,y:py(v)+5,'text-anchor':'end','font-size':'13',fill:'#333'},s);t.textContent=Math.abs(v);});
+    [[0,'00h'],[.2,'03h'],[.4,'06h'],[.6,'10h'],[.8,'13h']].forEach(([f,l])=>{const t=el('text',{x:px(f*n),y:B+28,'text-anchor':'middle','font-size':'14',fill:'#333'},s);t.textContent=l;});
+    el('line',{x1:L,x2:R,y1:B+8,y2:B+8,stroke:'#999'},s);
+    const P=[],C=[],G=[];
+    for(let i=0;i<=n;i++){const h=i/n*15; let p=h<6?0:Math.min(1450,Math.pow((h-6)/6,1.6)*1450)+(h>6?rnd()*40:0);
+      let c=h<6?60+rnd()*40:1100+rnd()*80; if(h<6&&rnd()<.03)c=1100; if(i>=44&&i<=48)c=2300; if(i>=94&&i<=96)c=2800; if(i>=120&&i<=124)c=3700; if(i>=124&&i<=128)c=2200; if(i>=172&&i<=176)c=3800; if(i>=176&&i<=182)c=3300; if(i==150)c=1900;
+      P.push(p);C.push(c);G.push(p-c);}
+    const path=(arr,sign)=>{let d='';arr.forEach((v,i)=>d+=(i?' L':'M')+px(i)+','+py(sign*v));return d;};
+    const z=py(0);
+    el('path',{d:path(P,1)+' L'+px(n)+','+z+' L'+px(0)+','+z+'Z',fill:'#1c8a6e',opacity:.18},s);
+    el('path',{d:path(C,-1)+' L'+px(n)+','+z+' L'+px(0)+','+z+'Z',fill:'#d63b4c',opacity:.12},s);
+    el('path',{d:path(G,1)+' L'+px(n)+','+z+' L'+px(0)+','+z+'Z',fill:'#2c63d6',opacity:.12},s);
+    el('path',{d:path(P,1),stroke:'#1c8a6e','stroke-width':2,fill:'none'},s);
+    el('path',{d:path(C,-1),stroke:'#d63b4c','stroke-width':2,fill:'none'},s);
+    el('path',{d:path(G,1),stroke:'#2c63d6','stroke-width':2,fill:'none'},s);
+  })();
+
+  // ---------- widget Flex ----------
+  const states=[['En cours','Vos équipements sont pilotés selon les besoins du réseau.'],['En pause','Pilotage suspendu à votre demande. Reprise automatique demain à 06h00.'],['Arrêté','Vous ne participez plus au programme. Réactivez-le à tout moment.']];
+  const st=document.getElementById('status'),stTxt=document.getElementById('statusTxt'),stSub=document.getElementById('statusSub');
+  const cycle=()=>{const s=(+st.dataset.s+1)%3;st.dataset.s=s;stTxt.textContent=states[s][0];stSub.textContent=states[s][1];};
+  st.addEventListener('click',cycle);st.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();cycle();}});
+  setTimeout(()=>document.getElementById('gainBar').style.width='74%',300);
+
+  const up=document.getElementById('thUp'),down=document.getElementById('thDown'),fb=document.getElementById('fb'),lbl=document.getElementById('fbLabel'),
+        ta=document.getElementById('fbText'),urg=document.getElementById('urg'),note=document.getElementById('urgNote'),send=document.getElementById('send'),done=document.getElementById('done');
+  let mood=null;
+  const ouvrable=()=>{const d=new Date(),h=d.getHours(),j=d.getDay();return j>=1&&j<=5&&h>=9&&h<18;};
+  function pick(m){mood=m;up.classList.toggle('sel',m==='up');down.classList.toggle('sel',m==='down');fb.classList.add('open');done.className='done';
+    if(m==='up'){lbl.textContent='Dites-nous ce qui vous plaît';ta.placeholder='Ex. : aucune différence de confort et je gagne de l\'argent.';urg.classList.remove('show');note.textContent='';}
+    else{lbl.textContent='Dites-nous ce qui ne va pas';ta.placeholder='Ex. : l\'eau chaude n\'était pas disponible ce matin.';urg.classList.add('show');
+      const ok=ouvrable();urg.disabled=!ok;note.textContent=ok?'Urgent : un conseiller vous rappelle sous 30 min (heures ouvrables).':'Prise en charge immédiate disponible du lundi au vendredi, 9h–18h. Hors de ces horaires, votre message est traité dès l\'ouverture.';}
+    ta.focus();}
+  up.addEventListener('click',()=>pick('up'));down.addEventListener('click',()=>pick('down'));
+  function submit(urgent){const msg=ta.value.trim();if(!msg){ta.focus();ta.style.outline='2px solid #d63b4c';setTimeout(()=>ta.style.outline='',1200);return;}
+    fb.classList.remove('open');done.className='done show'+(urgent?' urgent':'');
+    done.textContent=urgent?'Demande urgente envoyée. Un conseiller vous rappelle sous 30 minutes.':(mood==='up'?'Merci ! Votre retour est transmis à l\'équipe.':'Message envoyé. L\'équipe vous répond sous 48 h.');
+    ta.value='';up.classList.remove('sel');down.classList.remove('sel');}
+  send.addEventListener('click',()=>submit(false));urg.addEventListener('click',()=>submit(true));
+})();
+</script>
+
+<script>
+  // Icône en haut : retour au démonstrateur du parcours client (écran de confirmation).
+  (function(){
+    const u='https://app.starvolt.fr/demopocflex#merci';
+    document.getElementById('applogo').addEventListener('click',function(e){
+      e.preventDefault();
+      try{ window.top.location.href=u; }catch(err){ window.open(u,'_blank','noopener'); }
+    });
+  })();
+</script>
+</body>
+</html>

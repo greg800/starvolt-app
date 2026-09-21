@@ -70,6 +70,19 @@ http.createServer((req, res) => {
     return;
   }
 
+  // /demopocflex/mebca et /demopocflex/comwatt → maquettes des applis
+  // partenaires (bloc « Programme de flexibilité »), atteintes depuis
+  // l'écran de confirmation du démonstrateur ; leur logo ramène au parcours.
+  const demoApp = { '/demopocflex/mebca': 'demopocflex-mebca.html', '/demopocflex/comwatt': 'demopocflex-comwatt.html' }[reqPath.replace(/\/$/, '')];
+  if (demoApp) {
+    fs.readFile(path.join(__dirname, demoApp), 'utf-8', (err, data) => {
+      if (err) { res.writeHead(404); return res.end('Not found'); }
+      res.writeHead(200, { ...SECURITY_HEADERS, 'Content-Type': 'text/html; charset=utf-8' });
+      res.end(data);
+    });
+    return;
+  }
+
   // Tous les autres chemins → fichiers statiques (sw.js, manifest, images…)
   // On décode puis on vérifie que le chemin résolu reste dans __dirname
   // (protection path traversal : GET /../../etc/passwd doit être refusé).
