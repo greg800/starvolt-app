@@ -39,6 +39,12 @@ const SECURITY_HEADERS = {
   'Strict-Transport-Security': 'max-age=15552000',
 };
 
+// Les pages HTML changent à chaque déploiement : le navigateur doit les
+// revalider à chaque visite (sinon Chrome garde une vieille copie en cache
+// heuristique et l'utilisateur ne voit pas la mise à jour). Les images et
+// scripts gardent le comportement par défaut.
+const HTML_NO_CACHE = { 'Cache-Control': 'no-cache' };
+
 http.createServer((req, res) => {
   // Serveur de fichiers statiques en lecture seule : seules GET et HEAD ont un sens.
   // Toute autre méthode (POST/PUT/DELETE…) est refusée (405) — réduction de surface.
@@ -53,7 +59,7 @@ http.createServer((req, res) => {
   if (reqPath === '/' || reqPath === '/app' || reqPath === '/app/') {
     fs.readFile(path.join(__dirname, 'starvolt.html'), 'utf-8', (err, data) => {
       if (err) { res.writeHead(404); return res.end('Not found'); }
-      res.writeHead(200, { ...SECURITY_HEADERS, 'Content-Type': 'text/html; charset=utf-8' });
+      res.writeHead(200, { ...SECURITY_HEADERS, ...HTML_NO_CACHE, 'Content-Type': 'text/html; charset=utf-8' });
       res.end(injectBuild(data));
     });
     return;
@@ -64,7 +70,7 @@ http.createServer((req, res) => {
   if (reqPath === '/demopocflex' || reqPath === '/demopocflex/') {
     fs.readFile(path.join(__dirname, 'demopocflex.html'), 'utf-8', (err, data) => {
       if (err) { res.writeHead(404); return res.end('Not found'); }
-      res.writeHead(200, { ...SECURITY_HEADERS, 'Content-Type': 'text/html; charset=utf-8' });
+      res.writeHead(200, { ...SECURITY_HEADERS, ...HTML_NO_CACHE, 'Content-Type': 'text/html; charset=utf-8' });
       res.end(data);
     });
     return;
@@ -77,7 +83,7 @@ http.createServer((req, res) => {
   if (demoApp) {
     fs.readFile(path.join(__dirname, demoApp), 'utf-8', (err, data) => {
       if (err) { res.writeHead(404); return res.end('Not found'); }
-      res.writeHead(200, { ...SECURITY_HEADERS, 'Content-Type': 'text/html; charset=utf-8' });
+      res.writeHead(200, { ...SECURITY_HEADERS, ...HTML_NO_CACHE, 'Content-Type': 'text/html; charset=utf-8' });
       res.end(data);
     });
     return;
@@ -98,7 +104,7 @@ http.createServer((req, res) => {
   fs.readFile(file, (err, data) => {
     if (err) { res.writeHead(404); return res.end('Not found'); }
     const ext = path.extname(file);
-    res.writeHead(200, { ...SECURITY_HEADERS, 'Content-Type': mime[ext] || 'text/plain' });
+    res.writeHead(200, { ...SECURITY_HEADERS, ...(ext === '.html' ? HTML_NO_CACHE : {}), 'Content-Type': mime[ext] || 'text/plain' });
     res.end(ext === '.html' ? injectBuild(data.toString('utf-8')) : data);
   });
 }).listen(PORT, () => console.log(`Listening on ${PORT}`));
