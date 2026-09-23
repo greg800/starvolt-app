@@ -1,4 +1,4 @@
-const CACHE = 'starvolt-v3';
+const CACHE = 'starvolt-v4';
 const STATIC = [
   '/manifest.json',
   '/icon-192.svg',
@@ -26,8 +26,16 @@ self.addEventListener('fetch', e => {
 
   const url = new URL(e.request.url);
 
-  // HTML → network-first (toujours la dernière version)
-  if (url.pathname === '/' || url.pathname.endsWith('.html')) {
+  // Pages (navigations, racine, .html, et toute URL sans extension comme
+  // /demopocflex ou /demopocflex/mebca) → network-first : toujours la
+  // dernière version. Sans ce test, une URL sans extension tombait dans le
+  // cache-first ci-dessous et le navigateur ressortait l'ancienne page
+  // indéfiniment (constat 2026-09-23 sur le démonstrateur Offre Flex).
+  const isPage = e.request.mode === 'navigate'
+    || url.pathname === '/'
+    || url.pathname.endsWith('.html')
+    || !/\.[a-z0-9]+$/i.test(url.pathname);
+  if (isPage) {
     e.respondWith(
       fetch(e.request).catch(() => caches.match(e.request))
     );
