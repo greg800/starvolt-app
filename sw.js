@@ -26,11 +26,11 @@ self.addEventListener('fetch', e => {
 
   const url = new URL(e.request.url);
 
-  // Pages (navigations, racine, .html, et toute URL sans extension comme
-  // /demopocflex ou /demopocflex/mebca) → network-first : toujours la
-  // dernière version. Sans ce test, une URL sans extension tombait dans le
-  // cache-first ci-dessous et le navigateur ressortait l'ancienne page
-  // indéfiniment (constat 2026-09-23 sur le démonstrateur Offre Flex).
+  // Pages (navigations, racine, .html, et toute URL sans extension) →
+  // network-first : toujours la dernière version. Sans ce test, une URL sans
+  // extension tombait dans le cache-first ci-dessous et le navigateur
+  // ressortait l'ancienne page indéfiniment (constat 2026-09-23 sur l'ancien
+  // démonstrateur Offre Flex, depuis déménagé sur comwatt.starvolt.fr).
   const isPage = e.request.mode === 'navigate'
     || url.pathname === '/'
     || url.pathname.endsWith('.html')

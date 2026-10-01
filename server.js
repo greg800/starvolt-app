@@ -65,28 +65,14 @@ http.createServer((req, res) => {
     return;
   }
 
-  // /demopocflex → maquette du parcours client Offre Flex (démonstrateur
-  // autonome, données fictives), mise en ligne pour la faire tester.
-  if (reqPath === '/demopocflex' || reqPath === '/demopocflex/') {
-    fs.readFile(path.join(__dirname, 'demopocflex.html'), 'utf-8', (err, data) => {
-      if (err) { res.writeHead(404); return res.end('Not found'); }
-      res.writeHead(200, { ...SECURITY_HEADERS, ...HTML_NO_CACHE, 'Content-Type': 'text/html; charset=utf-8' });
-      res.end(data);
-    });
-    return;
-  }
-
-  // /demopocflex/mebca et /demopocflex/comwatt → maquettes des applis
-  // partenaires (bloc « Programme de flexibilité »), atteintes depuis
-  // l'écran de confirmation du démonstrateur ; leur logo ramène au parcours.
-  const demoApp = { '/demopocflex/mebca': 'demopocflex-mebca.html', '/demopocflex/comwatt': 'demopocflex-comwatt.html' }[reqPath.replace(/\/$/, '')];
-  if (demoApp) {
-    fs.readFile(path.join(__dirname, demoApp), 'utf-8', (err, data) => {
-      if (err) { res.writeHead(404); return res.end('Not found'); }
-      res.writeHead(200, { ...SECURITY_HEADERS, ...HTML_NO_CACHE, 'Content-Type': 'text/html; charset=utf-8' });
-      res.end(data);
-    });
-    return;
+  // /demopocflex… → l'ancien démonstrateur Offre Flex a déménagé dans
+  // l'application Comwatt (comwatt.starvolt.fr, accès par compte). Les pages
+  // ont été retirées d'ici le 2026-10-01 pour que personne ne travaille sur
+  // une vieille version : toute adresse qui commence ainsi renvoie là-bas,
+  // de façon permanente.
+  if (reqPath === '/demopocflex' || reqPath.startsWith('/demopocflex/')) {
+    res.writeHead(301, { ...SECURITY_HEADERS, ...HTML_NO_CACHE, 'Location': 'https://comwatt.starvolt.fr/' });
+    return res.end();
   }
 
   // Tous les autres chemins → fichiers statiques (sw.js, manifest, images…)
