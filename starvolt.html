@@ -6016,7 +6016,7 @@ function EnergyBalanceChart({ balance, level, selMonth, selDay, setLevel, setSel
 
   // Démarre le tutoriel quand le parent l'active
   useEffect(() => {
-    if (tutorial && !startedRef.current) { startedRef.current = true; abortRef.current = false; setTutoPhase('bubbles'); setTutoBubble(0); }
+    if (tutorial && !startedRef.current && !INCRUSTE) { startedRef.current = true; abortRef.current = false; setTutoPhase('bubbles'); setTutoBubble(0); }
   }, [tutorial]);
   // Nettoyage : annule la séquence si le composant est démonté
   useEffect(() => () => { abortRef.current = true; timeoutsRef.current.forEach(clearTimeout); timeoutsRef.current = []; }, []);
@@ -9614,7 +9614,7 @@ function OptimisationScreen({ user, userProfile, onBack, onPanier, onMonSite, on
     ? { de: tarifLabel(currentRanked.t), vers: tarifLabel(ranked[0].t), gain: heroSaving }
     : null;
   useEffect(() => {
-    if (!loading && conseilTexte && !conseilVu) { setShowConseil(true); setConseilVu(true); }
+    if (!loading && conseilTexte && !conseilVu && !INCRUSTE) { setShowConseil(true); setConseilVu(true); }   // incrusté dans l'écran d'un retour : pas de conseil par-dessus l'écran rejoué
   }, [loading, !!conseilTexte, conseilVu]);
 
   if (justConfirmed) {
