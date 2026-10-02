@@ -10698,7 +10698,12 @@ const INDICATEURS = [
   { id:'prix',   label:'Prix moyen HT',              unite:'c€/kWh' },
   { id:'spread', label:'Spread journalier HT',       unite:'c€/kWh' },
   { id:'gain',   label:'Gains batterie (arbitrage)', unite:'€' },
+  { id:'negatif',label:'Heures à prix négatif',      unite:'h' },
 ];
+// Indicateurs en unité brute (pas de conversion €/kWh → c€/kWh) et sommés sur la période
+const indicateurBrut = ind => ind === 'gain' || ind === 'negatif';
+// Valeur à passer à l'échelle de couleur depuis la valeur affichée
+const valeurEchelle = (ind, v) => (v === null || v === undefined) ? null : (indicateurBrut(ind) ? v : v / 100);
 
 function echelleCouleur(v, seuils) {
   if (v === null || v === undefined || isNaN(v)) return 'rgba(255,255,255,.08)';
@@ -10717,18 +10722,18 @@ function seuilsAuto(valeurs) {
 function seuilsIndicateur(ind, rows) {
   if (ind === 'prix')   return SEUILS_PRIX;
   if (ind === 'spread') return SEUILS_SPREAD;
-  return seuilsAuto(rows.map(r => r.gain));
+  return seuilsAuto(rows.map(r => ind === 'gain' ? r.gain : r.neg));
 }
 // Valeur d'une cellule en unité d'affichage (c€/kWh ou €)
 function valeurAffichee(ind, r) {
   if (!r) return null;
-  const v = ind === 'prix' ? r.prix : ind === 'spread' ? r.spread : r.gain;
+  const v = ind === 'prix' ? r.prix : ind === 'spread' ? r.spread : ind === 'gain' ? r.gain : r.neg;
   if (v === null || v === undefined) return null;
-  return ind === 'gain' ? v : v * 100;
+  return indicateurBrut(ind) ? v : v * 100;
 }
 function fmtValeur(ind, v, decimales) {
   if (v === null || v === undefined) return '';
-  return ind === 'gain' ? Math.round(v).toLocaleString('fr-FR') : v.toFixed(decimales).replace('.', ',');
+  return indicateurBrut(ind) ? Math.round(v).toLocaleString('fr-FR') : v.toFixed(decimales).replace('.', ',');
 }
 
 // Semaine ISO : (année ISO, numéro) — la semaine 1 contient le 4 janvier.
@@ -10760,13 +10765,13 @@ function agregerSpotJours(jours, gran) {
     const [a, m, j] = partsIso(x.d);
     const [annee, periode] = clePeriode(gran, a, m, j);
     const k = `${annee}_${periode}`;
-    const r = acc[k] || (acc[k] = { annee, periode, mois: m, jour: j, sp: 0, n: 0, ss: 0, nj: 0, gain: null, jours: [] });
-    r.sp += x.p * x.n; r.n += x.n; r.ss += x.s; r.nj += 1; r.jours.push(x.d);
+    const r = acc[k] || (acc[k] = { annee, periode, mois: m, jour: j, sp: 0, n: 0, ss: 0, nj: 0, neg: 0, gain: null, jours: [] });
+    r.sp += x.p * x.n; r.n += x.n; r.ss += x.s; r.nj += 1; r.neg += x.z || 0; r.jours.push(x.d);
     if (x.g !== null && x.g !== undefined) r.gain = (r.gain || 0) + x.g;
   });
   return Object.values(acc).map(r => ({
     annee: r.annee, periode: r.periode, mois: r.mois, jour: r.jour, jours: r.jours,
-    prix: r.n ? r.sp / r.n : null, spread: r.nj ? r.ss / r.nj : null, gain: r.gain, n: r.n, nj: r.nj,
+    prix: r.n ? r.sp / r.n : null, spread: r.nj ? r.ss / r.nj : null, gain: r.gain, neg: r.neg, n: r.n, nj: r.nj,
   }));
 }
 function heuresAttendues(gran, annee, periode) {
@@ -10945,13 +10950,13 @@ function SpotHistoTable({ rows, granularite, indicateur, seuils, onCell }) {
   const cell = {};
   rows.forEach(r => { cell[`${r.annee}_${r.periode}`] = r; });
   const periodes = Array.from({ length: hebdo ? 53 : 12 }, (_, i) => i + 1);
-  const decimales = (indicateur === 'gain' || hebdo) ? 0 : 1;
+  const decimales = (indicateurBrut(indicateur) || hebdo) ? 0 : 1;
   // Ligne Année : prix pondéré par les heures, spread par les jours, gain sommé
   const annuel = {};
   annees.forEach(a => {
-    let sp = 0, n = 0, ss = 0, nj = 0, g = null;
-    periodes.forEach(p => { const r = cell[`${a}_${p}`]; if (!r) return; sp += (r.prix || 0) * r.n; n += r.n; ss += (r.spread || 0) * r.nj; nj += r.nj; if (r.gain !== null) g = (g || 0) + r.gain; });
-    annuel[a] = n ? { prix: sp / n, spread: nj ? ss / nj : null, gain: g, n, nj, partiel: n < 8760 * 0.9 } : null;
+    let sp = 0, n = 0, ss = 0, nj = 0, g = null, z = 0;
+    periodes.forEach(p => { const r = cell[`${a}_${p}`]; if (!r) return; sp += (r.prix || 0) * r.n; n += r.n; ss += (r.spread || 0) * r.nj; nj += r.nj; z += r.neg || 0; if (r.gain !== null) g = (g || 0) + r.gain; });
+    annuel[a] = n ? { prix: sp / n, spread: nj ? ss / nj : null, gain: g, neg: z, n, nj, partiel: n < 8760 * 0.9 } : null;
   });
   const nLignes = periodes.length + 2;
   const espace  = hebdo ? 1 : 2;
@@ -10960,8 +10965,8 @@ function SpotHistoTable({ rows, granularite, indicateur, seuils, onCell }) {
   const lblStyle = {color:'rgba(255,255,255,.75)',fontSize:Math.min(fontPx, hebdo?7.5:8.5),fontWeight:800,textAlign:'right',paddingRight:3,whiteSpace:'nowrap',lineHeight:1};
   const caseDe = (key, r, partiel, bold) => {
     const v  = valeurAffichee(indicateur, r);
-    // Ligne Année en gains : une somme sur 12 mois sature l'échelle des périodes → fond neutre
-    const bg = (bold && indicateur === 'gain' && v !== null) ? 'rgba(255,255,255,.14)' : echelleCouleur(indicateur === 'gain' ? v : (v === null ? null : v / 100), seuils);
+    // Ligne Année d'un indicateur sommé : la somme sur 12 mois sature l'échelle des périodes → fond neutre
+    const bg = (bold && indicateurBrut(indicateur) && v !== null) ? 'rgba(255,255,255,.14)' : echelleCouleur(valeurEchelle(indicateur, v), seuils);
     const click = (onCell && r && r.jours && v !== null) ? () => onCell(r) : null;
     return spotCaseTd(key, bg, fmtValeur(indicateur, v, decimales) + (partiel && v !== null ? '*' : ''), partiel, bold, click);
   };
@@ -10991,7 +10996,7 @@ function SpotHistoTable({ rows, granularite, indicateur, seuils, onCell }) {
         </tbody>
       </table>
       <div style={{fontSize:8,color:'rgba(255,255,255,.35)',marginTop:3,paddingLeft:2,lineHeight:1}}>
-        {INDICATEURS.find(i => i.id === indicateur)?.unite} · {indicateur === 'gain' ? 'somme' : 'moyenne'} {hebdo ? 'de la semaine ISO' : 'du mois'} · * période incomplète
+        {INDICATEURS.find(i => i.id === indicateur)?.unite} · {indicateurBrut(indicateur) ? 'somme' : 'moyenne'} {hebdo ? 'de la semaine ISO' : 'du mois'} · * période incomplète
       </div>
     </div>
   );
@@ -11039,7 +11044,7 @@ function SpotJoursCanvas({ rows, indicateur, seuils, onCell }) {
       for (let p = 1; p <= NJ; p++) {
         const r = cell[`${a}_${p}`];
         const v = valeurAffichee(indicateur, r);
-        ctx.fillStyle = echelleCouleur(indicateur === 'gain' ? v : (v === null ? null : v / 100), seuils);
+        ctx.fillStyle = echelleCouleur(valeurEchelle(indicateur, v), seuils);
         ctx.fillRect(LBL_W + i * CELL_W, HDR_H + (p - 1) * CELL_H, CELL_W - gapW, CELL_H - gapH);
       }
     });
@@ -11301,7 +11306,7 @@ function SpotPricesScreen({ onBack }) {
   const onCell = (r) => {
     if (granularite === 'jour') {
       const v = valeurAffichee(indicateur, r);
-      setInfoJour(`${fmtJourLong(r.jours[0])} · ${fmtValeur(indicateur, v, indicateur === 'gain' ? 0 : 1)} ${indDef.unite}${r.n < 24 * 0.9 ? ' · journée incomplète' : ''}`);
+      setInfoJour(`${fmtJourLong(r.jours[0])} · ${fmtValeur(indicateur, v, 1)} ${indDef.unite}${r.n < 24 * 0.9 ? ' · journée incomplète' : ''}`);
     }
     if (indicateur === 'gain' && r.jours?.length) setPopup(r.jours.slice().sort()[0]);
   };
@@ -11413,8 +11418,8 @@ function SpotPricesScreen({ onBack }) {
               </div>
             </div>
           )}
-          <EchelleLegende seuils={seuils} unite={indDef.unite} facteur={indicateur === 'gain' ? 1 : 100}
-            decimales={indicateur === 'gain' ? (seuils[8] < 5 ? 2 : seuils[8] < 20 ? 1 : 0) : (granularite === 'semaine' ? 0 : 1)}/>
+          <EchelleLegende seuils={seuils} unite={indDef.unite} facteur={indicateurBrut(indicateur) ? 1 : 100}
+            decimales={indicateur === 'gain' ? (seuils[8] < 5 ? 2 : seuils[8] < 20 ? 1 : 0) : indicateur === 'negatif' ? (seuils[8] < 5 ? 1 : 0) : (granularite === 'semaine' ? 0 : 1)}/>
           {granularite === 'jour'
             ? <SpotJoursCanvas rows={rows} indicateur={indicateur} seuils={seuils} onCell={onCell}/>
             : <SpotHistoTable rows={rows} granularite={granularite} indicateur={indicateur} seuils={seuils} onCell={indicateur === 'gain' ? onCell : null}/>}
