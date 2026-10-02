@@ -1510,6 +1510,14 @@
     .rt-tableau tr.nonlu td{ font-weight:800; }
     .rt-tableau td.msg{ white-space:normal; max-width:420px; font-weight:400; }
     .rt-nouveau{ display:inline-block; background:rgba(255,179,64,.18); color:#ffb340; border:1px solid rgba(255,179,64,.4); border-radius:999px; padding:2px 8px; font-size:11px; font-weight:800; margin-right:6px; }
+    /* le classement d'un retour par l'équipe : à corriger, corrigé, à analyser */
+    .rt-statut{ display:inline-block; border-radius:999px; padding:2px 8px; font-size:11px; font-weight:800; margin-right:6px; white-space:nowrap; border:1px solid transparent; }
+    .rt-statut.a_corriger{ background:rgba(255,138,106,.18); color:#ff8a6a; border-color:rgba(255,138,106,.4); }
+    .rt-statut.corrige{ background:rgba(127,208,138,.18); color:#7fd08a; border-color:rgba(127,208,138,.4); }
+    .rt-statut.a_analyser{ background:rgba(156,192,255,.18); color:#9cc0ff; border-color:rgba(156,192,255,.4); }
+    .rt-classer{ display:flex; align-items:center; gap:6px; flex-wrap:wrap; font-size:12.5px; color:rgba(255,255,255,.6); }
+    .rt-classer .rt-btn{ padding:5px 10px; font-size:12.5px; }
+    .rt-classement{ font-size:10.5px; font-weight:800; text-transform:uppercase; letter-spacing:.4px; color:rgba(255,255,255,.55); }
     /* l'écran d'un retour : la fiche à gauche, la page incriminée à droite */
     .rt-page{ width:100%; max-width:none; padding:0 14px 90px; box-sizing:border-box; }
     .rt-split{ display:flex; flex-direction:column; gap:14px; }
@@ -19164,6 +19172,15 @@ const RetoursCtx = React.createContext({ nonLus:0, nonLuId:null, reponses:0, rep
 const useRetours = () => React.useContext(RetoursCtx);
 const dateRetour = (d) => d ? new Date(d).toLocaleString('fr-FR', { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit' }) : '—';
 const nomDe = (l) => (l.pseudo || ((l.prenom || '') + ' ' + (l.nom || '')).trim() || l.email || '—');
+// Les trois classements d'un retour par l'équipe. Classer poste dans le fil
+// la réponse toute faite (texte tenu en base par retour_classer).
+const CLASSEMENTS = [
+  { cle:'a_corriger', libelle:'À corriger', reponse:'Ok, ça va être corrigé.' },
+  { cle:'corrige',    libelle:'Corrigé',    reponse:'Ok, c\'est corrigé, vérifie maintenant.' },
+  { cle:'a_analyser', libelle:'À analyser', reponse:'Merci, je vais analyser ton message.' },
+];
+const classementDe = (k) => CLASSEMENTS.find(c => c.cle === k);
+const BadgeStatut = ({ k }) => { const c = classementDe(k); return c ? <span className={'rt-statut ' + c.cle}>{c.libelle}</span> : null; };
 const mmssR = (s) => Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
 
 // Le contexte d'un retour, pris au clic sur le pouce : l'état de l'écran (pour
@@ -19563,6 +19580,7 @@ function MessageFil({ m, moi, auteur, urls, user, onModifier, onSupprimer, onPle
     <div className={'rt-msg' + (droite ? ' droite' : '') + (edite ? ' edite' : '')}>
       <div className="rt-msg-tete">
         <b>{mien ? 'Vous' : nomDe(m)}</b>{!mien && ['admin','superadmin'].includes(m.role) && <span className="rt-role">équipe</span>}
+        {m.classement && <span className="rt-classement">· classé « {classementDe(m.classement)?.libelle || m.classement} »</span>}
         <span>{dateRetour(m.created_at)}{m.modifie_le ? ' · modifié' : ''}</span>
         {mien && !edite && <span style={{display:'inline-flex',gap:2}}>
           <button className="rt-ico-btn" onClick={()=>setEdite(true)} title="Modifier" aria-label="Modifier ce message"><PictoCrayon/></button>
@@ -19585,6 +19603,7 @@ function MessageFil({ m, moi, auteur, urls, user, onModifier, onSupprimer, onPle
 function EcranRetour({ id, admin, user, onRetour, onLu }) {
   const [fil, setFil] = useState(null); const [error, setError] = useState(null); const [urls, setUrls] = useState({});
   const [plein, setPlein] = useState(null); const [editeRacine, setEditeRacine] = useState(false);
+  const [classe, setClasse] = useState(null);     // le classement en cours d'envoi
   const frameRef = useRef(null), basRef = useRef(null);
   const charger = async () => {
     const { data, error: err } = await sb.rpc('retour_fil', { p_id: id });
@@ -19614,6 +19633,18 @@ function EcranRetour({ id, admin, user, onRetour, onLu }) {
   const modifier = async (m, p) => { const { error: err } = await sb.rpc('retour_message_modifier', { p_id: m.id, p_texte: p.texte, p_image: p.image_path, p_audio: p.audio_path, p_fichier: p.fichier_path, p_fichier_nom: p.fichier_nom }); if (err) throw new Error(err.message); if (p.retires.length) await sb.storage.from('retours').remove(p.retires); await charger(); };
   const supprimerMessage = async (m) => { if (!window.confirm('Supprimer ce message ?')) return; const chemins = [m.image_path, m.audio_path, m.fichier_path].filter(Boolean); if (chemins.length) await sb.storage.from('retours').remove(chemins); const { error: err } = await sb.rpc('retour_message_supprimer', { p_id: m.id }); if (err) { setError(err.message); return; } charger(); };
   const modifierRacine = async (p) => { const { error: err } = await sb.rpc('retour_modifier', { p_id: id, p_texte: p.texte }); if (err) throw new Error(err.message); setEditeRacine(false); await charger(); };
+  // Classer le retour : le statut est posé, la réponse toute faite part dans
+  // le fil au nom de l'administrateur. Reclasser envoie la réponse suivante.
+  const classer = async (c) => {
+    if (classe) return;
+    if (r.statut === c.cle && !window.confirm('Ce retour est déjà classé « ' + c.libelle + ' ». Renvoyer « ' + c.reponse + ' » ?')) return;
+    setClasse(c.cle); setError(null);
+    const { error: err } = await sb.rpc('retour_classer', { p_id: id, p_statut: c.cle });
+    setClasse(null);
+    if (err) { setError(err.message); return; }
+    await charger();
+    setTimeout(() => basRef.current && basRef.current.scrollIntoView({ block:'end', behavior:'smooth' }), 60);
+  };
   const situer = () => { const w = frameRef.current && frameRef.current.contentWindow; if (!w || !r) return; const m = { source:'starvolt-retour', action:'situer', scroll: r.detail?.scroll || null, cible: r.detail?.cible || null }; const envoyer = () => { try { w.postMessage(m, window.location.origin); } catch (e) {} }; envoyer(); setTimeout(envoyer, 900); setTimeout(envoyer, 2500); };
   // Socrate incrusté, à l'état enregistré. Un retour laissé sur l'écran d'un
   // retour rejouerait cet écran dans cet écran : on le ramène à l'accueil.
@@ -19629,7 +19660,8 @@ function EcranRetour({ id, admin, user, onRetour, onLu }) {
           {r && <>
             <div className="rt-tete">
               <span className={'rt-ico ' + (r.sentiment === 'down' ? 'bas' : 'haut')}><ThumbIcon up={r.sentiment !== 'down'} size={20} color={r.sentiment === 'down' ? '#ff8a6a' : '#7fd08a'}/></span>
-              <div><b>{mien ? 'Vous' : nomDe(r)}</b><span>{dateRetour(r.created_at)}{r.modifie_le ? ' · modifié' : ''} · {r.ecran || '—'}</span></div>
+              <div><b>{mien ? 'Vous' : nomDe(r)}</b><span>{dateRetour(r.created_at)}{r.modifie_le ? ' · modifié' : ''} · {r.ecran || '—'}</span>
+                {r.statut && <span><BadgeStatut k={r.statut}/></span>}</div>
               {mien && !editeRacine && <button className="rt-ico-btn" onClick={()=>setEditeRacine(true)} title="Modifier" aria-label="Corriger le texte de votre remarque"><PictoCrayon/></button>}
             </div>
             {editeRacine
@@ -19643,6 +19675,11 @@ function EcranRetour({ id, admin, user, onRetour, onLu }) {
             <div className="rt-fil">
               <div className="rt-fil-titre">{messages.length === 0 ? 'Pas encore de réponse' : messages.length === 1 ? 'Une réponse' : messages.length + ' réponses'}</div>
               {messages.map(m => <MessageFil key={m.id} m={m} moi={moi} auteur={r.user_id} urls={urls} user={user} onModifier={modifier} onSupprimer={supprimerMessage} onPlein={setPlein}/>)}
+              {admin && <div className="rt-classer" role="group" aria-label="Classer ce retour">
+                <span>Classer :</span>
+                {CLASSEMENTS.map(c => <button key={c.cle} className={'rt-btn' + (r.statut === c.cle ? ' on' : '')} disabled={!!classe}
+                                              title={'Répond : « ' + c.reponse + ' »'} onClick={()=>classer(c)}>{classe === c.cle ? '…' : c.libelle}</button>)}
+              </div>}
               <Composeur user={user} onEnvoyer={poster} bouton="Envoyer" placeholder={mien ? 'Répondre à l\'équipe…' : 'Répondre à ' + nomDe(r) + '…'}/>
               <div ref={basRef}/>
             </div>
@@ -19667,7 +19704,7 @@ function EcranRetours({ onBack, onOuvrir, onLu }) {
   const charger = async () => { const { data, error: err } = await sb.rpc('retours_lister', { p_limit: 300 }); if (err) { setError(err.message); return; } setLignes(data || []); };
   useEffect(() => { charger(); }, []);
   const nonLu = (l) => !l.lu_le || Number(l.nouveaux) > 0;
-  const garde = (k) => (l) => k === 'tous' || (k === 'nonlus' ? nonLu(l) : l.sentiment === k);
+  const garde = (k) => (l) => k === 'tous' || (k === 'nonlus' ? nonLu(l) : k === 'sans' ? !l.statut : classementDe(k) ? l.statut === k : l.sentiment === k);
   const n = (k) => (lignes || []).filter(garde(k)).length;
   const toutLu = async () => { const { error: err } = await sb.rpc('retour_marquer_lu', { p_id: null, p_lu: true }); if (err) { setError(err.message); return; } charger(); onLu && onLu(); };
   const visibles = (lignes || []).filter(garde(filtre));
@@ -19677,13 +19714,13 @@ function EcranRetours({ onBack, onOuvrir, onLu }) {
         <div className="screen-sub">{lignes ? n('nonlus') + ' non lu(s) sur ' + lignes.length : 'Chargement…'}</div></div>
       {error && <div className="rt-alerte">{error}</div>}
       <div className="rt-filtres">
-        {[['tous', 'Tous'], ['up', '👍'], ['down', '👎'], ['nonlus', 'Non lus']].map(([k, lib]) => <button key={k} className={'rt-btn' + (filtre === k ? ' on' : '')} onClick={()=>setFiltre(k)}>{lib} <small>{n(k)}</small></button>)}
+        {[['tous', 'Tous'], ['up', '👍'], ['down', '👎'], ['nonlus', 'Non lus'], ['sans', 'À classer'], ...CLASSEMENTS.map(c => [c.cle, c.libelle])].map(([k, lib]) => <button key={k} className={'rt-btn' + (filtre === k ? ' on' : '')} onClick={()=>setFiltre(k)}>{lib} <small>{n(k)}</small></button>)}
         <span className="rt-ressort"/>
         <button className="rt-btn" onClick={charger}>Rafraîchir</button>
         <button className="rt-btn" onClick={toutLu} disabled={!n('nonlus')}>Tout marquer lu</button>
       </div>
       <div className="rt-tableau"><table>
-        <thead><tr><th>Quand</th><th>Qui</th><th></th><th>Écran</th><th>Message</th><th>Pièces</th><th>Fil</th></tr></thead>
+        <thead><tr><th>Quand</th><th>Qui</th><th></th><th>Écran</th><th>Message</th><th>Pièces</th><th>Classement</th><th>Fil</th></tr></thead>
         <tbody>
           {visibles.map(l => (
             <tr key={l.id} className={'ouvrable' + (nonLu(l) ? ' nonlu' : '')} onClick={()=>onOuvrir(l.id)}>
@@ -19691,9 +19728,10 @@ function EcranRetours({ onBack, onOuvrir, onLu }) {
               <td>{nomDe(l)}</td><td>{l.sentiment === 'down' ? '👎' : '👍'}</td><td>{l.ecran || '—'}</td>
               <td className="msg">{l.message || <i style={{opacity:.6}}>sans texte</i>}</td>
               <td>{l.image_path ? '🖼️ ' : ''}{l.audio_path ? '🎙️ ' : ''}{l.fichier_path ? '📎 ' : ''}{l.detail?.cible ? '📍' : ''}</td>
+              <td>{l.statut ? <BadgeStatut k={l.statut}/> : <span style={{opacity:.5}}>—</span>}</td>
               <td>{Number(l.nouveaux) > 0 && <span className="rt-nouveau">{l.nouveaux} nouveau{Number(l.nouveaux) > 1 ? 'x' : ''}</span>}{Number(l.n_messages) > 0 ? '💬 ' + l.n_messages : <span style={{opacity:.5}}>—</span>}</td>
             </tr>))}
-          {lignes && !visibles.length && <tr><td colSpan={7}>Aucun retour{filtre !== 'tous' ? ' dans ce filtre' : ' pour l\'instant'}.</td></tr>}
+          {lignes && !visibles.length && <tr><td colSpan={8}>Aucun retour{filtre !== 'tous' ? ' dans ce filtre' : ' pour l\'instant'}.</td></tr>}
         </tbody></table></div>
       <div style={{marginTop:16}}><BackButton onClick={onBack}/></div>
     </div>
@@ -19709,12 +19747,13 @@ function EcranMesRetours({ onBack, onOuvrir }) {
       <div className="auth-header"><div className="welcome-tag">Mon compte</div><h1 className="welcome-title">Mes remarques <span className="accent">et les réponses</span></h1><div className="screen-sub">{chapo}</div></div>
       {error && <div className="rt-alerte">{error}</div>}
       {lignes && lignes.length > 0 && <div className="rt-tableau"><table>
-        <thead><tr><th>Quand</th><th></th><th>Écran</th><th>Message</th><th>Pièces</th><th>Réponses</th></tr></thead>
+        <thead><tr><th>Quand</th><th></th><th>Écran</th><th>Message</th><th>Pièces</th><th>Suite donnée</th><th>Réponses</th></tr></thead>
         <tbody>{lignes.map(l => (
           <tr key={l.id} className={'ouvrable' + (Number(l.nouveaux) > 0 ? ' nonlu' : '')} onClick={()=>onOuvrir(l.id)}>
             <td>{dateRetour(l.created_at)}</td><td>{l.sentiment === 'down' ? '👎' : '👍'}</td><td>{l.ecran || '—'}</td>
             <td className="msg">{l.message || <i style={{opacity:.6}}>sans texte</i>}</td>
             <td>{l.image_path ? '🖼️ ' : ''}{l.audio_path ? '🎙️ ' : ''}{l.fichier_path ? '📎 ' : ''}{l.cible ? '📍' : ''}</td>
+            <td>{l.statut ? <BadgeStatut k={l.statut}/> : <span style={{opacity:.5}}>—</span>}</td>
             <td>{Number(l.nouveaux) > 0 && <span className="rt-nouveau">{l.nouveaux} nouvelle{Number(l.nouveaux) > 1 ? 's' : ''}</span>}{Number(l.n_messages) > 0 ? '💬 ' + l.n_messages : <span style={{opacity:.5}}>—</span>}</td>
           </tr>))}</tbody></table></div>}
       {lignes && !lignes.length && <div className="rt-info">Les pouces 👍 👎 en haut à droite servent à laisser une remarque sur n'importe quel écran. Les réponses de l'équipe arriveront ici.</div>}
