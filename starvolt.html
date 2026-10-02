@@ -1547,6 +1547,9 @@
     .rt-msg.droite .rt-bulle{ background:var(--teal); border-bottom-right-radius:4px; }
     .rt-bulle .rt-message{ max-width:none; }
     .rt-bulle .rt-img{ max-height:220px; }
+    .rt-images{ display:flex; flex-wrap:wrap; gap:6px; }
+    .rt-images .rt-img{ max-height:180px; max-width:min(100%, 260px); }
+    .rt-images .rt-img:only-child{ max-height:240px; max-width:100%; }
     .rt-bulle .rt-audio{ width:260px; max-width:100%; }
     .rt-msg-tete{ display:flex; align-items:baseline; gap:8px; flex-wrap:wrap; font-size:12px; color:rgba(255,255,255,.6); padding:0 4px; }
     .rt-msg.droite .rt-msg-tete{ justify-content:flex-end; }
@@ -19419,6 +19422,20 @@ async function deposerPiece(user, piece) {
   if (error) throw new Error('Fichier refusé : ' + error.message);
   return chemin;
 }
+// Les images d'un retour ou d'un message : la liste `images`, sinon l'ancienne `image_path` seule. Dix au plus.
+const imagesDe = (x) => (x && x.images && x.images.length ? x.images : (x && x.image_path ? [x.image_path] : []));
+const MAX_IMAGES = 10;
+function Images({ chemins, urls, onPlein }) {
+  if (!chemins.length) return null;
+  return <div className="rt-images">{chemins.map(c => urls[c] ? <img key={c} className="rt-img" src={urls[c]} alt="Image jointe" onClick={()=>onPlein(urls[c])}/> : <div key={c} className="rt-info">Image introuvable.</div>)}</div>;
+}
+// Plusieurs images d'un coup, chacune réduite ; `place` = combien on peut encore en prendre.
+async function lireImages(e, place) {
+  const fs = Array.from(e.target.files || []); e.target.value = '';
+  const res = [];
+  for (const f of fs.slice(0, Math.max(0, place))) { const r = await reduireImage(f); res.push({ ...r, url: URL.createObjectURL(r.blob) }); }
+  return res;
+}
 function PictoCrayon({ size = 15 }) { return <svg viewBox="0 0 24 24" width={size} height={size} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>; }
 function PictoPoubelle({ size = 15 }) { return <svg viewBox="0 0 24 24" width={size} height={size} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/></svg>; }
 function PictoTrombone({ size = 16 }) { return <svg viewBox="0 0 24 24" width={size} height={size} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M21.4 11.1 12.5 20a5.5 5.5 0 0 1-7.8-7.8l9.2-9.2a3.7 3.7 0 0 1 5.2 5.2l-9.2 9.2a1.8 1.8 0 0 1-2.6-2.6l8.5-8.5"/></svg>; }
@@ -19431,31 +19448,32 @@ const ajusterTexte = (el) => { if (!el) return; el.style.height = 'auto'; el.sty
 // ── La modale des pouces ────────────────────────────────────────────────────
 function ModaleRetour({ sentiment, contexte, user, onFermer }) {
   const bas = sentiment === 'down';
-  const [texte, setTexte] = useState(''); const [image, setImage] = useState(null); const [fichier, setFichier] = useState(null);
+  const [texte, setTexte] = useState(''); const [images, setImages] = useState([]); const [fichier, setFichier] = useState(null);   // images : la capture de l'endroit, puis celles ajoutées
   const [cible, setCible] = useState(null); const [pointage, setPointage] = useState(false);
   const [envoi, setEnvoi] = useState(false); const [fait, setFait] = useState(false); const [erreur, setErreur] = useState(null);
   const micro = useMicro(); const taRef = useRef(null), fichierRef = useRef(null), pieceRef = useRef(null);
   useEffect(() => { const t = setTimeout(() => taRef.current && taRef.current.focus(), 120); return () => clearTimeout(t); }, [pointage]);
   useEffect(() => { const esc = (e) => { if (e.key === 'Escape' && !pointage) onFermer(); }; window.addEventListener('keydown', esc); return () => window.removeEventListener('keydown', esc); }, [pointage]);
-  const choisirImage = async (e) => { const f = e.target.files && e.target.files[0]; e.target.value = ''; if (!f) return; try { const r = await reduireImage(f); setImage({ ...r, url: URL.createObjectURL(r.blob) }); setErreur(null); } catch (err) { setErreur(err.message); } };
+  const choisirImage = async (e) => { try { const n = await lireImages(e, MAX_IMAGES - images.length); setImages(prev => [...prev, ...n].slice(0, MAX_IMAGES)); setErreur(null); } catch (err) { setErreur(err.message); } };
   const choisirFichier = (e) => { const f = e.target.files && e.target.files[0]; e.target.value = ''; if (!f) return; try { setFichier(lireFichier(f)); setErreur(null); } catch (err) { setErreur(err.message); } };
-  const retirerImage = () => { if (image) URL.revokeObjectURL(image.url); setImage(null); };
+  const retirerImage = (i) => setImages(prev => { const x = prev[i]; if (x) URL.revokeObjectURL(x.url); return prev.filter((_, j) => j !== i); });
   const envoyer = async () => {
     const msg = texte.trim();
-    if (!msg && !image && !micro.audio && !fichier && !cible) { setErreur(bas ? 'Dites-nous ce qui ne va pas, montrez l\'endroit, ou ajoutez une image, une note audio ou un fichier.' : 'Dites-nous ce qui vous plaît, ou ajoutez une image, une note audio ou un fichier.'); taRef.current && taRef.current.focus(); return; }
+    if (!msg && !images.length && !micro.audio && !fichier && !cible) { setErreur(bas ? 'Dites-nous ce qui ne va pas, montrez l\'endroit, ou ajoutez une image, une note audio ou un fichier.' : 'Dites-nous ce qui vous plaît, ou ajoutez une image, une note audio ou un fichier.'); taRef.current && taRef.current.focus(); return; }
     setEnvoi(true); setErreur(null);
     try {
-      const image_path = image ? await deposerPiece(user, image) : null;
+      const chemins = []; for (const im of images) chemins.push(await deposerPiece(user, im));
       const audio_path = micro.audio ? await deposerPiece(user, micro.audio) : null;
       const fichier_path = fichier ? await deposerPiece(user, fichier) : null;
       const { error } = await sb.rpc('retour_deposer', { p: { sentiment, message: msg, route: contexte.route, ecran: contexte.ecran,
-        detail: { ...contexte.detail, cible: cible || undefined }, image_path, audio_path, fichier_path, fichier_nom: fichier ? fichier.nom : null } });
+        detail: { ...contexte.detail, cible: cible || undefined }, images: chemins, image_path: chemins[0] || null, audio_path, fichier_path, fichier_nom: fichier ? fichier.nom : null } });
       if (error) throw new Error(error.message);
       setFait(true); setTimeout(onFermer, 1100);
     } catch (err) { setErreur(err.message || 'Envoi impossible.'); logAppError({ severity:'mineur', module:'retour', message: err.message || String(err) }); }
     finally { setEnvoi(false); }
   };
-  if (pointage) return <Pointeur onChoix={(c, photo)=>{ setCible(c); if (photo) { if (image) URL.revokeObjectURL(image.url); setImage(photo); } setPointage(false); }} onAnnuler={()=>setPointage(false)}/>;
+  // La capture de l'endroit remplace la capture précédente, pas les images ajoutées.
+  if (pointage) return <Pointeur onChoix={(c, photo)=>{ setCible(c); if (photo) setImages(prev => { prev.filter(x => x.capture).forEach(x => URL.revokeObjectURL(x.url)); return [photo, ...prev.filter(x => !x.capture)].slice(0, MAX_IMAGES); }); setPointage(false); }} onAnnuler={()=>setPointage(false)}/>;
   return (
     <div className="rt-voile" onClick={onFermer}>
       <div className="rt-modale" role="dialog" aria-modal="true" aria-label={bas ? 'Ce qui ne va pas' : 'Ce qui vous plaît'} onClick={(e)=>e.stopPropagation()}>
@@ -19468,15 +19486,15 @@ function ModaleRetour({ sentiment, contexte, user, onFermer }) {
           <textarea ref={taRef} className="rt-texte" rows={2} value={texte} placeholder={bas ? 'Ce qui ne va pas, ce que vous attendiez…' : 'Ce qui vous plaît…'}
                     onChange={(e)=>{ setTexte(e.target.value); ajusterTexte(e.target); }}/>
           {cible && <div className="rt-piece"><span>📍 {cible.libelle}{cible.section ? ' — ' + cible.section : ''}</span><button onClick={()=>setCible(null)} aria-label="Retirer l'endroit">×</button></div>}
-          {image && <div className="rt-piece"><img src={image.url} alt=""/><button onClick={retirerImage} aria-label="Retirer l'image">×</button></div>}
+          {images.map((im, i) => <div key={im.url} className="rt-piece"><img src={im.url} alt=""/>{im.capture && <span>Capture de l'endroit</span>}<button onClick={()=>retirerImage(i)} aria-label="Retirer l'image">×</button></div>)}
           {micro.audio && <div className="rt-piece"><audio controls src={micro.audio.url}/><button onClick={micro.retirer} aria-label="Retirer la note audio">×</button></div>}
           {fichier && <div className="rt-piece"><span><PictoTrombone size={14}/> {fichier.nom} <small>({tailleLisible(fichier.taille)})</small></span><button onClick={()=>setFichier(null)} aria-label="Retirer le fichier">×</button></div>}
           <div className="rt-outils">
             {bas && !cible && <button className="rt-btn" onClick={()=>setPointage(true)}>📍 Montrer l'endroit</button>}
-            {!image && <button className="rt-btn" onClick={()=>fichierRef.current && fichierRef.current.click()}>📷 Image</button>}
+            {images.length < MAX_IMAGES && <button className="rt-btn" onClick={()=>fichierRef.current && fichierRef.current.click()}>📷 {images.length ? 'Autre image' : 'Image'}</button>}
             {!micro.audio && (micro.etat === 'rec' ? <button className="rt-btn danger" onClick={micro.arreter}>■ Arrêter ({mmssR(micro.duree)})</button> : <button className="rt-btn" onClick={micro.demarrer}>🎙️ Note audio</button>)}
             {!fichier && <button className="rt-btn" onClick={()=>pieceRef.current && pieceRef.current.click()} title="Joindre un PDF ou un document bureautique"><PictoTrombone/> Fichier</button>}
-            <input ref={fichierRef} type="file" accept="image/*" style={{display:'none'}} onChange={choisirImage}/>
+            <input ref={fichierRef} type="file" accept="image/*" multiple style={{display:'none'}} onChange={choisirImage}/>
             <input ref={pieceRef} type="file" accept={FICHIERS_ACCEPT} style={{display:'none'}} onChange={choisirFichier}/>
           </div>
           {(erreur || micro.erreur) && <div className="rt-alerte">{erreur || micro.erreur}</div>}
@@ -19523,27 +19541,29 @@ function PopupReponse({ info, onOuvrir, onFermer }) {
 
 // ── Le fil : composeur et messages ──────────────────────────────────────────
 function Composeur({ user, initial, urls, texteSeul, placeholder, bouton, onEnvoyer, onAnnuler }) {
-  const [texte, setTexte] = useState(initial?.texte || ''); const [image, setImage] = useState(null);
-  const [imageGardee, setImageGardee] = useState(initial?.image_path || null); const [audioGarde, setAudioGarde] = useState(initial?.audio_path || null);
+  const [texte, setTexte] = useState(initial?.texte || ''); const [images, setImages] = useState([]);   // nouvelles images
+  const [imagesGardees, setImagesGardees] = useState(() => imagesDe(initial)); const [audioGarde, setAudioGarde] = useState(initial?.audio_path || null);
+  const nbImages = imagesGardees.length + images.length;
   const [fichier, setFichier] = useState(null); const [fichierGarde, setFichierGarde] = useState(initial?.fichier_path ? { chemin: initial.fichier_path, nom: initial.fichier_nom } : null);
   const [envoi, setEnvoi] = useState(false); const [erreur, setErreur] = useState(null);
   const micro = useMicro(); const taRef = useRef(null), fichierRef = useRef(null), pieceRef = useRef(null);
   useEffect(() => { const el = taRef.current; ajusterTexte(el); if (initial && el) { el.focus(); try { el.setSelectionRange(el.value.length, el.value.length); } catch (e) {} } }, []);
-  const choisirImage = async (e) => { const f = e.target.files && e.target.files[0]; e.target.value = ''; if (!f) return; try { const r = await reduireImage(f); setImage({ ...r, url: URL.createObjectURL(r.blob) }); setErreur(null); } catch (err) { setErreur(err.message); } };
+  const choisirImage = async (e) => { try { const n = await lireImages(e, MAX_IMAGES - nbImages); setImages(prev => [...prev, ...n]); setErreur(null); } catch (err) { setErreur(err.message); } };
   const choisirFichier = (e) => { const f = e.target.files && e.target.files[0]; e.target.value = ''; if (!f) return; try { setFichier(lireFichier(f)); setErreur(null); } catch (err) { setErreur(err.message); } };
-  const retirerImage = () => { if (image) URL.revokeObjectURL(image.url); setImage(null); };
+  const retirerImage = (i) => setImages(prev => { const x = prev[i]; if (x) URL.revokeObjectURL(x.url); return prev.filter((_, j) => j !== i); });
+  const viderImages = () => { images.forEach(x => URL.revokeObjectURL(x.url)); setImages([]); };
   const envoyer = async () => {
     const msg = texte.trim();
-    if (!msg && !image && !imageGardee && !micro.audio && !audioGarde && !fichier && !fichierGarde) { setErreur(texteSeul ? 'Le texte ne peut pas être vide.' : 'Écrivez un message, ou ajoutez une image, une note audio ou un fichier.'); taRef.current && taRef.current.focus(); return; }
+    if (!msg && !nbImages && !micro.audio && !audioGarde && !fichier && !fichierGarde) { setErreur(texteSeul ? 'Le texte ne peut pas être vide.' : 'Écrivez un message, ou ajoutez une image, une note audio ou un fichier.'); taRef.current && taRef.current.focus(); return; }
     setEnvoi(true); setErreur(null);
     try {
-      const image_path = image ? await deposerPiece(user, image) : imageGardee;
+      const chemins = [...imagesGardees]; for (const im of images) chemins.push(await deposerPiece(user, im));
       const audio_path = micro.audio ? await deposerPiece(user, micro.audio) : audioGarde;
       const fichier_path = fichier ? await deposerPiece(user, fichier) : (fichierGarde ? fichierGarde.chemin : null);
       const fichier_nom = fichier ? fichier.nom : (fichierGarde ? fichierGarde.nom : null);
-      const retires = [initial?.image_path, initial?.audio_path, initial?.fichier_path].filter(c => c && c !== image_path && c !== audio_path && c !== fichier_path);
-      await onEnvoyer({ texte: msg, image_path, audio_path, fichier_path, fichier_nom, retires });
-      if (!initial) { setTexte(''); retirerImage(); micro.retirer(); setFichier(null); setTimeout(() => ajusterTexte(taRef.current), 0); }
+      const retires = [...imagesDe(initial), initial?.audio_path, initial?.fichier_path].filter(c => c && chemins.indexOf(c) < 0 && c !== audio_path && c !== fichier_path);
+      await onEnvoyer({ texte: msg, images: chemins, image_path: chemins[0] || null, audio_path, fichier_path, fichier_nom, retires });
+      if (!initial) { setTexte(''); viderImages(); micro.retirer(); setFichier(null); setTimeout(() => ajusterTexte(taRef.current), 0); }
     } catch (err) { setErreur(err.message || 'Envoi impossible.'); logAppError({ severity:'mineur', module:'retour/fil', message: err.message || String(err) }); }
     finally { setEnvoi(false); }
   };
@@ -19553,18 +19573,18 @@ function Composeur({ user, initial, urls, texteSeul, placeholder, bouton, onEnvo
                 onChange={(e)=>{ setTexte(e.target.value); ajusterTexte(e.target); }}
                 onKeyDown={(e)=>{ if (e.key === 'Escape' && onAnnuler) onAnnuler(); if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); if (!envoi) envoyer(); } }}/>
       {!texteSeul && <>
-        {imageGardee && !image && <div className="rt-piece">{urls?.[imageGardee] ? <img src={urls[imageGardee]} alt=""/> : <span>🖼️ image jointe</span>}<button onClick={()=>setImageGardee(null)} aria-label="Retirer l'image">×</button></div>}
-        {image && <div className="rt-piece"><img src={image.url} alt=""/><button onClick={retirerImage} aria-label="Retirer l'image">×</button></div>}
+        {imagesGardees.map(c => <div key={c} className="rt-piece">{urls?.[c] ? <img src={urls[c]} alt=""/> : <span>🖼️ image jointe</span>}<button onClick={()=>setImagesGardees(prev => prev.filter(x => x !== c))} aria-label="Retirer l'image">×</button></div>)}
+        {images.map((im, i) => <div key={im.url} className="rt-piece"><img src={im.url} alt=""/><button onClick={()=>retirerImage(i)} aria-label="Retirer l'image">×</button></div>)}
         {audioGarde && !micro.audio && <div className="rt-piece">{urls?.[audioGarde] ? <audio controls src={urls[audioGarde]}/> : <span>🎙️ note audio</span>}<button onClick={()=>setAudioGarde(null)} aria-label="Retirer la note audio">×</button></div>}
         {micro.audio && <div className="rt-piece"><audio controls src={micro.audio.url}/><button onClick={micro.retirer} aria-label="Retirer la note audio">×</button></div>}
         {fichierGarde && !fichier && <div className="rt-piece"><span><PictoTrombone size={14}/> {fichierGarde.nom || fichierGarde.chemin.split('/').pop()}</span><button onClick={()=>setFichierGarde(null)} aria-label="Retirer le fichier">×</button></div>}
         {fichier && <div className="rt-piece"><span><PictoTrombone size={14}/> {fichier.nom} <small>({tailleLisible(fichier.taille)})</small></span><button onClick={()=>setFichier(null)} aria-label="Retirer le fichier">×</button></div>}
       </>}
       <div className="rt-outils">
-        {!texteSeul && !image && !imageGardee && <button className="rt-btn" onClick={()=>fichierRef.current && fichierRef.current.click()}>📷 Image</button>}
+        {!texteSeul && nbImages < MAX_IMAGES && <button className="rt-btn" onClick={()=>fichierRef.current && fichierRef.current.click()}>📷 {nbImages ? 'Autre image' : 'Image'}</button>}
         {!texteSeul && !micro.audio && !audioGarde && (micro.etat === 'rec' ? <button className="rt-btn danger" onClick={micro.arreter}>■ Arrêter ({mmssR(micro.duree)})</button> : <button className="rt-btn" onClick={micro.demarrer}>🎙️ Note audio</button>)}
         {!texteSeul && !fichier && !fichierGarde && <button className="rt-btn" onClick={()=>pieceRef.current && pieceRef.current.click()} title="Joindre un PDF ou un document bureautique"><PictoTrombone/> Fichier</button>}
-        <input ref={fichierRef} type="file" accept="image/*" style={{display:'none'}} onChange={choisirImage}/>
+        <input ref={fichierRef} type="file" accept="image/*" multiple style={{display:'none'}} onChange={choisirImage}/>
         <input ref={pieceRef} type="file" accept={FICHIERS_ACCEPT} style={{display:'none'}} onChange={choisirFichier}/>
         <span className="rt-ressort"/>
         {onAnnuler && <button className="rt-btn" onClick={onAnnuler} disabled={envoi}>Annuler</button>}
@@ -19591,7 +19611,7 @@ function MessageFil({ m, moi, auteur, urls, user, onModifier, onSupprimer, onPle
         ? <Composeur user={user} initial={m} urls={urls} bouton="Enregistrer" placeholder="Votre message…" onAnnuler={()=>setEdite(false)} onEnvoyer={async (p)=>{ await onModifier(m, p); setEdite(false); }}/>
         : <div className="rt-bulle">
           {m.texte && <div className="rt-message">{m.texte}</div>}
-          {m.image_path && (urls[m.image_path] ? <img className="rt-img" src={urls[m.image_path]} alt="Image jointe" onClick={()=>onPlein(urls[m.image_path])}/> : <div className="rt-info">Image introuvable.</div>)}
+          <Images chemins={imagesDe(m)} urls={urls} onPlein={onPlein}/>
           {m.audio_path && (urls[m.audio_path] ? <audio className="rt-audio" controls src={urls[m.audio_path]}/> : <div className="rt-info">Note audio introuvable.</div>)}
           {m.fichier_path && <PieceJointe chemin={m.fichier_path} nom={m.fichier_nom} url={urls[m.fichier_path]}/>}
         </div>}
@@ -19611,7 +19631,7 @@ function EcranRetour({ id, admin, user, onRetour, onLu }) {
     if (!data || !data.retour) { setError('Ce retour n\'existe plus.'); return; }
     setFil(data);
     const r = data.retour;
-    const chemins = [r.image_path, r.audio_path, r.fichier_path, ...(data.messages || []).flatMap(m => [m.image_path, m.audio_path, m.fichier_path])].filter(Boolean);
+    const chemins = [...imagesDe(r), r.audio_path, r.fichier_path, ...(data.messages || []).flatMap(m => [...imagesDe(m), m.audio_path, m.fichier_path])].filter(Boolean);
     if (chemins.length) {
       const { data: signes, error: e2 } = await sb.storage.from('retours').createSignedUrls(chemins, 3600);
       if (e2) logAppError({ severity:'mineur', module:'retour/fichiers', message: e2.message });
@@ -19624,14 +19644,14 @@ function EcranRetour({ id, admin, user, onRetour, onLu }) {
   const basculerLu = async () => { const lu = !r.lu_le; const { error: err } = await sb.rpc('retour_marquer_lu', { p_id: id, p_lu: lu }); if (err) { setError(err.message); return; } setFil({ ...fil, retour: { ...r, lu_le: lu ? new Date().toISOString() : null } }); onLu && onLu(); };
   const supprimerTout = async () => {
     if (!window.confirm((admin && !mien ? 'Supprimer ce retour' : 'Supprimer votre remarque') + ', toute la discussion et les fichiers ?')) return;
-    const chemins = [r.image_path, r.audio_path, r.fichier_path, ...fil.messages.flatMap(m => [m.image_path, m.audio_path, m.fichier_path])].filter(c => c && (admin || c.indexOf(user.id + '/') === 0));
+    const chemins = [...imagesDe(r), r.audio_path, r.fichier_path, ...fil.messages.flatMap(m => [...imagesDe(m), m.audio_path, m.fichier_path])].filter(c => c && (admin || c.indexOf(user.id + '/') === 0));
     if (chemins.length) { const { error: e1 } = await sb.storage.from('retours').remove(chemins); if (e1) { setError('Fichiers : ' + e1.message); return; } }
     const { error: err } = await sb.rpc('retour_supprimer', { p_id: id }); if (err) { setError(err.message); return; }
     onLu && onLu(); onRetour();
   };
-  const poster = async (p) => { const { error: err } = await sb.rpc('retour_message_poster', { p_retour: id, p_texte: p.texte, p_image: p.image_path, p_audio: p.audio_path, p_fichier: p.fichier_path, p_fichier_nom: p.fichier_nom }); if (err) throw new Error(err.message); await charger(); setTimeout(() => basRef.current && basRef.current.scrollIntoView({ block:'end', behavior:'smooth' }), 60); };
-  const modifier = async (m, p) => { const { error: err } = await sb.rpc('retour_message_modifier', { p_id: m.id, p_texte: p.texte, p_image: p.image_path, p_audio: p.audio_path, p_fichier: p.fichier_path, p_fichier_nom: p.fichier_nom }); if (err) throw new Error(err.message); if (p.retires.length) await sb.storage.from('retours').remove(p.retires); await charger(); };
-  const supprimerMessage = async (m) => { if (!window.confirm('Supprimer ce message ?')) return; const chemins = [m.image_path, m.audio_path, m.fichier_path].filter(Boolean); if (chemins.length) await sb.storage.from('retours').remove(chemins); const { error: err } = await sb.rpc('retour_message_supprimer', { p_id: m.id }); if (err) { setError(err.message); return; } charger(); };
+  const poster = async (p) => { const { error: err } = await sb.rpc('retour_message_poster', { p_retour: id, p_texte: p.texte, p_image: p.image_path, p_images: p.images, p_audio: p.audio_path, p_fichier: p.fichier_path, p_fichier_nom: p.fichier_nom }); if (err) throw new Error(err.message); await charger(); setTimeout(() => basRef.current && basRef.current.scrollIntoView({ block:'end', behavior:'smooth' }), 60); };
+  const modifier = async (m, p) => { const { error: err } = await sb.rpc('retour_message_modifier', { p_id: m.id, p_texte: p.texte, p_image: p.image_path, p_images: p.images, p_audio: p.audio_path, p_fichier: p.fichier_path, p_fichier_nom: p.fichier_nom }); if (err) throw new Error(err.message); if (p.retires.length) await sb.storage.from('retours').remove(p.retires); await charger(); };
+  const supprimerMessage = async (m) => { if (!window.confirm('Supprimer ce message ?')) return; const chemins = [...imagesDe(m), m.audio_path, m.fichier_path].filter(Boolean); if (chemins.length) await sb.storage.from('retours').remove(chemins); const { error: err } = await sb.rpc('retour_message_supprimer', { p_id: m.id }); if (err) { setError(err.message); return; } charger(); };
   const modifierRacine = async (p) => { const { error: err } = await sb.rpc('retour_modifier', { p_id: id, p_texte: p.texte }); if (err) throw new Error(err.message); setEditeRacine(false); await charger(); };
   // Classer le retour : le statut est posé, la réponse toute faite part dans
   // le fil au nom de l'administrateur. Reclasser envoie la réponse suivante.
@@ -19666,9 +19686,9 @@ function EcranRetour({ id, admin, user, onRetour, onLu }) {
             </div>
             {editeRacine
               ? <Composeur user={user} initial={{ texte: r.message || '' }} texteSeul bouton="Enregistrer" placeholder="Votre remarque…" onAnnuler={()=>setEditeRacine(false)} onEnvoyer={modifierRacine}/>
-              : (r.message || r.image_path || r.audio_path || r.fichier_path) && <div className="rt-bulle rt-racine">
+              : (r.message || imagesDe(r).length || r.audio_path || r.fichier_path) && <div className="rt-bulle rt-racine">
                 {r.message && <div className="rt-message">{r.message}</div>}
-                {r.image_path && (urls[r.image_path] ? <img className="rt-img" src={urls[r.image_path]} alt="Image jointe" onClick={()=>setPlein(urls[r.image_path])}/> : <div className="rt-info">Image introuvable.</div>)}
+                <Images chemins={imagesDe(r)} urls={urls} onPlein={setPlein}/>
                 {r.audio_path && (urls[r.audio_path] ? <audio className="rt-audio" controls src={urls[r.audio_path]}/> : <div className="rt-info">Note audio introuvable.</div>)}
                 {r.fichier_path && <PieceJointe chemin={r.fichier_path} nom={r.fichier_nom} url={urls[r.fichier_path]}/>}
               </div>}
