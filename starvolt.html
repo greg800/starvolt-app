@@ -18515,28 +18515,55 @@ function cibleDe(el) {
 }
 // Dans Socrate incrusté : défile comme l'auteur et pose un cercle rouge à
 // l'endroit cliqué (fraction de l'élément retrouvé, sinon % de la fenêtre).
-function situerRepere({ scroll, cible }, essai = 0) {
-  document.querySelectorAll('.rt-repere').forEach(n => n.remove());
+function situerRepere({ scroll, cible }) {
   if (scroll) { try { window.scrollTo(scroll.x || 0, scroll.y || 0); } catch (e) {} }
   if (!cible) return;
   const visible = (n) => { const b = n.getBoundingClientRect(); return b.width > 0 && b.height > 0; };
-  let el = null;
-  if (cible.chemin) { try { el = [...document.querySelectorAll(cible.chemin)].find(visible) || null; } catch (e) {} }
-  if (!el && cible.libelle) {
-    const cands = [...document.querySelectorAll(POINTABLES)].filter(visible);
-    el = cands.find(n => n.tagName.toLowerCase() === cible.tag && libelleDe(n) === cible.libelle) || cands.find(n => libelleDe(n) === cible.libelle);
-  }
-  if (!el && essai < 8) { setTimeout(() => situerRepere({ cible }, essai + 1), 600); return; }   // l'écran charge encore
-  const D = 48, f = cible.point || { fx: 0.5, fy: 0.5 };
-  let x, y;
-  if (el) { el.scrollIntoView({ block:'center', inline:'nearest' }); const r = el.getBoundingClientRect(); x = r.left + r.width * f.fx + window.scrollX; y = r.top + r.height * f.fy + window.scrollY; }
-  else if (cible.boite) { const b = cible.boite; x = (b.x + b.w * f.fx) / 100 * window.innerWidth + window.scrollX; y = (b.y + b.h * f.fy) / 100 * window.innerHeight + window.scrollY; }
-  else return;
-  const rep = document.createElement('div'); rep.className = 'rt-repere';
-  Object.assign(rep.style, { position:'absolute', zIndex:'9999', pointerEvents:'none', width: D + 'px', height: D + 'px', borderRadius:'50%', boxSizing:'border-box',
-    border:'4px solid #e5322d', boxShadow:'0 0 0 3px rgba(255,255,255,.85), 0 0 0 7px rgba(229,50,45,.35), 0 6px 18px rgba(0,0,0,.35)', background:'rgba(229,50,45,.08)',
-    left: x - D / 2 + 'px', top: y - D / 2 + 'px' });
-  document.body.appendChild(rep);
+  const trouver = () => {
+    let el = null;
+    if (cible.chemin) { try { el = [...document.querySelectorAll(cible.chemin)].find(visible) || null; } catch (e) {} }
+    if (!el && cible.libelle) {
+      const cands = [...document.querySelectorAll(POINTABLES)].filter(visible);
+      el = cands.find(n => n.tagName.toLowerCase() === cible.tag && libelleDe(n) === cible.libelle) || cands.find(n => libelleDe(n) === cible.libelle);
+    }
+    return el;
+  };
+  // Juste un cercle rouge à l'endroit cliqué, qui suit l'élément pointé.
+  suivreRepere(document, window, trouver, cible.point, cible.boite, 'rt-repere',
+    { border:'4px solid #e5322d', boxShadow:'0 0 0 3px rgba(255,255,255,.85), 0 0 0 7px rgba(229,50,45,.35), 0 6px 18px rgba(0,0,0,.35)', background:'rgba(229,50,45,.08)' });
+}
+
+// Le cercle suit l'élément pointé : replacé à chaque image, caché quand
+// l'élément n'est plus affiché (autre écran), de retour quand il revient.
+// Une recherche à la fois par document : la précédente s'arrête.
+function suivreRepere(doc, win, trouver, point, boite, classe, style) {
+  if (win.__repereStop) { try { win.__repereStop(); } catch (e) {} }
+  const D = 48, f = point || { fx: 0.5, fy: 0.5 };
+  const rep = doc.createElement('div'); rep.className = classe;
+  Object.assign(rep.style, style, { position:'fixed', zIndex:'9999', pointerEvents:'none', width: D + 'px', height: D + 'px', borderRadius:'50%', boxSizing:'border-box', display:'none' });
+  doc.body.appendChild(rep);
+  const visible = (n) => { if (!n || !doc.contains(n)) return false; const b = n.getBoundingClientRect(); return b.width > 0 && b.height > 0; };
+  let el = trouver(), trouveUneFois = !!el, dernierEssai = 0, actif = true;
+  if (el) { try { el.scrollIntoView({ block:'center', inline:'nearest' }); } catch (e) {} }
+  const pas = (t) => {
+    if (!actif) return;
+    if (!visible(el) && t - dernierEssai > 500) { dernierEssai = t; el = trouver(); if (el) trouveUneFois = true; }
+    if (visible(el)) {
+      const r = el.getBoundingClientRect();
+      rep.style.display = ''; rep.style.left = (r.left + r.width * f.fx - D / 2) + 'px'; rep.style.top = (r.top + r.height * f.fy - D / 2) + 'px';
+    } else if (!trouveUneFois && boite) {
+      // l'élément n'a jamais été retrouvé : à l'endroit où il était, en % de la fenêtre
+      rep.style.display = ''; rep.style.left = ((boite.x + boite.w * f.fx) / 100 * win.innerWidth - D / 2) + 'px'; rep.style.top = ((boite.y + boite.h * f.fy) / 100 * win.innerHeight - D / 2) + 'px';
+    } else rep.style.display = 'none';
+  };
+  // Une cadence fixe plutôt que requestAnimationFrame (ralenti dans un iframe
+  // ou un onglet en retrait), et une réaction immédiate au défilement et au
+  // redimensionnement.
+  const tic = () => pas(performance.now());
+  const minuteur = win.setInterval(tic, 100);
+  win.addEventListener('scroll', tic, true); win.addEventListener('resize', tic);
+  tic();
+  win.__repereStop = () => { actif = false; win.clearInterval(minuteur); win.removeEventListener('scroll', tic, true); win.removeEventListener('resize', tic); rep.remove(); win.__repereStop = null; };
 }
 function Pointeur({ onChoix, onAnnuler }) {
   useEffect(() => { const esc = (e) => { if (e.key === 'Escape') onAnnuler(); }; window.addEventListener('keydown', esc); return () => window.removeEventListener('keydown', esc); }, []);
