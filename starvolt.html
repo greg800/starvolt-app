@@ -1441,6 +1441,122 @@
     /* Coin haut-gauche : au-dessus des deux axes */
     .adm-freeze thead th.frz-col { z-index: 3; background: #0d4a58; }
 
+
+    /* =============================================
+       LES RETOURS DES UTILISATEURS (pouces, fil, pastilles)
+       Repris de l'application Comwatt (via Socrate), aux couleurs de Starvolt.
+       ============================================= */
+    .rt-pastille{ position:absolute; top:-6px; right:-7px; min-width:18px; height:18px; padding:0 5px; border-radius:9px;
+      background:#e5322d; color:#fff; font-size:11px; font-weight:800; display:inline-flex; align-items:center; justify-content:center;
+      border:2px solid #065060; line-height:1; font-family:var(--font); }
+    .rt-porte{ position:relative; display:inline-flex; }
+    .rt-voile{ position:fixed; inset:0; z-index:10000; background:rgba(0,0,0,.7); backdrop-filter:blur(4px); -webkit-backdrop-filter:blur(4px);
+      display:flex; align-items:center; justify-content:center; padding:16px; }
+    .rt-voile.sombre{ background:rgba(0,0,0,.9); cursor:zoom-out; }
+    .rt-voile img.plein{ max-width:96vw; max-height:92vh; border-radius:8px; }
+    .rt-modale{ background:#073d4a; border:1px solid rgba(255,255,255,.16); border-radius:18px; width:100%; max-width:440px; padding:20px 18px 16px;
+      box-shadow:0 18px 50px rgba(0,0,0,.45); color:#fff; font-family:var(--font); }
+    .rt-tete{ display:flex; align-items:center; gap:12px; margin-bottom:12px; }
+    .rt-tete > div{ flex:1 1 auto; min-width:0; display:flex; flex-direction:column; gap:2px; }
+    .rt-tete b{ font-size:16px; color:#fff; }
+    .rt-tete span{ font-size:12.5px; color:rgba(255,255,255,.6); }
+    .rt-ico{ width:42px; height:42px; border-radius:12px; display:inline-flex; align-items:center; justify-content:center; flex:none; background:rgba(255,255,255,.1); }
+    .rt-ico.haut{ background:rgba(127,208,138,.14); color:#7fd08a; }
+    .rt-ico.bas{ background:rgba(255,138,106,.14); color:#ff8a6a; }
+    .rt-fermer{ appearance:none; border:none; background:none; font-size:26px; line-height:1; color:rgba(255,255,255,.6); cursor:pointer; padding:2px 6px; }
+    .rt-texte{ width:100%; min-height:58px; max-height:320px; padding:10px 12px; border:1px solid rgba(255,255,255,.18); border-radius:12px;
+      background:rgba(255,255,255,.06); color:#fff; font:inherit; font-family:var(--font); font-size:15px; line-height:1.45; resize:none; overflow:auto; display:block; box-sizing:border-box; }
+    .rt-texte::placeholder{ color:rgba(255,255,255,.45); }
+    .rt-texte:focus{ outline:2px solid var(--green); border-color:transparent; }
+    .rt-piece{ display:flex; align-items:center; gap:8px; margin-top:8px; padding:6px 8px; background:rgba(255,255,255,.08); border-radius:10px; font-size:13.5px; color:#fff; }
+    .rt-piece > span{ flex:1 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; display:inline-flex; align-items:center; gap:6px; }
+    .rt-piece img{ max-height:120px; max-width:calc(100% - 36px); border-radius:6px; display:block; }
+    .rt-piece audio{ flex:1 1 auto; min-width:0; height:36px; }
+    .rt-piece button{ appearance:none; border:none; background:rgba(255,255,255,.14); color:#fff; border-radius:50%; width:24px; height:24px; cursor:pointer; flex:none; font-size:15px; line-height:1; }
+    .rt-outils{ display:flex; gap:8px; flex-wrap:wrap; margin-top:10px; align-items:center; }
+    .rt-ressort{ flex:1 1 auto; }
+    .rt-btn{ display:inline-flex; align-items:center; justify-content:center; gap:7px; padding:9px 14px; border-radius:11px; border:1px solid transparent;
+      font-family:var(--font); font-size:13.5px; font-weight:700; cursor:pointer; line-height:1.2; color:#fff; background:var(--teal); white-space:nowrap; }
+    .rt-btn:hover{ filter:brightness(1.12); }
+    .rt-btn.principal{ background:var(--green); color:#1a4500; }
+    .rt-btn.danger{ background:rgba(229,50,45,.18); color:#ffb4b4; border-color:rgba(255,120,120,.4); }
+    .rt-btn.danger:hover{ background:rgba(229,50,45,.32); }
+    .rt-btn[disabled]{ opacity:.55; cursor:not-allowed; }
+    .rt-actions{ display:flex; gap:8px; justify-content:flex-end; margin-top:14px; }
+    .rt-merci{ text-align:center; font-size:17px; font-weight:800; color:#7fd08a; padding:18px 0 8px; }
+    .rt-alerte{ background:rgba(255,138,106,.14); border:1px solid rgba(255,138,106,.4); color:#ffd3c4; border-radius:10px; padding:9px 12px; font-size:13.5px; margin-top:10px; }
+    .rt-info{ background:rgba(255,255,255,.08); border:1px solid rgba(255,255,255,.16); color:#fff; border-radius:10px; padding:9px 12px; font-size:13px; line-height:1.5; }
+    .rt-extrait{ background:rgba(255,255,255,.08); border-radius:10px; padding:10px 12px; font-size:14px; line-height:1.45; color:#fff; }
+    .rt-extrait p{ margin:6px 0 0; font-style:italic; }
+    .rt-extrait small{ color:rgba(255,255,255,.6); display:block; margin-top:4px; }
+    /* le pointeur : un calque sur la page, un clic désigne l'endroit */
+    .rt-pointeur{ position:fixed; inset:0; z-index:10001; cursor:crosshair; background:rgba(6,80,96,.18); }
+    .rt-pointeur-msg{ position:fixed; top:calc(14px + env(safe-area-inset-top,0px)); left:50%; transform:translateX(-50%); background:#073d4a; color:#fff; border:1px solid rgba(255,255,255,.2);
+      border-radius:999px; padding:10px 16px; font-size:14px; font-weight:700; display:flex; gap:12px; align-items:center; box-shadow:0 10px 30px rgba(0,0,0,.4); cursor:default; font-family:var(--font); }
+    .rt-halo{ position:fixed; z-index:10002; pointer-events:none; border:4px solid #e5322d; border-radius:50%; box-shadow:0 0 0 3px rgba(255,255,255,.85), 0 0 0 7px rgba(229,50,45,.35); box-sizing:border-box; animation:rtHalo 1.4s ease-out forwards; }
+    @keyframes rtHalo{ 0%{ transform:scale(1.4); opacity:0 } 20%{ opacity:1 } 100%{ transform:scale(1); opacity:1 } }
+    /* la liste des retours (admin) et mes remarques */
+    .rt-screen{ max-width:1100px; }
+    .rt-filtres{ display:flex; gap:8px; flex-wrap:wrap; margin-bottom:12px; }
+    .rt-filtres .rt-btn{ padding:7px 12px; }
+    .rt-filtres .rt-btn.on{ background:var(--green); color:#1a4500; }
+    .rt-filtres small{ opacity:.8; font-weight:500; margin-left:4px; }
+    .rt-tableau{ overflow:auto; border-radius:14px; border:1px solid rgba(255,255,255,.14); background:rgba(255,255,255,.06); }
+    .rt-tableau table{ width:100%; border-collapse:collapse; font-size:13.5px; color:#fff; }
+    .rt-tableau th{ text-align:left; font-size:11px; text-transform:uppercase; letter-spacing:.5px; color:rgba(255,255,255,.6); padding:10px 12px; border-bottom:1px solid rgba(255,255,255,.14); white-space:nowrap; }
+    .rt-tableau td{ padding:10px 12px; border-bottom:1px solid rgba(255,255,255,.08); vertical-align:top; white-space:nowrap; }
+    .rt-tableau tr.ouvrable{ cursor:pointer; }
+    .rt-tableau tr.ouvrable:hover td{ background:rgba(255,255,255,.06); }
+    .rt-tableau tr.nonlu td{ font-weight:800; }
+    .rt-tableau td.msg{ white-space:normal; max-width:420px; font-weight:400; }
+    .rt-nouveau{ display:inline-block; background:rgba(255,179,64,.18); color:#ffb340; border:1px solid rgba(255,179,64,.4); border-radius:999px; padding:2px 8px; font-size:11px; font-weight:800; margin-right:6px; }
+    /* l'écran d'un retour : la fiche à gauche, la page incriminée à droite */
+    .rt-page{ width:100%; max-width:none; padding:0 14px 90px; box-sizing:border-box; }
+    .rt-split{ display:flex; flex-direction:column; gap:14px; }
+    .rt-fiche{ width:fit-content; min-width:280px; max-width:100%; background:rgba(255,255,255,.08); border:1px solid rgba(255,255,255,.16); border-radius:var(--r-card);
+      padding:16px 16px 14px; font-size:14px; color:#fff; display:flex; flex-direction:column; gap:10px; align-self:flex-start; box-sizing:border-box; }
+    .rt-fiche .rt-tete{ margin-bottom:0; }
+    .rt-message{ white-space:pre-wrap; line-height:1.5; font-size:15px; max-width:60ch; }
+    .rt-img{ max-width:100%; max-height:240px; border-radius:8px; cursor:zoom-in; display:block; }
+    .rt-audio{ width:100%; max-width:340px; }
+    .rt-cadre{ flex:1 1 auto; min-height:60vh; border:1px solid rgba(255,255,255,.16); border-radius:var(--r-card); overflow:hidden; background:#065060; box-shadow:var(--shadow); }
+    .rt-cadre iframe{ width:100%; height:100%; border:0; display:block; min-height:60vh; background:#065060; }
+    @media (min-width:900px){
+      .rt-page{ height:calc(100vh - 56px); overflow:hidden; display:flex; flex-direction:column; padding-top:14px; }
+      .rt-split{ flex:1; min-height:0; flex-direction:row; align-items:stretch; }
+      .rt-split .rt-fiche{ max-width:min(560px, 46%); overflow:auto; max-height:100%; }
+      .rt-split .rt-cadre{ min-height:0; height:100%; }
+      .rt-split .rt-cadre iframe{ min-height:0; }
+    }
+    /* le fil : l'auteur à gauche (marge à droite), ceux qui répondent à droite */
+    .rt-fil{ display:flex; flex-direction:column; gap:10px; border-top:1px solid rgba(255,255,255,.14); padding-top:12px; min-width:min(100%, 320px); }
+    .rt-fil-titre{ font-size:11.5px; font-weight:800; color:rgba(255,255,255,.6); text-transform:uppercase; letter-spacing:.5px; }
+    .rt-msg{ display:flex; flex-direction:column; gap:4px; max-width:80%; align-self:flex-start; }
+    .rt-msg.droite{ align-self:flex-end; align-items:flex-end; }
+    .rt-msg.edite{ max-width:100%; width:100%; align-items:stretch; }
+    .rt-bulle{ background:rgba(255,255,255,.14); color:#fff; border-radius:16px; padding:10px 14px; display:flex; flex-direction:column; gap:8px; font-size:15px; line-height:1.45; max-width:100%; }
+    .rt-msg:not(.droite) .rt-bulle{ border-bottom-left-radius:4px; }
+    .rt-msg.droite .rt-bulle{ background:var(--teal); border-bottom-right-radius:4px; }
+    .rt-bulle .rt-message{ max-width:none; }
+    .rt-bulle .rt-img{ max-height:220px; }
+    .rt-bulle .rt-audio{ width:260px; max-width:100%; }
+    .rt-msg-tete{ display:flex; align-items:baseline; gap:8px; flex-wrap:wrap; font-size:12px; color:rgba(255,255,255,.6); padding:0 4px; }
+    .rt-msg.droite .rt-msg-tete{ justify-content:flex-end; }
+    .rt-msg-tete b{ color:rgba(255,255,255,.75); font-weight:800; }
+    .rt-role{ font-size:10.5px; font-weight:800; color:var(--green-light); text-transform:uppercase; letter-spacing:.4px; }
+    .rt-ico-btn{ appearance:none; background:none; border:none; cursor:pointer; color:rgba(255,255,255,.6); padding:2px 4px; line-height:0; border-radius:6px; }
+    .rt-ico-btn:hover{ color:#fff; background:rgba(255,255,255,.12); }
+    .rt-ico-btn.poubelle:hover{ color:#ff8a6a; }
+    .rt-racine{ align-self:flex-start; max-width:80%; }
+    .rt-pj{ display:inline-flex; align-items:center; gap:7px; max-width:100%; padding:7px 11px; border-radius:10px; background:rgba(255,255,255,.14); color:#fff; text-decoration:none; font-size:13.5px; font-weight:700; align-self:flex-start; }
+    .rt-pj:hover{ background:rgba(255,255,255,.24); }
+    .rt-pj span{ overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .rt-composeur{ display:flex; flex-direction:column; }
+    .rt-composeur .rt-texte{ background:var(--teal); border-color:var(--teal); border-radius:16px; padding:10px 14px; }
+    .rt-composeur .rt-texte::placeholder{ color:rgba(255,255,255,.6); }
+    .rt-bas{ position:fixed; left:0; right:0; bottom:0; z-index:30; background:rgba(6,80,96,.92); backdrop-filter:blur(10px); -webkit-backdrop-filter:blur(10px);
+      border-top:1px solid rgba(255,255,255,.12); padding:12px 16px calc(12px + env(safe-area-inset-bottom,0px)); display:flex; gap:10px; align-items:center; }
+    .rt-bas .rt-ressort{ flex:1; }
   </style>
 </head>
 <body>
@@ -1533,8 +1649,20 @@ window.__BUILD = BUILD;
 // ─── Tracking événements utilisateur ──────────────
 // UID courant stocké en global pour éviter un appel réseau à chaque clic
 window.__trackUserId = null;
+// Incrusté dans l'écran d'un retour (/?incruste=retour&etat=…), Starvolt rejoue
+// l'écran tel que l'auteur le voyait : pas de suivi, pas de pouces, pas de
+// pop-up, pas de roue. `etat` est l'état de l'écran enregistré avec le retour.
+const INCRUSTE = (() => { try { return new URLSearchParams(window.location.search).get('incruste') || null; } catch (e) { return null; } })();
+const ETAT_INCRUSTE = (() => {
+  if (!INCRUSTE) return null;
+  try { const e = JSON.parse(new URLSearchParams(window.location.search).get('etat') || 'null'); return e && typeof e === 'object' && e.screen ? e : null; } catch (e) { return null; }
+})();
+// Les dix derniers clics, pour le contexte d'un retour.
+window.__derniersClics = [];
 
 function trackEvent(type, label, screen) {
+  if (type === 'click') { try { window.__derniersClics.push({ libelle: String(label || '').slice(0, 80), ecran: screenLabel(screen || window.__currentScreen), quand: Date.now() }); if (window.__derniersClics.length > 10) window.__derniersClics.shift(); } catch (e) {} }
+  if (INCRUSTE) return;   // incrusté dans l'écran d'un retour : on ne trace rien
   if (window.__impersonating) return; // mode debug admin : on ne compte pas les clics
   const uid = window.__trackUserId;
   if (!uid) return;
@@ -1756,6 +1884,11 @@ function ThumbIcon({ up = true, size = 18, color = 'white' }) {
 function TopBar({ name, avatarName, showName, logoOnly = false, onLogoClick, onProfileClick, isAdmin, onAdmin, onPanier, cartCount = 0, onFeedback }) {
   const src = avatarName || name || '';
   const initials = src.trim().split(/\s+/).map(w => w[0]?.toUpperCase() || '').join('').slice(0, 2);
+  // Les pastilles : la roue dit les retours à lire (administrateur), les
+  // initiales les réponses non lues à ses remarques ; un clic mène droit au but.
+  const rt = useRetours();
+  const clicRoue = () => { if (rt.nonLus > 0 && rt.aller) rt.aller(rt.nonLus === 1 && rt.nonLuId ? 'ADMIN_RETOUR' : 'ADMIN_RETOURS', rt.nonLus === 1 && rt.nonLuId ? { retourId: rt.nonLuId } : {}); else onAdmin && onAdmin(); };
+  const clicInitiales = () => { if (rt.reponses > 0 && rt.aller) rt.aller(rt.reponses === 1 && rt.reponseId ? 'MON_RETOUR' : 'MES_RETOURS', rt.reponses === 1 && rt.reponseId ? { retourId: rt.reponseId } : {}); else onProfileClick && onProfileClick(); };
   return (
     <div className="top-bar">
       <div onClick={onLogoClick} style={onLogoClick ? {cursor:'pointer'} : {}}>
@@ -1763,7 +1896,7 @@ function TopBar({ name, avatarName, showName, logoOnly = false, onLogoClick, onP
       </div>
       {!logoOnly && (
         <div style={{display:'flex',alignItems:'center',gap:8}}>
-          {onFeedback && (
+          {onFeedback && !INCRUSTE && (
             <div style={{display:'flex',alignItems:'center',gap:2}}>
               <button onClick={()=>onFeedback('up')} title="J'aime cette page" aria-label="Retour positif"
                 style={{background:'transparent',border:'none',padding:'4px',cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center',borderRadius:8,lineHeight:0,color:'white',opacity:.85,transition:'opacity .15s,background .15s'}}
@@ -1779,8 +1912,9 @@ function TopBar({ name, avatarName, showName, logoOnly = false, onLogoClick, onP
               </button>
             </div>
           )}
-          {isAdmin && onAdmin && (
-            <button className="admin-badge" onClick={onAdmin}>⚙️</button>
+          {isAdmin && onAdmin && !INCRUSTE && (
+            <span className="rt-porte"><button className="admin-badge" onClick={clicRoue} title={rt.nonLus ? (rt.nonLus === 1 ? 'Un retour à lire — l\'ouvrir' : rt.nonLus + ' retours à lire — les voir') : 'Administration'}>⚙️</button>
+              {rt.nonLus > 0 && <span className="rt-pastille">{rt.nonLus > 99 ? '99+' : rt.nonLus}</span>}</span>
           )}
           {onPanier && (
             <button className="cart-btn" onClick={onPanier}>
@@ -1789,11 +1923,11 @@ function TopBar({ name, avatarName, showName, logoOnly = false, onLogoClick, onP
             </button>
           )}
           {showName && onProfileClick && (
-            <div className="user-chip" onClick={onProfileClick}
-              style={{cursor:'pointer'}}>
+            <span className="rt-porte"><div className="user-chip" onClick={clicInitiales} style={{cursor:'pointer'}}
+              title={rt.reponses ? (rt.reponses === 1 ? 'Une réponse non lue à votre remarque — l\'ouvrir' : rt.reponses + ' réponses non lues — les voir') : 'Mon profil'}>
               <div className="user-chip-av">{initials || '?'}</div>
               {name && <span>{name}</span>}
-            </div>
+            </div>{rt.reponses > 0 && !INCRUSTE && <span className="rt-pastille">{rt.reponses > 99 ? '99+' : rt.reponses}</span>}</span>
           )}
         </div>
       )}
@@ -9823,7 +9957,7 @@ function OptimisationScreen({ user, userProfile, onBack, onPanier, onMonSite, on
 }
 
 // ─── ProfileScreen ───────────────────────────
-function ProfileScreen({ user, profile, onSave, onCancel, onLogout, onDeleted }) {
+function ProfileScreen({ user, profile, onSave, onCancel, onLogout, onDeleted, onRemarques, reponses = 0 }) {
   const [prenom,    setPrenom]    = useState(profile?.prenom || '');
   const [nom,       setNom]       = useState(profile?.nom || '');
   const [pseudo,    setPseudo]    = useState(profile?.pseudo || '');
@@ -9912,6 +10046,15 @@ function ProfileScreen({ user, profile, onSave, onCancel, onLogout, onDeleted })
           {error && <div className="auth-error">{error}</div>}
         </div>
 
+        {onRemarques && (
+          <div className="card" style={{marginTop:14,marginBottom:14,padding:'18px 20px'}}>
+            <div style={{fontWeight:800,fontSize:15,marginBottom:4}}>Mes remarques</div>
+            <div style={{fontSize:13,color:'rgba(255,255,255,.72)',lineHeight:1.5,marginBottom:12}}>Les remarques laissées avec les pouces 👍 👎, et les réponses de l'équipe. Vous pouvez y répondre à votre tour.</div>
+            <button type="button" className="btn btn-no" onClick={onRemarques} style={{width:'auto',fontSize:13,padding:'10px 14px'}}>
+              Voir mes remarques et les réponses{reponses > 0 ? ' · ' + reponses + (reponses > 1 ? ' non lues' : ' non lue') : ''}
+            </button>
+          </div>
+        )}
         <button className="btn-link" style={{color:'white'}} onClick={onLogout}>
           Se déconnecter
         </button>
@@ -14031,138 +14174,6 @@ function AdminFacturesScreen({ onBack }) {
         </div></div>
       )}
     </div>
-    <StickyFooter onBack={onBack}/>
-    </>
-  );
-}
-
-// ─── AdminFeedbackScreen : tableau des retours utilisateurs ───────────────────
-function AdminFeedbackScreen({ onBack }) {
-  const [rows, setRows] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [filter, setFilter] = useState('all'); // all | up | down
-  const [signed, setSigned] = useState({}); // attachment_url -> URL signée temporaire
-  const [pdfView, setPdfView] = useState(null); // { url, name } pour la modale PDF in-app
-
-  useEffect(() => {
-    sb.rpc('get_all_feedback').then(async ({ data, error }) => {
-      if (error) console.error('get_all_feedback', error);
-      setRows(data || []);
-      setLoading(false);
-      // Bucket privé : on génère des URLs signées (expirent dans 1 h) pour chaque pièce jointe
-      const withAtt = (data || []).filter(r => r.attachment_url);
-      if (!withAtt.length) return;
-      const pathOf = (u) => { const p = u.split('/feedback-attachments/')[1]; return p ? p.split('?')[0] : null; };
-      const paths = withAtt.map(r => pathOf(r.attachment_url)).filter(Boolean);
-      const { data: sg, error: sgErr } = await sb.storage.from('feedback-attachments').createSignedUrls(paths, 3600);
-      if (sgErr) { console.error('signed urls', sgErr); return; }
-      const map = {};
-      (sg || []).forEach(s => { if (s.signedUrl && s.path) map[s.path] = s.signedUrl; });
-      // Reclé par attachment_url d'origine pour le rendu
-      const byUrl = {};
-      withAtt.forEach(r => { const p = pathOf(r.attachment_url); if (p && map[p]) byUrl[r.attachment_url] = map[p]; });
-      setSigned(byUrl);
-    });
-  }, []);
-
-  const fmtDate = (d) => d ? new Date(d).toLocaleString('fr-FR', { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit' }) : '—';
-  const userName = (r) => {
-    const n = `${r.prenom||''} ${r.nom||''}`.trim();
-    return n || r.pseudo || r.email || '—';
-  };
-
-  const shown = rows.filter(r => filter === 'all' || r.sentiment === filter);
-  const nbUp = rows.filter(r => r.sentiment === 'up').length;
-  const nbDown = rows.filter(r => r.sentiment === 'down').length;
-
-  const FilterBtn = ({ val, label }) => (
-    <button onClick={()=>setFilter(val)} style={{
-      background: filter===val ? 'rgba(125,217,64,.15)' : 'rgba(255,255,255,.06)',
-      border: filter===val ? '1px solid rgba(125,217,64,.4)' : '1px solid rgba(255,255,255,.14)',
-      borderRadius:9, color: filter===val ? '#7dd940' : 'rgba(255,255,255,.65)',
-      fontSize:12, fontWeight:700, padding:'6px 12px', cursor:'pointer', fontFamily:'inherit'
-    }}>{label}</button>
-  );
-
-  const cols = ['Utilisateur', '', 'Date & heure', 'Page', 'Commentaire', 'Pièce jointe'];
-
-  return (
-    <>
-    <div className="screen fade-in" style={{padding:'0 0 80px', maxWidth:'100%', width:'100%'}}>
-      <div className="auth-header">
-        <div className="welcome-tag" style={{color:'#ffb340'}}>Administration</div>
-        <h1 className="welcome-title">Retours<br/><span className="accent">utilisateurs</span></h1>
-      </div>
-
-      <div style={{display:'flex',gap:8,padding:'0 16px 14px',flexWrap:'wrap'}}>
-        <FilterBtn val="all" label={`Tous (${rows.length})`}/>
-        <FilterBtn val="up" label={`👍 Positifs (${nbUp})`}/>
-        <FilterBtn val="down" label={`👎 Négatifs (${nbDown})`}/>
-      </div>
-
-      {loading ? <div style={{textAlign:'center',padding:40}}><StarSpinner size={34}/></div> : (
-        shown.length === 0 ? (
-          <div style={{textAlign:'center',color:'rgba(255,255,255,.4)',padding:40,fontSize:14}}>Aucun retour pour le moment.</div>
-        ) : (
-        <div style={{padding:'0 16px'}}>
-        <div className="adm-freeze">
-          <table style={{width:'100%', minWidth:900, borderCollapse:'collapse', fontSize:13}}>
-            <thead>
-              <tr>
-                {cols.map((c, ci) => (
-                  <th key={ci} className={ci===0 ? 'frz-col' : undefined} style={{textAlign:'left', padding:'8px 10px', color:'rgba(255,255,255,.4)', fontWeight:600, borderBottom:'1px solid rgba(255,255,255,.08)', whiteSpace:'nowrap'}}>{c}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {shown.map(r => (
-                <tr key={r.id} style={{borderBottom:'1px solid rgba(255,255,255,.06)', verticalAlign:'top'}}>
-                  <td className="frz-col" style={{padding:'12px 10px', whiteSpace:'nowrap'}}>
-                    <div style={{fontWeight:600, color:'#fff'}}>{userName(r)}</div>
-                    {r.email && <div style={{color:'rgba(125,217,64,.7)', fontSize:11}}>{r.email}</div>}
-                  </td>
-                  <td style={{padding:'12px 8px', width:34}}>
-                    <span title={r.sentiment==='up'?'Positif':'Négatif'} style={{display:'inline-flex',width:26,height:26,borderRadius:7,alignItems:'center',justifyContent:'center',background:r.sentiment==='up'?'rgba(125,217,64,.14)':'rgba(255,138,106,.14)',border:`1px solid ${r.sentiment==='up'?'rgba(125,217,64,.4)':'rgba(255,138,106,.4)'}`}}>
-                      <ThumbIcon up={r.sentiment==='up'} size={15} color={r.sentiment==='up'?'#7dd940':'#ff8a6a'}/>
-                    </span>
-                  </td>
-                  <td style={{padding:'12px 10px', whiteSpace:'nowrap', color:'rgba(255,255,255,.6)'}}>{fmtDate(r.created_at)}</td>
-                  <td style={{padding:'12px 10px', color:'rgba(255,255,255,.8)', minWidth:150, maxWidth:260}}>
-                    <div style={{whiteSpace:'nowrap'}}>{r.page_label || r.screen || '—'}</div>
-                    {r.context_detail && <div style={{marginTop:3,fontSize:11.5,color:'rgba(255,179,64,.85)',lineHeight:1.4}}>{r.context_detail}</div>}
-                  </td>
-                  <td style={{padding:'12px 10px', color:'rgba(255,255,255,.85)', lineHeight:1.5, minWidth:240, maxWidth:420}}>{r.comment || <span style={{color:'rgba(255,255,255,.3)',fontStyle:'italic'}}>(sans commentaire)</span>}</td>
-                  <td style={{padding:'12px 10px', whiteSpace:'nowrap'}}>
-                    {r.attachment_url ? (() => {
-                      const su = signed[r.attachment_url];
-                      const isPdf = /\.pdf($|\?)/i.test(r.attachment_url);
-                      if (!su) return <span style={{color:'rgba(255,255,255,.3)',fontSize:11}}>chargement…</span>;
-                      return isPdf ? (
-                        <button onClick={()=>setPdfView({ url: su, name: 'Pièce jointe PDF' })} style={{display:'inline-flex',alignItems:'center',gap:5,background:'rgba(125,217,64,.12)',border:'1px solid rgba(125,217,64,.35)',borderRadius:8,color:'#7dd940',fontSize:12,fontWeight:700,padding:'7px 11px',cursor:'pointer',fontFamily:'inherit'}}>📄 Voir le PDF</button>
-                      ) : (
-                        <ImageWithLightbox src={su} style={{width:46,height:46,objectFit:'cover',borderRadius:8,border:'1px solid rgba(255,255,255,.15)',display:'block'}}/>
-                      );
-                    })() : <span style={{color:'rgba(255,255,255,.25)'}}>—</span>}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        </div>
-        )
-      )}
-    </div>
-    {pdfView && (
-      <div onClick={()=>setPdfView(null)} style={{position:'fixed',inset:0,background:'rgba(0,0,0,.82)',backdropFilter:'blur(3px)',WebkitBackdropFilter:'blur(3px)',zIndex:10000,display:'flex',flexDirection:'column',padding:'14px'}}>
-        <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:10,flexShrink:0}}>
-          <div style={{flex:1,minWidth:0,color:'#fff',fontWeight:700,fontSize:14,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>📄 {pdfView.name}</div>
-          <a href={pdfView.url} target="_blank" rel="noopener noreferrer" onClick={e=>e.stopPropagation()} style={{flexShrink:0,background:'rgba(125,217,64,.14)',border:'1px solid rgba(125,217,64,.4)',borderRadius:9,color:'#7dd940',fontSize:12,fontWeight:700,padding:'8px 13px',textDecoration:'none'}}>Ouvrir / Télécharger</a>
-          <button onClick={()=>setPdfView(null)} style={{flexShrink:0,background:'rgba(255,255,255,.1)',border:'1px solid rgba(255,255,255,.25)',borderRadius:9,color:'#fff',fontSize:16,fontWeight:700,width:38,height:38,cursor:'pointer',fontFamily:'inherit',lineHeight:1}}>✕</button>
-        </div>
-        <iframe title="pdf" src={pdfView.url} onClick={e=>e.stopPropagation()} style={{flex:1,width:'100%',border:'none',borderRadius:12,background:'#fff'}}/>
-      </div>
-    )}
     <StickyFooter onBack={onBack}/>
     </>
   );
@@ -18425,109 +18436,501 @@ const SCREEN_LABELS = {
   BOX_SIM:'Simulation box', DIY_BOX_SIM:'Installer soi-même Comwatt',
   SOLAR_SIM:'Simulation solaire', SOLAR:'Solaire', COMWATT:'Box Comwatt',
   PANIER:'Panier', PROFILE:'Mon profil', ADDRESS:'Adresse', FINAL:'Récapitulatif final',
-  ADMIN:'Admin', ADMIN_FEEDBACK:'Admin — retours', ADMIN_FACTURES:'Admin — factures à valider',
+  ADMIN:'Admin', ADMIN_RETOURS:'Admin — retours', ADMIN_RETOUR:'Admin — un retour', ADMIN_FACTURES:'Admin — factures à valider',
+  MES_RETOURS:'Mes remarques', MON_RETOUR:'Ma remarque',
   ADMIN_ROLES_MGMT:'Admin — gestion des rôles',
   ADMIN_CYBER_SECURITY:'Admin — cyber-sécurité',
 };
 const screenLabel = (s) => SCREEN_LABELS[s] || s || 'Inconnue';
 
-// ─── FeedbackModal : recueille un commentaire positif/négatif ──────────────────
-function FeedbackModal({ sentiment, user, screen, onClose }) {
-  const [text, setText] = useState('');
-  const [saving, setSaving] = useState(false);
-  const [done, setDone] = useState(false);
-  const [file, setFile] = useState(null);
-  const taRef = useRef(null);
-  const fileRef = useRef(null);
-  // Capturé au montage : le détail contextuel (ex : la question de quiz affichée)
-  const detailRef = useRef(typeof window !== 'undefined' ? window.__feedbackDetail : null);
-  const detail = detailRef.current;
-  const positif = sentiment === 'up';
-  const accent = positif ? '#7dd940' : '#ff8a6a';
-  const accentBg = positif ? 'rgba(125,217,64,.12)' : 'rgba(255,138,106,.12)';
-  const accentBd = positif ? 'rgba(125,217,64,.4)' : 'rgba(255,138,106,.4)';
-  const pageNom = screenLabel(screen);
 
-  useEffect(() => { const t = setTimeout(() => taRef.current?.focus(), 120); return () => clearTimeout(t); }, []);
+// ═══════════════════════════════════════════════════════════════════════════
+//  Les retours des utilisateurs — repris de l'application Comwatt via Socrate (2026-10-02)
+//  Les pouces 👍/👎 ouvrent une modale : texte, image, note audio, pièce
+//  jointe, et pour un 👎 « Montrer l'endroit ». Le retour garde l'état exact
+//  de l'écran. L'administrateur a une pastille sur la roue, une liste, et un écran
+//  divisé : la fiche à gauche, à droite Socrate incrusté rejouant l'écran avec
+//  un cercle rouge à l'endroit cliqué. Sous le retour, un fil de discussion.
+//  L'auteur retrouve ses remarques depuis son compte, avec une pastille sur
+//  ses initiales et une pop-up à l'arrivée d'une réponse.
+// ═══════════════════════════════════════════════════════════════════════════
+const RetoursCtx = React.createContext({ nonLus:0, nonLuId:null, reponses:0, reponseId:null, aller:null });
+const useRetours = () => React.useContext(RetoursCtx);
+const dateRetour = (d) => d ? new Date(d).toLocaleString('fr-FR', { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit' }) : '—';
+const nomDe = (l) => (l.pseudo || ((l.prenom || '') + ' ' + (l.nom || '')).trim() || l.email || '—');
+const mmssR = (s) => Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
 
-  const pickFile = (e) => {
-    const f = e.target.files && e.target.files[0];
-    if (!f) return;
-    if (f.size > 10 * 1024 * 1024) { alert('Fichier trop volumineux (max 10 Mo).'); return; }
-    setFile(f);
+// Le contexte d'un retour, pris au clic sur le pouce : l'état de l'écran (pour
+// le rejouer), le nom de l'écran, la fenêtre, le défilement, le build, les
+// derniers clics, et le détail que l'écran a bien voulu laisser.
+function contexteRetour() {
+  const etat = window.__etatCourant || { screen: window.__currentScreen };
+  const { screen, ...reste } = etat;
+  // On ne garde que ce qui sert à rejouer l'écran : des scalaires courts, jamais
+  // le nom, l'adresse ni les montants du foyer.
+  const PRIVE = ['name','address','initialBill','bill','investment','bravoItems','email','phone','telephone','prenom','nom'];
+  const simple = {}; Object.keys(reste).forEach(k => { const v = reste[k]; if (PRIVE.includes(k)) return; if (v == null || typeof v === 'number' || typeof v === 'boolean' || (typeof v === 'string' && v.length <= 60)) simple[k] = v; });
+  return {
+    route: JSON.stringify({ screen, ...simple }),
+    ecran: screenLabel(screen),
+    detail: {
+      viewport: { w: window.innerWidth, h: window.innerHeight },
+      scroll: { x: window.scrollX, y: window.scrollY },
+      build: (document.querySelector('meta[name="build"]')?.content) || (window.__BUILD_ID || null),
+      ua: navigator.userAgent.slice(0, 160),
+      derniers_clics: (window.__derniersClics || []).slice(-10),
+      detail_ecran: window.__feedbackDetail || null,
+    },
   };
+}
 
-  const submit = async () => {
-    if (saving || !user) return;
-    setSaving(true);
-    let attachment_url = null;
-    if (file) {
-      try { attachment_url = await uploadFeedbackFile(file); }
-      catch (err) { setSaving(false); alert('Erreur lors de l’envoi de la pièce jointe : ' + err.message); return; }
+// ── L'endroit pointé ────────────────────────────────────────────────────────
+const POINTABLES = 'button, a, [role=button], input, select, textarea, label, summary, .card, .sim-btn, td, th, li, h1, h2, h3, p, img, svg, .user-chip, .cart-btn';
+const libelleDe = (el) => (el.getAttribute('aria-label') || el.getAttribute('title') || el.getAttribute('alt') || el.textContent || '').replace(/\s+/g, ' ').trim();
+function cibleDe(el) {
+  const chemin = []; let n = el;
+  for (let i = 0; n && n !== document.body && i < 5; i++) {
+    let seg = n.tagName.toLowerCase();
+    if (n.id) seg += '#' + CSS.escape(n.id);
+    else {
+      const cls = [...n.classList].filter(c => !/^(fade-in|actif|on|off|sel|selected)$/.test(c)).slice(0, 2);
+      if (cls.length) seg += '.' + cls.map(c => CSS.escape(c)).join('.');
+      const parent = n.parentElement;
+      if (parent) { const freres = [...parent.children].filter(f => f.tagName === n.tagName); if (freres.length > 1) seg += ':nth-of-type(' + (freres.indexOf(n) + 1) + ')'; }
     }
-    const { error } = await sb.from('app_feedback').insert({
-      user_id: user.id, sentiment, comment: text.trim() || null,
-      screen, page_label: pageNom,
-      context_detail: detail || null, attachment_url,
-    });
-    setSaving(false);
-    if (error) { alert('Erreur lors de l’envoi : ' + error.message); return; }
-    setDone(true);
-    setTimeout(onClose, 1100);
+    chemin.unshift(seg); n = n.parentElement;
+  }
+  const r = el.getBoundingClientRect(), W = window.innerWidth || 1, H = window.innerHeight || 1;
+  const titres = [...document.querySelectorAll('h1, h2, h3, .screen-title')].filter(t => t.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING);
+  return { libelle: libelleDe(el).slice(0, 120), tag: el.tagName.toLowerCase(), chemin: chemin.join(' > ').slice(0, 300),
+           boite: { x: +(r.left / W * 100).toFixed(1), y: +(r.top / H * 100).toFixed(1), w: +(r.width / W * 100).toFixed(1), h: +(r.height / H * 100).toFixed(1) },
+           section: titres.length ? titres[titres.length - 1].textContent.replace(/\s+/g, ' ').trim().slice(0, 80) : null };
+}
+// Dans Socrate incrusté : défile comme l'auteur et pose un cercle rouge à
+// l'endroit cliqué (fraction de l'élément retrouvé, sinon % de la fenêtre).
+function situerRepere({ scroll, cible }, essai = 0) {
+  document.querySelectorAll('.rt-repere').forEach(n => n.remove());
+  if (scroll) { try { window.scrollTo(scroll.x || 0, scroll.y || 0); } catch (e) {} }
+  if (!cible) return;
+  const visible = (n) => { const b = n.getBoundingClientRect(); return b.width > 0 && b.height > 0; };
+  let el = null;
+  if (cible.chemin) { try { el = [...document.querySelectorAll(cible.chemin)].find(visible) || null; } catch (e) {} }
+  if (!el && cible.libelle) {
+    const cands = [...document.querySelectorAll(POINTABLES)].filter(visible);
+    el = cands.find(n => n.tagName.toLowerCase() === cible.tag && libelleDe(n) === cible.libelle) || cands.find(n => libelleDe(n) === cible.libelle);
+  }
+  if (!el && essai < 8) { setTimeout(() => situerRepere({ cible }, essai + 1), 600); return; }   // l'écran charge encore
+  const D = 48, f = cible.point || { fx: 0.5, fy: 0.5 };
+  let x, y;
+  if (el) { el.scrollIntoView({ block:'center', inline:'nearest' }); const r = el.getBoundingClientRect(); x = r.left + r.width * f.fx + window.scrollX; y = r.top + r.height * f.fy + window.scrollY; }
+  else if (cible.boite) { const b = cible.boite; x = (b.x + b.w * f.fx) / 100 * window.innerWidth + window.scrollX; y = (b.y + b.h * f.fy) / 100 * window.innerHeight + window.scrollY; }
+  else return;
+  const rep = document.createElement('div'); rep.className = 'rt-repere';
+  Object.assign(rep.style, { position:'absolute', zIndex:'9999', pointerEvents:'none', width: D + 'px', height: D + 'px', borderRadius:'50%', boxSizing:'border-box',
+    border:'4px solid #e5322d', boxShadow:'0 0 0 3px rgba(255,255,255,.85), 0 0 0 7px rgba(229,50,45,.35), 0 6px 18px rgba(0,0,0,.35)', background:'rgba(229,50,45,.08)',
+    left: x - D / 2 + 'px', top: y - D / 2 + 'px' });
+  document.body.appendChild(rep);
+}
+function Pointeur({ onChoix, onAnnuler }) {
+  useEffect(() => { const esc = (e) => { if (e.key === 'Escape') onAnnuler(); }; window.addEventListener('keydown', esc); return () => window.removeEventListener('keydown', esc); }, []);
+  const clic = (e) => {
+    e.preventDefault(); e.stopPropagation();
+    const calque = e.currentTarget; calque.style.pointerEvents = 'none';
+    const el = document.elementFromPoint(e.clientX, e.clientY); calque.style.pointerEvents = '';
+    if (!el || el === document.body || el === document.documentElement) return;
+    const cible = el.closest(POINTABLES) || el;
+    const r = cible.getBoundingClientRect();
+    const point = { fx: +Math.min(1, Math.max(0, (e.clientX - r.left) / (r.width || 1))).toFixed(3), fy: +Math.min(1, Math.max(0, (e.clientY - r.top) / (r.height || 1))).toFixed(3) };
+    const halo = document.createElement('div'); halo.className = 'rt-halo';
+    Object.assign(halo.style, { left: e.clientX - 22 + 'px', top: e.clientY - 22 + 'px', width:'44px', height:'44px' });
+    document.body.appendChild(halo); setTimeout(() => halo.remove(), 1400);
+    onChoix({ ...cibleDe(cible), point });
   };
-
   return (
-    <div onClick={onClose} style={{position:'fixed',inset:0,background:'rgba(0,0,0,.7)',backdropFilter:'blur(4px)',WebkitBackdropFilter:'blur(4px)',zIndex:10000,display:'flex',alignItems:'center',justifyContent:'center',padding:20}}>
-      <div onClick={e=>e.stopPropagation()} style={{background:'#13212e',border:`1px solid ${accentBd}`,borderRadius:18,padding:'22px 20px',maxWidth:380,width:'100%',boxShadow:'0 18px 50px rgba(0,0,0,.45)'}} className="fade-in">
-        {done ? (
-          <div style={{textAlign:'center',padding:'14px 0'}}>
-            <div style={{fontSize:40,marginBottom:8}}>{positif?'🙌':'🙏'}</div>
-            <div style={{fontWeight:900,fontSize:17,color:'white'}}>Merci pour votre retour !</div>
-            <div style={{fontSize:13,color:'rgba(255,255,255,.6)',marginTop:6,lineHeight:1.5}}>Votre message nous aide à améliorer Starvolt.</div>
+    <div className="rt-pointeur" onClick={clic}>
+      <div className="rt-pointeur-msg" onClick={(e)=>e.stopPropagation()}>Cliquez l'élément qui pose problème<button className="rt-btn" onClick={onAnnuler}>Annuler</button></div>
+    </div>
+  );
+}
+
+// ── Les pièces : image réduite, note audio, fichier ─────────────────────────
+async function reduireImage(file) {
+  if (!/^image\//.test(file.type)) throw new Error('Ce fichier n\'est pas une image.');
+  const url = URL.createObjectURL(file);
+  try {
+    const img = await new Promise((ok, ko) => { const i = new Image(); i.onload = () => ok(i); i.onerror = () => ko(new Error('Image illisible.')); i.src = url; });
+    const MAX = 1600, k = Math.min(1, MAX / Math.max(img.naturalWidth, img.naturalHeight, 1));
+    if (k === 1 && file.size < 1.5e6 && /^image\/(jpeg|png|webp)$/.test(file.type)) return { blob: file, type: file.type, ext: file.type.split('/')[1].replace('jpeg', 'jpg') };
+    const c = document.createElement('canvas'); c.width = Math.max(1, Math.round(img.naturalWidth * k)); c.height = Math.max(1, Math.round(img.naturalHeight * k));
+    c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+    const blob = await new Promise(ok => c.toBlob(ok, 'image/jpeg', 0.85));
+    if (!blob) throw new Error('Image illisible.');
+    return { blob, type: 'image/jpeg', ext: 'jpg' };
+  } finally { URL.revokeObjectURL(url); }
+}
+function useMicro() {
+  const [etat, setEtat] = useState('idle'); const [duree, setDuree] = useState(0); const [audio, setAudio] = useState(null); const [erreur, setErreur] = useState(null);
+  const rec = useRef(null), timer = useRef(null), debut = useRef(0);
+  const arreter = () => { clearInterval(timer.current); timer.current = null; try { if (rec.current && rec.current.state !== 'inactive') rec.current.stop(); } catch (e) {} };
+  const demarrer = async () => {
+    setErreur(null);
+    if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) { setErreur('Votre navigateur ne sait pas enregistrer de son.'); return; }
+    let flux; try { flux = await navigator.mediaDevices.getUserMedia({ audio: true }); } catch (e) { setErreur('Micro refusé ou indisponible.'); return; }
+    const type = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/ogg;codecs=opus'].find(t => MediaRecorder.isTypeSupported(t)) || '';
+    let r; try { r = new MediaRecorder(flux, type ? { mimeType: type } : undefined); } catch (e) { flux.getTracks().forEach(t => t.stop()); setErreur('Enregistrement impossible : ' + e.message); return; }
+    const morceaux = [];
+    r.ondataavailable = (e) => { if (e.data && e.data.size) morceaux.push(e.data); };
+    r.onstop = () => {
+      flux.getTracks().forEach(t => t.stop());
+      const mime = (r.mimeType || type || 'audio/webm').split(';')[0]; const blob = new Blob(morceaux, { type: mime });
+      const ext = mime.includes('mp4') ? 'm4a' : mime.includes('ogg') ? 'ogg' : mime.includes('mpeg') ? 'mp3' : 'webm';
+      setAudio({ blob, type: mime, ext, url: URL.createObjectURL(blob) }); setEtat('pret');
+    };
+    rec.current = r; r.start(250); debut.current = Date.now(); setDuree(0); setEtat('rec');
+    timer.current = setInterval(() => { const sec = Math.round((Date.now() - debut.current) / 1000); setDuree(sec); if (sec >= 180) arreter(); }, 500);
+  };
+  const retirer = () => { if (audio) URL.revokeObjectURL(audio.url); setAudio(null); setEtat('idle'); setDuree(0); };
+  useEffect(() => () => arreter(), []);
+  return { etat, duree, audio, erreur, demarrer, arreter, retirer };
+}
+const FICHIERS_TYPES = {
+  pdf:'application/pdf', txt:'text/plain', csv:'text/csv', md:'text/markdown', rtf:'application/rtf',
+  doc:'application/msword', docx:'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  xls:'application/vnd.ms-excel', xlsx:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  ppt:'application/vnd.ms-powerpoint', pptx:'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  odt:'application/vnd.oasis.opendocument.text', ods:'application/vnd.oasis.opendocument.spreadsheet', odp:'application/vnd.oasis.opendocument.presentation',
+};
+const FICHIERS_ACCEPT = Object.keys(FICHIERS_TYPES).map(e => '.' + e).join(',');
+function lireFichier(f) {
+  const ext = (f.name.split('.').pop() || '').toLowerCase(); const type = FICHIERS_TYPES[ext];
+  if (!type) throw new Error('Format non admis : PDF ou bureautique (' + Object.keys(FICHIERS_TYPES).join(', ') + ').');
+  if (f.size > 20 * 1024 * 1024) throw new Error('Fichier trop lourd : 20 Mo au plus.');
+  return { blob: f, type, ext, nom: f.name.slice(0, 200), taille: f.size };
+}
+const tailleLisible = (o) => o == null ? '' : o < 1024 ? o + ' o' : o < 1048576 ? Math.round(o / 1024) + ' Ko' : (o / 1048576).toFixed(1).replace('.', ',') + ' Mo';
+async function deposerPiece(user, piece) {
+  const chemin = user.id + '/' + Date.now() + '_' + Math.random().toString(36).slice(2, 8) + '.' + piece.ext;
+  const { error } = await sb.storage.from('retours').upload(chemin, piece.blob, { contentType: piece.type, upsert: false });
+  if (error) throw new Error('Fichier refusé : ' + error.message);
+  return chemin;
+}
+function PictoCrayon({ size = 15 }) { return <svg viewBox="0 0 24 24" width={size} height={size} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>; }
+function PictoPoubelle({ size = 15 }) { return <svg viewBox="0 0 24 24" width={size} height={size} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/></svg>; }
+function PictoTrombone({ size = 16 }) { return <svg viewBox="0 0 24 24" width={size} height={size} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M21.4 11.1 12.5 20a5.5 5.5 0 0 1-7.8-7.8l9.2-9.2a3.7 3.7 0 0 1 5.2 5.2l-9.2 9.2a1.8 1.8 0 0 1-2.6-2.6l8.5-8.5"/></svg>; }
+function PieceJointe({ chemin, nom, url }) {
+  const libelle = nom || (chemin || '').split('/').pop(); const corps = <><PictoTrombone size={15}/><span>{libelle}</span></>;
+  return url ? <a className="rt-pj" href={url} target="_blank" rel="noopener" title={'Ouvrir ' + libelle}>{corps}</a> : <span className="rt-pj" title="Fichier introuvable">{corps}</span>;
+}
+const ajusterTexte = (el) => { if (!el) return; el.style.height = 'auto'; el.style.height = Math.min(320, el.scrollHeight + 2) + 'px'; };
+
+// ── La modale des pouces ────────────────────────────────────────────────────
+function ModaleRetour({ sentiment, contexte, user, onFermer }) {
+  const bas = sentiment === 'down';
+  const [texte, setTexte] = useState(''); const [image, setImage] = useState(null); const [fichier, setFichier] = useState(null);
+  const [cible, setCible] = useState(null); const [pointage, setPointage] = useState(false);
+  const [envoi, setEnvoi] = useState(false); const [fait, setFait] = useState(false); const [erreur, setErreur] = useState(null);
+  const micro = useMicro(); const taRef = useRef(null), fichierRef = useRef(null), pieceRef = useRef(null);
+  useEffect(() => { const t = setTimeout(() => taRef.current && taRef.current.focus(), 120); return () => clearTimeout(t); }, [pointage]);
+  useEffect(() => { const esc = (e) => { if (e.key === 'Escape' && !pointage) onFermer(); }; window.addEventListener('keydown', esc); return () => window.removeEventListener('keydown', esc); }, [pointage]);
+  const choisirImage = async (e) => { const f = e.target.files && e.target.files[0]; e.target.value = ''; if (!f) return; try { const r = await reduireImage(f); setImage({ ...r, url: URL.createObjectURL(r.blob) }); setErreur(null); } catch (err) { setErreur(err.message); } };
+  const choisirFichier = (e) => { const f = e.target.files && e.target.files[0]; e.target.value = ''; if (!f) return; try { setFichier(lireFichier(f)); setErreur(null); } catch (err) { setErreur(err.message); } };
+  const retirerImage = () => { if (image) URL.revokeObjectURL(image.url); setImage(null); };
+  const envoyer = async () => {
+    const msg = texte.trim();
+    if (!msg && !image && !micro.audio && !fichier && !cible) { setErreur(bas ? 'Dites-nous ce qui ne va pas, montrez l\'endroit, ou ajoutez une image, une note audio ou un fichier.' : 'Dites-nous ce qui vous plaît, ou ajoutez une image, une note audio ou un fichier.'); taRef.current && taRef.current.focus(); return; }
+    setEnvoi(true); setErreur(null);
+    try {
+      const image_path = image ? await deposerPiece(user, image) : null;
+      const audio_path = micro.audio ? await deposerPiece(user, micro.audio) : null;
+      const fichier_path = fichier ? await deposerPiece(user, fichier) : null;
+      const { error } = await sb.rpc('retour_deposer', { p: { sentiment, message: msg, route: contexte.route, ecran: contexte.ecran,
+        detail: { ...contexte.detail, cible: cible || undefined }, image_path, audio_path, fichier_path, fichier_nom: fichier ? fichier.nom : null } });
+      if (error) throw new Error(error.message);
+      setFait(true); setTimeout(onFermer, 1100);
+    } catch (err) { setErreur(err.message || 'Envoi impossible.'); logAppError({ severity:'mineur', module:'retour', message: err.message || String(err) }); }
+    finally { setEnvoi(false); }
+  };
+  if (pointage) return <Pointeur onChoix={(c)=>{ setCible(c); setPointage(false); }} onAnnuler={()=>setPointage(false)}/>;
+  return (
+    <div className="rt-voile" onClick={onFermer}>
+      <div className="rt-modale" role="dialog" aria-modal="true" aria-label={bas ? 'Ce qui ne va pas' : 'Ce qui vous plaît'} onClick={(e)=>e.stopPropagation()}>
+        <div className="rt-tete">
+          <span className={'rt-ico ' + (bas ? 'bas' : 'haut')}><ThumbIcon up={!bas} size={22} color={bas ? '#ff8a6a' : '#7fd08a'}/></span>
+          <div><b>{bas ? 'Ce qui ne va pas' : 'Ce qui vous plaît'}</b><span>Page : {contexte.ecran}</span></div>
+          <button className="rt-fermer" onClick={onFermer} aria-label="Fermer">×</button>
+        </div>
+        {fait ? <div className="rt-merci">{bas ? '🙏' : '🙌'} Merci pour votre retour !</div> : <>
+          <textarea ref={taRef} className="rt-texte" rows={2} value={texte} placeholder={bas ? 'Ce qui ne va pas, ce que vous attendiez…' : 'Ce qui vous plaît…'}
+                    onChange={(e)=>{ setTexte(e.target.value); ajusterTexte(e.target); }}/>
+          {cible && <div className="rt-piece"><span>📍 {cible.libelle}{cible.section ? ' — ' + cible.section : ''}</span><button onClick={()=>setCible(null)} aria-label="Retirer l'endroit">×</button></div>}
+          {image && <div className="rt-piece"><img src={image.url} alt=""/><button onClick={retirerImage} aria-label="Retirer l'image">×</button></div>}
+          {micro.audio && <div className="rt-piece"><audio controls src={micro.audio.url}/><button onClick={micro.retirer} aria-label="Retirer la note audio">×</button></div>}
+          {fichier && <div className="rt-piece"><span><PictoTrombone size={14}/> {fichier.nom} <small>({tailleLisible(fichier.taille)})</small></span><button onClick={()=>setFichier(null)} aria-label="Retirer le fichier">×</button></div>}
+          <div className="rt-outils">
+            {bas && !cible && <button className="rt-btn" onClick={()=>setPointage(true)}>📍 Montrer l'endroit</button>}
+            {!image && <button className="rt-btn" onClick={()=>fichierRef.current && fichierRef.current.click()}>📷 Image</button>}
+            {!micro.audio && (micro.etat === 'rec' ? <button className="rt-btn danger" onClick={micro.arreter}>■ Arrêter ({mmssR(micro.duree)})</button> : <button className="rt-btn" onClick={micro.demarrer}>🎙️ Note audio</button>)}
+            {!fichier && <button className="rt-btn" onClick={()=>pieceRef.current && pieceRef.current.click()} title="Joindre un PDF ou un document bureautique"><PictoTrombone/> Fichier</button>}
+            <input ref={fichierRef} type="file" accept="image/*" style={{display:'none'}} onChange={choisirImage}/>
+            <input ref={pieceRef} type="file" accept={FICHIERS_ACCEPT} style={{display:'none'}} onChange={choisirFichier}/>
           </div>
-        ) : (
-          <>
-            <div style={{display:'flex',alignItems:'center',gap:11,marginBottom:14}}>
-              <div style={{width:44,height:44,borderRadius:12,background:accentBg,border:`1px solid ${accentBd}`,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
-                <ThumbIcon up={positif} size={22} color={accent}/>
-              </div>
-              <div style={{minWidth:0}}>
-                <div style={{fontWeight:900,fontSize:16,color:'white',lineHeight:1.2}}>{positif?'Ce qui vous plaît':'Ce qui ne va pas'}</div>
-                <div style={{fontSize:12,color:'rgba(255,255,255,.5)',marginTop:2}}>Page : <span style={{color:accent,fontWeight:700}}>{pageNom}</span></div>
-              </div>
-            </div>
-            {detail && (
-              <div style={{background:accentBg,border:`1px solid ${accentBd}`,borderRadius:10,padding:'8px 11px',marginBottom:12,fontSize:12,color:'rgba(255,255,255,.78)',lineHeight:1.45}}>
-                <span style={{color:accent,fontWeight:700}}>Contexte : </span>{detail}
-              </div>
-            )}
-            <textarea
-              ref={taRef}
-              value={text}
-              onChange={e=>setText(e.target.value)}
-              placeholder={positif?'Dites-nous ce que vous appréciez…':'Décrivez le problème ou ce qui pourrait être amélioré…'}
-              rows={4}
-              style={{width:'100%',boxSizing:'border-box',background:'rgba(255,255,255,.06)',border:'1px solid rgba(255,255,255,.15)',borderRadius:11,color:'white',fontSize:14,fontFamily:'inherit',padding:'11px 13px',lineHeight:1.5,resize:'vertical',outline:'none'}}
-            />
-            <input ref={fileRef} type="file" accept="image/png,image/jpeg,image/gif,image/webp,application/pdf" onChange={pickFile} style={{display:'none'}}/>
-            {file ? (
-              <div style={{display:'flex',alignItems:'center',gap:9,marginTop:10,background:'rgba(255,255,255,.06)',border:'1px solid rgba(255,255,255,.14)',borderRadius:10,padding:'8px 11px'}}>
-                <span style={{fontSize:16,flexShrink:0}}>{file.type==='application/pdf'?'📄':'🖼️'}</span>
-                <span style={{flex:1,minWidth:0,fontSize:12.5,color:'rgba(255,255,255,.82)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{file.name}</span>
-                <button onClick={()=>{ setFile(null); if(fileRef.current) fileRef.current.value=''; }} style={{flexShrink:0,background:'none',border:'none',color:'rgba(255,255,255,.5)',cursor:'pointer',fontSize:16,fontFamily:'inherit',lineHeight:1,padding:2}}>✕</button>
-              </div>
-            ) : (
-              <button onClick={()=>fileRef.current?.click()} style={{display:'flex',alignItems:'center',gap:7,marginTop:10,background:'rgba(255,255,255,.05)',border:'1px dashed rgba(255,255,255,.22)',borderRadius:10,color:'rgba(255,255,255,.62)',padding:'9px 13px',cursor:'pointer',fontFamily:'inherit',fontSize:12.5,fontWeight:600,width:'100%'}}>
-                <span style={{fontSize:15}}>📎</span> Ajouter une pièce jointe (image ou PDF)
-              </button>
-            )}
-            <div style={{display:'flex',gap:10,marginTop:14}}>
-              <button onClick={onClose} style={{flex:'0 0 auto',background:'rgba(255,255,255,.07)',border:'1px solid rgba(255,255,255,.18)',borderRadius:11,color:'rgba(255,255,255,.7)',padding:'11px 16px',cursor:'pointer',fontFamily:'inherit',fontSize:13,fontWeight:700}}>Annuler</button>
-              <button onClick={submit} disabled={saving} style={{flex:1,background:accentBg,border:`1px solid ${accentBd}`,borderRadius:11,color:accent,padding:'11px',cursor:saving?'default':'pointer',fontFamily:'inherit',fontSize:14,fontWeight:800,opacity:saving?.6:1}}>{saving?<span style={{display:'inline-flex',alignItems:'center',gap:7}}><StarSpinner size={15} color={accent}/> Envoi…</span>:'Envoyer'}</button>
-            </div>
-          </>
-        )}
+          {(erreur || micro.erreur) && <div className="rt-alerte">{erreur || micro.erreur}</div>}
+          <div className="rt-actions">
+            <button className="rt-btn" onClick={onFermer} disabled={envoi}>Annuler</button>
+            <button className="rt-btn principal" onClick={envoyer} disabled={envoi || micro.etat === 'rec'}>{envoi ? 'Envoi…' : 'Envoyer'}</button>
+          </div>
+        </>}
       </div>
+    </div>
+  );
+}
+
+// ── Les pop-ups ─────────────────────────────────────────────────────────────
+function PopupRetours({ info, onOuvrir, onFermer }) {
+  const d = info.dernier || {}; const qui = nomDe(d) === '—' ? 'Quelqu\'un' : nomDe(d);
+  const titre = info.n === 1 ? (d.type === 'message' ? 'Un nouveau message dans un retour' : 'Un nouveau retour') : info.n + ' retours à lire';
+  return (
+    <div className="rt-voile" onClick={onFermer}>
+      <div className="rt-modale" role="dialog" aria-modal="true" aria-label="Nouveaux retours" onClick={(e)=>e.stopPropagation()}>
+        <div className="rt-tete"><span className="rt-ico">💬</span><div><b>{titre}</b><span>à lire dans Admin → Retours utilisateurs</span></div></div>
+        <div className="rt-extrait"><b>{d.sentiment === 'down' ? '👎' : '👍'} {qui}</b> · {d.ecran || '—'} · {dateRetour(d.created_at)}
+          {d.message && <p>« {d.message}{d.message.length >= 120 ? '…' : ''} »</p>}
+          {(d.image || d.audio) && <small>{d.image ? '🖼️ image jointe ' : ''}{d.audio ? '🎙️ note audio' : ''}</small>}</div>
+        <div className="rt-actions"><button className="rt-btn" onClick={onFermer}>Plus tard</button><button className="rt-btn principal" onClick={onOuvrir}>Voir les retours</button></div>
+      </div>
+    </div>
+  );
+}
+function PopupReponse({ info, onOuvrir, onFermer }) {
+  const d = info.derniere || {}; const qui = nomDe(d) === '—' ? 'L\'équipe' : nomDe(d); const n = info.reponses || 0;
+  return (
+    <div className="rt-voile" onClick={onFermer}>
+      <div className="rt-modale" role="dialog" aria-modal="true" aria-label="Réponse à votre remarque" onClick={(e)=>e.stopPropagation()}>
+        <div className="rt-tete"><span className="rt-ico">💬</span><div><b>{n === 1 ? 'Une réponse à votre remarque' : n + ' réponses à vos remarques'}</b><span>à retrouver depuis vos initiales, en haut à droite</span></div></div>
+        <div className="rt-extrait"><b>{qui}</b> · {d.ecran || '—'} · {dateRetour(d.created_at)}
+          {d.message && <p>« {d.message}{d.message.length >= 120 ? '…' : ''} »</p>}
+          {(d.image || d.audio) && <small>{d.image ? '🖼️ image jointe ' : ''}{d.audio ? '🎙️ note audio' : ''}</small>}</div>
+        <div className="rt-actions"><button className="rt-btn" onClick={onFermer}>Plus tard</button><button className="rt-btn principal" onClick={onOuvrir}>{n === 1 ? 'Voir la réponse' : 'Voir les réponses'}</button></div>
+      </div>
+    </div>
+  );
+}
+
+// ── Le fil : composeur et messages ──────────────────────────────────────────
+function Composeur({ user, initial, urls, texteSeul, placeholder, bouton, onEnvoyer, onAnnuler }) {
+  const [texte, setTexte] = useState(initial?.texte || ''); const [image, setImage] = useState(null);
+  const [imageGardee, setImageGardee] = useState(initial?.image_path || null); const [audioGarde, setAudioGarde] = useState(initial?.audio_path || null);
+  const [fichier, setFichier] = useState(null); const [fichierGarde, setFichierGarde] = useState(initial?.fichier_path ? { chemin: initial.fichier_path, nom: initial.fichier_nom } : null);
+  const [envoi, setEnvoi] = useState(false); const [erreur, setErreur] = useState(null);
+  const micro = useMicro(); const taRef = useRef(null), fichierRef = useRef(null), pieceRef = useRef(null);
+  useEffect(() => { const el = taRef.current; ajusterTexte(el); if (initial && el) { el.focus(); try { el.setSelectionRange(el.value.length, el.value.length); } catch (e) {} } }, []);
+  const choisirImage = async (e) => { const f = e.target.files && e.target.files[0]; e.target.value = ''; if (!f) return; try { const r = await reduireImage(f); setImage({ ...r, url: URL.createObjectURL(r.blob) }); setErreur(null); } catch (err) { setErreur(err.message); } };
+  const choisirFichier = (e) => { const f = e.target.files && e.target.files[0]; e.target.value = ''; if (!f) return; try { setFichier(lireFichier(f)); setErreur(null); } catch (err) { setErreur(err.message); } };
+  const retirerImage = () => { if (image) URL.revokeObjectURL(image.url); setImage(null); };
+  const envoyer = async () => {
+    const msg = texte.trim();
+    if (!msg && !image && !imageGardee && !micro.audio && !audioGarde && !fichier && !fichierGarde) { setErreur(texteSeul ? 'Le texte ne peut pas être vide.' : 'Écrivez un message, ou ajoutez une image, une note audio ou un fichier.'); taRef.current && taRef.current.focus(); return; }
+    setEnvoi(true); setErreur(null);
+    try {
+      const image_path = image ? await deposerPiece(user, image) : imageGardee;
+      const audio_path = micro.audio ? await deposerPiece(user, micro.audio) : audioGarde;
+      const fichier_path = fichier ? await deposerPiece(user, fichier) : (fichierGarde ? fichierGarde.chemin : null);
+      const fichier_nom = fichier ? fichier.nom : (fichierGarde ? fichierGarde.nom : null);
+      const retires = [initial?.image_path, initial?.audio_path, initial?.fichier_path].filter(c => c && c !== image_path && c !== audio_path && c !== fichier_path);
+      await onEnvoyer({ texte: msg, image_path, audio_path, fichier_path, fichier_nom, retires });
+      if (!initial) { setTexte(''); retirerImage(); micro.retirer(); setFichier(null); setTimeout(() => ajusterTexte(taRef.current), 0); }
+    } catch (err) { setErreur(err.message || 'Envoi impossible.'); logAppError({ severity:'mineur', module:'retour/fil', message: err.message || String(err) }); }
+    finally { setEnvoi(false); }
+  };
+  return (
+    <div className="rt-composeur">
+      <textarea ref={taRef} className="rt-texte" rows={2} value={texte} placeholder={placeholder || 'Votre réponse…'}
+                onChange={(e)=>{ setTexte(e.target.value); ajusterTexte(e.target); }}
+                onKeyDown={(e)=>{ if (e.key === 'Escape' && onAnnuler) onAnnuler(); if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); if (!envoi) envoyer(); } }}/>
+      {!texteSeul && <>
+        {imageGardee && !image && <div className="rt-piece">{urls?.[imageGardee] ? <img src={urls[imageGardee]} alt=""/> : <span>🖼️ image jointe</span>}<button onClick={()=>setImageGardee(null)} aria-label="Retirer l'image">×</button></div>}
+        {image && <div className="rt-piece"><img src={image.url} alt=""/><button onClick={retirerImage} aria-label="Retirer l'image">×</button></div>}
+        {audioGarde && !micro.audio && <div className="rt-piece">{urls?.[audioGarde] ? <audio controls src={urls[audioGarde]}/> : <span>🎙️ note audio</span>}<button onClick={()=>setAudioGarde(null)} aria-label="Retirer la note audio">×</button></div>}
+        {micro.audio && <div className="rt-piece"><audio controls src={micro.audio.url}/><button onClick={micro.retirer} aria-label="Retirer la note audio">×</button></div>}
+        {fichierGarde && !fichier && <div className="rt-piece"><span><PictoTrombone size={14}/> {fichierGarde.nom || fichierGarde.chemin.split('/').pop()}</span><button onClick={()=>setFichierGarde(null)} aria-label="Retirer le fichier">×</button></div>}
+        {fichier && <div className="rt-piece"><span><PictoTrombone size={14}/> {fichier.nom} <small>({tailleLisible(fichier.taille)})</small></span><button onClick={()=>setFichier(null)} aria-label="Retirer le fichier">×</button></div>}
+      </>}
+      <div className="rt-outils">
+        {!texteSeul && !image && !imageGardee && <button className="rt-btn" onClick={()=>fichierRef.current && fichierRef.current.click()}>📷 Image</button>}
+        {!texteSeul && !micro.audio && !audioGarde && (micro.etat === 'rec' ? <button className="rt-btn danger" onClick={micro.arreter}>■ Arrêter ({mmssR(micro.duree)})</button> : <button className="rt-btn" onClick={micro.demarrer}>🎙️ Note audio</button>)}
+        {!texteSeul && !fichier && !fichierGarde && <button className="rt-btn" onClick={()=>pieceRef.current && pieceRef.current.click()} title="Joindre un PDF ou un document bureautique"><PictoTrombone/> Fichier</button>}
+        <input ref={fichierRef} type="file" accept="image/*" style={{display:'none'}} onChange={choisirImage}/>
+        <input ref={pieceRef} type="file" accept={FICHIERS_ACCEPT} style={{display:'none'}} onChange={choisirFichier}/>
+        <span className="rt-ressort"/>
+        {onAnnuler && <button className="rt-btn" onClick={onAnnuler} disabled={envoi}>Annuler</button>}
+        <button className="rt-btn principal" onClick={envoyer} disabled={envoi || micro.etat === 'rec'}>{envoi ? 'Envoi…' : (bouton || 'Envoyer')}</button>
+      </div>
+      {(erreur || micro.erreur) && <div className="rt-alerte">{erreur || micro.erreur}</div>}
+    </div>
+  );
+}
+function MessageFil({ m, moi, auteur, urls, user, onModifier, onSupprimer, onPlein }) {
+  const [edite, setEdite] = useState(false); const mien = m.user_id === moi; const droite = m.user_id !== auteur;
+  return (
+    <div className={'rt-msg' + (droite ? ' droite' : '') + (edite ? ' edite' : '')}>
+      <div className="rt-msg-tete">
+        <b>{mien ? 'Vous' : nomDe(m)}</b>{!mien && ['admin','superadmin'].includes(m.role) && <span className="rt-role">équipe</span>}
+        <span>{dateRetour(m.created_at)}{m.modifie_le ? ' · modifié' : ''}</span>
+        {mien && !edite && <span style={{display:'inline-flex',gap:2}}>
+          <button className="rt-ico-btn" onClick={()=>setEdite(true)} title="Modifier" aria-label="Modifier ce message"><PictoCrayon/></button>
+          <button className="rt-ico-btn poubelle" onClick={()=>onSupprimer(m)} title="Supprimer" aria-label="Supprimer ce message"><PictoPoubelle/></button>
+        </span>}
+      </div>
+      {edite
+        ? <Composeur user={user} initial={m} urls={urls} bouton="Enregistrer" placeholder="Votre message…" onAnnuler={()=>setEdite(false)} onEnvoyer={async (p)=>{ await onModifier(m, p); setEdite(false); }}/>
+        : <div className="rt-bulle">
+          {m.texte && <div className="rt-message">{m.texte}</div>}
+          {m.image_path && (urls[m.image_path] ? <img className="rt-img" src={urls[m.image_path]} alt="Image jointe" onClick={()=>onPlein(urls[m.image_path])}/> : <div className="rt-info">Image introuvable.</div>)}
+          {m.audio_path && (urls[m.audio_path] ? <audio className="rt-audio" controls src={urls[m.audio_path]}/> : <div className="rt-info">Note audio introuvable.</div>)}
+          {m.fichier_path && <PieceJointe chemin={m.fichier_path} nom={m.fichier_nom} url={urls[m.fichier_path]}/>}
+        </div>}
+    </div>
+  );
+}
+
+// ── L'écran d'un retour : la fiche, le fil, et Socrate incrusté à droite ────
+function EcranRetour({ id, admin, user, onRetour, onLu }) {
+  const [fil, setFil] = useState(null); const [error, setError] = useState(null); const [urls, setUrls] = useState({});
+  const [plein, setPlein] = useState(null); const [editeRacine, setEditeRacine] = useState(false);
+  const frameRef = useRef(null), basRef = useRef(null);
+  const charger = async () => {
+    const { data, error: err } = await sb.rpc('retour_fil', { p_id: id });
+    if (err) { setError(/forbidden/.test(err.message) ? 'Ce retour n\'existe plus, ou ne vous est pas ouvert.' : err.message); return; }
+    if (!data || !data.retour) { setError('Ce retour n\'existe plus.'); return; }
+    setFil(data);
+    const r = data.retour;
+    const chemins = [r.image_path, r.audio_path, r.fichier_path, ...(data.messages || []).flatMap(m => [m.image_path, m.audio_path, m.fichier_path])].filter(Boolean);
+    if (chemins.length) {
+      const { data: signes, error: e2 } = await sb.storage.from('retours').createSignedUrls(chemins, 3600);
+      if (e2) logAppError({ severity:'mineur', module:'retour/fichiers', message: e2.message });
+      const u = {}; (signes || []).forEach(x => { if (x.signedUrl) u[x.path] = x.signedUrl; }); setUrls(u);
+    }
+    onLu && onLu();
+  };
+  useEffect(() => { setFil(null); setUrls({}); setError(null); setEditeRacine(false); charger(); const t = setInterval(charger, 30000); return () => clearInterval(t); }, [id]);
+  const r = fil && fil.retour, moi = fil && fil.moi, mien = !!(r && moi && r.user_id === moi);
+  const basculerLu = async () => { const lu = !r.lu_le; const { error: err } = await sb.rpc('retour_marquer_lu', { p_id: id, p_lu: lu }); if (err) { setError(err.message); return; } setFil({ ...fil, retour: { ...r, lu_le: lu ? new Date().toISOString() : null } }); onLu && onLu(); };
+  const supprimerTout = async () => {
+    if (!window.confirm((admin && !mien ? 'Supprimer ce retour' : 'Supprimer votre remarque') + ', toute la discussion et les fichiers ?')) return;
+    const chemins = [r.image_path, r.audio_path, r.fichier_path, ...fil.messages.flatMap(m => [m.image_path, m.audio_path, m.fichier_path])].filter(c => c && (admin || c.indexOf(user.id + '/') === 0));
+    if (chemins.length) { const { error: e1 } = await sb.storage.from('retours').remove(chemins); if (e1) { setError('Fichiers : ' + e1.message); return; } }
+    const { error: err } = await sb.rpc('retour_supprimer', { p_id: id }); if (err) { setError(err.message); return; }
+    onLu && onLu(); onRetour();
+  };
+  const poster = async (p) => { const { error: err } = await sb.rpc('retour_message_poster', { p_retour: id, p_texte: p.texte, p_image: p.image_path, p_audio: p.audio_path, p_fichier: p.fichier_path, p_fichier_nom: p.fichier_nom }); if (err) throw new Error(err.message); await charger(); setTimeout(() => basRef.current && basRef.current.scrollIntoView({ block:'end', behavior:'smooth' }), 60); };
+  const modifier = async (m, p) => { const { error: err } = await sb.rpc('retour_message_modifier', { p_id: m.id, p_texte: p.texte, p_image: p.image_path, p_audio: p.audio_path, p_fichier: p.fichier_path, p_fichier_nom: p.fichier_nom }); if (err) throw new Error(err.message); if (p.retires.length) await sb.storage.from('retours').remove(p.retires); await charger(); };
+  const supprimerMessage = async (m) => { if (!window.confirm('Supprimer ce message ?')) return; const chemins = [m.image_path, m.audio_path, m.fichier_path].filter(Boolean); if (chemins.length) await sb.storage.from('retours').remove(chemins); const { error: err } = await sb.rpc('retour_message_supprimer', { p_id: m.id }); if (err) { setError(err.message); return; } charger(); };
+  const modifierRacine = async (p) => { const { error: err } = await sb.rpc('retour_modifier', { p_id: id, p_texte: p.texte }); if (err) throw new Error(err.message); setEditeRacine(false); await charger(); };
+  const situer = () => { const w = frameRef.current && frameRef.current.contentWindow; if (!w || !r) return; const m = { source:'starvolt-retour', action:'situer', scroll: r.detail?.scroll || null, cible: r.detail?.cible || null }; const envoyer = () => { try { w.postMessage(m, window.location.origin); } catch (e) {} }; envoyer(); setTimeout(envoyer, 900); setTimeout(envoyer, 2500); };
+  // Socrate incrusté, à l'état enregistré. Un retour laissé sur l'écran d'un
+  // retour rejouerait cet écran dans cet écran : on le ramène à l'accueil.
+  const etat = (() => { try { const e = JSON.parse((r && r.route) || '{}'); if (!e.screen || ['ADMIN_RETOUR', 'MON_RETOUR'].includes(e.screen)) e.screen = 'HOME_CHOICE'; return e; } catch (e) { return { screen:'HOME_CHOICE' }; } })();
+  const srcIncruste = '/?incruste=retour&etat=' + encodeURIComponent(JSON.stringify(etat));
+  const messages = (fil && fil.messages) || [];
+  return (
+    <div className="screen rt-page fade-in">
+      <div className="rt-split">
+        <aside className="rt-fiche">
+          {error && <div className="rt-alerte" style={{marginTop:0}}>{error}</div>}
+          {!fil && !error && <div className="rt-info">Chargement…</div>}
+          {r && <>
+            <div className="rt-tete">
+              <span className={'rt-ico ' + (r.sentiment === 'down' ? 'bas' : 'haut')}><ThumbIcon up={r.sentiment !== 'down'} size={20} color={r.sentiment === 'down' ? '#ff8a6a' : '#7fd08a'}/></span>
+              <div><b>{mien ? 'Vous' : nomDe(r)}</b><span>{dateRetour(r.created_at)}{r.modifie_le ? ' · modifié' : ''} · {r.ecran || '—'}</span></div>
+              {mien && !editeRacine && <button className="rt-ico-btn" onClick={()=>setEditeRacine(true)} title="Modifier" aria-label="Corriger le texte de votre remarque"><PictoCrayon/></button>}
+            </div>
+            {editeRacine
+              ? <Composeur user={user} initial={{ texte: r.message || '' }} texteSeul bouton="Enregistrer" placeholder="Votre remarque…" onAnnuler={()=>setEditeRacine(false)} onEnvoyer={modifierRacine}/>
+              : (r.message || r.image_path || r.audio_path || r.fichier_path) && <div className="rt-bulle rt-racine">
+                {r.message && <div className="rt-message">{r.message}</div>}
+                {r.image_path && (urls[r.image_path] ? <img className="rt-img" src={urls[r.image_path]} alt="Image jointe" onClick={()=>setPlein(urls[r.image_path])}/> : <div className="rt-info">Image introuvable.</div>)}
+                {r.audio_path && (urls[r.audio_path] ? <audio className="rt-audio" controls src={urls[r.audio_path]}/> : <div className="rt-info">Note audio introuvable.</div>)}
+                {r.fichier_path && <PieceJointe chemin={r.fichier_path} nom={r.fichier_nom} url={urls[r.fichier_path]}/>}
+              </div>}
+            <div className="rt-fil">
+              <div className="rt-fil-titre">{messages.length === 0 ? 'Pas encore de réponse' : messages.length === 1 ? 'Une réponse' : messages.length + ' réponses'}</div>
+              {messages.map(m => <MessageFil key={m.id} m={m} moi={moi} auteur={r.user_id} urls={urls} user={user} onModifier={modifier} onSupprimer={supprimerMessage} onPlein={setPlein}/>)}
+              <Composeur user={user} onEnvoyer={poster} bouton="Envoyer" placeholder={mien ? 'Répondre à l\'équipe…' : 'Répondre à ' + nomDe(r) + '…'}/>
+              <div ref={basRef}/>
+            </div>
+          </>}
+        </aside>
+        {r && <div className="rt-cadre"><iframe ref={frameRef} src={srcIncruste} title="L'écran tel que l'auteur le voyait" onLoad={situer}/></div>}
+      </div>
+      {plein && <div className="rt-voile sombre" onClick={()=>setPlein(null)}><img src={plein} alt="" className="plein"/></div>}
+      <div className="rt-bas">
+        <button className="rt-btn" onClick={onRetour} title={admin ? 'Retour aux retours' : 'Retour à mes remarques'} aria-label="Retour"><PictoPorte size={18}/></button>
+        {r && admin && <button className="rt-btn" onClick={basculerLu}>{r.lu_le ? 'Marquer non lu' : 'Marquer lu'}</button>}
+        <span className="rt-ressort"/>
+        {r && (admin || mien) && <button className="rt-btn danger" onClick={supprimerTout}>{admin && !mien ? 'Supprimer la discussion' : 'Supprimer ma remarque'}</button>}
+      </div>
+    </div>
+  );
+}
+
+// ── Les listes : l'administrateur, et mes remarques ─────────────────────────
+function EcranRetours({ onBack, onOuvrir, onLu }) {
+  const [lignes, setLignes] = useState(null); const [filtre, setFiltre] = useState('tous'); const [error, setError] = useState(null);
+  const charger = async () => { const { data, error: err } = await sb.rpc('retours_lister', { p_limit: 300 }); if (err) { setError(err.message); return; } setLignes(data || []); };
+  useEffect(() => { charger(); }, []);
+  const nonLu = (l) => !l.lu_le || Number(l.nouveaux) > 0;
+  const garde = (k) => (l) => k === 'tous' || (k === 'nonlus' ? nonLu(l) : l.sentiment === k);
+  const n = (k) => (lignes || []).filter(garde(k)).length;
+  const toutLu = async () => { const { error: err } = await sb.rpc('retour_marquer_lu', { p_id: null, p_lu: true }); if (err) { setError(err.message); return; } charger(); onLu && onLu(); };
+  const visibles = (lignes || []).filter(garde(filtre));
+  return (
+    <div className="screen screen-admin rt-screen fade-in">
+      <div className="auth-header"><div className="welcome-tag">Administration</div><h1 className="welcome-title">Retours <span className="accent">utilisateurs</span></h1>
+        <div className="screen-sub">{lignes ? n('nonlus') + ' non lu(s) sur ' + lignes.length : 'Chargement…'}</div></div>
+      {error && <div className="rt-alerte">{error}</div>}
+      <div className="rt-filtres">
+        {[['tous', 'Tous'], ['up', '👍'], ['down', '👎'], ['nonlus', 'Non lus']].map(([k, lib]) => <button key={k} className={'rt-btn' + (filtre === k ? ' on' : '')} onClick={()=>setFiltre(k)}>{lib} <small>{n(k)}</small></button>)}
+        <span className="rt-ressort"/>
+        <button className="rt-btn" onClick={charger}>Rafraîchir</button>
+        <button className="rt-btn" onClick={toutLu} disabled={!n('nonlus')}>Tout marquer lu</button>
+      </div>
+      <div className="rt-tableau"><table>
+        <thead><tr><th>Quand</th><th>Qui</th><th></th><th>Écran</th><th>Message</th><th>Pièces</th><th>Fil</th></tr></thead>
+        <tbody>
+          {visibles.map(l => (
+            <tr key={l.id} className={'ouvrable' + (nonLu(l) ? ' nonlu' : '')} onClick={()=>onOuvrir(l.id)}>
+              <td>{!l.lu_le && <span className="rt-nouveau">Nouveau</span>}{dateRetour(l.created_at)}</td>
+              <td>{nomDe(l)}</td><td>{l.sentiment === 'down' ? '👎' : '👍'}</td><td>{l.ecran || '—'}</td>
+              <td className="msg">{l.message || <i style={{opacity:.6}}>sans texte</i>}</td>
+              <td>{l.image_path ? '🖼️ ' : ''}{l.audio_path ? '🎙️ ' : ''}{l.fichier_path ? '📎 ' : ''}{l.detail?.cible ? '📍' : ''}</td>
+              <td>{Number(l.nouveaux) > 0 && <span className="rt-nouveau">{l.nouveaux} nouveau{Number(l.nouveaux) > 1 ? 'x' : ''}</span>}{Number(l.n_messages) > 0 ? '💬 ' + l.n_messages : <span style={{opacity:.5}}>—</span>}</td>
+            </tr>))}
+          {lignes && !visibles.length && <tr><td colSpan={7}>Aucun retour{filtre !== 'tous' ? ' dans ce filtre' : ' pour l\'instant'}.</td></tr>}
+        </tbody></table></div>
+      <div style={{marginTop:16}}><BackButton onClick={onBack}/></div>
+    </div>
+  );
+}
+function EcranMesRetours({ onBack, onOuvrir }) {
+  const [lignes, setLignes] = useState(null); const [error, setError] = useState(null);
+  useEffect(() => { sb.rpc('retours_miens').then(({ data, error: err }) => { if (err) setError(err.message); else setLignes(data || []); }); }, []);
+  const nouveaux = (lignes || []).reduce((t, l) => t + Number(l.nouveaux || 0), 0);
+  const chapo = !lignes ? 'Chargement…' : !lignes.length ? 'Vous n\'avez pas encore laissé de remarque.' : lignes.length + (lignes.length > 1 ? ' remarques' : ' remarque') + (nouveaux ? ', ' + nouveaux + (nouveaux > 1 ? ' réponses non lues' : ' réponse non lue') : '');
+  return (
+    <div className="screen screen-admin rt-screen fade-in">
+      <div className="auth-header"><div className="welcome-tag">Mon compte</div><h1 className="welcome-title">Mes remarques <span className="accent">et les réponses</span></h1><div className="screen-sub">{chapo}</div></div>
+      {error && <div className="rt-alerte">{error}</div>}
+      {lignes && lignes.length > 0 && <div className="rt-tableau"><table>
+        <thead><tr><th>Quand</th><th></th><th>Écran</th><th>Message</th><th>Pièces</th><th>Réponses</th></tr></thead>
+        <tbody>{lignes.map(l => (
+          <tr key={l.id} className={'ouvrable' + (Number(l.nouveaux) > 0 ? ' nonlu' : '')} onClick={()=>onOuvrir(l.id)}>
+            <td>{dateRetour(l.created_at)}</td><td>{l.sentiment === 'down' ? '👎' : '👍'}</td><td>{l.ecran || '—'}</td>
+            <td className="msg">{l.message || <i style={{opacity:.6}}>sans texte</i>}</td>
+            <td>{l.image_path ? '🖼️ ' : ''}{l.audio_path ? '🎙️ ' : ''}{l.fichier_path ? '📎 ' : ''}{l.cible ? '📍' : ''}</td>
+            <td>{Number(l.nouveaux) > 0 && <span className="rt-nouveau">{l.nouveaux} nouvelle{Number(l.nouveaux) > 1 ? 's' : ''}</span>}{Number(l.n_messages) > 0 ? '💬 ' + l.n_messages : <span style={{opacity:.5}}>—</span>}</td>
+          </tr>))}</tbody></table></div>}
+      {lignes && !lignes.length && <div className="rt-info">Les pouces 👍 👎 en haut à droite servent à laisser une remarque sur n'importe quel écran. Les réponses de l'équipe arriveront ici.</div>}
+      <div style={{marginTop:16}}><BackButton onClick={onBack}/></div>
     </div>
   );
 }
@@ -18539,15 +18942,6 @@ async function uploadLearnImage(file) {
   const { error } = await sb.storage.from('learn-images').upload(filename, file, { contentType: file.type, upsert: true });
   if (error) throw error;
   const { data: { publicUrl } } = sb.storage.from('learn-images').getPublicUrl(filename);
-  return publicUrl;
-}
-// Upload d'une pièce jointe de feedback (png/jpg/pdf…) vers son bucket dédié
-async function uploadFeedbackFile(file) {
-  const ext = (file.name.split('.').pop() || 'bin').toLowerCase();
-  const filename = `${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`;
-  const { error } = await sb.storage.from('feedback-attachments').upload(filename, file, { contentType: file.type || 'application/octet-stream', upsert: true });
-  if (error) throw error;
-  const { data: { publicUrl } } = sb.storage.from('feedback-attachments').getPublicUrl(filename);
   return publicUrl;
 }
 function getVideoEmbed(url) {
@@ -20237,7 +20631,26 @@ function App() {
   const [authLoading, setAuthLoading]= useState(true);
   // showDemoPopup supprimé — plus de popup démo
   const [cartVersion, setCartVersion]= useState(0);
-  const [feedbackSentiment, setFeedbackSentiment] = useState(null); // null | 'up' | 'down'
+  // Les retours : la modale ouverte (sentiment + contexte pris au clic), les
+  // pop-ups, et les comptes de non-lus (roue : retours à lire ; initiales :
+  // réponses à mes remarques). On ne pop-e qu'à la hausse.
+  const [retour, setRetour]         = useState(null);
+  const [popRetours, setPopRetours] = useState(null);
+  const [popReponse, setPopReponse] = useState(null);
+  const [nonLus, setNonLus]         = useState(0);
+  const [nonLuId, setNonLuId]       = useState(null);
+  const [reponses, setReponses]     = useState(0);
+  const [reponseId, setReponseId]   = useState(null);
+  const comptesVus                  = useRef(null);
+  const incrusteFait                = useRef(false);
+  const ouvrirRetour = (sentiment) => setRetour({ sentiment, contexte: contexteRetour() });
+  const appliquerComptes = (data) => {
+    if (!data) return;
+    setNonLus(data.n || 0); setNonLuId(data.dernier ? data.dernier.id : null);
+    setReponses(data.reponses || 0); setReponseId(data.derniere ? data.derniere.id : null);
+    comptesVus.current = { n: data.n || 0, reponses: data.reponses || 0 };
+  };
+  const rafraichirNonLus = () => sb.rpc('retours_non_lus').then(({ data }) => appliquerComptes(data));
   const [bilanPopup, setBilanPopup]  = useState(null); // {collected,errored,errorMsg,bilanText,consoKwh} | null — popup « bilan prêt »
   const [secReport, setSecReport]    = useState(null); // dernier rapport de sécurité non vu (popup au login admin)
   const [codeAuditDue, setCodeAuditDue] = useState(null); // {lastAt} si l'audit code n'a pas tourné depuis > 1 mois
@@ -20578,6 +20991,42 @@ function App() {
   const isAdmin = ['admin','superadmin'].includes(profile?.role) || rolePerms?.access?.admin === true;
   const isSuperadmin = profile?.role === 'superadmin' || rolePerms?.access?.superadmin === true;
 
+  // L'état courant, pour le contexte d'un retour (rejouer l'écran).
+  useEffect(() => { window.__etatCourant = state; }, [state]);
+  // Les retours et réponses non lus : un sondage toutes les minutes, et dès
+  // que l'onglet redevient visible ; pop-up à l'ouverture s'il y a du nouveau,
+  // puis à chaque hausse, sauf sur l'écran concerné. Rien en incrusté.
+  useEffect(() => {
+    if (!user?.id || !profile || INCRUSTE) return;
+    let vivant = true;
+    const verifier = async () => {
+      const { data } = await sb.rpc('retours_non_lus');
+      if (!vivant || !data) return;
+      const avant = comptesVus.current || { n: 0, reponses: 0 };
+      const ecran = window.__currentScreen || '';
+      if ((data.reponses || 0) > avant.reponses && data.derniere && !/^(MES_RETOURS|MON_RETOUR)$/.test(ecran)) setPopReponse(data);
+      if (isAdmin && (data.n || 0) > avant.n && data.dernier && !/^ADMIN_RETOUR/.test(ecran)) setPopRetours(data);
+      appliquerComptes(data);
+    };
+    verifier();
+    const t = setInterval(verifier, 60000);
+    const reveil = () => { if (document.visibilityState === 'visible') verifier(); };
+    document.addEventListener('visibilitychange', reveil); window.addEventListener('focus', reveil);
+    return () => { vivant = false; clearInterval(t); document.removeEventListener('visibilitychange', reveil); window.removeEventListener('focus', reveil); };
+  }, [user?.id, profile?.role, isAdmin]);
+  // Incrusté dans l'écran d'un retour : on rejoue l'état enregistré dès que la
+  // session est là, et le parent dit où poser le cercle rouge.
+  useEffect(() => {
+    if (!INCRUSTE || !ETAT_INCRUSTE || !user?.id || !profile || incrusteFait.current) return;
+    incrusteFait.current = true;
+    setState(s => ({ ...s, ...ETAT_INCRUSTE })); setHistory([]);
+  }, [user?.id, profile]);
+  useEffect(() => {
+    if (!INCRUSTE) return;
+    const onMsg = (e) => { if (e.origin !== window.location.origin || e.data?.source !== 'starvolt-retour' || e.data.action !== 'situer') return; situerRepere(e.data); };
+    window.addEventListener('message', onMsg); return () => window.removeEventListener('message', onMsg);
+  }, []);
+
   // À la connexion d'un admin/superadmin (hors mode debug), afficher le dernier
   // rapport de sécurité qu'il n'a pas encore vu (une seule fois par utilisateur).
   const secCheckedRef = useRef(null);
@@ -20712,7 +21161,7 @@ function App() {
       case 'PROFILE':
         return <ProfileScreen
           user={user}
-          profile={profile}
+          profile={profile} reponses={reponses} onRemarques={()=>goTo('MES_RETOURS')}
           onSave={(updated) => { setProfile(p => ({...p, ...updated})); goTo('MA_CONSO'); }}
           onCancel={() => goTo('MA_CONSO')}
           onLogout={handleLogout}
@@ -20732,7 +21181,7 @@ function App() {
           onPrix={()=>goTo('ADMIN_PRIX_MATERIAUX')}
           onOffres={()=>goTo('ADMIN_OFFRES')}
           onLearn={()=>goTo('ADMIN_LEARN')}
-          onFeedback={()=>goTo('ADMIN_FEEDBACK')}
+          onFeedback={()=>goTo('ADMIN_RETOURS')}
           onFactures={()=>goTo('ADMIN_FACTURES')}
           onProofread={()=>goTo('ADMIN_PROOFREAD')}
           onAICosts={()=>goTo('ADMIN_AI_COSTS')}
@@ -20746,8 +21195,20 @@ function App() {
       case 'ADMIN_QUIZ_FAILS':
         return <AdminQuizFailsScreen user={state.failUser} onBack={goBack}/>;
 
-      case 'ADMIN_FEEDBACK':
-        return <AdminFeedbackScreen onBack={goBack}/>;
+      case 'ADMIN_RETOURS':
+        if (!isAdmin) return null;
+        return <EcranRetours onBack={()=>goTo('ADMIN')} onOuvrir={(id)=>goTo('ADMIN_RETOUR', { retourId: id })} onLu={rafraichirNonLus}/>;
+
+      case 'ADMIN_RETOUR':
+        if (!isAdmin || !state.retourId) return null;
+        return <EcranRetour id={state.retourId} admin user={user} onRetour={()=>goTo('ADMIN_RETOURS')} onLu={rafraichirNonLus}/>;
+
+      case 'MES_RETOURS':
+        return <EcranMesRetours onBack={()=>goTo('PROFILE')} onOuvrir={(id)=>goTo('MON_RETOUR', { retourId: id })}/>;
+
+      case 'MON_RETOUR':
+        if (!state.retourId) return null;
+        return <EcranRetour id={state.retourId} admin={false} user={user} onRetour={()=>goTo('MES_RETOURS')} onLu={rafraichirNonLus}/>;
 
       case 'ADMIN_FACTURES':
         return <AdminFacturesScreen onBack={goBack}/>;
@@ -21064,8 +21525,9 @@ function App() {
     || (state.screen === 'COMPRENDRE_QUIZ' && state.onboardingEval);
 
   return (
+    <RetoursCtx.Provider value={{ nonLus, nonLuId, reponses, reponseId, aller: goTo }}>
     <div className="app">
-      {imperso && (
+      {imperso && !INCRUSTE && (
         <div style={{
           position:'sticky', top:0, zIndex:9999,
           background:'linear-gradient(90deg,#b8412e,#d4632e)', color:'#fff',
@@ -21097,16 +21559,26 @@ function App() {
         onAdmin={()=>goTo('ADMIN')}
         onPanier={user && state.screen !== 'PANIER' && can('menus','panier') ? ()=>autoExit('PANIER') : null}
         cartCount={cartCount}
-        onFeedback={user && !isAuthScreen ? (s)=>setFeedbackSentiment(s) : null}
+        onFeedback={user && !isAuthScreen ? ouvrirRetour : null}
       />
-      {feedbackSentiment && (
-        <FeedbackModal sentiment={feedbackSentiment} user={user} screen={state.screen} onClose={()=>setFeedbackSentiment(null)}/>
+      {retour && !INCRUSTE && (
+        <ModaleRetour sentiment={retour.sentiment} contexte={retour.contexte} user={user} onFermer={()=>setRetour(null)}/>
       )}
-      {user && <GlobalBilanWatcher onReady={handleBilanReady}/>}
-      {bilanPopup && !onboardingDialogOpen && <BilanReadyPopup data={bilanPopup} onUnderstood={handleBilanUnderstood}/>}
-      {secReport && <SecReportPopup check={secReport} title="🛡️ Sécurité — dernier rapport" onClose={dismissSecReport}/>}
-      {!secReport && codeAuditDue && <SecCodeReminderPopup lastAt={codeAuditDue.lastAt} onClose={()=>setCodeAuditDue(null)}/>}
-      {user && !isAuthScreen && <ApproxConsoBanner screen={state.screen} userId={user.id}/>}
+      {popReponse && !retour && !INCRUSTE && (
+        <PopupReponse info={popReponse}
+          onOuvrir={()=>{ const d = popReponse.derniere; setPopReponse(null); if (popReponse.reponses === 1 && d) goTo('MON_RETOUR', { retourId: d.id }); else goTo('MES_RETOURS'); }}
+          onFermer={()=>setPopReponse(null)}/>
+      )}
+      {popRetours && isAdmin && !retour && !popReponse && !INCRUSTE && (
+        <PopupRetours info={popRetours}
+          onOuvrir={()=>{ const d = popRetours.dernier; setPopRetours(null); if (popRetours.n === 1 && d) goTo('ADMIN_RETOUR', { retourId: d.id }); else goTo('ADMIN_RETOURS'); }}
+          onFermer={()=>setPopRetours(null)}/>
+      )}
+      {user && !INCRUSTE && <GlobalBilanWatcher onReady={handleBilanReady}/>}
+      {bilanPopup && !onboardingDialogOpen && !INCRUSTE && <BilanReadyPopup data={bilanPopup} onUnderstood={handleBilanUnderstood}/>}
+      {secReport && !INCRUSTE && <SecReportPopup check={secReport} title="🛡️ Sécurité — dernier rapport" onClose={dismissSecReport}/>}
+      {!secReport && codeAuditDue && !INCRUSTE && <SecCodeReminderPopup lastAt={codeAuditDue.lastAt} onClose={()=>setCodeAuditDue(null)}/>}
+      {user && !isAuthScreen && !INCRUSTE && <ApproxConsoBanner screen={state.screen} userId={user.id}/>}
       <div className="chevrons-deco" aria-hidden="true">
         {['»','»','»','»'].map((c,i)=><span key={i}>{c}</span>)}
       </div>
@@ -21124,8 +21596,9 @@ function App() {
           </button>
         </StickyFooter>
       )}
-      {user && !isAuthScreen && state.screen!=='WELCOME' && state.screen!=='RESET_PASSWORD' && <InstallBanner/>}
+      {user && !isAuthScreen && state.screen!=='WELCOME' && state.screen!=='RESET_PASSWORD' && !INCRUSTE && <InstallBanner/>}
     </div>
+    </RetoursCtx.Provider>
   );
 }
 
