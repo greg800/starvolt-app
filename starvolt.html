@@ -10625,55 +10625,79 @@ function SpotLegende({ mode }) {
   );
 }
 
-// ─── SpotMensuelTable ─────────────────────────
-// Années en colonnes, mois en lignes, moyenne du mois en c€/kWh sur le nuancier
-// du prix horaire. Un mois dont il manque plus de 10 % des heures est marqué *.
-function SpotMensuelTable({ mensuel }) {
-  const annees = [...new Set(mensuel.map(r => r.annee))].sort((a,b)=>a-b);
+// ─── SpotHistoTable ───────────────────────────
+// Années en colonnes, périodes en lignes (semaine ISO ou mois), moyenne de la
+// période en c€/kWh sur le nuancier du prix horaire. Une période dont il manque
+// plus de 10 % des heures est marquée *. En semaines, la marge rappelle le mois
+// qui commence (position calculée sur une année de référence, à ± 1 semaine).
+function isoSemaine(d) {
+  const t = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+  const jour = t.getUTCDay() || 7;
+  t.setUTCDate(t.getUTCDate() + 4 - jour);
+  const y0 = new Date(Date.UTC(t.getUTCFullYear(), 0, 1));
+  return Math.ceil(((t - y0) / 86400000 + 1) / 7);
+}
+const MOIS_PAR_SEMAINE = (() => {
+  const m = {};
+  for (let i = 0; i < 12; i++) m[isoSemaine(new Date(2025, i, 1))] = MOIS_LABELS[i];
+  return m;
+})();
+
+// Simple fonction de rendu (pas un composant : évite un remontage à chaque rendu)
+function spotCaseTd(key, r, partiel, bold, compact) {
+  const bg = spotColor(r ? r.prix : null);
+  return (
+    <td key={key} style={{background:bg,color:spotTexteSombre(bg)?'#0a2a10':'white',textAlign:'center',borderRadius:3,padding:compact?'1px 0':'4px 0',fontWeight:bold?800:700,opacity:partiel?.8:1,whiteSpace:'nowrap'}}>
+      {r ? (r.prix*100).toFixed(1).replace('.',',') + (partiel ? '*' : '') : ''}
+    </td>
+  );
+}
+
+function SpotHistoTable({ data, granularite }) {
+  const hebdo = granularite === 'semaine';
+  const annees = [...new Set(data.map(r => r.annee))].sort((a,b)=>a-b);
   const cell = {};
-  mensuel.forEach(r => { cell[`${r.annee}_${r.mois}`] = r; });
-  const heuresMois = (a, m) => new Date(a, m, 0).getDate() * 24;
+  data.forEach(r => { cell[`${r.annee}_${hebdo ? r.semaine : r.mois}`] = r; });
+  const heuresAttendues = (a, p) => hebdo ? 168 : new Date(a, p, 0).getDate() * 24;
+  const periodes = hebdo ? Array.from({length:53}, (_, i) => i + 1) : Array.from({length:12}, (_, i) => i + 1);
   const annuel = {};
   annees.forEach(a => {
-    let s = 0, n = 0, h = 0;
-    for (let m = 1; m <= 12; m++) { const r = cell[`${a}_${m}`]; h += heuresMois(a, m); if (r) { s += r.prix * r.n; n += r.n; } }
-    annuel[a] = n ? { prix: s / n, partiel: n < h * 0.9 } : null;
+    let s = 0, n = 0;
+    periodes.forEach(p => { const r = cell[`${a}_${p}`]; if (r) { s += r.prix * r.n; n += r.n; } });
+    annuel[a] = n ? { prix: s / n, partiel: n < 8760 * 0.9 } : null;
   });
-  // Simple fonction de rendu (pas un composant : évite un remontage à chaque rendu)
-  const caseTd = (key, r, partiel, bold) => {
-    const bg = spotColor(r ? r.prix : null);
-    return (
-      <td key={key} style={{background:bg,color:spotTexteSombre(bg)?'#0a2a10':'white',textAlign:'center',borderRadius:3,padding:'4px 0',fontWeight:bold?800:700,opacity:partiel?.8:1,whiteSpace:'nowrap'}}>
-        {r ? (r.prix*100).toFixed(1).replace('.',',') + (partiel ? '*' : '') : ''}
-      </td>
-    );
-  };
+  const lblStyle = {color:'rgba(255,255,255,.75)',fontSize:hebdo?7.5:8.5,fontWeight:800,textAlign:'right',paddingRight:3,whiteSpace:'nowrap'};
   return (
     <div style={{overflowX:'auto',borderRadius:8,border:'1px solid rgba(255,255,255,.1)',background:'rgba(4,55,66,0.85)',padding:4}}>
-      <table style={{borderCollapse:'separate',borderSpacing:2,width:'100%',fontSize:9.5,fontFamily:'var(--font)'}}>
+      <table style={{borderCollapse:'separate',borderSpacing:hebdo?'2px 1px':2,width:'100%',fontSize:hebdo?8:9.5,fontFamily:'var(--font)'}}>
         <thead>
           <tr>
-            <th style={{width:26}}/>
+            {hebdo && <th style={{width:18}}/>}
+            <th style={{width:hebdo?18:26}}/>
             {annees.map(a => <th key={a} style={{color:'rgba(255,255,255,.75)',fontSize:9,fontWeight:800,padding:'2px 0'}}>{String(a).slice(2)}</th>)}
           </tr>
         </thead>
         <tbody>
-          {MOIS_LABELS.map((lbl, i) => (
-            <tr key={lbl}>
-              <td style={{color:'rgba(255,255,255,.75)',fontSize:8.5,fontWeight:800,textAlign:'right',paddingRight:3}}>{lbl}</td>
+          {periodes.map(p => (
+            <tr key={p}>
+              {hebdo && <td style={{...lblStyle,color:'var(--green)',paddingRight:2}}>{MOIS_PAR_SEMAINE[p] || ''}</td>}
+              <td style={lblStyle}>{hebdo ? `S${p}` : MOIS_LABELS[p-1]}</td>
               {annees.map(a => {
-                const r = cell[`${a}_${i+1}`];
-                return caseTd(a, r, r && r.n < heuresMois(a, i+1) * 0.9, false);
+                const r = cell[`${a}_${p}`];
+                return spotCaseTd(a, r, r && r.n < heuresAttendues(a, p) * 0.9, false, hebdo);
               })}
             </tr>
           ))}
           <tr>
-            <td style={{color:'var(--green)',fontSize:8.5,fontWeight:800,textAlign:'right',paddingRight:3,paddingTop:4}}>Année</td>
-            {annees.map(a => caseTd(a, annuel[a], annuel[a]?.partiel, true))}
+            {hebdo && <td/>}
+            <td style={{...lblStyle,color:'var(--green)',paddingTop:4}}>Année</td>
+            {annees.map(a => spotCaseTd(a, annuel[a], annuel[a]?.partiel, true, hebdo))}
           </tr>
         </tbody>
       </table>
-      <div style={{fontSize:8.5,color:'rgba(255,255,255,.35)',marginTop:4,paddingLeft:2}}>c€/kWh · moyenne des heures du mois · * période incomplète</div>
+      <div style={{fontSize:8.5,color:'rgba(255,255,255,.35)',marginTop:4,paddingLeft:2}}>
+        c€/kWh · moyenne des heures {hebdo ? 'de la semaine ISO' : 'du mois'} · * période incomplète
+      </div>
     </div>
   );
 }
@@ -10683,6 +10707,8 @@ function SpotPricesScreen({ onBack }) {
   const [meta,       setMeta]       = useState(null);
   const [spotAll,    setSpotAll]    = useState(null);
   const [mensuel,    setMensuel]    = useState(null);
+  const [hebdo,      setHebdo]      = useState(null);
+  const [granularite,setGranularite]= useState('semaine'); // 'semaine' | 'mois'
   const [loading,    setLoading]    = useState(true);
   const [importing,  setImporting]  = useState(false);
   const [importMsg,  setImportMsg]  = useState(null);
@@ -10692,15 +10718,17 @@ function SpotPricesScreen({ onBack }) {
   const fileRef = useRef(null);
 
   const loadData = useCallback(async () => {
-    const [{data:m}, {data:jsonRows}, {data:mens}, {data:nat}] = await Promise.all([
+    const [{data:m}, {data:jsonRows}, {data:mens}, {data:heb}, {data:nat}] = await Promise.all([
       sb.from('spot_metadata').select('*').eq('id',1).maybeSingle(),
       sb.rpc('get_spot_json'),
       sb.rpc('get_spot_mensuel'),
+      sb.rpc('get_spot_hebdo'),
       sb.from('parametres_nationaux').select('*').eq('id',1).maybeSingle(),
     ]);
     setMeta(m);
     setSpotAll(jsonRows && jsonRows.length > 0 ? jsonRows : null);
     setMensuel(mens && mens.length > 0 ? mens : null);
+    setHebdo(heb && heb.length > 0 ? heb : null);
     setNatParams(nat || null);
     setLoading(false);
   }, []);
@@ -10740,7 +10768,7 @@ function SpotPricesScreen({ onBack }) {
   };
 
   const fmtDate = (ts) => ts ? new Date(ts).toLocaleString('fr-FR',{day:'2-digit',month:'2-digit',year:'2-digit',hour:'2-digit',minute:'2-digit'}) : '—';
-  const titre = vue === 'mensuel' ? 'Historique par mois' : vue === 'horaire' ? '12 derniers mois heure par heure' : null;
+  const titre = vue === 'mensuel' ? 'Historique par semaine' : vue === 'horaire' ? '12 derniers mois heure par heure' : null;
 
   return (
     <>
@@ -10788,8 +10816,8 @@ function SpotPricesScreen({ onBack }) {
               <button className="sim-btn" onClick={()=>setVue('mensuel')} disabled={!mensuel} style={{opacity:mensuel?1:.5}}>
                 <span className="sim-icon">📅</span>
                 <div className="sim-text">
-                  <div className="sim-title">Vue historique par mois</div>
-                  <div className="sim-sub">{mensuel ? `Moyennes mensuelles ${mensuel[0].annee} → ${mensuel[mensuel.length-1].annee}` : 'Aucun historique importé'}</div>
+                  <div className="sim-title">Vue historique par semaine</div>
+                  <div className="sim-sub">{mensuel ? `Moyennes hebdomadaires ou mensuelles ${mensuel[0].annee} → ${mensuel[mensuel.length-1].annee}` : 'Aucun historique importé'}</div>
                 </div>
                 <span className="sim-arrow">→</span>
               </button>
@@ -10808,8 +10836,19 @@ function SpotPricesScreen({ onBack }) {
 
       {vue === 'mensuel' && mensuel && (
         <>
+          <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:6,flexWrap:'wrap'}}>
+            <div style={{display:'flex',background:'rgba(255,255,255,.06)',borderRadius:7,padding:2,gap:2}}>
+              {[['semaine','Semaine'],['mois','Mois']].map(([g,lbl])=>(
+                <button key={g} onClick={()=>setGranularite(g)} disabled={g==='semaine'&&!hebdo} style={{fontSize:11,fontWeight:700,border:'none',borderRadius:5,padding:'4px 10px',cursor:'pointer',fontFamily:'var(--font)',background:granularite===g?'rgba(125,217,64,.25)':'transparent',color:granularite===g?'#7dd940':'rgba(255,255,255,.45)'}}>
+                  {lbl}
+                </button>
+              ))}
+            </div>
+          </div>
           <SpotLegende mode="spot"/>
-          <SpotMensuelTable mensuel={mensuel}/>
+          {granularite === 'semaine' && hebdo
+            ? <SpotHistoTable data={hebdo} granularite="semaine"/>
+            : <SpotHistoTable data={mensuel} granularite="mois"/>}
         </>
       )}
 
