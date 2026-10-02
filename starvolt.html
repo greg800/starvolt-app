@@ -10130,7 +10130,7 @@ function ttcColor(prix) {
 const DAYS_IN_MONTH = [31,29,31,30,31,30,31,31,30,31,30,31];
 const MOIS_LABELS   = ['Jan','Fév','Mar','Avr','Mai','Jui','Jul','Aoû','Sep','Oct','Nov','Déc'];
 
-function SpotHeatmapCanvas({ spotAll, natParams, heatmapMode }) {
+function SpotHeatmapCanvas({ spotAll, natParams, heatmapMode, comparaisons = [] }) {
   const wrapperRef = useRef(null);
   const canvasRef  = useRef(null);
 
@@ -10164,6 +10164,11 @@ function SpotHeatmapCanvas({ spotAll, natParams, heatmapMode }) {
       }
     days.sort((a, b) => (a.annee - b.annee) || (a.mois - b.mois) || (a.jour - b.jour));
 
+    // Panneaux : le premier est la fenêtre courante, les suivants la même
+    // fenêtre décalée de k années (alignée jour pour jour).
+    const panneaux = [{ decal: 0, map: null }, ...comparaisons.map(c => ({ decal: c.decal, map: c.map }))];
+    const nP = panneaux.length;
+
     // L'année entière tient dans la hauteur visible : la hauteur de ligne est
     // fractionnaire (≈ 1,5 px sur un iPhone), le canvas est dessiné en pixels
     // physiques donc les lignes restent distinctes.
@@ -10172,12 +10177,16 @@ function SpotHeatmapCanvas({ spotAll, natParams, heatmapMode }) {
     const viewH   = window.visualViewport?.height || window.innerHeight;
     const availH  = Math.max(150, viewH - top - footerH - 4);
     const LBL_W = 40;
-    const HDR_H = 16;
-    const CELL_W = Math.max(4, Math.floor((containerW - LBL_W) / 24));
+    const GAP_P = nP > 1 ? 4 : 0;                       // espace entre panneaux
+    const HDR_H = nP > 1 ? 26 : 16;                     // titre du panneau + heures
+    const CELL_W = Math.max(2, Math.floor((containerW - LBL_W - GAP_P * (nP - 1)) / (24 * nP)));
+    const GAP_W  = CELL_W >= 4 ? 1 : 0;
+    const PAN_W  = 24 * CELL_W;
     const CELL_H = (availH - HDR_H) / days.length;
     const GAP_H  = CELL_H >= 3 ? 1 : 0;
-    const W = LBL_W + 24 * CELL_W;
+    const W = LBL_W + nP * PAN_W + GAP_P * (nP - 1);
     const H = Math.round(HDR_H + days.length * CELL_H);
+    const x0 = (p) => LBL_W + p * (PAN_W + GAP_P);
 
     canvas.width  = W * dpr;
     canvas.height = H * dpr;
@@ -10188,12 +10197,26 @@ function SpotHeatmapCanvas({ spotAll, natParams, heatmapMode }) {
     ctx.fillStyle = 'rgba(4,55,66,0.85)';
     ctx.fillRect(0, 0, W, H);
 
-    // Header heures — centré sur chaque colonne
-    ctx.fillStyle = 'rgba(255,255,255,0.5)';
-    ctx.font = 'bold 8px sans-serif';
-    ctx.textAlign = 'center';
-    for (let h = 0; h < 24; h += 3)
-      ctx.fillText(`${h}h`, LBL_W + h * CELL_W + CELL_W / 2, 12);
+    // En-tête : titre du panneau (si comparaison) puis heures, centrées sur
+    // leur colonne — le pas dépend de la place.
+    const yy = (a) => a ? String(a).slice(2) : '';
+    const premier = days[0], dernier = days[days.length - 1];
+    const pasH = CELL_W >= 6 ? 3 : CELL_W >= 3 ? 6 : 12;
+    panneaux.forEach((pan, p) => {
+      ctx.textAlign = 'center';
+      if (nP > 1) {
+        ctx.fillStyle = p === 0 ? '#7dd940' : 'rgba(255,255,255,0.75)';
+        ctx.font = 'bold 8px sans-serif';
+        const titre = premier.annee
+          ? `${MOIS_LABELS[premier.mois-1]} ${yy(premier.annee - pan.decal)} → ${MOIS_LABELS[dernier.mois-1]} ${yy(dernier.annee - pan.decal)}`
+          : (pan.decal ? `−${pan.decal} an${pan.decal > 1 ? 's' : ''}` : '12 derniers mois');
+        ctx.fillText(titre, x0(p) + PAN_W / 2, 9);
+      }
+      ctx.fillStyle = 'rgba(255,255,255,0.5)';
+      ctx.font = 'bold 8px sans-serif';
+      for (let h = 0; h < 24; h += pasH)
+        ctx.fillText(`${h}h`, x0(p) + h * CELL_W + CELL_W / 2, HDR_H - 4);
+    });
 
     // Label d'un bloc (mois + année) centré verticalement ; un bloc trop court
     // (ex. : le seul 1er octobre de l'année en cours) n'a pas la place.
@@ -10203,8 +10226,14 @@ function SpotHeatmapCanvas({ spotAll, natParams, heatmapMode }) {
       ctx.fillStyle = 'rgba(255,255,255,0.75)';
       ctx.font = 'bold 8px sans-serif';
       ctx.textAlign = 'right';
-      const an = day.annee ? ` ${String(day.annee).slice(2)}` : '';
+      const an = day.annee ? ` ${yy(day.annee)}` : '';
       ctx.fillText(MOIS_LABELS[day.mois-1] + an, LBL_W - 3, cy);
+    };
+
+    const couleur = (prix, mois, h) => {
+      let p = prix;
+      if (isTTC && prix !== null && prix !== undefined) p = calcPrixTTC(prix, mois, h, natParams, hcWindows);
+      return isTTC ? ttcColor(p) : spotColor(p);
     };
 
     let prev = null, bStartRow = 0;
@@ -10214,20 +10243,21 @@ function SpotHeatmapCanvas({ spotAll, natParams, heatmapMode }) {
         if (prev) {
           drawBlockLabel(prev, bStartRow, di);
           ctx.fillStyle = 'rgba(255,255,255,0.18)';
-          ctx.fillRect(LBL_W, y, 24 * CELL_W, 1);
+          ctx.fillRect(LBL_W, y, W - LBL_W, 1);
         }
         bStartRow = di;
         prev = day;
       }
-      day.prices.forEach((prix, h) => {
-        let p = prix;
-        if (isTTC && prix !== null) p = calcPrixTTC(prix, day.mois, h, natParams, hcWindows);
-        ctx.fillStyle = isTTC ? ttcColor(p) : spotColor(p);
-        ctx.fillRect(LBL_W + h * CELL_W, y, CELL_W - 1, CELL_H - GAP_H);
+      panneaux.forEach((pan, p) => {
+        for (let h = 0; h < 24; h++) {
+          const prix = p === 0 ? day.prices[h] : (pan.map[`${day.mois}_${day.jour}_${h}`] ?? null);
+          ctx.fillStyle = couleur(prix, day.mois, h);
+          ctx.fillRect(x0(p) + h * CELL_W, y, CELL_W - GAP_W, CELL_H - GAP_H);
+        }
       });
     });
     if (prev) drawBlockLabel(prev, bStartRow, days.length);
-  }, [spotAll, natParams, heatmapMode, hcWindows]);
+  }, [spotAll, natParams, heatmapMode, hcWindows, comparaisons]);
 
   useEffect(() => {
     if (!wrapperRef.current) return;
@@ -10607,6 +10637,12 @@ function parseSpotHoraire(texte) {
 }
 
 const fmtJourIso = (s) => s ? `${s.slice(8,10)}/${s.slice(5,7)}/${s.slice(2,4)}` : '—';
+// 'AAAA-MM-JJ' décalé de n années (le 29 février retombe au 28)
+function decalerAnnees(iso, n) {
+  const a = parseInt(iso.slice(0,4)) + n, m = iso.slice(5,7), j = iso.slice(8,10);
+  const jj = (m === '02' && j === '29' && !(a % 4 === 0 && (a % 100 !== 0 || a % 400 === 0))) ? '28' : j;
+  return `${a}-${m}-${jj}`;
+}
 
 // Texte foncé sur les cases claires du nuancier, blanc sur les foncées
 function spotTexteSombre(hex) {
@@ -10653,11 +10689,30 @@ const MOIS_PAR_SEMAINE = (() => {
   return m;
 })();
 
+// Hauteur restant entre le haut d'un élément et le pied de page fixe, pour
+// qu'un tableau ou un canvas tienne dans l'écran sans défilement.
+function useHauteurDisponible(ref, marge = 4) {
+  const [h, setH] = useState(null);
+  useEffect(() => {
+    const mesure = () => {
+      if (!ref.current) return;
+      const top     = ref.current.getBoundingClientRect().top;
+      const footerH = document.querySelector('.sticky-footer')?.offsetHeight || 90;
+      const viewH   = window.visualViewport?.height || window.innerHeight;
+      setH(Math.max(150, viewH - top - footerH - marge));
+    };
+    mesure();
+    window.addEventListener('resize', mesure);
+    return () => window.removeEventListener('resize', mesure);
+  }, [ref, marge]);
+  return h;
+}
+
 // Simple fonction de rendu (pas un composant : évite un remontage à chaque rendu)
 function spotCaseTd(key, r, partiel, bold, compact) {
   const bg = spotColor(r ? r.prix : null);
   return (
-    <td key={key} style={{background:bg,color:spotTexteSombre(bg)?'#0a2a10':'white',textAlign:'center',borderRadius:3,padding:compact?'1px 0':'4px 0',fontWeight:bold?800:700,opacity:partiel?.8:1,whiteSpace:'nowrap'}}>
+    <td key={key} style={{background:bg,color:spotTexteSombre(bg)?'#0a2a10':'white',textAlign:'center',borderRadius:3,padding:0,lineHeight:1,fontWeight:bold?800:700,opacity:partiel?.8:1,whiteSpace:'nowrap'}}>
       {r ? (r.prix*100).toFixed(compact ? 0 : 1).replace('.',',') + (partiel ? '*' : '') : ''}
     </td>
   );
@@ -10665,6 +10720,8 @@ function spotCaseTd(key, r, partiel, bold, compact) {
 
 function SpotHistoTable({ data, granularite }) {
   const hebdo = granularite === 'semaine';
+  const wrapRef = useRef(null);
+  const availH  = useHauteurDisponible(wrapRef);
   const annees = [...new Set(data.map(r => r.annee))].sort((a,b)=>a-b);
   const cell = {};
   data.forEach(r => { cell[`${r.annee}_${hebdo ? r.semaine : r.mois}`] = r; });
@@ -10676,20 +10733,27 @@ function SpotHistoTable({ data, granularite }) {
     periodes.forEach(p => { const r = cell[`${a}_${p}`]; if (r) { s += r.prix * r.n; n += r.n; } });
     annuel[a] = n ? { prix: s / n, partiel: n < 8760 * 0.9 } : null;
   });
-  const lblStyle = {color:'rgba(255,255,255,.75)',fontSize:hebdo?7.5:8.5,fontWeight:800,textAlign:'right',paddingRight:3,whiteSpace:'nowrap'};
+  // Hauteur de ligne : la hauteur disponible partagée entre l'en-tête, les
+  // périodes et la ligne Année (note de bas de tableau et marges déduites),
+  // plafonnée pour que la vue mois ne s'étire pas en cases géantes.
+  const nLignes = periodes.length + 2;
+  const espace  = hebdo ? 1 : 2;
+  const rowH    = availH ? Math.min(hebdo ? 16 : 26, Math.max(7, (availH - 30) / nLignes - espace)) : (hebdo ? 11 : 20);
+  const fontPx  = Math.min(hebdo ? 8.5 : 9.5, Math.max(6.5, rowH * 0.72));
+  const lblStyle = {color:'rgba(255,255,255,.75)',fontSize:Math.min(fontPx, hebdo?7.5:8.5),fontWeight:800,textAlign:'right',paddingRight:3,whiteSpace:'nowrap',lineHeight:1};
   return (
-    <div style={{overflowX:'auto',borderRadius:8,border:'1px solid rgba(255,255,255,.1)',background:'rgba(4,55,66,0.85)',padding:4}}>
-      <table style={{borderCollapse:'separate',borderSpacing:hebdo?'2px 1px':2,width:'100%',fontSize:hebdo?8:9.5,fontFamily:'var(--font)'}}>
+    <div ref={wrapRef} style={{overflowX:'auto',borderRadius:8,border:'1px solid rgba(255,255,255,.1)',background:'rgba(4,55,66,0.85)',padding:4}}>
+      <table style={{borderCollapse:'separate',borderSpacing:`2px ${espace}px`,width:'100%',fontSize:fontPx,fontFamily:'var(--font)'}}>
         <thead>
-          <tr>
+          <tr style={{height:rowH}}>
             {hebdo && <th style={{width:18}}/>}
             <th style={{width:hebdo?18:26}}/>
-            {annees.map(a => <th key={a} style={{color:'rgba(255,255,255,.75)',fontSize:9,fontWeight:800,padding:'2px 0'}}>{String(a).slice(2)}</th>)}
+            {annees.map(a => <th key={a} style={{color:'rgba(255,255,255,.75)',fontSize:Math.min(9,fontPx+0.5),fontWeight:800,padding:0,lineHeight:1}}>{String(a).slice(2)}</th>)}
           </tr>
         </thead>
         <tbody>
           {periodes.map(p => (
-            <tr key={p}>
+            <tr key={p} style={{height:rowH}}>
               {hebdo && <td style={{...lblStyle,color:'var(--green)',paddingRight:2}}>{MOIS_PAR_SEMAINE[p] || ''}</td>}
               <td style={lblStyle}>{hebdo ? `S${p}` : MOIS_LABELS[p-1]}</td>
               {annees.map(a => {
@@ -10698,14 +10762,14 @@ function SpotHistoTable({ data, granularite }) {
               })}
             </tr>
           ))}
-          <tr>
+          <tr style={{height:rowH}}>
             {hebdo && <td/>}
-            <td style={{...lblStyle,color:'var(--green)',paddingTop:4}}>Année</td>
+            <td style={{...lblStyle,color:'var(--green)'}}>Année</td>
             {annees.map(a => spotCaseTd(a, annuel[a], annuel[a]?.partiel, true, hebdo))}
           </tr>
         </tbody>
       </table>
-      <div style={{fontSize:8.5,color:'rgba(255,255,255,.35)',marginTop:4,paddingLeft:2}}>
+      <div style={{fontSize:8,color:'rgba(255,255,255,.35)',marginTop:3,paddingLeft:2,lineHeight:1}}>
         c€/kWh · moyenne des heures {hebdo ? 'de la semaine ISO' : 'du mois'} · * période incomplète
       </div>
     </div>
@@ -10725,7 +10789,36 @@ function SpotPricesScreen({ onBack }) {
   const [natParams,  setNatParams]  = useState(null);
   const [heatmapMode,setHeatmapMode]= useState('spot'); // 'spot' | 'ttc'
   const [vue,        setVue]        = useState('menu'); // 'menu' | 'mensuel' | 'horaire'
+  const [compSel,    setCompSel]    = useState([]);     // décalages (années) comparés, 3 max
+  const [compData,   setCompData]   = useState({});     // decal → { m_j_h: prix }
   const fileRef = useRef(null);
+
+  // Fenêtres antérieures comparables : la fenêtre courante décalée de k années,
+  // tant qu'elle reste couverte par l'historique.
+  const decalsDispo = useMemo(() => {
+    if (!meta?.fenetre_debut || !meta?.periode_debut) return [];
+    const out = [];
+    for (let k = 1; k <= 12; k++) {
+      const deb = decalerAnnees(meta.fenetre_debut, -k);
+      if (deb < meta.periode_debut) break;
+      out.push(k);
+    }
+    return out;
+  }, [meta]);
+
+  const toggleComp = async (k) => {
+    if (compSel.includes(k)) { setCompSel(compSel.filter(x => x !== k)); return; }
+    if (compSel.length >= 3) return;
+    if (!compData[k]) {
+      const { data, error } = await sb.rpc('get_spot_horaire_periode', { p_debut: decalerAnnees(meta.fenetre_debut, -k), p_fin: decalerAnnees(meta.fenetre_fin, -k) });
+      if (error || !data) { window.logAppError?.('spot_comparaison', error || new Error('fenêtre vide')); return; }
+      const map = {};
+      data.forEach(r => { map[`${r.m}_${r.j}_${r.h}`] = r.p; });
+      setCompData(prev => ({ ...prev, [k]: map }));
+    }
+    setCompSel([...compSel, k].sort((a, b) => a - b));
+  };
+  const comparaisons = useMemo(() => compSel.filter(k => compData[k]).map(k => ({ decal: k, map: compData[k] })), [compSel, compData]);
 
   const loadData = useCallback(async () => {
     const [{data:m}, {data:jsonRows}, {data:mens}, {data:heb}, {data:nat}] = await Promise.all([
@@ -10880,8 +10973,23 @@ function SpotPricesScreen({ onBack }) {
               </span>
             )}
           </div>
+          {decalsDispo.length > 0 && (
+            <div style={{display:'flex',alignItems:'center',gap:4,marginBottom:6,overflowX:'auto',whiteSpace:'nowrap',paddingBottom:2}}>
+              <span style={{fontSize:9,color:'rgba(255,255,255,.45)',fontWeight:700,flexShrink:0}}>Comparer :</span>
+              {decalsDispo.map(k => {
+                const on = compSel.includes(k);
+                const plein = !on && compSel.length >= 3;
+                const a0 = parseInt(meta.fenetre_debut.slice(0,4)) - k, a1 = parseInt(meta.fenetre_fin.slice(0,4)) - k;
+                return (
+                  <button key={k} onClick={()=>toggleComp(k)} disabled={plein} style={{flexShrink:0,fontSize:9.5,fontWeight:700,border:'1px solid',borderColor:on?'rgba(125,217,64,.6)':'rgba(255,255,255,.15)',borderRadius:6,padding:'2px 7px',cursor:plein?'default':'pointer',fontFamily:'var(--font)',background:on?'rgba(125,217,64,.22)':'rgba(255,255,255,.05)',color:on?'#7dd940':plein?'rgba(255,255,255,.25)':'rgba(255,255,255,.6)'}}>
+                    {a0 === a1 ? a0 : `${String(a0).slice(2)}-${String(a1).slice(2)}`}
+                  </button>
+                );
+              })}
+            </div>
+          )}
           <SpotLegende mode={heatmapMode === 'ttc' && natParams ? 'ttc' : 'spot'}/>
-          <SpotHeatmapCanvas spotAll={spotAll} natParams={natParams} heatmapMode={heatmapMode}/>
+          <SpotHeatmapCanvas spotAll={spotAll} natParams={natParams} heatmapMode={heatmapMode} comparaisons={comparaisons}/>
         </>
       )}
     </div>
