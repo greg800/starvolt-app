@@ -10591,7 +10591,7 @@ function parseSpotHoraire(texte) {
     const iso = ts.replace(' ', 'T') + (/[zZ]$|[+-]\d\d:?\d\d$/.test(ts) ? '' : 'Z');
     const d = new Date(iso);
     if (isNaN(d.getTime())) continue;
-    out.push({ ts_utc: d.toISOString(), prix: +(prix * facteur).toFixed(6) });
+    out.push({ ts_utc: d.toISOString(), prix: +(prix * facteur).toFixed(6), interpole: false });
   }
   return out;
 }
@@ -10707,8 +10707,9 @@ function SpotPricesScreen({ onBack }) {
 
   useEffect(() => { loadData(); }, [loadData]);
 
-  // Import : l'historique horaire est complété (upsert sur l'heure UTC), puis
-  // les 12 mois glissants sont reconstruits côté serveur.
+  // Import : l'historique horaire est complété (upsert sur l'heure UTC ; une
+  // vraie valeur écrase une heure interpolée), puis le serveur comble les trous
+  // restants par interpolation linéaire et reconstruit les 12 mois glissants.
   const handleImport = async (e) => {
     const file = e.target.files?.[0];
     e.target.value = '';
@@ -10728,7 +10729,8 @@ function SpotPricesScreen({ onBack }) {
       const { data, error } = await sb.rpc('rebuild_prix_spot_glissant');
       if (error) throw error;
       await sb.from('spot_metadata').update({ source_file: file.name }).eq('id', 1);
-      setImportMsg(`✓ ${records.length.toLocaleString('fr-FR')} heures importées · 12 mois glissants ${fmtJourIso(data?.fenetre_debut)} → ${fmtJourIso(data?.fenetre_fin)}`);
+      const interp = data?.interpolees ? ` · ${data.interpolees} h interpolées` : '';
+      setImportMsg(`✓ ${records.length.toLocaleString('fr-FR')} heures importées${interp} · 12 mois glissants ${fmtJourIso(data?.fenetre_debut)} → ${fmtJourIso(data?.fenetre_fin)}`);
       await loadData();
     } catch(err) {
       setImportMsg('Erreur : ' + (err.message || String(err)));

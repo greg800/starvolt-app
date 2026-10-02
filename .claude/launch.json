@@ -24,6 +24,16 @@
       ],
       "port": 3056,
       "autoPort": false
+    },
+    {
+      "name": "comwatt",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "/Users/gregorylamotte/claude code/comwatt-app/.claude/dev-server.py",
+        "3057"
+      ],
+      "port": 3057,
+      "autoPort": false
     }
   ]
 }
