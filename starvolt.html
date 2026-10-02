@@ -10164,12 +10164,20 @@ function SpotHeatmapCanvas({ spotAll, natParams, heatmapMode }) {
       }
     days.sort((a, b) => (a.annee - b.annee) || (a.mois - b.mois) || (a.jour - b.jour));
 
+    // L'année entière tient dans la hauteur visible : la hauteur de ligne est
+    // fractionnaire (≈ 1,5 px sur un iPhone), le canvas est dessiné en pixels
+    // physiques donc les lignes restent distinctes.
+    const top     = wrapperRef.current ? wrapperRef.current.getBoundingClientRect().top : 0;
+    const footerH = document.querySelector('.sticky-footer')?.offsetHeight || 90;
+    const viewH   = window.visualViewport?.height || window.innerHeight;
+    const availH  = Math.max(150, viewH - top - footerH - 4);
     const LBL_W = 40;
     const HDR_H = 16;
     const CELL_W = Math.max(4, Math.floor((containerW - LBL_W) / 24));
-    const CELL_H = 3;
+    const CELL_H = (availH - HDR_H) / days.length;
+    const GAP_H  = CELL_H >= 3 ? 1 : 0;
     const W = LBL_W + 24 * CELL_W;
-    const H = HDR_H + days.length * CELL_H;
+    const H = Math.round(HDR_H + days.length * CELL_H);
 
     canvas.width  = W * dpr;
     canvas.height = H * dpr;
@@ -10215,7 +10223,7 @@ function SpotHeatmapCanvas({ spotAll, natParams, heatmapMode }) {
         let p = prix;
         if (isTTC && prix !== null) p = calcPrixTTC(prix, day.mois, h, natParams, hcWindows);
         ctx.fillStyle = isTTC ? ttcColor(p) : spotColor(p);
-        ctx.fillRect(LBL_W + h * CELL_W, y, CELL_W - 1, CELL_H - 1);
+        ctx.fillRect(LBL_W + h * CELL_W, y, CELL_W - 1, CELL_H - GAP_H);
       });
     });
     if (prev) drawBlockLabel(prev, bStartRow, days.length);
@@ -10227,11 +10235,13 @@ function SpotHeatmapCanvas({ spotAll, natParams, heatmapMode }) {
       draw(Math.floor(entries[0].contentRect.width))
     );
     ro.observe(wrapperRef.current);
-    return () => ro.disconnect();
+    const onResize = () => wrapperRef.current && draw(Math.floor(wrapperRef.current.getBoundingClientRect().width));
+    window.addEventListener('resize', onResize);
+    return () => { ro.disconnect(); window.removeEventListener('resize', onResize); };
   }, [draw]);
 
   return (
-    <div ref={wrapperRef} style={{width:'100%',overflowY:'auto',maxHeight:'calc(100vh - 230px)',borderRadius:8,border:'1px solid rgba(255,255,255,.1)'}}>
+    <div ref={wrapperRef} style={{width:'100%',borderRadius:8,border:'1px solid rgba(255,255,255,.1)',overflow:'hidden'}}>
       <canvas ref={canvasRef} style={{display:'block'}}/>
     </div>
   );
@@ -10648,7 +10658,7 @@ function spotCaseTd(key, r, partiel, bold, compact) {
   const bg = spotColor(r ? r.prix : null);
   return (
     <td key={key} style={{background:bg,color:spotTexteSombre(bg)?'#0a2a10':'white',textAlign:'center',borderRadius:3,padding:compact?'1px 0':'4px 0',fontWeight:bold?800:700,opacity:partiel?.8:1,whiteSpace:'nowrap'}}>
-      {r ? (r.prix*100).toFixed(1).replace('.',',') + (partiel ? '*' : '') : ''}
+      {r ? (r.prix*100).toFixed(compact ? 0 : 1).replace('.',',') + (partiel ? '*' : '') : ''}
     </td>
   );
 }
