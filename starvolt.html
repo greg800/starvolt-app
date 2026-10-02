@@ -10261,9 +10261,12 @@ function SpotHeatmapCanvas({ spotAll, natParams, heatmapMode, comparaisons = [] 
 
   useEffect(() => {
     if (!wrapperRef.current) return;
-    const ro = new ResizeObserver(entries =>
-      draw(Math.floor(entries[0].contentRect.width))
-    );
+    // rAF : la mesure de la hauteur disponible attend que la mise en page soit
+    // stabilisée (légende passée sur deux lignes, chips ajoutées…).
+    const ro = new ResizeObserver(entries => {
+      const w = Math.floor(entries[0].contentRect.width);
+      requestAnimationFrame(() => draw(w));
+    });
     ro.observe(wrapperRef.current);
     const onResize = () => wrapperRef.current && draw(Math.floor(wrapperRef.current.getBoundingClientRect().width));
     window.addEventListener('resize', onResize);
@@ -10671,23 +10674,177 @@ function SpotLegende({ mode }) {
   );
 }
 
-// ─── SpotHistoTable ───────────────────────────
-// Années en colonnes, périodes en lignes (semaine ISO ou mois), moyenne de la
-// période en c€/kWh sur le nuancier du prix horaire. Une période dont il manque
-// plus de 10 % des heures est marquée *. En semaines, la marge rappelle le mois
-// qui commence (position calculée sur une année de référence, à ± 1 semaine).
-function isoSemaine(d) {
-  const t = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+// ─── Historique : agrégation, échelles, optimiseur batterie ──────────────────
+// Une seule série journalière (get_spot_journalier) est agrégée côté client en
+// mois, semaines ISO ou jours, pour l'indicateur choisi :
+//   prix    = moyenne horaire HT (€/kWh), pondérée par les heures connues
+//   spread  = max − min du jour (€/kWh), moyenné sur les jours de la période
+//   gain    = recette d'arbitrage d'une batterie (€ HT), sommée sur la période
+const PALETTE_SPOT  = ['#c8f0c8','#90d890','#58c058','#28a028','#b0c820','#d8b000','#e07818','#d84010','#b01010','#600010'];
+const SEUILS_PRIX   = [0.03, 0.06, 0.09, 0.12, 0.15, 0.18, 0.20, 0.22, 0.26];   // €/kWh, = spotColor
+const SEUILS_SPREAD = [0.02, 0.04, 0.06, 0.08, 0.10, 0.13, 0.16, 0.20, 0.30];   // €/kWh
+const INDICATEURS = [
+  { id:'prix',   label:'Prix moyen HT',              unite:'c€/kWh' },
+  { id:'spread', label:'Spread journalier HT',       unite:'c€/kWh' },
+  { id:'gain',   label:'Gains batterie (arbitrage)', unite:'€' },
+];
+
+function echelleCouleur(v, seuils) {
+  if (v === null || v === undefined || isNaN(v)) return 'rgba(255,255,255,.08)';
+  for (let i = 0; i < seuils.length; i++) if (v < seuils[i]) return PALETTE_SPOT[i];
+  return PALETTE_SPOT[PALETTE_SPOT.length - 1];
+}
+// Seuils linéaires jusqu'au 95e centile des valeurs affichées (gains : dépend
+// de la batterie et de la granularité, impossible à fixer d'avance).
+function seuilsAuto(valeurs) {
+  const v = valeurs.filter(x => x !== null && x !== undefined && !isNaN(x)).sort((a, b) => a - b);
+  if (!v.length) return [1,2,3,4,5,6,7,8,9];
+  const p95 = v[Math.min(v.length - 1, Math.floor(v.length * 0.95))];
+  const max = p95 > 0 ? p95 : (v[v.length - 1] || 1);
+  return Array.from({ length: 9 }, (_, i) => max * (i + 1) / 10);
+}
+function seuilsIndicateur(ind, rows) {
+  if (ind === 'prix')   return SEUILS_PRIX;
+  if (ind === 'spread') return SEUILS_SPREAD;
+  return seuilsAuto(rows.map(r => r.gain));
+}
+// Valeur d'une cellule en unité d'affichage (c€/kWh ou €)
+function valeurAffichee(ind, r) {
+  if (!r) return null;
+  const v = ind === 'prix' ? r.prix : ind === 'spread' ? r.spread : r.gain;
+  if (v === null || v === undefined) return null;
+  return ind === 'gain' ? v : v * 100;
+}
+function fmtValeur(ind, v, decimales) {
+  if (v === null || v === undefined) return '';
+  return ind === 'gain' ? Math.round(v).toLocaleString('fr-FR') : v.toFixed(decimales).replace('.', ',');
+}
+
+// Semaine ISO : (année ISO, numéro) — la semaine 1 contient le 4 janvier.
+function isoAnneeSemaine(a, m, j) {
+  const t = new Date(Date.UTC(a, m - 1, j));
   const jour = t.getUTCDay() || 7;
   t.setUTCDate(t.getUTCDate() + 4 - jour);
-  const y0 = new Date(Date.UTC(t.getUTCFullYear(), 0, 1));
-  return Math.ceil(((t - y0) / 86400000 + 1) / 7);
+  const ia = t.getUTCFullYear();
+  const y0 = new Date(Date.UTC(ia, 0, 1));
+  return [ia, Math.ceil(((t - y0) / 86400000 + 1) / 7)];
 }
 const MOIS_PAR_SEMAINE = (() => {
   const m = {};
-  for (let i = 0; i < 12; i++) m[isoSemaine(new Date(2025, i, 1))] = MOIS_LABELS[i];
+  for (let i = 0; i < 12; i++) m[isoAnneeSemaine(2025, i + 1, 1)[1]] = MOIS_LABELS[i];
   return m;
 })();
+
+// Clé (annee, periode) d'un jour pour une granularité
+function clePeriode(gran, a, m, j) {
+  if (gran === 'mois') return [a, m];
+  if (gran === 'jour') return [a, dayIdx(m, j) + 1];           // 1..366, calendrier bissextile
+  return isoAnneeSemaine(a, m, j);
+}
+const partsIso = d => [+d.slice(0, 4), +d.slice(5, 7), +d.slice(8, 10)];
+
+function agregerSpotJours(jours, gran) {
+  const acc = {};
+  jours.forEach(x => {
+    const [a, m, j] = partsIso(x.d);
+    const [annee, periode] = clePeriode(gran, a, m, j);
+    const k = `${annee}_${periode}`;
+    const r = acc[k] || (acc[k] = { annee, periode, mois: m, jour: j, sp: 0, n: 0, ss: 0, nj: 0, gain: null, jours: [] });
+    r.sp += x.p * x.n; r.n += x.n; r.ss += x.s; r.nj += 1; r.jours.push(x.d);
+    if (x.g !== null && x.g !== undefined) r.gain = (r.gain || 0) + x.g;
+  });
+  return Object.values(acc).map(r => ({
+    annee: r.annee, periode: r.periode, mois: r.mois, jour: r.jour, jours: r.jours,
+    prix: r.n ? r.sp / r.n : null, spread: r.nj ? r.ss / r.nj : null, gain: r.gain, n: r.n, nj: r.nj,
+  }));
+}
+function heuresAttendues(gran, annee, periode) {
+  if (gran === 'mois') return new Date(annee, periode, 0).getDate() * 24;
+  if (gran === 'jour') return 24;
+  return 168;
+}
+
+// Optimiseur d'arbitrage sur une journée : programmation dynamique sur l'état
+// de charge (N paliers) et l'énergie déjà déchargée (plafond cycles × capacité).
+// Le rendement aller-retour est réparti en √η à la charge et √η à la décharge :
+// à 81 %, 10 kWh stockés coûtent 11,1 kWh achetés et rendent 9 kWh vendus.
+// La puissance borne les kWh échangés avec le réseau à chaque heure. Un prix
+// négatif rémunère la charge : l'algorithme en profite, comme le ferait un
+// agrégateur. Retour : gain € HT et e[24] = kWh côté réseau (+ achat, − vente).
+function optimiserBatterieJour(prix, { capacite, puissance, cycles, rendement }) {
+  const N = 20, step = capacite / N, r = Math.sqrt(rendement);
+  const maxC = Math.max(1, Math.min(N, Math.floor(puissance * r / step + 1e-9)));
+  const maxD = Math.max(1, Math.min(N, Math.floor(puissance / (r * step) + 1e-9)));
+  const D = Math.max(1, Math.floor(cycles * N + 1e-9));
+  const L = D + 1, S = (N + 1) * L;
+  let dp = new Float64Array(S).fill(-Infinity); dp[0] = 0;
+  const choix = new Array(24);
+  for (let h = 0; h < 24; h++) {
+    const p = prix[h];
+    const nd = new Float64Array(S).fill(-Infinity);
+    const ch = new Int8Array(S);
+    for (let soc = 0; soc <= N; soc++) for (let dis = 0; dis <= D; dis++) {
+      const v = dp[soc * L + dis];
+      if (v === -Infinity) continue;
+      let idx = soc * L + dis;
+      if (v > nd[idx]) { nd[idx] = v; ch[idx] = 0; }
+      const cMax = Math.min(maxC, N - soc);
+      for (let c = 1; c <= cMax; c++) {
+        const val = v - c * step / r * p; idx = (soc + c) * L + dis;
+        if (val > nd[idx]) { nd[idx] = val; ch[idx] = c; }
+      }
+      const dMax = Math.min(maxD, soc, D - dis);
+      for (let d = 1; d <= dMax; d++) {
+        const val = v + d * step * r * p; idx = (soc - d) * L + dis + d;
+        if (val > nd[idx]) { nd[idx] = val; ch[idx] = -d; }
+      }
+    }
+    dp = nd; choix[h] = ch;
+  }
+  let best = -Infinity, bi = 0;
+  for (let i = 0; i < S; i++) if (dp[i] > best) { best = dp[i]; bi = i; }
+  const e = new Array(24).fill(0);
+  let soc = Math.floor(bi / L), dis = bi % L;
+  for (let h = 23; h >= 0; h--) {
+    const a = choix[h][soc * L + dis];
+    if (a > 0)      { e[h] = a * step / r;  soc -= a; }
+    else if (a < 0) { e[h] = a * step * r;  soc -= a; dis += a; }
+  }
+  return { gain: best, e };
+}
+// Heure locale absente (passage à l'heure d'été) : moyenne des voisines
+function completerPrix24(p) {
+  const out = p.slice();
+  for (let h = 0; h < 24; h++) if (out[h] === null || out[h] === undefined) {
+    const g = out[(h + 23) % 24], d = out[(h + 1) % 24];
+    out[h] = (g ?? d ?? 0) === null ? 0 : (g !== null && g !== undefined && d !== null && d !== undefined) ? (g + d) / 2 : (g ?? d ?? 0);
+  }
+  return out;
+}
+
+// Calcule et stocke les gains de tous les jours de l'historique (quelques
+// secondes pour 4 300 jours ; cède la main au navigateur tous les 150 jours).
+async function calculerGainsBatterie(params, onProgress) {
+  const { data, error } = await sb.rpc('get_spot_jours_horaires');
+  if (error) throw error;
+  if (!data?.length) throw new Error('aucune journée dans l\'historique');
+  const rows = [];
+  for (let i = 0; i < data.length; i++) {
+    const p = completerPrix24(data[i].p);
+    const { gain, e } = optimiserBatterieJour(p, params);
+    rows.push({ jour: data[i].d, gain: +gain.toFixed(4), plan: { p, e: e.map(x => +x.toFixed(3)) } });
+    if (i % 150 === 0) { onProgress?.(`Optimisation ${i.toLocaleString('fr-FR')} / ${data.length.toLocaleString('fr-FR')} jours…`); await new Promise(r => setTimeout(r, 0)); }
+  }
+  const CHUNK = 400;
+  for (let i = 0; i < rows.length; i += CHUNK) {
+    onProgress?.(`Enregistrement ${Math.min(i + CHUNK, rows.length).toLocaleString('fr-FR')} / ${rows.length.toLocaleString('fr-FR')}…`);
+    const { error: e2 } = await sb.from('spot_batterie_jours').upsert(rows.slice(i, i + CHUNK), { onConflict: 'jour' });
+    if (e2) throw e2;
+  }
+  const { error: e3 } = await sb.from('spot_batterie_params').upsert({ id: 1, capacite_kwh: params.capacite, puissance_kw: params.puissance, cycles_jour: params.cycles, rendement_ar: params.rendement, calcule_le: new Date().toISOString() }, { onConflict: 'id' });
+  if (e3) throw e3;
+  return rows.length;
+}
 
 // Hauteur restant entre le haut d'un élément et le pied de page fixe, pour
 // qu'un tableau ou un canvas tienne dans l'écran sans défilement.
@@ -10708,39 +10865,62 @@ function useHauteurDisponible(ref, marge = 4) {
   return h;
 }
 
-// Simple fonction de rendu (pas un composant : évite un remontage à chaque rendu)
-function spotCaseTd(key, r, partiel, bold, compact) {
-  const bg = spotColor(r ? r.prix : null);
+// ─── EchelleLegende ───────────────────────────
+function EchelleLegende({ seuils, unite, facteur = 1, decimales = 0 }) {
+  const f = v => (v * facteur).toFixed(decimales).replace('.', ',');
+  const items = seuils.map((s, i) => i === 0 ? `<${f(s)}` : `${f(seuils[i-1])}-${f(s)}`);
+  items.push(`>${f(seuils[seuils.length - 1])}`);
   return (
-    <td key={key} style={{background:bg,color:spotTexteSombre(bg)?'#0a2a10':'white',textAlign:'center',borderRadius:3,padding:0,lineHeight:1,fontWeight:bold?800:700,opacity:partiel?.8:1,whiteSpace:'nowrap'}}>
-      {r ? (r.prix*100).toFixed(compact ? 0 : 1).replace('.',',') + (partiel ? '*' : '') : ''}
-    </td>
+    <div style={{display:'flex',gap:5,flexWrap:'wrap',marginBottom:5}}>
+      {items.map((lbl, i) => (
+        <div key={i} style={{display:'flex',alignItems:'center',gap:2,fontSize:8.5,color:'rgba(255,255,255,.55)',fontWeight:700}}>
+          <div style={{width:9,height:9,borderRadius:2,background:PALETTE_SPOT[i],flexShrink:0}}/>
+          {lbl}
+        </div>
+      ))}
+      <span style={{fontSize:8.5,color:'rgba(255,255,255,.3)',alignSelf:'center'}}>{unite}</span>
+    </div>
   );
 }
 
-function SpotHistoTable({ data, granularite }) {
+// ─── SpotHistoTable (mois, semaine) ───────────
+// Années en colonnes, périodes en lignes. Simple fonction de rendu pour la
+// cellule (pas un composant : évite un remontage à chaque rendu).
+function spotCaseTd(key, bg, texte, partiel, bold, onClick) {
+  return (
+    <td key={key} onClick={onClick} style={{background:bg,color:spotTexteSombre(bg)?'#0a2a10':'white',textAlign:'center',borderRadius:3,padding:0,lineHeight:1,fontWeight:bold?800:700,opacity:partiel?.8:1,whiteSpace:'nowrap',cursor:onClick?'pointer':'default'}}>
+      {texte}
+    </td>
+  );
+}
+function SpotHistoTable({ rows, granularite, indicateur, seuils, onCell }) {
   const hebdo = granularite === 'semaine';
   const wrapRef = useRef(null);
   const availH  = useHauteurDisponible(wrapRef);
-  const annees = [...new Set(data.map(r => r.annee))].sort((a,b)=>a-b);
+  const annees = [...new Set(rows.map(r => r.annee))].sort((a, b) => a - b);
   const cell = {};
-  data.forEach(r => { cell[`${r.annee}_${hebdo ? r.semaine : r.mois}`] = r; });
-  const heuresAttendues = (a, p) => hebdo ? 168 : new Date(a, p, 0).getDate() * 24;
-  const periodes = hebdo ? Array.from({length:53}, (_, i) => i + 1) : Array.from({length:12}, (_, i) => i + 1);
+  rows.forEach(r => { cell[`${r.annee}_${r.periode}`] = r; });
+  const periodes = Array.from({ length: hebdo ? 53 : 12 }, (_, i) => i + 1);
+  const decimales = (indicateur === 'gain' || hebdo) ? 0 : 1;
+  // Ligne Année : prix pondéré par les heures, spread par les jours, gain sommé
   const annuel = {};
   annees.forEach(a => {
-    let s = 0, n = 0;
-    periodes.forEach(p => { const r = cell[`${a}_${p}`]; if (r) { s += r.prix * r.n; n += r.n; } });
-    annuel[a] = n ? { prix: s / n, partiel: n < 8760 * 0.9 } : null;
+    let sp = 0, n = 0, ss = 0, nj = 0, g = null;
+    periodes.forEach(p => { const r = cell[`${a}_${p}`]; if (!r) return; sp += (r.prix || 0) * r.n; n += r.n; ss += (r.spread || 0) * r.nj; nj += r.nj; if (r.gain !== null) g = (g || 0) + r.gain; });
+    annuel[a] = n ? { prix: sp / n, spread: nj ? ss / nj : null, gain: g, n, nj, partiel: n < 8760 * 0.9 } : null;
   });
-  // Hauteur de ligne : la hauteur disponible partagée entre l'en-tête, les
-  // périodes et la ligne Année (note de bas de tableau et marges déduites),
-  // plafonnée pour que la vue mois ne s'étire pas en cases géantes.
   const nLignes = periodes.length + 2;
   const espace  = hebdo ? 1 : 2;
   const rowH    = availH ? Math.min(hebdo ? 16 : 26, Math.max(7, (availH - 30) / nLignes - espace)) : (hebdo ? 11 : 20);
   const fontPx  = Math.min(hebdo ? 8.5 : 9.5, Math.max(6.5, rowH * 0.72));
   const lblStyle = {color:'rgba(255,255,255,.75)',fontSize:Math.min(fontPx, hebdo?7.5:8.5),fontWeight:800,textAlign:'right',paddingRight:3,whiteSpace:'nowrap',lineHeight:1};
+  const caseDe = (key, r, partiel, bold) => {
+    const v  = valeurAffichee(indicateur, r);
+    // Ligne Année en gains : une somme sur 12 mois sature l'échelle des périodes → fond neutre
+    const bg = (bold && indicateur === 'gain' && v !== null) ? 'rgba(255,255,255,.14)' : echelleCouleur(indicateur === 'gain' ? v : (v === null ? null : v / 100), seuils);
+    const click = (onCell && r && r.jours && v !== null) ? () => onCell(r) : null;
+    return spotCaseTd(key, bg, fmtValeur(indicateur, v, decimales) + (partiel && v !== null ? '*' : ''), partiel, bold, click);
+  };
   return (
     <div ref={wrapRef} style={{overflowX:'auto',borderRadius:8,border:'1px solid rgba(255,255,255,.1)',background:'rgba(4,55,66,0.85)',padding:4}}>
       <table style={{borderCollapse:'separate',borderSpacing:`2px ${espace}px`,width:'100%',fontSize:fontPx,fontFamily:'var(--font)'}}>
@@ -10756,39 +10936,201 @@ function SpotHistoTable({ data, granularite }) {
             <tr key={p} style={{height:rowH}}>
               {hebdo && <td style={{...lblStyle,color:'var(--green)',paddingRight:2}}>{MOIS_PAR_SEMAINE[p] || ''}</td>}
               <td style={lblStyle}>{hebdo ? `S${p}` : MOIS_LABELS[p-1]}</td>
-              {annees.map(a => {
-                const r = cell[`${a}_${p}`];
-                return spotCaseTd(a, r, r && r.n < heuresAttendues(a, p) * 0.9, false, hebdo);
-              })}
+              {annees.map(a => { const r = cell[`${a}_${p}`]; return caseDe(a, r, r && r.n < heuresAttendues(granularite, a, p) * 0.9, false); })}
             </tr>
           ))}
           <tr style={{height:rowH}}>
             {hebdo && <td/>}
             <td style={{...lblStyle,color:'var(--green)'}}>Année</td>
-            {annees.map(a => spotCaseTd(a, annuel[a], annuel[a]?.partiel, true, hebdo))}
+            {annees.map(a => caseDe(a, annuel[a] ? { ...annuel[a], jours: null } : null, annuel[a]?.partiel, true))}
           </tr>
         </tbody>
       </table>
       <div style={{fontSize:8,color:'rgba(255,255,255,.35)',marginTop:3,paddingLeft:2,lineHeight:1}}>
-        c€/kWh · moyenne des heures {hebdo ? 'de la semaine ISO' : 'du mois'} · * période incomplète
+        {INDICATEURS.find(i => i.id === indicateur)?.unite} · {indicateur === 'gain' ? 'somme' : 'moyenne'} {hebdo ? 'de la semaine ISO' : 'du mois'} · * période incomplète
+      </div>
+    </div>
+  );
+}
+
+// ─── SpotJoursCanvas (une ligne par jour) ─────
+// Années en colonnes, 366 jours en lignes, pas de valeur dans la case : la
+// couleur suffit, le clic donne le détail (et ouvre le graphique batterie).
+function SpotJoursCanvas({ rows, indicateur, seuils, onCell }) {
+  const wrapperRef = useRef(null);
+  const canvasRef  = useRef(null);
+  const geoRef     = useRef(null);
+  const annees = useMemo(() => [...new Set(rows.map(r => r.annee))].sort((a, b) => a - b), [rows]);
+  const cell = useMemo(() => { const c = {}; rows.forEach(r => { c[`${r.annee}_${r.periode}`] = r; }); return c; }, [rows]);
+
+  const draw = useCallback((containerW) => {
+    if (!canvasRef.current || !annees.length || containerW < 10) return;
+    const canvas = canvasRef.current, ctx = canvas.getContext('2d'), dpr = window.devicePixelRatio || 1;
+    const top     = wrapperRef.current ? wrapperRef.current.getBoundingClientRect().top : 0;
+    const footerH = document.querySelector('.sticky-footer')?.offsetHeight || 90;
+    const viewH   = window.visualViewport?.height || window.innerHeight;
+    const availH  = Math.max(150, viewH - top - footerH - 4);
+    const LBL_W = 26, HDR_H = 14, NJ = 366;
+    const CELL_W = Math.max(3, Math.floor((containerW - LBL_W) / annees.length));
+    const CELL_H = (availH - HDR_H) / NJ;
+    const W = LBL_W + annees.length * CELL_W, H = Math.round(HDR_H + NJ * CELL_H);
+    geoRef.current = { LBL_W, HDR_H, CELL_W, CELL_H };
+    canvas.width = W * dpr; canvas.height = H * dpr;
+    canvas.style.width = W + 'px'; canvas.style.height = H + 'px';
+    ctx.scale(dpr, dpr);
+    ctx.fillStyle = 'rgba(4,55,66,0.85)'; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = 'rgba(255,255,255,0.75)'; ctx.font = 'bold 8px sans-serif'; ctx.textAlign = 'center';
+    annees.forEach((a, i) => ctx.fillText(String(a).slice(2), LBL_W + i * CELL_W + CELL_W / 2, 10));
+    // Mois en marge + filet
+    let idx = 0;
+    for (let m = 1; m <= 12; m++) {
+      const n = DAYS_IN_MONTH[m-1], y0 = HDR_H + idx * CELL_H, y1 = HDR_H + (idx + n) * CELL_H;
+      ctx.fillStyle = 'rgba(255,255,255,0.75)'; ctx.font = 'bold 8px sans-serif'; ctx.textAlign = 'right';
+      ctx.fillText(MOIS_LABELS[m-1], LBL_W - 3, (y0 + y1) / 2 + 3);
+      if (m > 1) { ctx.fillStyle = 'rgba(255,255,255,0.18)'; ctx.fillRect(LBL_W, y0, W - LBL_W, 1); }
+      idx += n;
+    }
+    const gapW = CELL_W >= 4 ? 1 : 0, gapH = CELL_H >= 3 ? 1 : 0;
+    annees.forEach((a, i) => {
+      for (let p = 1; p <= NJ; p++) {
+        const r = cell[`${a}_${p}`];
+        const v = valeurAffichee(indicateur, r);
+        ctx.fillStyle = echelleCouleur(indicateur === 'gain' ? v : (v === null ? null : v / 100), seuils);
+        ctx.fillRect(LBL_W + i * CELL_W, HDR_H + (p - 1) * CELL_H, CELL_W - gapW, CELL_H - gapH);
+      }
+    });
+  }, [annees, cell, indicateur, seuils]);
+
+  useEffect(() => {
+    if (!wrapperRef.current) return;
+    const ro = new ResizeObserver(entries => {
+      const w = Math.floor(entries[0].contentRect.width);
+      requestAnimationFrame(() => draw(w));
+    });
+    ro.observe(wrapperRef.current);
+    const onResize = () => wrapperRef.current && draw(Math.floor(wrapperRef.current.getBoundingClientRect().width));
+    window.addEventListener('resize', onResize);
+    return () => { ro.disconnect(); window.removeEventListener('resize', onResize); };
+  }, [draw]);
+
+  const onClick = (ev) => {
+    const g = geoRef.current; if (!g || !onCell) return;
+    const rect = canvasRef.current.getBoundingClientRect();
+    const x = ev.clientX - rect.left, y = ev.clientY - rect.top;
+    const i = Math.floor((x - g.LBL_W) / g.CELL_W), p = Math.floor((y - g.HDR_H) / g.CELL_H) + 1;
+    if (i < 0 || i >= annees.length || p < 1 || p > 366) return;
+    const r = cell[`${annees[i]}_${p}`];
+    if (r) onCell(r);
+  };
+
+  return (
+    <div ref={wrapperRef} style={{width:'100%',borderRadius:8,border:'1px solid rgba(255,255,255,.1)',overflow:'hidden'}}>
+      <canvas ref={canvasRef} onClick={onClick} style={{display:'block',cursor:'pointer'}}/>
+    </div>
+  );
+}
+
+// ─── BatterieJourPopup ────────────────────────
+// Contrôle visuel de l'optimiseur : prix horaire (ligne) et kWh échangés avec
+// le réseau (barres : achat en cyan, vente en vert). Navigation sur les jours
+// de la période cliquée.
+const JOURS_FR = ['dim.', 'lun.', 'mar.', 'mer.', 'jeu.', 'ven.', 'sam.'];
+const MOIS_FR  = ['janvier','février','mars','avril','mai','juin','juillet','août','septembre','octobre','novembre','décembre'];
+function fmtJourLong(iso) { const [a, m, j] = partsIso(iso); const d = new Date(a, m - 1, j); return `${JOURS_FR[d.getDay()]} ${j} ${MOIS_FR[m-1]} ${a}`; }
+
+function BatterieJourPopup({ jours, indexInitial = 0, params, onClose }) {
+  const [idx, setIdx]   = useState(indexInitial);
+  const [data, setData] = useState(null);
+  const jour = jours[idx];
+  useEffect(() => {
+    let vivant = true;
+    setData(null);
+    sb.from('spot_batterie_jours').select('gain,plan').eq('jour', jour).maybeSingle()
+      .then(({ data: d }) => { if (vivant) setData(d || { absent: true }); });
+    return () => { vivant = false; };
+  }, [jour]);
+
+  const W = 340, H = 190, ML = 30, MR = 30, MT = 10, MB = 18;
+  const iw = W - ML - MR, ih = H - MT - MB;
+  let corps = null;
+  if (data && !data.absent) {
+    const p = data.plan.p.map(x => x * 100), e = data.plan.e;
+    const pMin = Math.min(0, ...p), pMax = Math.max(...p, pMin + 1);
+    const eMax = Math.max(params?.puissance || 1, ...e.map(Math.abs));
+    const xh = h => ML + (h + 0.5) * iw / 24;
+    const yp = v => MT + ih - (v - pMin) / (pMax - pMin) * ih;
+    const y0 = MT + ih / 2, ye = v => y0 - v / eMax * (ih / 2);
+    const achat = e.filter(x => x > 0).reduce((s, x) => s + x, 0), vente = -e.filter(x => x < 0).reduce((s, x) => s + x, 0);
+    const cout = e.reduce((s, x, h) => s + (x > 0 ? x * data.plan.p[h] : 0), 0), recette = e.reduce((s, x, h) => s + (x < 0 ? -x * data.plan.p[h] : 0), 0);
+    const bw = iw / 24 * 0.7;
+    corps = (
+      <>
+        <svg viewBox={`0 0 ${W} ${H}`} style={{width:'100%',display:'block'}}>
+          <line x1={ML} x2={W-MR} y1={y0} y2={y0} stroke="rgba(255,255,255,.2)"/>
+          {e.map((x, h) => x !== 0 && (
+            <rect key={h} x={xh(h) - bw/2} width={bw} y={Math.min(y0, ye(x))} height={Math.abs(ye(x) - y0)} fill={x > 0 ? 'rgba(93,224,245,.75)' : 'rgba(125,217,64,.8)'}/>
+          ))}
+          <polyline points={p.map((v, h) => `${xh(h)},${yp(v)}`).join(' ')} fill="none" stroke="#ffd84d" strokeWidth="1.6"/>
+          {p.map((v, h) => <circle key={h} cx={xh(h)} cy={yp(v)} r="1.6" fill="#ffd84d"/>)}
+          {[0, 6, 12, 18, 23].map(h => <text key={h} x={xh(h)} y={H - 5} fontSize="8" fill="rgba(255,255,255,.5)" textAnchor="middle">{h}h</text>)}
+          <text x={ML - 3} y={yp(pMax) + 3} fontSize="8" fill="#ffd84d" textAnchor="end">{pMax.toFixed(0)}</text>
+          <text x={ML - 3} y={yp(pMin) + 3} fontSize="8" fill="#ffd84d" textAnchor="end">{pMin.toFixed(0)}</text>
+          <text x={ML - 3} y={MT + 3} fontSize="7" fill="rgba(255,255,255,.4)" textAnchor="end">c€</text>
+          <text x={W - MR + 3} y={ye(eMax) + 3} fontSize="8" fill="rgba(255,255,255,.6)">+{eMax.toFixed(1)}</text>
+          <text x={W - MR + 3} y={ye(-eMax) + 3} fontSize="8" fill="rgba(255,255,255,.6)">−{eMax.toFixed(1)}</text>
+          <text x={W - MR + 3} y={y0 + 3} fontSize="7" fill="rgba(255,255,255,.4)">kWh</text>
+        </svg>
+        <div style={{display:'flex',justifyContent:'space-between',gap:8,fontSize:10,fontWeight:700,marginTop:4,flexWrap:'wrap'}}>
+          <span style={{color:'#5de0f5'}}>Achat {achat.toFixed(1)} kWh · {cout.toFixed(2).replace('.',',')} €</span>
+          <span style={{color:'#7dd940'}}>Vente {vente.toFixed(1)} kWh · {recette.toFixed(2).replace('.',',')} €</span>
+          <span style={{color:'white'}}>Gain {Number(data.gain).toFixed(2).replace('.',',')} € HT</span>
+        </div>
+      </>
+    );
+  }
+  return (
+    <div className="lightbox-overlay" style={{cursor:'default',padding:12}} onClick={onClose}>
+      <div onClick={e => e.stopPropagation()} style={{background:'#05414e',border:'1px solid rgba(255,255,255,.15)',borderRadius:14,padding:'12px 14px',width:'100%',maxWidth:420,color:'white',fontFamily:'var(--font)'}}>
+        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:8,marginBottom:6}}>
+          <button onClick={() => setIdx(i => Math.max(0, i - 1))} disabled={idx === 0} style={{background:'none',border:'none',color:idx===0?'rgba(255,255,255,.2)':'white',fontSize:20,cursor:'pointer',padding:'0 6px'}}>‹</button>
+          <div style={{textAlign:'center'}}>
+            <div style={{fontSize:13,fontWeight:800}}>{fmtJourLong(jour)}</div>
+            <div style={{fontSize:9.5,color:'rgba(255,255,255,.5)',fontWeight:600}}>
+              {params ? `${params.capacite} kWh · ${params.puissance} kW · ${params.cycles} cycle${params.cycles > 1 ? 's' : ''}/j · η ${Math.round(params.rendement * 100)} %` : ''}
+              {jours.length > 1 ? ` · ${idx + 1}/${jours.length}` : ''}
+            </div>
+          </div>
+          <button onClick={() => setIdx(i => Math.min(jours.length - 1, i + 1))} disabled={idx === jours.length - 1} style={{background:'none',border:'none',color:idx===jours.length-1?'rgba(255,255,255,.2)':'white',fontSize:20,cursor:'pointer',padding:'0 6px'}}>›</button>
+        </div>
+        {data === null ? <div style={{textAlign:'center',padding:30}}><StarSpinner size={26}/></div>
+         : data.absent ? <div style={{textAlign:'center',padding:20,fontSize:12,color:'rgba(255,255,255,.6)'}}>Pas de calcul pour ce jour — relancez « Calculer ».</div>
+         : corps}
+        <button onClick={onClose} style={{marginTop:10,width:'100%',background:'rgba(255,255,255,.1)',border:'1px solid rgba(255,255,255,.2)',color:'white',borderRadius:8,padding:'7px',fontFamily:'var(--font)',fontSize:12,fontWeight:700,cursor:'pointer'}}>Fermer</button>
       </div>
     </div>
   );
 }
 
 // ─── SpotPricesScreen ─────────────────────────
+const BAT_DEFAUT = { capacite: 10, puissance: 5, cycles: 1, rendement: 0.81 };
 function SpotPricesScreen({ onBack }) {
   const [meta,       setMeta]       = useState(null);
   const [spotAll,    setSpotAll]    = useState(null);
-  const [mensuel,    setMensuel]    = useState(null);
-  const [hebdo,      setHebdo]      = useState(null);
-  const [granularite,setGranularite]= useState('semaine'); // 'semaine' | 'mois'
+  const [jours,      setJours]      = useState(null);     // série journalière (get_spot_journalier)
+  const [granularite,setGranularite]= useState('semaine'); // 'mois' | 'semaine' | 'jour'
+  const [indicateur, setIndicateur] = useState('prix');    // 'prix' | 'spread' | 'gain'
+  const [batParams,  setBatParams]  = useState(null);      // paramètres enregistrés en base
+  const [batSaisie,  setBatSaisie]  = useState(BAT_DEFAUT);
+  const [batMsg,     setBatMsg]     = useState(null);
+  const [batCalc,    setBatCalc]    = useState(false);
+  const [popup,      setPopup]      = useState(null);      // { jours:[iso], index }
+  const [infoJour,   setInfoJour]   = useState(null);
   const [loading,    setLoading]    = useState(true);
   const [importing,  setImporting]  = useState(false);
   const [importMsg,  setImportMsg]  = useState(null);
   const [natParams,  setNatParams]  = useState(null);
   const [heatmapMode,setHeatmapMode]= useState('spot'); // 'spot' | 'ttc'
-  const [vue,        setVue]        = useState('menu'); // 'menu' | 'mensuel' | 'horaire'
+  const [vue,        setVue]        = useState('menu'); // 'menu' | 'histo' | 'horaire'
   const [compSel,    setCompSel]    = useState([]);     // décalages (années) comparés, 3 max
   const [compData,   setCompData]   = useState({});     // decal → { m_j_h: prix }
   const fileRef = useRef(null);
@@ -10821,26 +11163,48 @@ function SpotPricesScreen({ onBack }) {
   const comparaisons = useMemo(() => compSel.filter(k => compData[k]).map(k => ({ decal: k, map: compData[k] })), [compSel, compData]);
 
   const loadData = useCallback(async () => {
-    const [{data:m}, {data:jsonRows}, {data:mens}, {data:heb}, {data:nat}] = await Promise.all([
+    const [{data:m}, {data:jsonRows}, {data:jj}, {data:bp}, {data:nat}] = await Promise.all([
       sb.from('spot_metadata').select('*').eq('id',1).maybeSingle(),
       sb.rpc('get_spot_json'),
-      sb.rpc('get_spot_mensuel'),
-      sb.rpc('get_spot_hebdo'),
+      sb.rpc('get_spot_journalier'),
+      sb.from('spot_batterie_params').select('*').eq('id',1).maybeSingle(),
       sb.from('parametres_nationaux').select('*').eq('id',1).maybeSingle(),
     ]);
     setMeta(m);
     setSpotAll(jsonRows && jsonRows.length > 0 ? jsonRows : null);
-    setMensuel(mens && mens.length > 0 ? mens : null);
-    setHebdo(heb && heb.length > 0 ? heb : null);
+    setJours(jj && jj.length > 0 ? jj : null);
+    if (bp) {
+      const p = { capacite: +bp.capacite_kwh, puissance: +bp.puissance_kw, cycles: +bp.cycles_jour, rendement: +bp.rendement_ar };
+      setBatParams({ ...p, calcule_le: bp.calcule_le }); setBatSaisie(p);
+    }
     setNatParams(nat || null);
     setLoading(false);
   }, []);
 
   useEffect(() => { loadData(); }, [loadData]);
 
+  // Agrégation pour la granularité courante, seuils de l'indicateur
+  const rows   = useMemo(() => jours ? agregerSpotJours(jours, granularite) : [], [jours, granularite]);
+  const seuils = useMemo(() => seuilsIndicateur(indicateur, rows), [indicateur, rows]);
+  const indDef = INDICATEURS.find(i => i.id === indicateur);
+
+  const lancerCalcul = async (params) => {
+    setBatCalc(true); setBatMsg('Lecture des 24 prix de chaque jour…');
+    try {
+      const n = await calculerGainsBatterie(params, setBatMsg);
+      setBatMsg(`✓ ${n.toLocaleString('fr-FR')} jours optimisés`);
+      await loadData();
+    } catch (err) {
+      setBatMsg('Erreur : ' + (err.message || String(err)));
+      window.logAppError?.('spot_batterie', err);
+    }
+    setBatCalc(false);
+  };
+
   // Import : l'historique horaire est complété (upsert sur l'heure UTC ; une
   // vraie valeur écrase une heure interpolée), puis le serveur comble les trous
   // restants par interpolation linéaire et reconstruit les 12 mois glissants.
+  // Si une batterie est paramétrée, ses gains sont recalculés sur les jours ajoutés.
   const handleImport = async (e) => {
     const file = e.target.files?.[0];
     e.target.value = '';
@@ -10860,6 +11224,7 @@ function SpotPricesScreen({ onBack }) {
       const { data, error } = await sb.rpc('rebuild_prix_spot_glissant');
       if (error) throw error;
       await sb.from('spot_metadata').update({ source_file: file.name }).eq('id', 1);
+      if (batParams) { setImportMsg('Recalcul des gains batterie…'); await calculerGainsBatterie(batParams, setImportMsg); }
       const interp = data?.interpolees ? ` · ${data.interpolees} h interpolées` : '';
       setImportMsg(`✓ ${records.length.toLocaleString('fr-FR')} heures importées${interp} · 12 mois glissants ${fmtJourIso(data?.fenetre_debut)} → ${fmtJourIso(data?.fenetre_fin)}`);
       await loadData();
@@ -10870,8 +11235,30 @@ function SpotPricesScreen({ onBack }) {
     setImporting(false);
   };
 
+  // Clic sur une cellule : détail du jour, et graphique batterie si c'est l'indicateur
+  const onCell = (r) => {
+    if (granularite === 'jour') {
+      const v = valeurAffichee(indicateur, r);
+      setInfoJour(`${fmtJourLong(r.jours[0])} · ${fmtValeur(indicateur, v, indicateur === 'gain' ? 0 : 1)} ${indDef.unite}${r.n < 24 * 0.9 ? ' · journée incomplète' : ''}`);
+    }
+    if (indicateur === 'gain' && r.jours?.length) setPopup({ jours: r.jours.slice().sort(), index: 0 });
+  };
+
   const fmtDate = (ts) => ts ? new Date(ts).toLocaleString('fr-FR',{day:'2-digit',month:'2-digit',year:'2-digit',hour:'2-digit',minute:'2-digit'}) : '—';
-  const titre = vue === 'mensuel' ? 'Historique par semaine' : vue === 'horaire' ? '12 derniers mois heure par heure' : null;
+  const titre = vue === 'histo' ? 'Historique' : vue === 'horaire' ? '12 derniers mois heure par heure' : null;
+  const segBtn = (actif, onClick, lbl, key, off) => (
+    <button key={key} onClick={onClick} disabled={off} style={{fontSize:11,fontWeight:700,border:'none',borderRadius:5,padding:'4px 10px',cursor:off?'default':'pointer',fontFamily:'var(--font)',background:actif?'rgba(125,217,64,.25)':'transparent',color:actif?'#7dd940':off?'rgba(255,255,255,.2)':'rgba(255,255,255,.45)'}}>{lbl}</button>
+  );
+  const inpBat = (champ, lbl, step, min, max, fmtIn = v => v, fmtOut = v => v) => (
+    <label style={{display:'flex',flexDirection:'column',gap:1,fontSize:8.5,color:'rgba(255,255,255,.5)',fontWeight:700,minWidth:0,flex:1}}>
+      {lbl}
+      <input type="number" inputMode="decimal" step={step} min={min} max={max} value={fmtIn(batSaisie[champ])}
+        onChange={e => setBatSaisie(s => ({ ...s, [champ]: fmtOut(parseFloat(e.target.value)) }))}
+        style={{width:'100%',padding:'4px 6px',borderRadius:6,border:'1px solid rgba(255,255,255,.2)',background:'rgba(255,255,255,.08)',color:'white',fontFamily:'var(--font)',fontSize:12,fontWeight:700,outline:'none'}}/>
+    </label>
+  );
+  const saisieValide = [batSaisie.capacite, batSaisie.puissance, batSaisie.cycles, batSaisie.rendement].every(v => v > 0) && batSaisie.rendement <= 1;
+  const saisieChangee = !batParams || ['capacite','puissance','cycles','rendement'].some(k => batParams[k] !== batSaisie[k]);
 
   return (
     <>
@@ -10916,11 +11303,11 @@ function SpotPricesScreen({ onBack }) {
             <div style={{textAlign:'center',padding:40}}><StarSpinner size={34}/></div>
           ) : (
             <div style={{display:'flex',flexDirection:'column',gap:10}}>
-              <button className="sim-btn" onClick={()=>setVue('mensuel')} disabled={!mensuel} style={{opacity:mensuel?1:.5}}>
+              <button className="sim-btn" onClick={()=>setVue('histo')} disabled={!jours} style={{opacity:jours?1:.5}}>
                 <span className="sim-icon">📅</span>
                 <div className="sim-text">
-                  <div className="sim-title">Vue historique par semaine</div>
-                  <div className="sim-sub">{mensuel ? `Moyennes hebdomadaires ou mensuelles ${mensuel[0].annee} → ${mensuel[mensuel.length-1].annee}` : 'Aucun historique importé'}</div>
+                  <div className="sim-title">Vue historique</div>
+                  <div className="sim-sub">{jours ? `Prix, spread, gains batterie · par mois, semaine ou jour · ${jours[0].d.slice(0,4)} → ${jours[jours.length-1].d.slice(0,4)}` : 'Aucun historique importé'}</div>
                 </div>
                 <span className="sim-arrow">→</span>
               </button>
@@ -10928,7 +11315,7 @@ function SpotPricesScreen({ onBack }) {
                 <span className="sim-icon">🕐</span>
                 <div className="sim-text">
                   <div className="sim-title">Vue des 12 derniers mois heure par heure</div>
-                  <div className="sim-sub">{spotAll ? '365 derniers jours connus, prix spot ou TTC' : 'Aucun prix spot importé'}</div>
+                  <div className="sim-sub">{spotAll ? '365 derniers jours connus, comparables aux années passées' : 'Aucun prix spot importé'}</div>
                 </div>
                 <span className="sim-arrow">→</span>
               </button>
@@ -10937,21 +11324,43 @@ function SpotPricesScreen({ onBack }) {
         </>
       )}
 
-      {vue === 'mensuel' && mensuel && (
+      {vue === 'histo' && jours && (
         <>
-          <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:6,flexWrap:'wrap'}}>
+          <div style={{display:'flex',alignItems:'center',gap:6,marginBottom:6,flexWrap:'wrap'}}>
+            <select value={indicateur} onChange={e => { setIndicateur(e.target.value); setInfoJour(null); }}
+              style={{flex:1,minWidth:150,padding:'5px 8px',borderRadius:7,border:'1px solid rgba(255,255,255,.2)',background:'rgba(255,255,255,.08)',color:'white',fontFamily:'var(--font)',fontSize:11.5,fontWeight:700,outline:'none',appearance:'auto'}}>
+              {INDICATEURS.map(i => <option key={i.id} value={i.id} style={{color:'black'}}>{i.label}</option>)}
+            </select>
             <div style={{display:'flex',background:'rgba(255,255,255,.06)',borderRadius:7,padding:2,gap:2}}>
-              {[['semaine','Semaine'],['mois','Mois']].map(([g,lbl])=>(
-                <button key={g} onClick={()=>setGranularite(g)} disabled={g==='semaine'&&!hebdo} style={{fontSize:11,fontWeight:700,border:'none',borderRadius:5,padding:'4px 10px',cursor:'pointer',fontFamily:'var(--font)',background:granularite===g?'rgba(125,217,64,.25)':'transparent',color:granularite===g?'#7dd940':'rgba(255,255,255,.45)'}}>
-                  {lbl}
-                </button>
-              ))}
+              {[['mois','Mois'],['semaine','Semaine'],['jour','Jour']].map(([g,lbl]) => segBtn(granularite===g, () => { setGranularite(g); setInfoJour(null); }, lbl, g, false))}
             </div>
           </div>
-          <SpotLegende mode="spot"/>
-          {granularite === 'semaine' && hebdo
-            ? <SpotHistoTable data={hebdo} granularite="semaine"/>
-            : <SpotHistoTable data={mensuel} granularite="mois"/>}
+          {indicateur === 'gain' && (
+            <div style={{background:'rgba(255,255,255,.06)',border:'1px solid rgba(255,255,255,.1)',borderRadius:8,padding:'6px 8px',marginBottom:6}}>
+              <div style={{display:'flex',gap:6,alignItems:'flex-end'}}>
+                {inpBat('capacite', 'Capacité kWh', 0.5, 0.5, 1000)}
+                {inpBat('puissance', 'Puissance kW', 0.5, 0.1, 1000)}
+                {inpBat('cycles', 'Cycles / jour', 0.5, 0.5, 10)}
+                {inpBat('rendement', 'Rendement A/R %', 1, 50, 100, v => Math.round(v * 100), v => v / 100)}
+                <button onClick={() => lancerCalcul(batSaisie)} disabled={batCalc || !saisieValide} style={{flexShrink:0,background:saisieChangee?'rgba(125,217,64,.25)':'rgba(255,255,255,.08)',border:'1px solid',borderColor:saisieChangee?'rgba(125,217,64,.6)':'rgba(255,255,255,.2)',color:saisieChangee?'#7dd940':'rgba(255,255,255,.6)',fontFamily:'var(--font)',fontSize:11,fontWeight:700,borderRadius:7,padding:'6px 10px',cursor:'pointer',alignSelf:'flex-end'}}>
+                  {batCalc ? '…' : 'Calculer'}
+                </button>
+              </div>
+              <div style={{fontSize:9,fontWeight:700,marginTop:4,color:batMsg?(batMsg.startsWith('✓')?'var(--green)':batMsg.startsWith('Erreur')?'#ff9090':'#5de0f5'):'rgba(255,255,255,.4)'}}>
+                {batMsg || (batParams ? `Calculé le ${fmtDate(batParams.calcule_le)} · achat au creux, vente à la pointe, prix spot HT, sans taxes` : 'Aucun calcul enregistré : renseignez la batterie puis Calculer')}
+              </div>
+            </div>
+          )}
+          <EchelleLegende seuils={seuils} unite={indDef.unite} facteur={indicateur === 'gain' ? 1 : 100}
+            decimales={indicateur === 'gain' ? (seuils[8] < 5 ? 2 : seuils[8] < 20 ? 1 : 0) : (granularite === 'semaine' ? 0 : 1)}/>
+          {granularite === 'jour'
+            ? <SpotJoursCanvas rows={rows} indicateur={indicateur} seuils={seuils} onCell={onCell}/>
+            : <SpotHistoTable rows={rows} granularite={granularite} indicateur={indicateur} seuils={seuils} onCell={indicateur === 'gain' ? onCell : null}/>}
+          {granularite === 'jour' && (
+            <div style={{fontSize:9.5,fontWeight:700,marginTop:4,color:infoJour?'white':'rgba(255,255,255,.35)',minHeight:12}}>
+              {infoJour || 'Touchez un jour pour lire sa valeur'}
+            </div>
+          )}
         </>
       )}
 
@@ -10960,11 +11369,7 @@ function SpotPricesScreen({ onBack }) {
           <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:8,flexWrap:'wrap'}}>
             {natParams && (
               <div style={{display:'flex',background:'rgba(255,255,255,.06)',borderRadius:7,padding:2,gap:2}}>
-                {[['spot','Prix spot'],['ttc','Prix TTC']].map(([m,lbl])=>(
-                  <button key={m} onClick={()=>setHeatmapMode(m)} style={{fontSize:11,fontWeight:700,border:'none',borderRadius:5,padding:'4px 10px',cursor:'pointer',fontFamily:'var(--font)',background:heatmapMode===m?'rgba(125,217,64,.25)':'transparent',color:heatmapMode===m?'#7dd940':'rgba(255,255,255,.45)'}}>
-                    {lbl}
-                  </button>
-                ))}
+                {[['spot','Prix spot'],['ttc','Prix TTC']].map(([m,lbl]) => segBtn(heatmapMode===m, () => setHeatmapMode(m), lbl, m, false))}
               </div>
             )}
             {meta?.fenetre_debut && (
@@ -10993,6 +11398,7 @@ function SpotPricesScreen({ onBack }) {
         </>
       )}
     </div>
+    {popup && <BatterieJourPopup jours={popup.jours} indexInitial={popup.index} params={batParams || batSaisie} onClose={() => setPopup(null)}/>}
     <StickyFooter onBack={vue === 'menu' ? onBack : () => setVue('menu')}/>
     </>
   );
