@@ -10775,76 +10775,109 @@ function heuresAttendues(gran, annee, periode) {
   return 168;
 }
 
-// Optimiseur d'arbitrage sur une journée : programmation dynamique sur l'état
-// de charge (N paliers) et l'énergie déjà déchargée (plafond cycles × capacité).
+// Optimiseur d'arbitrage : programmation dynamique sur l'état de charge
+// (N paliers) et l'énergie déjà déchargée dans la journée (plafond cycles ×
+// capacité, remis à zéro chaque matin). Les jours s'enchaînent : l'état de
+// charge de fin de journée est celui du lendemain à 0 h, l'optimisation porte
+// sur toute la période reçue (un mois civil) avec un stock final sans valeur.
 // Le rendement aller-retour est réparti en √η à la charge et √η à la décharge :
 // à 81 %, 10 kWh stockés coûtent 11,1 kWh achetés et rendent 9 kWh vendus.
 // La puissance borne les kWh échangés avec le réseau à chaque heure. Un prix
-// négatif rémunère la charge : l'algorithme en profite, comme le ferait un
-// agrégateur. Retour : gain € HT et e[24] = kWh côté réseau (+ achat, − vente).
-function optimiserBatterieJour(prix, { capacite, puissance, cycles, rendement }) {
+// négatif rémunère la charge : l'algorithme en profite, comme un agrégateur.
+// Retour par jour : gain € HT (recettes − achats du jour, peut être négatif si
+// l'énergie achetée est vendue le lendemain), e[24] kWh côté réseau (+ achat,
+// − vente), s[24] état de charge % en fin d'heure, s0 état de charge à 0 h.
+function optimiserBatteriePeriode(jours, { capacite, puissance, cycles, rendement }, socInitPct = 0) {
   const N = 20, step = capacite / N, r = Math.sqrt(rendement);
   const maxC = Math.max(1, Math.min(N, Math.floor(puissance * r / step + 1e-9)));
   const maxD = Math.max(1, Math.min(N, Math.floor(puissance / (r * step) + 1e-9)));
   const D = Math.max(1, Math.floor(cycles * N + 1e-9));
   const L = D + 1, S = (N + 1) * L;
-  let dp = new Float64Array(S).fill(-Infinity); dp[0] = 0;
-  const choix = new Array(24);
-  for (let h = 0; h < 24; h++) {
-    const p = prix[h];
-    const nd = new Float64Array(S).fill(-Infinity);
-    const ch = new Int8Array(S);
-    for (let soc = 0; soc <= N; soc++) for (let dis = 0; dis <= D; dis++) {
-      const v = dp[soc * L + dis];
-      if (v === -Infinity) continue;
-      let idx = soc * L + dis;
-      if (v > nd[idx]) { nd[idx] = v; ch[idx] = 0; }
-      const cMax = Math.min(maxC, N - soc);
-      for (let c = 1; c <= cMax; c++) {
-        const val = v - c * step / r * p; idx = (soc + c) * L + dis;
-        if (val > nd[idx]) { nd[idx] = val; ch[idx] = c; }
+  let dp = new Float64Array(S).fill(-Infinity);
+  dp[Math.round(socInitPct / 100 * N) * L] = 0;
+  const choix = [], trans = [];
+  jours.forEach((jour, j) => {
+    if (j > 0) {                                     // nouveau jour : compteur de cycles remis à zéro
+      const nd = new Float64Array(S).fill(-Infinity), tr = new Int8Array(N + 1);
+      for (let soc = 0; soc <= N; soc++) {
+        let best = -Infinity, bd = 0;
+        for (let dis = 0; dis <= D; dis++) { const v = dp[soc * L + dis]; if (v > best) { best = v; bd = dis; } }
+        nd[soc * L] = best; tr[soc] = bd;
       }
-      const dMax = Math.min(maxD, soc, D - dis);
-      for (let d = 1; d <= dMax; d++) {
-        const val = v + d * step * r * p; idx = (soc - d) * L + dis + d;
-        if (val > nd[idx]) { nd[idx] = val; ch[idx] = -d; }
-      }
+      dp = nd; trans[j] = tr;
     }
-    dp = nd; choix[h] = ch;
-  }
+    const chJ = new Array(24);
+    for (let h = 0; h < 24; h++) {
+      const p = jour.p[h];
+      const nd = new Float64Array(S).fill(-Infinity), ch = new Int8Array(S);
+      for (let soc = 0; soc <= N; soc++) for (let dis = 0; dis <= D; dis++) {
+        const v = dp[soc * L + dis];
+        if (v === -Infinity) continue;
+        let idx = soc * L + dis;
+        if (v > nd[idx]) { nd[idx] = v; ch[idx] = 0; }
+        const cMax = Math.min(maxC, N - soc);
+        for (let c = 1; c <= cMax; c++) {
+          const val = v - c * step / r * p; idx = (soc + c) * L + dis;
+          if (val > nd[idx]) { nd[idx] = val; ch[idx] = c; }
+        }
+        const dMax = Math.min(maxD, soc, D - dis);
+        for (let d = 1; d <= dMax; d++) {
+          const val = v + d * step * r * p; idx = (soc - d) * L + dis + d;
+          if (val > nd[idx]) { nd[idx] = val; ch[idx] = -d; }
+        }
+      }
+      dp = nd; chJ[h] = ch;
+    }
+    choix[j] = chJ;
+  });
+  // Meilleur état final puis remontée du chemin, du dernier jour au premier
   let best = -Infinity, bi = 0;
   for (let i = 0; i < S; i++) if (dp[i] > best) { best = dp[i]; bi = i; }
-  const e = new Array(24).fill(0);
   let soc = Math.floor(bi / L), dis = bi % L;
-  for (let h = 23; h >= 0; h--) {
-    const a = choix[h][soc * L + dis];
-    if (a > 0)      { e[h] = a * step / r;  soc -= a; }
-    else if (a < 0) { e[h] = a * step * r;  soc -= a; dis += a; }
+  const socFinalPct = soc / N * 100;
+  const res = new Array(jours.length);
+  for (let j = jours.length - 1; j >= 0; j--) {
+    const e = new Array(24).fill(0), s = new Array(24).fill(0);
+    for (let h = 23; h >= 0; h--) {
+      s[h] = soc / N * 100;
+      const a = choix[j][h][soc * L + dis];
+      if (a > 0)      { e[h] = a * step / r; soc -= a; }
+      else if (a < 0) { e[h] = a * step * r; soc -= a; dis += a; }
+    }
+    const gain = e.reduce((acc, x, h) => acc - x * jours[j].p[h], 0);
+    res[j] = { d: jours[j].d, p: jours[j].p, gain, e, s, s0: soc / N * 100 };
+    if (j > 0) dis = trans[j][soc];
   }
-  return { gain: best, e };
+  return { jours: res, socFinalPct };
 }
 // Heure locale absente (passage à l'heure d'été) : moyenne des voisines
 function completerPrix24(p) {
   const out = p.slice();
   for (let h = 0; h < 24; h++) if (out[h] === null || out[h] === undefined) {
     const g = out[(h + 23) % 24], d = out[(h + 1) % 24];
-    out[h] = (g ?? d ?? 0) === null ? 0 : (g !== null && g !== undefined && d !== null && d !== undefined) ? (g + d) / 2 : (g ?? d ?? 0);
+    const ok = x => x !== null && x !== undefined;
+    out[h] = ok(g) && ok(d) ? (g + d) / 2 : ok(g) ? g : ok(d) ? d : 0;
   }
   return out;
 }
 
-// Calcule et stocke les gains de tous les jours de l'historique (quelques
-// secondes pour 4 300 jours ; cède la main au navigateur tous les 150 jours).
+// Calcule et stocke les gains de tous les jours de l'historique, mois par mois
+// en reportant l'état de charge d'un mois au suivant (quelques secondes pour
+// 4 300 jours ; cède la main au navigateur entre deux mois).
 async function calculerGainsBatterie(params, onProgress) {
   const { data, error } = await sb.rpc('get_spot_jours_horaires');
   if (error) throw error;
   if (!data?.length) throw new Error('aucune journée dans l\'historique');
+  const parMois = {};
+  data.forEach(x => { (parMois[x.d.slice(0, 7)] = parMois[x.d.slice(0, 7)] || []).push({ d: x.d, p: completerPrix24(x.p) }); });
+  const cles = Object.keys(parMois).sort();
   const rows = [];
-  for (let i = 0; i < data.length; i++) {
-    const p = completerPrix24(data[i].p);
-    const { gain, e } = optimiserBatterieJour(p, params);
-    rows.push({ jour: data[i].d, gain: +gain.toFixed(4), plan: { p, e: e.map(x => +x.toFixed(3)) } });
-    if (i % 150 === 0) { onProgress?.(`Optimisation ${i.toLocaleString('fr-FR')} / ${data.length.toLocaleString('fr-FR')} jours…`); await new Promise(r => setTimeout(r, 0)); }
+  let soc = 0;
+  for (let i = 0; i < cles.length; i++) {
+    const r = optimiserBatteriePeriode(parMois[cles[i]], params, soc);
+    soc = r.socFinalPct;
+    r.jours.forEach(j => rows.push({ jour: j.d, gain: +j.gain.toFixed(4), plan: { p: j.p, e: j.e.map(x => +x.toFixed(3)), s: j.s.map(x => Math.round(x)), s0: Math.round(j.s0) } }));
+    if (i % 6 === 0) { onProgress?.(`Optimisation ${cles[i]} (${rows.length.toLocaleString('fr-FR')} / ${data.length.toLocaleString('fr-FR')} jours)…`); await new Promise(res => setTimeout(res, 0)); }
   }
   const CHUNK = 400;
   for (let i = 0; i < rows.length; i += CHUNK) {
@@ -11043,16 +11076,16 @@ function SpotJoursCanvas({ rows, indicateur, seuils, onCell }) {
 
 // ─── BatterieJourPopup ────────────────────────
 // Contrôle visuel de l'optimiseur : prix horaire (ligne) et kWh échangés avec
-// le réseau (barres : achat en cyan, vente en vert). Navigation sur les jours
-// de la période cliquée.
+// le réseau (barres : achat en cyan, vente en vert), puis l'état de charge en %
+// heure par heure. Les flèches parcourent le calendrier jour par jour.
 const JOURS_FR = ['dim.', 'lun.', 'mar.', 'mer.', 'jeu.', 'ven.', 'sam.'];
 const MOIS_FR  = ['janvier','février','mars','avril','mai','juin','juillet','août','septembre','octobre','novembre','décembre'];
 function fmtJourLong(iso) { const [a, m, j] = partsIso(iso); const d = new Date(a, m - 1, j); return `${JOURS_FR[d.getDay()]} ${j} ${MOIS_FR[m-1]} ${a}`; }
+function decalerJours(iso, n) { const [a, m, j] = partsIso(iso); const d = new Date(Date.UTC(a, m - 1, j + n)); return d.toISOString().slice(0, 10); }
 
-function BatterieJourPopup({ jours, indexInitial = 0, params, onClose }) {
-  const [idx, setIdx]   = useState(indexInitial);
+function BatterieJourPopup({ jourInitial, bornes, params, onClose }) {
+  const [jour, setJour] = useState(jourInitial);
   const [data, setData] = useState(null);
-  const jour = jours[idx];
   useEffect(() => {
     let vivant = true;
     setData(null);
@@ -11060,20 +11093,25 @@ function BatterieJourPopup({ jours, indexInitial = 0, params, onClose }) {
       .then(({ data: d }) => { if (vivant) setData(d || { absent: true }); });
     return () => { vivant = false; };
   }, [jour]);
+  const [deb, fin] = bornes || [null, null];
+  const precOk = !deb || jour > deb, suivOk = !fin || jour < fin;
 
-  const W = 340, H = 190, ML = 30, MR = 30, MT = 10, MB = 18;
+  const W = 340, H = 170, ML = 30, MR = 30, MT = 8, MB = 16, HS = 52;
   const iw = W - ML - MR, ih = H - MT - MB;
   let corps = null;
   if (data && !data.absent) {
-    const p = data.plan.p.map(x => x * 100), e = data.plan.e;
+    const p = data.plan.p.map(x => x * 100), e = data.plan.e, s = data.plan.s || new Array(24).fill(0), s0 = data.plan.s0 ?? 0;
     const pMin = Math.min(0, ...p), pMax = Math.max(...p, pMin + 1);
     const eMax = Math.max(params?.puissance || 1, ...e.map(Math.abs));
     const xh = h => ML + (h + 0.5) * iw / 24;
     const yp = v => MT + ih - (v - pMin) / (pMax - pMin) * ih;
     const y0 = MT + ih / 2, ye = v => y0 - v / eMax * (ih / 2);
-    const achat = e.filter(x => x > 0).reduce((s, x) => s + x, 0), vente = -e.filter(x => x < 0).reduce((s, x) => s + x, 0);
-    const cout = e.reduce((s, x, h) => s + (x > 0 ? x * data.plan.p[h] : 0), 0), recette = e.reduce((s, x, h) => s + (x < 0 ? -x * data.plan.p[h] : 0), 0);
+    const achat = e.filter(x => x > 0).reduce((a, x) => a + x, 0), vente = -e.filter(x => x < 0).reduce((a, x) => a + x, 0);
+    const cout = e.reduce((a, x, h) => a + (x > 0 ? x * data.plan.p[h] : 0), 0), recette = e.reduce((a, x, h) => a + (x < 0 ? -x * data.plan.p[h] : 0), 0);
     const bw = iw / 24 * 0.7;
+    // Bande état de charge : point à 0 h (s0) puis fin de chaque heure
+    const ys = v => 6 + (100 - v) / 100 * (HS - 14);
+    const ptsSoc = [[ML, ys(s0)], ...s.map((v, h) => [ML + (h + 1) * iw / 24, ys(v)])];
     corps = (
       <>
         <svg viewBox={`0 0 ${W} ${H}`} style={{width:'100%',display:'block'}}>
@@ -11083,35 +11121,48 @@ function BatterieJourPopup({ jours, indexInitial = 0, params, onClose }) {
           ))}
           <polyline points={p.map((v, h) => `${xh(h)},${yp(v)}`).join(' ')} fill="none" stroke="#ffd84d" strokeWidth="1.6"/>
           {p.map((v, h) => <circle key={h} cx={xh(h)} cy={yp(v)} r="1.6" fill="#ffd84d"/>)}
-          {[0, 6, 12, 18, 23].map(h => <text key={h} x={xh(h)} y={H - 5} fontSize="8" fill="rgba(255,255,255,.5)" textAnchor="middle">{h}h</text>)}
+          {[0, 6, 12, 18, 23].map(h => <text key={h} x={xh(h)} y={H - 4} fontSize="8" fill="rgba(255,255,255,.5)" textAnchor="middle">{h}h</text>)}
           <text x={ML - 3} y={yp(pMax) + 3} fontSize="8" fill="#ffd84d" textAnchor="end">{pMax.toFixed(0)}</text>
           <text x={ML - 3} y={yp(pMin) + 3} fontSize="8" fill="#ffd84d" textAnchor="end">{pMin.toFixed(0)}</text>
-          <text x={ML - 3} y={MT + 3} fontSize="7" fill="rgba(255,255,255,.4)" textAnchor="end">c€</text>
+          <text x={ML - 3} y={H - 4} fontSize="7" fill="#ffd84d" textAnchor="end">c€/kWh</text>
           <text x={W - MR + 3} y={ye(eMax) + 3} fontSize="8" fill="rgba(255,255,255,.6)">+{eMax.toFixed(1)}</text>
           <text x={W - MR + 3} y={ye(-eMax) + 3} fontSize="8" fill="rgba(255,255,255,.6)">−{eMax.toFixed(1)}</text>
-          <text x={W - MR + 3} y={y0 + 3} fontSize="7" fill="rgba(255,255,255,.4)">kWh</text>
+          <text x={W - MR + 3} y={H - 4} fontSize="7" fill="rgba(255,255,255,.4)">kWh</text>
+        </svg>
+        <svg viewBox={`0 0 ${W} ${HS}`} style={{width:'100%',display:'block',marginTop:2}}>
+          <rect x={ML} y={ys(100)} width={iw} height={ys(0) - ys(100)} fill="rgba(255,255,255,.04)"/>
+          <polygon points={`${ML},${ys(0)} ${ptsSoc.map(q => q.join(',')).join(' ')} ${W - MR},${ys(0)}`} fill="rgba(125,217,64,.22)"/>
+          <polyline points={ptsSoc.map(q => q.join(',')).join(' ')} fill="none" stroke="#7dd940" strokeWidth="1.6"/>
+          <text x={ML - 3} y={ys(100) + 3} fontSize="8" fill="rgba(255,255,255,.6)" textAnchor="end">100 %</text>
+          <text x={ML - 3} y={ys(0) + 3} fontSize="8" fill="rgba(255,255,255,.6)" textAnchor="end">0 %</text>
+          <text x={W - MR + 3} y={ys(50) + 3} fontSize="7" fill="rgba(255,255,255,.4)">charge</text>
         </svg>
         <div style={{display:'flex',justifyContent:'space-between',gap:8,fontSize:10,fontWeight:700,marginTop:4,flexWrap:'wrap'}}>
           <span style={{color:'#5de0f5'}}>Achat {achat.toFixed(1)} kWh · {cout.toFixed(2).replace('.',',')} €</span>
           <span style={{color:'#7dd940'}}>Vente {vente.toFixed(1)} kWh · {recette.toFixed(2).replace('.',',')} €</span>
           <span style={{color:'white'}}>Gain {Number(data.gain).toFixed(2).replace('.',',')} € HT</span>
         </div>
+        <div style={{fontSize:9.5,fontWeight:600,color:'rgba(255,255,255,.5)',marginTop:2}}>
+          Charge {Math.round(s0)} % à 0 h → {Math.round(s[23])} % à minuit · l'énergie restante est revendue les jours suivants
+        </div>
       </>
     );
   }
+  const fleche = (ok, onClick, car) => (
+    <button onClick={onClick} disabled={!ok} style={{background:'none',border:'none',color:ok?'white':'rgba(255,255,255,.2)',fontSize:22,cursor:ok?'pointer':'default',padding:'0 8px',lineHeight:1}}>{car}</button>
+  );
   return (
     <div className="lightbox-overlay" style={{cursor:'default',padding:12}} onClick={onClose}>
       <div onClick={e => e.stopPropagation()} style={{background:'#05414e',border:'1px solid rgba(255,255,255,.15)',borderRadius:14,padding:'12px 14px',width:'100%',maxWidth:420,color:'white',fontFamily:'var(--font)'}}>
         <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:8,marginBottom:6}}>
-          <button onClick={() => setIdx(i => Math.max(0, i - 1))} disabled={idx === 0} style={{background:'none',border:'none',color:idx===0?'rgba(255,255,255,.2)':'white',fontSize:20,cursor:'pointer',padding:'0 6px'}}>‹</button>
+          {fleche(precOk, () => setJour(j => decalerJours(j, -1)), '‹')}
           <div style={{textAlign:'center'}}>
             <div style={{fontSize:13,fontWeight:800}}>{fmtJourLong(jour)}</div>
             <div style={{fontSize:9.5,color:'rgba(255,255,255,.5)',fontWeight:600}}>
               {params ? `${params.capacite} kWh · ${params.puissance} kW · ${params.cycles} cycle${params.cycles > 1 ? 's' : ''}/j · η ${Math.round(params.rendement * 100)} %` : ''}
-              {jours.length > 1 ? ` · ${idx + 1}/${jours.length}` : ''}
             </div>
           </div>
-          <button onClick={() => setIdx(i => Math.min(jours.length - 1, i + 1))} disabled={idx === jours.length - 1} style={{background:'none',border:'none',color:idx===jours.length-1?'rgba(255,255,255,.2)':'white',fontSize:20,cursor:'pointer',padding:'0 6px'}}>›</button>
+          {fleche(suivOk, () => setJour(j => decalerJours(j, 1)), '›')}
         </div>
         {data === null ? <div style={{textAlign:'center',padding:30}}><StarSpinner size={26}/></div>
          : data.absent ? <div style={{textAlign:'center',padding:20,fontSize:12,color:'rgba(255,255,255,.6)'}}>Pas de calcul pour ce jour — relancez « Calculer ».</div>
@@ -11134,7 +11185,7 @@ function SpotPricesScreen({ onBack }) {
   const [batSaisie,  setBatSaisie]  = useState(BAT_DEFAUT);
   const [batMsg,     setBatMsg]     = useState(null);
   const [batCalc,    setBatCalc]    = useState(false);
-  const [popup,      setPopup]      = useState(null);      // { jours:[iso], index }
+  const [popup,      setPopup]      = useState(null);      // jour iso ouvert dans le graphique batterie
   const [infoJour,   setInfoJour]   = useState(null);
   const [loading,    setLoading]    = useState(true);
   const [importing,  setImporting]  = useState(false);
@@ -11252,7 +11303,7 @@ function SpotPricesScreen({ onBack }) {
       const v = valeurAffichee(indicateur, r);
       setInfoJour(`${fmtJourLong(r.jours[0])} · ${fmtValeur(indicateur, v, indicateur === 'gain' ? 0 : 1)} ${indDef.unite}${r.n < 24 * 0.9 ? ' · journée incomplète' : ''}`);
     }
-    if (indicateur === 'gain' && r.jours?.length) setPopup({ jours: r.jours.slice().sort(), index: 0 });
+    if (indicateur === 'gain' && r.jours?.length) setPopup(r.jours.slice().sort()[0]);
   };
 
   const fmtDate = (ts) => ts ? new Date(ts).toLocaleString('fr-FR',{day:'2-digit',month:'2-digit',year:'2-digit',hour:'2-digit',minute:'2-digit'}) : '—';
@@ -11409,7 +11460,7 @@ function SpotPricesScreen({ onBack }) {
         </>
       )}
     </div>
-    {popup && <BatterieJourPopup jours={popup.jours} indexInitial={popup.index} params={batParams || batSaisie} onClose={() => setPopup(null)}/>}
+    {popup && <BatterieJourPopup jourInitial={popup} bornes={[meta?.periode_debut, meta?.periode_fin]} params={batParams || batSaisie} onClose={() => setPopup(null)}/>}
     <StickyFooter onBack={vue === 'menu' ? onBack : () => setVue('menu')}/>
     </>
   );
