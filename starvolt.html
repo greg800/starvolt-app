@@ -10144,19 +10144,27 @@ function SpotHeatmapCanvas({ spotAll, natParams, heatmapMode }) {
     const dpr    = window.devicePixelRatio || 1;
     const isTTC  = heatmapMode === 'ttc' && natParams;
 
-    const dayMap = {};
+    // Chaque jour porte l'année d'où il vient (12 mois glissants) : on dessine
+    // dans l'ordre chronologique réel. Le 29 février, pris sur la dernière année
+    // bissextile, est rangé avec le février affiché.
+    const dayMap = {}, yearOf = {};
     spotAll.forEach(r => {
       const k = `${r.mois}_${r.jour}`;
       if (!dayMap[k]) dayMap[k] = new Array(24).fill(null);
       dayMap[k][r.heure] = parseFloat(r.prix);
+      if (r.annee) yearOf[k] = r.annee;
     });
 
     const days = [];
     for (let m = 1; m <= 12; m++)
-      for (let d = 1; d <= DAYS_IN_MONTH[m-1]; d++)
-        days.push({ mois:m, jour:d, prices: dayMap[`${m}_${d}`] || new Array(24).fill(null) });
+      for (let d = 1; d <= DAYS_IN_MONTH[m-1]; d++) {
+        const k = `${m}_${d}`;
+        const annee = (m === 2 && d === 29) ? (yearOf['2_28'] ?? yearOf[k] ?? 0) : (yearOf[k] ?? 0);
+        days.push({ mois:m, jour:d, annee, prices: dayMap[k] || new Array(24).fill(null) });
+      }
+    days.sort((a, b) => (a.annee - b.annee) || (a.mois - b.mois) || (a.jour - b.jour));
 
-    const LBL_W = 26;
+    const LBL_W = 40;
     const HDR_H = 16;
     const CELL_W = Math.max(4, Math.floor((containerW - LBL_W) / 24));
     const CELL_H = 3;
@@ -10179,26 +10187,29 @@ function SpotHeatmapCanvas({ spotAll, natParams, heatmapMode }) {
     for (let h = 0; h < 24; h += 3)
       ctx.fillText(`${h}h`, LBL_W + h * CELL_W + CELL_W / 2, 12);
 
-    // Dessine le label d'un mois centré verticalement sur son bloc
-    const drawMonthLabel = (mois, startRow, endRow) => {
+    // Label d'un bloc (mois + année) centré verticalement ; un bloc trop court
+    // (ex. : le seul 1er octobre de l'année en cours) n'a pas la place.
+    const drawBlockLabel = (day, startRow, endRow) => {
+      if ((endRow - startRow) * CELL_H < 9) return;
       const cy = HDR_H + (startRow + endRow) / 2 * CELL_H + 3;
       ctx.fillStyle = 'rgba(255,255,255,0.75)';
       ctx.font = 'bold 8px sans-serif';
       ctx.textAlign = 'right';
-      ctx.fillText(MOIS_LABELS[mois-1], LBL_W - 3, cy);
+      const an = day.annee ? ` ${String(day.annee).slice(2)}` : '';
+      ctx.fillText(MOIS_LABELS[day.mois-1] + an, LBL_W - 3, cy);
     };
 
-    let prevMonth = 0, mStartRow = 0;
+    let prev = null, bStartRow = 0;
     days.forEach((day, di) => {
       const y = HDR_H + di * CELL_H;
-      if (day.mois !== prevMonth) {
-        if (prevMonth !== 0) {
-          drawMonthLabel(prevMonth, mStartRow, di);
+      if (!prev || day.mois !== prev.mois || day.annee !== prev.annee) {
+        if (prev) {
+          drawBlockLabel(prev, bStartRow, di);
           ctx.fillStyle = 'rgba(255,255,255,0.18)';
           ctx.fillRect(LBL_W, y, 24 * CELL_W, 1);
         }
-        mStartRow = di;
-        prevMonth = day.mois;
+        bStartRow = di;
+        prev = day;
       }
       day.prices.forEach((prix, h) => {
         let p = prix;
@@ -10207,7 +10218,7 @@ function SpotHeatmapCanvas({ spotAll, natParams, heatmapMode }) {
         ctx.fillRect(LBL_W + h * CELL_W, y, CELL_W - 1, CELL_H - 1);
       });
     });
-    if (prevMonth) drawMonthLabel(prevMonth, mStartRow, days.length);
+    if (prev) drawBlockLabel(prev, bStartRow, days.length);
   }, [spotAll, natParams, heatmapMode, hcWindows]);
 
   useEffect(() => {
@@ -10556,144 +10567,274 @@ function FactureVarsScreen({ onBack }) {
   );
 }
 
+// ─── Import CSV horaire ───────────────────────
+// Format Ember / ENTSO-E : une ligne par heure, colonnes « Datetime (UTC) » et
+// « Price (EUR/MWhe) ». Tolère le séparateur de colonnes , ou ; et le séparateur
+// décimal . ou , (export Excel français). Prix stocké en €/kWh.
+function parseSpotHoraire(texte) {
+  const lignes = texte.split(/\r?\n/).filter(l => l.trim());
+  if (lignes.length < 2) return [];
+  const sep = (lignes[0].match(/;/g) || []).length > (lignes[0].match(/,/g) || []).length ? ';' : ',';
+  const split = l => l.split(sep).map(c => c.trim().replace(/^"|"$/g, ''));
+  const hdr = split(lignes[0]).map(h => h.toLowerCase());
+  const iTs = hdr.findIndex(h => h.includes('utc'));
+  const iPx = hdr.findIndex(h => h.includes('price') || h.includes('prix'));
+  if (iTs < 0 || iPx < 0) return [];
+  const facteur = /kwh/.test(hdr[iPx]) ? 1 : 1 / 1000;
+  const out = [];
+  for (let i = 1; i < lignes.length; i++) {
+    const c = split(lignes[i]);
+    const ts = c[iTs], px = c[iPx];
+    if (!ts || !px) continue;
+    const prix = parseFloat(px.replace(/\s/g, '').replace(',', '.'));
+    if (isNaN(prix)) continue;
+    const iso = ts.replace(' ', 'T') + (/[zZ]$|[+-]\d\d:?\d\d$/.test(ts) ? '' : 'Z');
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) continue;
+    out.push({ ts_utc: d.toISOString(), prix: +(prix * facteur).toFixed(6) });
+  }
+  return out;
+}
+
+const fmtJourIso = (s) => s ? `${s.slice(8,10)}/${s.slice(5,7)}/${s.slice(2,4)}` : '—';
+
+// Texte foncé sur les cases claires du nuancier, blanc sur les foncées
+function spotTexteSombre(hex) {
+  if (!hex || hex[0] !== '#') return false;
+  const r = parseInt(hex.slice(1,3),16), g = parseInt(hex.slice(3,5),16), b = parseInt(hex.slice(5,7),16);
+  return (0.299*r + 0.587*g + 0.114*b) > 150;
+}
+
+// ─── SpotLegende ──────────────────────────────
+function SpotLegende({ mode }) {
+  const ttc = mode === 'ttc';
+  const items = ttc
+    ? [['<10c',0.08],['10-13',0.115],['13-16',0.145],['16-19',0.175],['19-22',0.205],['22-26',0.24],['26-30',0.28],['30-35',0.33],['35-45',0.40],['>45',0.50]]
+    : [['<3c',0.02],['3-6',0.045],['6-9',0.075],['9-12',0.105],['12-15',0.135],['15-18',0.165],['18-20',0.19],['20-22',0.21],['22-26',0.24],['>26',0.30]];
+  const col = ttc ? ttcColor : spotColor;
+  return (
+    <div style={{display:'flex',gap:5,flexWrap:'wrap',marginBottom:5}}>
+      {items.map(([lbl,v])=>(
+        <div key={lbl} style={{display:'flex',alignItems:'center',gap:2,fontSize:8.5,color:'rgba(255,255,255,.55)',fontWeight:700}}>
+          <div style={{width:9,height:9,borderRadius:2,background:col(v),flexShrink:0}}/>
+          {lbl}
+        </div>
+      ))}
+      <span style={{fontSize:8.5,color:'rgba(255,255,255,.3)',alignSelf:'center'}}>{ttc ? 'c€/kWh TTC' : 'c€/kWh'}</span>
+    </div>
+  );
+}
+
+// ─── SpotMensuelTable ─────────────────────────
+// Années en colonnes, mois en lignes, moyenne du mois en c€/kWh sur le nuancier
+// du prix horaire. Un mois dont il manque plus de 10 % des heures est marqué *.
+function SpotMensuelTable({ mensuel }) {
+  const annees = [...new Set(mensuel.map(r => r.annee))].sort((a,b)=>a-b);
+  const cell = {};
+  mensuel.forEach(r => { cell[`${r.annee}_${r.mois}`] = r; });
+  const heuresMois = (a, m) => new Date(a, m, 0).getDate() * 24;
+  const annuel = {};
+  annees.forEach(a => {
+    let s = 0, n = 0, h = 0;
+    for (let m = 1; m <= 12; m++) { const r = cell[`${a}_${m}`]; h += heuresMois(a, m); if (r) { s += r.prix * r.n; n += r.n; } }
+    annuel[a] = n ? { prix: s / n, partiel: n < h * 0.9 } : null;
+  });
+  // Simple fonction de rendu (pas un composant : évite un remontage à chaque rendu)
+  const caseTd = (key, r, partiel, bold) => {
+    const bg = spotColor(r ? r.prix : null);
+    return (
+      <td key={key} style={{background:bg,color:spotTexteSombre(bg)?'#0a2a10':'white',textAlign:'center',borderRadius:3,padding:'4px 0',fontWeight:bold?800:700,opacity:partiel?.8:1,whiteSpace:'nowrap'}}>
+        {r ? (r.prix*100).toFixed(1).replace('.',',') + (partiel ? '*' : '') : ''}
+      </td>
+    );
+  };
+  return (
+    <div style={{overflowX:'auto',borderRadius:8,border:'1px solid rgba(255,255,255,.1)',background:'rgba(4,55,66,0.85)',padding:4}}>
+      <table style={{borderCollapse:'separate',borderSpacing:2,width:'100%',fontSize:9.5,fontFamily:'var(--font)'}}>
+        <thead>
+          <tr>
+            <th style={{width:26}}/>
+            {annees.map(a => <th key={a} style={{color:'rgba(255,255,255,.75)',fontSize:9,fontWeight:800,padding:'2px 0'}}>{String(a).slice(2)}</th>)}
+          </tr>
+        </thead>
+        <tbody>
+          {MOIS_LABELS.map((lbl, i) => (
+            <tr key={lbl}>
+              <td style={{color:'rgba(255,255,255,.75)',fontSize:8.5,fontWeight:800,textAlign:'right',paddingRight:3}}>{lbl}</td>
+              {annees.map(a => {
+                const r = cell[`${a}_${i+1}`];
+                return caseTd(a, r, r && r.n < heuresMois(a, i+1) * 0.9, false);
+              })}
+            </tr>
+          ))}
+          <tr>
+            <td style={{color:'var(--green)',fontSize:8.5,fontWeight:800,textAlign:'right',paddingRight:3,paddingTop:4}}>Année</td>
+            {annees.map(a => caseTd(a, annuel[a], annuel[a]?.partiel, true))}
+          </tr>
+        </tbody>
+      </table>
+      <div style={{fontSize:8.5,color:'rgba(255,255,255,.35)',marginTop:4,paddingLeft:2}}>c€/kWh · moyenne des heures du mois · * période incomplète</div>
+    </div>
+  );
+}
+
 // ─── SpotPricesScreen ─────────────────────────
 function SpotPricesScreen({ onBack }) {
   const [meta,       setMeta]       = useState(null);
   const [spotAll,    setSpotAll]    = useState(null);
+  const [mensuel,    setMensuel]    = useState(null);
   const [loading,    setLoading]    = useState(true);
   const [importing,  setImporting]  = useState(false);
   const [importMsg,  setImportMsg]  = useState(null);
   const [natParams,  setNatParams]  = useState(null);
   const [heatmapMode,setHeatmapMode]= useState('spot'); // 'spot' | 'ttc'
+  const [vue,        setVue]        = useState('menu'); // 'menu' | 'mensuel' | 'horaire'
   const fileRef = useRef(null);
 
   const loadData = useCallback(async () => {
-    const [{data:m}, {data:jsonRows}, {data:nat}] = await Promise.all([
+    const [{data:m}, {data:jsonRows}, {data:mens}, {data:nat}] = await Promise.all([
       sb.from('spot_metadata').select('*').eq('id',1).maybeSingle(),
       sb.rpc('get_spot_json'),
+      sb.rpc('get_spot_mensuel'),
       sb.from('parametres_nationaux').select('*').eq('id',1).maybeSingle(),
     ]);
     setMeta(m);
     setSpotAll(jsonRows && jsonRows.length > 0 ? jsonRows : null);
+    setMensuel(mens && mens.length > 0 ? mens : null);
     setNatParams(nat || null);
     setLoading(false);
   }, []);
 
   useEffect(() => { loadData(); }, [loadData]);
 
-  const handleImport = (e) => {
+  // Import : l'historique horaire est complété (upsert sur l'heure UTC), puis
+  // les 12 mois glissants sont reconstruits côté serveur.
+  const handleImport = async (e) => {
     const file = e.target.files?.[0];
-    if (!file) return;
-    setImporting(true); setImportMsg(null);
-    const reader = new FileReader();
-    reader.onload = async (ev) => {
-      try {
-        const wb = XLSX.read(ev.target.result, { type:'array' });
-        const ws = wb.Sheets[wb.SheetNames[0]];
-        const rows = XLSX.utils.sheet_to_json(ws, { header:0 });
-        const records = rows.map(r => ({
-          mois:  parseInt(r['mois'] ?? r['Mois'] ?? r['MOIS']),
-          jour:  parseInt(r['jour'] ?? r['Jour'] ?? r['JOUR']),
-          heure: parseInt(r['heure'] ?? r['Heure'] ?? r['HEURE']),
-          prix:  parseFloat(r['spot price'] ?? r['prix'] ?? r['Prix']),
-        })).filter(r => !isNaN(r.mois) && !isNaN(r.jour) && !isNaN(r.heure) && !isNaN(r.prix));
-        const CHUNK = 500;
-        for (let i = 0; i < records.length; i += CHUNK) {
-          const { error } = await sb.from('prix_spot').upsert(records.slice(i, i+CHUNK), { onConflict:'mois,jour,heure' });
-          if (error) { setImportMsg('Erreur : ' + error.message); setImporting(false); return; }
-        }
-        await sb.from('spot_metadata').upsert({ id:1, last_update:new Date().toISOString(), rows_count:records.length, source_file:file.name }, { onConflict:'id' });
-        setImportMsg(`✓ ${records.length} lignes importées`);
-        setImporting(false);
-        await loadData();
-      } catch(err) {
-        setImportMsg('Erreur : ' + err.message);
-        setImporting(false);
-      }
-    };
-    reader.readAsArrayBuffer(file);
     e.target.value = '';
+    if (!file) return;
+    setImporting(true); setImportMsg('Lecture du fichier…');
+    try {
+      const texte = await file.text();
+      const records = parseSpotHoraire(texte);
+      if (!records.length) throw new Error('aucune ligne reconnue — colonnes attendues « Datetime (UTC) » et « Price (EUR/MWhe) »');
+      const CHUNK = 2000;
+      for (let i = 0; i < records.length; i += CHUNK) {
+        setImportMsg(`Import ${Math.min(i + CHUNK, records.length).toLocaleString('fr-FR')} / ${records.length.toLocaleString('fr-FR')} heures…`);
+        const { error } = await sb.from('prix_spot_historique').upsert(records.slice(i, i + CHUNK), { onConflict:'ts_utc' });
+        if (error) throw error;
+      }
+      setImportMsg('Reconstruction des 12 mois glissants…');
+      const { data, error } = await sb.rpc('rebuild_prix_spot_glissant');
+      if (error) throw error;
+      await sb.from('spot_metadata').update({ source_file: file.name }).eq('id', 1);
+      setImportMsg(`✓ ${records.length.toLocaleString('fr-FR')} heures importées · 12 mois glissants ${fmtJourIso(data?.fenetre_debut)} → ${fmtJourIso(data?.fenetre_fin)}`);
+      await loadData();
+    } catch(err) {
+      setImportMsg('Erreur : ' + (err.message || String(err)));
+      window.logAppError?.('spot_import', err);
+    }
+    setImporting(false);
   };
 
   const fmtDate = (ts) => ts ? new Date(ts).toLocaleString('fr-FR',{day:'2-digit',month:'2-digit',year:'2-digit',hour:'2-digit',minute:'2-digit'}) : '—';
+  const titre = vue === 'mensuel' ? 'Historique par mois' : vue === 'horaire' ? '12 derniers mois heure par heure' : null;
 
   return (
     <>
     <div className="screen fade-in">
       {/* Header compact */}
-      <div style={{display:'flex',alignItems:'center',justifyContent:'flex-end',marginBottom:6}}>
+      <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:6}}>
+        <span style={{fontSize:11,fontWeight:700,color:'rgba(255,255,255,.6)'}}>{titre || ''}</span>
         <span style={{fontSize:13,fontWeight:800,color:'white',letterSpacing:.5}}>
           Prix <span style={{color:'var(--green)'}}>spot</span>
         </span>
-        <div style={{width:60}}/>
       </div>
 
-      {/* Méta + bouton import — ultra compact */}
-      <div style={{background:'rgba(255,255,255,.07)',border:'1px solid rgba(255,255,255,.12)',borderRadius:10,padding:'8px 12px',marginBottom:6,display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}}>
-        <div style={{flex:1,minWidth:0}}>
-          <div style={{fontSize:10,color:'rgba(255,255,255,.5)',fontWeight:600}}>
-            {meta ? `${meta.rows_count?.toLocaleString('fr-FR')} lignes · MAJ ${fmtDate(meta.last_update)}` : 'Aucune donnée importée'}
-          </div>
-          {meta?.source_file && <div style={{fontSize:9,color:'rgba(255,255,255,.35)',marginTop:1,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{meta.source_file}</div>}
-          {importMsg && <div style={{fontSize:10,fontWeight:700,marginTop:2,color:importMsg.startsWith('✓')?'var(--green)':'#ff9090'}}>{importMsg}</div>}
-        </div>
-        <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" style={{display:'none'}} onChange={handleImport}/>
-        <button onClick={()=>fileRef.current?.click()} disabled={importing} style={{
-          background:'rgba(8,145,178,.2)',border:'1px solid rgba(8,145,178,.4)',color:'#5de0f5',
-          fontFamily:'var(--font)',fontSize:11,fontWeight:700,borderRadius:8,padding:'6px 10px',
-          cursor:'pointer',whiteSpace:'nowrap',flexShrink:0
-        }}>
-          {importing ? '…' : '⚡ Importer'}
-        </button>
-      </div>
-
-      {/* Sélecteur spot / TTC */}
-      {natParams && spotAll && (
-        <div style={{display:'flex',background:'rgba(255,255,255,.06)',borderRadius:7,padding:2,gap:2,marginBottom:8,alignSelf:'flex-start'}}>
-          {[['spot','Prix spot'],['ttc','Prix TTC']].map(([m,lbl])=>(
-            <button key={m} onClick={()=>setHeatmapMode(m)} style={{fontSize:11,fontWeight:700,border:'none',borderRadius:5,padding:'4px 10px',cursor:'pointer',fontFamily:'var(--font)',background:heatmapMode===m?'rgba(125,217,64,.25)':'transparent',color:heatmapMode===m?'#7dd940':'rgba(255,255,255,.45)'}}>
-              {lbl}
+      {vue === 'menu' && (
+        <>
+          {/* Méta + bouton import — ultra compact */}
+          <div style={{background:'rgba(255,255,255,.07)',border:'1px solid rgba(255,255,255,.12)',borderRadius:10,padding:'8px 12px',marginBottom:10,display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}}>
+            <div style={{flex:1,minWidth:0}}>
+              <div style={{fontSize:10,color:'rgba(255,255,255,.5)',fontWeight:600}}>
+                {meta?.rows_count
+                  ? `${meta.rows_count.toLocaleString('fr-FR')} heures · ${fmtJourIso(meta.periode_debut)} → ${fmtJourIso(meta.periode_fin)} · MAJ ${fmtDate(meta.last_update)}`
+                  : 'Aucune donnée importée'}
+              </div>
+              {meta?.fenetre_debut && (
+                <div style={{fontSize:10,color:'rgba(255,255,255,.5)',fontWeight:600,marginTop:1}}>
+                  12 mois glissants : {fmtJourIso(meta.fenetre_debut)} → {fmtJourIso(meta.fenetre_fin)}
+                </div>
+              )}
+              {meta?.source_file && <div style={{fontSize:9,color:'rgba(255,255,255,.35)',marginTop:1,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{meta.source_file}</div>}
+              {importMsg && <div style={{fontSize:10,fontWeight:700,marginTop:2,color:importMsg.startsWith('✓')?'var(--green)':importMsg.startsWith('Erreur')?'#ff9090':'#5de0f5'}}>{importMsg}</div>}
+            </div>
+            <input ref={fileRef} type="file" accept=".csv,text/csv" style={{display:'none'}} onChange={handleImport}/>
+            <button onClick={()=>fileRef.current?.click()} disabled={importing} title="CSV horaire : Datetime (UTC), Price (EUR/MWhe)" style={{
+              background:'rgba(8,145,178,.2)',border:'1px solid rgba(8,145,178,.4)',color:'#5de0f5',
+              fontFamily:'var(--font)',fontSize:11,fontWeight:700,borderRadius:8,padding:'6px 10px',
+              cursor:'pointer',whiteSpace:'nowrap',flexShrink:0
+            }}>
+              {importing ? '…' : '⚡ Importer CSV'}
             </button>
-          ))}
-        </div>
+          </div>
+
+          {loading ? (
+            <div style={{textAlign:'center',padding:40}}><StarSpinner size={34}/></div>
+          ) : (
+            <div style={{display:'flex',flexDirection:'column',gap:10}}>
+              <button className="sim-btn" onClick={()=>setVue('mensuel')} disabled={!mensuel} style={{opacity:mensuel?1:.5}}>
+                <span className="sim-icon">📅</span>
+                <div className="sim-text">
+                  <div className="sim-title">Vue historique par mois</div>
+                  <div className="sim-sub">{mensuel ? `Moyennes mensuelles ${mensuel[0].annee} → ${mensuel[mensuel.length-1].annee}` : 'Aucun historique importé'}</div>
+                </div>
+                <span className="sim-arrow">→</span>
+              </button>
+              <button className="sim-btn" onClick={()=>setVue('horaire')} disabled={!spotAll} style={{opacity:spotAll?1:.5}}>
+                <span className="sim-icon">🕐</span>
+                <div className="sim-text">
+                  <div className="sim-title">Vue des 12 derniers mois heure par heure</div>
+                  <div className="sim-sub">{spotAll ? '365 derniers jours connus, prix spot ou TTC' : 'Aucun prix spot importé'}</div>
+                </div>
+                <span className="sim-arrow">→</span>
+              </button>
+            </div>
+          )}
+        </>
       )}
 
-      {/* Légende compacte */}
-      {heatmapMode === 'ttc' && natParams ? (
-        <div style={{display:'flex',gap:5,flexWrap:'wrap',marginBottom:5}}>
-          {[['<10c',0.08],['10-13',0.115],['13-16',0.145],['16-19',0.175],['19-22',0.205],['22-26',0.24],['26-30',0.28],['30-35',0.33],['35-45',0.40],['>45',0.50]].map(([lbl,v])=>(
-            <div key={lbl} style={{display:'flex',alignItems:'center',gap:2,fontSize:8.5,color:'rgba(255,255,255,.55)',fontWeight:700}}>
-              <div style={{width:9,height:9,borderRadius:2,background:ttcColor(v),flexShrink:0}}/>
-              {lbl}
-            </div>
-          ))}
-          <span style={{fontSize:8.5,color:'rgba(255,255,255,.3)',alignSelf:'center'}}>c€/kWh TTC</span>
-        </div>
-      ) : (
-        <div style={{display:'flex',gap:5,flexWrap:'wrap',marginBottom:5}}>
-          {[['<3c',0.02],['3-6',0.045],['6-9',0.075],['9-12',0.105],['12-15',0.135],['15-18',0.165],['18-20',0.19],['20-22',0.21],['22-26',0.24],['>26',0.30]].map(([lbl,v])=>(
-            <div key={lbl} style={{display:'flex',alignItems:'center',gap:2,fontSize:8.5,color:'rgba(255,255,255,.55)',fontWeight:700}}>
-              <div style={{width:9,height:9,borderRadius:2,background:spotColor(v),flexShrink:0}}/>
-              {lbl}
-            </div>
-          ))}
-          <span style={{fontSize:8.5,color:'rgba(255,255,255,.3)',alignSelf:'center'}}>c€/kWh</span>
-        </div>
+      {vue === 'mensuel' && mensuel && (
+        <>
+          <SpotLegende mode="spot"/>
+          <SpotMensuelTable mensuel={mensuel}/>
+        </>
       )}
 
-      {/* Heatmap pleine largeur */}
-      {loading ? (
-        <div style={{textAlign:'center',padding:40}}><StarSpinner size={34}/></div>
-      ) : spotAll ? (
-        <SpotHeatmapCanvas spotAll={spotAll} natParams={natParams} heatmapMode={heatmapMode}/>
-      ) : (
-        <div className="card" style={{textAlign:'center',padding:'32px 20px'}}>
-          <div style={{fontSize:32,marginBottom:10}}>⚡</div>
-          <p style={{color:'rgba(255,255,255,.6)',fontSize:13}}>Aucun prix spot importé.</p>
-        </div>
+      {vue === 'horaire' && spotAll && (
+        <>
+          <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:8,flexWrap:'wrap'}}>
+            {natParams && (
+              <div style={{display:'flex',background:'rgba(255,255,255,.06)',borderRadius:7,padding:2,gap:2}}>
+                {[['spot','Prix spot'],['ttc','Prix TTC']].map(([m,lbl])=>(
+                  <button key={m} onClick={()=>setHeatmapMode(m)} style={{fontSize:11,fontWeight:700,border:'none',borderRadius:5,padding:'4px 10px',cursor:'pointer',fontFamily:'var(--font)',background:heatmapMode===m?'rgba(125,217,64,.25)':'transparent',color:heatmapMode===m?'#7dd940':'rgba(255,255,255,.45)'}}>
+                    {lbl}
+                  </button>
+                ))}
+              </div>
+            )}
+            {meta?.fenetre_debut && (
+              <span style={{fontSize:10,color:'rgba(255,255,255,.5)',fontWeight:600}}>
+                {fmtJourIso(meta.fenetre_debut)} → {fmtJourIso(meta.fenetre_fin)}
+              </span>
+            )}
+          </div>
+          <SpotLegende mode={heatmapMode === 'ttc' && natParams ? 'ttc' : 'spot'}/>
+          <SpotHeatmapCanvas spotAll={spotAll} natParams={natParams} heatmapMode={heatmapMode}/>
+        </>
       )}
     </div>
-    <StickyFooter onBack={onBack}/>
+    <StickyFooter onBack={vue === 'menu' ? onBack : () => setVue('menu')}/>
     </>
   );
 }
