@@ -18565,10 +18565,52 @@ function suivreRepere(doc, win, trouver, point, boite, classe, style) {
   tic();
   win.__repereStop = () => { actif = false; win.clearInterval(minuteur); win.removeEventListener('scroll', tic, true); win.removeEventListener('resize', tic); rep.remove(); win.__repereStop = null; };
 }
+
+// ── La capture d'écran au moment où l'on pointe ────────────────────────────
+// Plutôt que de rejouer l'écran et d'y chercher l'endroit, on photographie la
+// fenêtre telle qu'elle est (html2canvas, chargé à la demande) et on y dessine
+// le cercle rouge : l'image devient la pièce du retour, elle ne bouge plus.
+function chargerHtml2canvas() {
+  if (window.html2canvas) return Promise.resolve(window.html2canvas);
+  return new Promise((ok, ko) => {
+    const s = document.createElement('script');
+    s.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js';
+    s.onload = () => ok(window.html2canvas); s.onerror = () => ko(new Error('capture indisponible'));
+    document.head.appendChild(s);
+  });
+}
+// cadres : [{ el: iframe, win, doc }] — les iframes de même origine à incruster dans la capture
+async function capturerEcran(cx, cy, cadres) {
+  const h2c = await chargerHtml2canvas();
+  const W = window.innerWidth, H = window.innerHeight;
+  const k = Math.min(1, 1600 / Math.max(W, H, 1));
+  const opts = (win) => ({ x: win.scrollX, y: win.scrollY, width: win.innerWidth, height: win.innerHeight, scrollX: 0, scrollY: 0, scale: k, useCORS: true, logging: false, backgroundColor: null });
+  const base = await h2c(document.documentElement, opts(window));
+  const c = document.createElement('canvas'); c.width = Math.round(W * k); c.height = Math.round(H * k);
+  const g = c.getContext('2d'); g.drawImage(base, 0, 0, c.width, c.height);
+  // les iframes de même origine (le démonstrateur) : html2canvas ne les rend pas, on les dessine à leur place
+  for (const f of (cadres || [])) {
+    try {
+      const r = f.el.getBoundingClientRect(); if (r.width <= 0 || r.height <= 0) continue;
+      const img = await h2c(f.doc.documentElement, opts(f.win));
+      g.drawImage(img, 0, 0, img.width, img.height, r.left * k, r.top * k, r.width * k, r.height * k);
+    } catch (e) {}
+  }
+  // le cercle rouge, halo blanc, à l'endroit cliqué
+  const D = 48 * k, x = cx * k, y = cy * k;
+  g.save(); g.beginPath(); g.arc(x, y, D / 2 + 5, 0, Math.PI * 2); g.lineWidth = 6 * k; g.strokeStyle = 'rgba(255,255,255,.9)'; g.stroke();
+  g.beginPath(); g.arc(x, y, D / 2, 0, Math.PI * 2); g.lineWidth = 4 * k; g.strokeStyle = '#e11d1d'; g.stroke();
+  g.beginPath(); g.arc(x, y, D / 2 + 10, 0, Math.PI * 2); g.lineWidth = 6 * k; g.strokeStyle = 'rgba(225,29,29,.35)'; g.stroke(); g.restore();
+  const blob = await new Promise(ok => c.toBlob(ok, 'image/jpeg', 0.85));
+  if (!blob) throw new Error('capture illisible');
+  return { blob, type: 'image/jpeg', ext: 'jpg', url: URL.createObjectURL(blob), capture: true };
+}
 function Pointeur({ onChoix, onAnnuler }) {
   useEffect(() => { const esc = (e) => { if (e.key === 'Escape') onAnnuler(); }; window.addEventListener('keydown', esc); return () => window.removeEventListener('keydown', esc); }, []);
-  const clic = (e) => {
+  const [capture, setCapture] = useState(false);
+  const clic = async (e) => {
     e.preventDefault(); e.stopPropagation();
+    if (capture) return;
     const calque = e.currentTarget; calque.style.pointerEvents = 'none';
     const el = document.elementFromPoint(e.clientX, e.clientY); calque.style.pointerEvents = '';
     if (!el || el === document.body || el === document.documentElement) return;
@@ -18578,11 +18620,17 @@ function Pointeur({ onChoix, onAnnuler }) {
     const halo = document.createElement('div'); halo.className = 'rt-halo';
     Object.assign(halo.style, { left: e.clientX - 22 + 'px', top: e.clientY - 22 + 'px', width:'44px', height:'44px' });
     document.body.appendChild(halo); setTimeout(() => halo.remove(), 1400);
-    onChoix({ ...cibleDe(cible), point });
+    // La capture : le calque et son message disparaissent le temps de la photo.
+    let photo = null;
+    setCapture(true); calque.style.visibility = 'hidden';
+    try { await new Promise(r => setTimeout(r, 60)); photo = await capturerEcran(e.clientX, e.clientY, []); }
+    catch (err) { logAppError({ severity:'mineur', module:'retour/capture', message: err.message || String(err) }); }
+    calque.style.visibility = ''; setCapture(false);
+    onChoix({ ...cibleDe(cible), point }, photo);
   };
   return (
     <div className="rt-pointeur" onClick={clic}>
-      <div className="rt-pointeur-msg" onClick={(e)=>e.stopPropagation()}>Cliquez l'élément qui pose problème<button className="rt-btn" onClick={onAnnuler}>Annuler</button></div>
+      <div className="rt-pointeur-msg" onClick={(e)=>e.stopPropagation()}>{capture ? 'Capture de l\'écran…' : 'Cliquez l\'élément qui pose problème'}<button className="rt-btn" onClick={onAnnuler} disabled={capture}>Annuler</button></div>
     </div>
   );
 }
@@ -18684,7 +18732,7 @@ function ModaleRetour({ sentiment, contexte, user, onFermer }) {
     } catch (err) { setErreur(err.message || 'Envoi impossible.'); logAppError({ severity:'mineur', module:'retour', message: err.message || String(err) }); }
     finally { setEnvoi(false); }
   };
-  if (pointage) return <Pointeur onChoix={(c)=>{ setCible(c); setPointage(false); }} onAnnuler={()=>setPointage(false)}/>;
+  if (pointage) return <Pointeur onChoix={(c, photo)=>{ setCible(c); if (photo) { if (image) URL.revokeObjectURL(image.url); setImage(photo); } setPointage(false); }} onAnnuler={()=>setPointage(false)}/>;
   return (
     <div className="rt-voile" onClick={onFermer}>
       <div className="rt-modale" role="dialog" aria-modal="true" aria-label={bas ? 'Ce qui ne va pas' : 'Ce qui vous plaît'} onClick={(e)=>e.stopPropagation()}>
