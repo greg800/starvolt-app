@@ -18469,7 +18469,14 @@ function contexteRetour() {
   // On ne garde que ce qui sert à rejouer l'écran : des scalaires courts, jamais
   // le nom, l'adresse ni les montants du foyer.
   const PRIVE = ['name','address','initialBill','bill','investment','bravoItems','email','phone','telephone','prenom','nom'];
-  const simple = {}; Object.keys(reste).forEach(k => { const v = reste[k]; if (PRIVE.includes(k)) return; if (v == null || typeof v === 'number' || typeof v === 'boolean' || (typeof v === 'string' && v.length <= 60)) simple[k] = v; });
+  // Les objets que l'écran reçoit (le thème, le sujet de « Comprendre ») ne
+  // sont gardés que par leur identifiant ; Starvolt incrusté les recharge.
+  const REFS = { learnGroup: 'learn_groups', learnSubject: 'learn_subjects' };
+  const simple = {}; Object.keys(reste).forEach(k => {
+    const v = reste[k]; if (PRIVE.includes(k)) return;
+    if (REFS[k] && v && typeof v === 'object' && v.id != null) { simple[k] = { __table: REFS[k], id: v.id }; return; }
+    if (v == null || typeof v === 'number' || typeof v === 'boolean' || (typeof v === 'string' && v.length <= 60)) simple[k] = v;
+  });
   return {
     route: JSON.stringify({ screen, ...simple }),
     ecran: screenLabel(screen),
@@ -21019,7 +21026,24 @@ function App() {
   useEffect(() => {
     if (!INCRUSTE || !ETAT_INCRUSTE || !user?.id || !profile || incrusteFait.current) return;
     incrusteFait.current = true;
-    setState(s => ({ ...s, ...ETAT_INCRUSTE })); setHistory([]);
+    (async () => {
+      const etat = { ...ETAT_INCRUSTE };
+      // Les objets gardés par leur identifiant sont rechargés.
+      for (const k of Object.keys(etat)) {
+        const v = etat[k];
+        if (v && typeof v === 'object' && v.__table && v.id != null) {
+          try { const { data } = await sb.from(v.__table).select('*').eq('id', v.id).maybeSingle(); etat[k] = data || null; } catch (e) { etat[k] = null; }
+        }
+      }
+      // Ce qui ne peut pas se rejouer sans ses données se replie sur l'écran parent.
+      if (['COMPRENDRE_QUIZ', 'COMPRENDRE_SCORE'].includes(etat.screen)) etat.screen = etat.learnSubject ? 'COMPRENDRE_SUBJECT' : etat.learnGroup ? 'COMPRENDRE_GROUP' : 'COMPRENDRE_HOME';
+      if (etat.screen === 'COMPRENDRE_SUBJECT' && !etat.learnSubject) etat.screen = etat.learnGroup ? 'COMPRENDRE_GROUP' : 'COMPRENDRE_HOME';
+      if (etat.screen === 'COMPRENDRE_GROUP' && !etat.learnGroup) etat.screen = 'COMPRENDRE_HOME';
+      const BESOIN = { ADMIN_LEARN_GROUP:'editLearnGroup', ADMIN_OFFRE_EDIT:'editOffre', ADMIN_TARIFF_EDIT:'editTariff', ADMIN_SITE_EDIT:'editSite', ADMIN_ACC_EDIT:'editAccSite', ADMIN_USER_LOGS:'logUser', ADMIN_QUIZ_FAILS:'failUser' };
+      if (BESOIN[etat.screen] && !etat[BESOIN[etat.screen]]) etat.screen = 'ADMIN';
+      setState(s => ({ ...s, ...etat })); setHistory([]);
+      window.__setTrackScreen && window.__setTrackScreen(etat.screen);
+    })();
   }, [user?.id, profile]);
   useEffect(() => {
     if (!INCRUSTE) return;
