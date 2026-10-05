@@ -10190,12 +10190,14 @@ function SpotHeatmapCanvas({ spotAll, natParams, heatmapMode, comparaisons = [] 
     const LBL_W = 40;
     const GAP_P = nP > 1 ? 4 : 0;                       // espace entre panneaux
     const HDR_H = nP > 1 ? 26 : 16;                     // titre du panneau + heures
-    const CELL_W = Math.max(2, Math.floor((containerW - LBL_W - GAP_P * (nP - 1)) / (24 * nP)));
+    // Largeur de colonne arrondie au pixel physique (et non au pixel CSS) : sur un
+    // écran de bureau à 11 panneaux, l'arrondi entier laissait 20 % de la largeur vide.
+    const CELL_W = Math.max(2, Math.floor((containerW - LBL_W - GAP_P * (nP - 1)) / (24 * nP) * dpr) / dpr);
     const GAP_W  = CELL_W >= 4 ? 1 : 0;
     const PAN_W  = 24 * CELL_W;
     const CELL_H = (availH - HDR_H) / days.length;
     const GAP_H  = CELL_H >= 3 ? 1 : 0;
-    const W = LBL_W + nP * PAN_W + GAP_P * (nP - 1);
+    const W = Math.ceil(LBL_W + nP * PAN_W + GAP_P * (nP - 1));
     const H = Math.round(HDR_H + days.length * CELL_H);
     const x0 = (p) => LBL_W + p * (PAN_W + GAP_P);
 
@@ -10218,8 +10220,11 @@ function SpotHeatmapCanvas({ spotAll, natParams, heatmapMode, comparaisons = [] 
       if (nP > 1) {
         ctx.fillStyle = p === 0 ? '#7dd940' : 'rgba(255,255,255,0.75)';
         ctx.font = 'bold 8px sans-serif';
+        // Panneau étroit (beaucoup d'années côte à côte) : titre réduit aux deux millésimes
         const titre = premier.annee
-          ? `${MOIS_LABELS[premier.mois-1]} ${yy(premier.annee - pan.decal)} → ${MOIS_LABELS[dernier.mois-1]} ${yy(dernier.annee - pan.decal)}`
+          ? (PAN_W < 90
+              ? `${yy(premier.annee - pan.decal)}-${yy(dernier.annee - pan.decal)}`
+              : `${MOIS_LABELS[premier.mois-1]} ${yy(premier.annee - pan.decal)} → ${MOIS_LABELS[dernier.mois-1]} ${yy(dernier.annee - pan.decal)}`)
           : (pan.decal ? `−${pan.decal} an${pan.decal > 1 ? 's' : ''}` : '12 derniers mois');
         ctx.fillText(titre, x0(p) + PAN_W / 2, 9);
       }
@@ -11198,9 +11203,23 @@ function SpotPricesScreen({ onBack }) {
   const [natParams,  setNatParams]  = useState(null);
   const [heatmapMode,setHeatmapMode]= useState('spot'); // 'spot' | 'ttc'
   const [vue,        setVue]        = useState('menu'); // 'menu' | 'histo' | 'horaire'
-  const [compSel,    setCompSel]    = useState([]);     // décalages (années) comparés, 3 max
+  const [compSel,    setCompSel]    = useState([]);     // décalages (années) comparés
   const [compData,   setCompData]   = useState({});     // decal → { m_j_h: prix }
+  const [largeurH,   setLargeurH]   = useState(340);    // largeur utile de la vue horaire
+  const horaireRef = useRef(null);
   const fileRef = useRef(null);
+
+  // Nombre de fenêtres comparables : autant de panneaux que la largeur en
+  // accepte à 3 px par heure (4 sur un téléphone, toutes les années sur un
+  // écran de bureau, où la vue passe en pleine largeur).
+  useEffect(() => {
+    if (vue !== 'horaire') return;
+    const mesure = () => { if (horaireRef.current) setLargeurH(horaireRef.current.clientWidth); };
+    mesure();
+    window.addEventListener('resize', mesure);
+    return () => window.removeEventListener('resize', mesure);
+  }, [vue]);
+  const maxComp = Math.max(1, Math.floor((largeurH - 40 + 4) / (24 * 3 + 4)) - 1);
 
   // Fenêtres antérieures comparables : la fenêtre courante décalée de k années,
   // tant qu'elle reste couverte par l'historique.
@@ -11215,19 +11234,30 @@ function SpotPricesScreen({ onBack }) {
     return out;
   }, [meta]);
 
+  const chargerComp = async (k) => {
+    if (compData[k]) return true;
+    const { data, error } = await sb.rpc('get_spot_horaire_periode', { p_debut: decalerAnnees(meta.fenetre_debut, -k), p_fin: decalerAnnees(meta.fenetre_fin, -k) });
+    if (error || !data) { window.logAppError?.('spot_comparaison', error || new Error('fenêtre vide')); return false; }
+    const map = {};
+    data.forEach(r => { map[`${r.m}_${r.j}_${r.h}`] = r.p; });
+    setCompData(prev => ({ ...prev, [k]: map }));
+    return true;
+  };
   const toggleComp = async (k) => {
     if (compSel.includes(k)) { setCompSel(compSel.filter(x => x !== k)); return; }
-    if (compSel.length >= 3) return;
-    if (!compData[k]) {
-      const { data, error } = await sb.rpc('get_spot_horaire_periode', { p_debut: decalerAnnees(meta.fenetre_debut, -k), p_fin: decalerAnnees(meta.fenetre_fin, -k) });
-      if (error || !data) { window.logAppError?.('spot_comparaison', error || new Error('fenêtre vide')); return; }
-      const map = {};
-      data.forEach(r => { map[`${r.m}_${r.j}_${r.h}`] = r.p; });
-      setCompData(prev => ({ ...prev, [k]: map }));
-    }
-    setCompSel([...compSel, k].sort((a, b) => a - b));
+    if (compSel.length >= maxComp) return;
+    if (await chargerComp(k)) setCompSel(prev => [...new Set([...prev, k])].sort((a, b) => a - b));
   };
-  const comparaisons = useMemo(() => compSel.filter(k => compData[k]).map(k => ({ decal: k, map: compData[k] })), [compSel, compData]);
+  // « Tout » : toutes les fenêtres que la largeur accepte, les plus récentes d'abord
+  const toutSel = decalsDispo.length > 0 && decalsDispo.slice(0, maxComp).every(k => compSel.includes(k));
+  const toggleTout = async () => {
+    if (toutSel) { setCompSel([]); return; }
+    const cibles = decalsDispo.slice(0, maxComp);
+    const ok = await Promise.all(cibles.map(chargerComp));
+    setCompSel(cibles.filter((_, i) => ok[i]));
+  };
+  // Si la fenêtre rétrécit, on n'affiche que ce qui tient
+  const comparaisons = useMemo(() => compSel.filter(k => compData[k]).slice(0, maxComp).map(k => ({ decal: k, map: compData[k] })), [compSel, compData, maxComp]);
 
   const loadData = useCallback(async () => {
     const [{data:m}, {data:jsonRows}, {data:jj}, {data:bp}, {data:nat}] = await Promise.all([
@@ -11329,7 +11359,7 @@ function SpotPricesScreen({ onBack }) {
 
   return (
     <>
-    <div className="screen fade-in">
+    <div className={`screen fade-in${vue === 'horaire' ? ' screen-wide' : ''}`}>
       {/* Header compact */}
       <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:6}}>
         <span style={{fontSize:11,fontWeight:700,color:'rgba(255,255,255,.6)'}}>{titre || ''}</span>
@@ -11433,7 +11463,7 @@ function SpotPricesScreen({ onBack }) {
 
       {vue === 'horaire' && spotAll && (
         <>
-          <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:8,flexWrap:'wrap'}}>
+          <div ref={horaireRef} style={{display:'flex',alignItems:'center',gap:8,marginBottom:8,flexWrap:'wrap'}}>
             {natParams && (
               <div style={{display:'flex',background:'rgba(255,255,255,.06)',borderRadius:7,padding:2,gap:2}}>
                 {[['spot','Prix spot'],['ttc','Prix TTC']].map(([m,lbl]) => segBtn(heatmapMode===m, () => setHeatmapMode(m), lbl, m, false))}
@@ -11448,9 +11478,14 @@ function SpotPricesScreen({ onBack }) {
           {decalsDispo.length > 0 && (
             <div style={{display:'flex',alignItems:'center',gap:4,marginBottom:6,overflowX:'auto',whiteSpace:'nowrap',paddingBottom:2}}>
               <span style={{fontSize:9,color:'rgba(255,255,255,.45)',fontWeight:700,flexShrink:0}}>Comparer :</span>
+              {maxComp >= 4 && (
+                <button onClick={toggleTout} style={{flexShrink:0,fontSize:9.5,fontWeight:800,border:'1px solid',borderColor:toutSel?'rgba(125,217,64,.6)':'rgba(255,255,255,.3)',borderRadius:6,padding:'2px 7px',cursor:'pointer',fontFamily:'var(--font)',background:toutSel?'rgba(125,217,64,.22)':'rgba(255,255,255,.1)',color:toutSel?'#7dd940':'white'}}>
+                  Tout
+                </button>
+              )}
               {decalsDispo.map(k => {
                 const on = compSel.includes(k);
-                const plein = !on && compSel.length >= 3;
+                const plein = !on && compSel.length >= maxComp;
                 const a0 = parseInt(meta.fenetre_debut.slice(0,4)) - k, a1 = parseInt(meta.fenetre_fin.slice(0,4)) - k;
                 return (
                   <button key={k} onClick={()=>toggleComp(k)} disabled={plein} style={{flexShrink:0,fontSize:9.5,fontWeight:700,border:'1px solid',borderColor:on?'rgba(125,217,64,.6)':'rgba(255,255,255,.15)',borderRadius:6,padding:'2px 7px',cursor:plein?'default':'pointer',fontFamily:'var(--font)',background:on?'rgba(125,217,64,.22)':'rgba(255,255,255,.05)',color:on?'#7dd940':plein?'rgba(255,255,255,.25)':'rgba(255,255,255,.6)'}}>
