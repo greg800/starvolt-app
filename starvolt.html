@@ -11151,7 +11151,7 @@ const fmtGain = g => (g >= 0 ? '+' : '−') + f2(Math.abs(g)) + ' €';
 // Graphique d'une journée. Échelles passées par le parent pour que les tuiles
 // d'une même période soient comparables. axes=false pour une tuile.
 function GraphiqueJour({ plan, w, h, pMin, pMax, eMax, axes }) {
-  const ML = axes ? 46 : 2, MR = axes ? 46 : 2, MT = axes ? 14 : 12, MB = axes ? 22 : 2;
+  const ML = axes ? 46 : 2, MR = axes ? 46 : 2, MT = axes ? 14 : 12, MB = axes ? 26 : 2;
   const F = axes ? 12 : 9, FU = axes ? 10 : 7;   // taille des libellés d'axe et des unités
   const HS = axes ? 56 : Math.max(10, Math.round(h * 0.18));
   const iw = Math.max(10, w - ML - MR), ih = Math.max(10, h - HS - MT - MB - (axes ? 6 : 2));
@@ -11169,6 +11169,9 @@ function GraphiqueJour({ plan, w, h, pMin, pMax, eMax, axes }) {
   const xTexte = hh => Math.max(ML + 14, Math.min(w - MR - 14, xh(hh)));
   // Gras, grand, et un halo couleur fond pour rester lisible sur les barres
   const styleExtreme = { fontSize: axes ? 18 : 13, fontWeight: 800, fill: '#ffd84d', stroke: '#05414e', strokeWidth: 3, paintOrder: 'stroke', textAnchor: 'middle' };
+  // Spread du jour (max − min) dans une pastille en bas à gauche de la zone des prix
+  const spread = p[hMax] - p[hMin];
+  const RS = axes ? 24 : 13, cxS = ML + RS + 4, cyS = MT + ih - RS - 4;
   return (
     <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`} style={{display:'block'}}>
       {axes && [6, 12, 18].map(hh => <line key={hh} x1={ML + hh * pxH} x2={ML + hh * pxH} y1={MT} y2={ysTop + HS - 8} stroke="rgba(255,255,255,.1)"/>)}
@@ -11182,11 +11185,14 @@ function GraphiqueJour({ plan, w, h, pMin, pMax, eMax, axes }) {
       <rect x={ML} y={ys(100)} width={iw} height={ys(0) - ys(100)} fill="rgba(255,255,255,.04)"/>
       {s.length > 0 && <polygon points={`${ML},${ys(0)} ${ptsSoc.map(q => q.join(',')).join(' ')} ${w - MR},${ys(0)}`} fill="rgba(125,217,64,.22)"/>}
       {s.length > 0 && <polyline points={ptsSoc.map(q => q.join(',')).join(' ')} fill="none" stroke="#7dd940" strokeWidth={axes ? 1.4 : 1}/>}
+      <circle cx={cxS} cy={cyS} r={RS} fill="#ffd84d" stroke="#05414e" strokeWidth="2"/>
+      <text x={cxS} y={cyS + (axes ? 2 : 4.5)} fontSize={axes ? 18 : 12} fontWeight="800" fill="#0a2a10" textAnchor="middle">{fmt0(spread)}</text>
+      {axes && <text x={cxS} y={cyS + 15} fontSize="8" fontWeight="700" fill="#0a2a10" textAnchor="middle">spread</text>}
       <text x={xTexte(hMax)} y={Math.max(yp(p[hMax]) - (axes ? 8 : 5), axes ? 16 : 12)} style={styleExtreme}>{fmt0(p[hMax])}</text>
       {hMin !== hMax && <text x={xTexte(hMin)} y={Math.min(yp(p[hMin]) + (axes ? 22 : 15), MT + ih - 1)} style={styleExtreme}>{fmt0(p[hMin])}</text>}
       {axes && (
         <>
-          {[0, 6, 12, 18, 23].map(hh => <text key={hh} x={xh(hh)} y={MT + ih + 15} fontSize={F} fill="rgba(255,255,255,.6)" textAnchor="middle">{hh}h</text>)}
+          {[0, 6, 12, 18, 23].map(hh => <text key={hh} x={xh(hh)} y={MT + ih + 17} fontSize={F + 2} fontWeight="800" fill="rgba(255,255,255,.92)" textAnchor="middle">{hh}h</text>)}
           <text x={ML - 5} y={yp(pMax) + 4} fontSize={F} fill="#ffd84d" textAnchor="end">{fmt0(pMax)}</text>
           <text x={ML - 5} y={yp(pMin) + 4} fontSize={F} fill="#ffd84d" textAnchor="end">{fmt0(pMin)}</text>
           <text x={ML - 5} y={MT + ih / 2 + 4} fontSize={FU} fill="#ffd84d" textAnchor="end">c€/kWh</text>
