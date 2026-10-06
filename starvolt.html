@@ -10973,10 +10973,10 @@ function spotCaseTd(key, bg, texte, partiel, bold, onClick) {
     </td>
   );
 }
-function SpotHistoTable({ rows, granularite, indicateur, seuils, onCell }) {
+function SpotHistoTable({ rows, granularite, indicateur, seuils, onCell, reserveBas = 0 }) {
   const hebdo = granularite === 'semaine';
   const wrapRef = useRef(null);
-  const availH  = useHauteurDisponible(wrapRef);
+  const availH  = useHauteurDisponible(wrapRef, 4 + reserveBas);
   const annees = [...new Set(rows.map(r => r.annee))].sort((a, b) => a - b);
   const cell = {};
   rows.forEach(r => { cell[`${r.annee}_${r.periode}`] = r; });
@@ -11036,7 +11036,7 @@ function SpotHistoTable({ rows, granularite, indicateur, seuils, onCell }) {
 // ─── SpotJoursCanvas (une ligne par jour) ─────
 // Années en colonnes, 366 jours en lignes, pas de valeur dans la case : la
 // couleur suffit, le clic donne le détail (et ouvre le graphique batterie).
-function SpotJoursCanvas({ rows, indicateur, seuils, onCell }) {
+function SpotJoursCanvas({ rows, indicateur, seuils, onCell, reserveBas = 0 }) {
   const wrapperRef = useRef(null);
   const canvasRef  = useRef(null);
   const geoRef     = useRef(null);
@@ -11049,7 +11049,7 @@ function SpotJoursCanvas({ rows, indicateur, seuils, onCell }) {
     const top     = wrapperRef.current ? wrapperRef.current.getBoundingClientRect().top : 0;
     const footerH = document.querySelector('.sticky-footer')?.offsetHeight || 90;
     const viewH   = window.visualViewport?.height || window.innerHeight;
-    const availH  = Math.max(150, viewH - top - footerH - 4);
+    const availH  = Math.max(150, viewH - top - footerH - 4 - reserveBas);
     const LBL_W = 26, HDR_H = 14, NJ = 366;
     const CELL_W = Math.max(3, Math.floor((containerW - LBL_W) / annees.length));
     const CELL_H = (availH - HDR_H) / NJ;
@@ -11079,7 +11079,7 @@ function SpotJoursCanvas({ rows, indicateur, seuils, onCell }) {
         ctx.fillRect(LBL_W + i * CELL_W, HDR_H + (p - 1) * CELL_H, CELL_W - gapW, CELL_H - gapH);
       }
     });
-  }, [annees, cell, indicateur, seuils]);
+  }, [annees, cell, indicateur, seuils, reserveBas]);
 
   useEffect(() => {
     if (!wrapperRef.current) return;
@@ -11671,6 +11671,14 @@ function SpotPricesScreen({ onBack }) {
                 </div>
                 <span className="sim-arrow">→</span>
               </button>
+              <button className="sim-btn" onClick={()=>{ setIndicateur('gain'); setInfoJour(null); setVue('histo'); }} disabled={!jours} style={{opacity:jours?1:.5}}>
+                <span className="sim-icon">🔋</span>
+                <div className="sim-text">
+                  <div className="sim-title">Vue gains batterie</div>
+                  <div className="sim-sub">{batParams ? `Arbitrage d'une batterie ${batParams.capacite} kWh · ${batParams.puissance} kW · ${batParams.cycles} cycle${batParams.cycles > 1 ? 's' : ''}/j` : 'Paramétrer une batterie et calculer ses gains jour par jour'}</div>
+                </div>
+                <span className="sim-arrow">→</span>
+              </button>
               <button className="sim-btn" onClick={()=>setVue('horaire')} disabled={!spotAll} style={{opacity:spotAll?1:.5}}>
                 <span className="sim-icon">🕐</span>
                 <div className="sim-text">
@@ -11714,11 +11722,16 @@ function SpotPricesScreen({ onBack }) {
           <EchelleLegende seuils={seuils} unite={indDef.unite} facteur={indicateurBrut(indicateur) ? 1 : 100}
             decimales={indicateur === 'gain' ? (seuils[8] < 5 ? 2 : seuils[8] < 20 ? 1 : 0) : indicateur === 'negatif' ? (seuils[8] < 5 ? 1 : 0) : (granularite === 'semaine' ? 0 : 1)}/>
           {granularite === 'jour'
-            ? <SpotJoursCanvas rows={rows} indicateur={indicateur} seuils={seuils} onCell={onCell}/>
-            : <SpotHistoTable rows={rows} granularite={granularite} indicateur={indicateur} seuils={seuils} onCell={indicateur === 'gain' ? onCell : null}/>}
-          {granularite === 'jour' && (
+            ? <SpotJoursCanvas rows={rows} indicateur={indicateur} seuils={seuils} onCell={onCell} reserveBas={indicateur === 'gain' ? 22 : 0}/>
+            : <SpotHistoTable rows={rows} granularite={granularite} indicateur={indicateur} seuils={seuils} onCell={indicateur === 'gain' ? onCell : null} reserveBas={indicateur === 'gain' ? 22 : 0}/>}
+          {granularite === 'jour' && indicateur !== 'gain' && (
             <div style={{fontSize:9.5,fontWeight:700,marginTop:4,color:infoJour?'white':'rgba(255,255,255,.35)',minHeight:12}}>
               {infoJour || 'Touchez un jour pour lire sa valeur'}
+            </div>
+          )}
+          {indicateur === 'gain' && (
+            <div style={{fontSize:11,fontWeight:700,marginTop:5,color:'#7dd940',textAlign:'center',lineHeight:1.2}}>
+              👆 Touchez {granularite === 'jour' ? 'un jour' : granularite === 'semaine' ? 'une semaine' : 'un mois'} pour voir le détail en graphique
             </div>
           )}
         </>
