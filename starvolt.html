@@ -10794,9 +10794,13 @@ function heuresAttendues(gran, annee, periode) {
 // à 81 %, 10 kWh stockés coûtent 11,1 kWh achetés et rendent 9 kWh vendus.
 // La puissance borne les kWh échangés avec le réseau à chaque heure. Un prix
 // négatif rémunère la charge : l'algorithme en profite, comme un agrégateur.
-// Retour par jour : gain € HT (recettes − achats du jour, peut être négatif si
-// l'énergie achetée est vendue le lendemain), e[24] kWh côté réseau (+ achat,
-// − vente), s[24] état de charge % en fin d'heure, s0 état de charge à 0 h.
+// Retour par jour : gain € HT, e[24] kWh côté réseau (+ achat, − vente), s[24]
+// état de charge % en fin d'heure, s0 état de charge à 0 h.
+// Gain d'un jour = recettes de l'énergie ACHETÉE ce jour-là − son coût d'achat,
+// même quand elle est revendue le lendemain (suivi FIFO des lots stockés) :
+// sans cela, une charge du soir revendue à 0 h affichait un jour négatif puis
+// un lendemain gonflé. La somme sur la période est inchangée ; l'énergie encore
+// stockée au dernier jour n'a pas de valeur, comme dans l'optimisation.
 function optimiserBatteriePeriode(jours, { capacite, puissance, cycles, rendement }, socInitPct = 0) {
   const N = 20, step = capacite / N, r = Math.sqrt(rendement);
   const maxC = Math.max(1, Math.min(N, Math.floor(puissance * r / step + 1e-9)));
@@ -10845,18 +10849,40 @@ function optimiserBatteriePeriode(jours, { capacite, puissance, cycles, rendemen
   for (let i = 0; i < S; i++) if (dp[i] > best) { best = dp[i]; bi = i; }
   let soc = Math.floor(bi / L), dis = bi % L;
   const socFinalPct = soc / N * 100;
-  const res = new Array(jours.length);
+  const res = new Array(jours.length), pas = new Array(jours.length);   // pas[j][h] = paliers stockés (+) / déstockés (−)
   for (let j = jours.length - 1; j >= 0; j--) {
-    const e = new Array(24).fill(0), s = new Array(24).fill(0);
+    const e = new Array(24).fill(0), s = new Array(24).fill(0), a24 = new Array(24).fill(0);
     for (let h = 23; h >= 0; h--) {
       s[h] = soc / N * 100;
       const a = choix[j][h][soc * L + dis];
+      a24[h] = a;
       if (a > 0)      { e[h] = a * step / r; soc -= a; }
       else if (a < 0) { e[h] = a * step * r; soc -= a; dis += a; }
     }
-    const gain = e.reduce((acc, x, h) => acc - x * jours[j].p[h], 0);
-    res[j] = { d: jours[j].d, p: jours[j].p, gain, e, s, s0: soc / N * 100 };
+    res[j] = { d: jours[j].d, p: jours[j].p, gain: 0, e, s, s0: soc / N * 100 };
+    pas[j] = a24;
     if (j > 0) dis = trans[j][soc];
+  }
+  // Attribution FIFO : chaque palier stocké garde son jour d'achat ; la recette
+  // de sa vente est créditée à ce jour. Le stock initial (reporté du mois
+  // précédent) est porté par le premier jour.
+  const lots = [];                                   // { j, n } paliers, du plus ancien au plus récent
+  const socInit = Math.round(socInitPct / 100 * N);
+  if (socInit > 0) lots.push({ j: 0, n: socInit });
+  for (let j = 0; j < jours.length; j++) {
+    for (let h = 0; h < 24; h++) {
+      const a = pas[j][h];
+      if (a > 0) { res[j].gain -= a * step / r * jours[j].p[h]; lots.push({ j, n: a }); }
+      else if (a < 0) {
+        let reste = -a;
+        while (reste > 0 && lots.length) {
+          const lot = lots[0], n = Math.min(reste, lot.n);
+          res[lot.j].gain += n * step * r * jours[j].p[h];
+          lot.n -= n; reste -= n;
+          if (lot.n === 0) lots.shift();
+        }
+      }
+    }
   }
   return { jours: res, socFinalPct };
 }
@@ -11638,7 +11664,7 @@ function SpotPricesScreen({ onBack }) {
                 </button>
               </div>
               <div style={{fontSize:9,fontWeight:700,marginTop:4,color:batMsg?(batMsg.startsWith('✓')?'var(--green)':batMsg.startsWith('Erreur')?'#ff9090':'#5de0f5'):'rgba(255,255,255,.4)'}}>
-                {batMsg || (batParams ? `Calculé le ${fmtDate(batParams.calcule_le)} · achat au creux, vente à la pointe, prix spot HT, sans taxes` : 'Aucun calcul enregistré : renseignez la batterie puis Calculer')}
+                {batMsg || (batParams ? `Calculé le ${fmtDate(batParams.calcule_le)} · prix spot HT sans taxes · le gain d'un jour = l'énergie achetée ce jour, même revendue le lendemain` : 'Aucun calcul enregistré : renseignez la batterie puis Calculer')}
               </div>
             </div>
           )}
