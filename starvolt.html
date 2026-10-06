@@ -1574,7 +1574,7 @@
 <div id="root"></div>
 
 <script type="text/babel" data-presets="react-classic">
-const { useState, useEffect, useRef, useCallback, useMemo } = React;
+const { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } = React;
 
 // ─── Turnstile (Cloudflare) — anti-bot des écrans d'authentification ─────────
 // Le jeton produit ici n'est PAS vérifié par le client : c'est Supabase qui
@@ -11168,26 +11168,38 @@ function GraphiqueJour({ plan, w, h, pMin, pMax, eMax, axes }) {
 }
 
 function BatteriePeriodePopup({ granularite, ancreInitiale, bornes, params, onClose }) {
-  const [ancre,  setAncre]  = useState(ancreInitiale);
-  const [detail, setDetail] = useState(granularite === 'jour' ? ancreInitiale : null);   // jour ouvert en grand
-  const [data,   setData]   = useState(null);          // { parJour: {iso: {gain, plan}} }
-  const zoneRef = useRef(null);
-  const [dims, setDims] = useState({ w: 340, h: 300 });
-  const { debut, jours } = useMemo(() => periodeAutour(granularite, ancre, bornes), [granularite, ancre, bornes]);
+  // Flux continu de tuiles journalières (3 par ligne sur ordinateur, 2 sur
+  // téléphone), centré sur la période cliquée et prolongé sans fin vers les
+  // jours précédents et suivants au défilement. Le titre et les totaux suivent
+  // la semaine (ou le mois) du premier jour visible. Une tuile ouvre le détail.
+  const PAS = 12, GAP = 8;   // 12 jours : multiple de 2 et de 3 colonnes, les lundis restent alignés
+  const granTitre = granularite === 'jour' ? 'semaine' : granularite;
+  const [range,   setRange]   = useState(null);          // { min, max } jours chargés
+  const [parJour, setParJour] = useState({});
+  const [detail,  setDetail]  = useState(granularite === 'jour' ? ancreInitiale : null);
+  const [haut,    setHaut]    = useState(ancreInitiale); // premier jour visible
+  const [dims,    setDims]    = useState({ w: 340, h: 300 });
+  const zoneRef = useRef(null), listeRef = useRef(null);
+  const chargementRef = useRef(false), prependRef = useRef(null), cibleRef = useRef(null);
+  const dansBornes = d => (!bornes[0] || d >= bornes[0]) && (!bornes[1] || d <= bornes[1]);
+  const clip = d => (bornes[0] && d < bornes[0]) ? bornes[0] : (bornes[1] && d > bornes[1]) ? bornes[1] : d;
 
+  const charger = useCallback(async (min, max) => {
+    min = clip(min); max = clip(max);
+    if (min > max || chargementRef.current) return;
+    chargementRef.current = true;
+    const { data: rows } = await sb.from('spot_batterie_jours').select('jour,gain,plan').gte('jour', min).lte('jour', max);
+    setParJour(prev => { const n = { ...prev }; (rows || []).forEach(r => { n[r.jour] = r; }); return n; });
+    setRange(prev => prev ? { min: min < prev.min ? min : prev.min, max: max > prev.max ? max : prev.max } : { min, max });
+    chargementRef.current = false;
+  }, [bornes]);
+
+  // Chargement initial : la période cliquée, plus une semaine avant et deux après
   useEffect(() => {
-    let vivant = true;
-    setData(null);
-    if (!jours.length) { setData({ parJour: {} }); return; }
-    sb.from('spot_batterie_jours').select('jour,gain,plan').in('jour', jours).order('jour')
-      .then(({ data: rows }) => {
-        if (!vivant) return;
-        const parJour = {};
-        (rows || []).forEach(r => { parJour[r.jour] = r; });
-        setData({ parJour });
-      });
-    return () => { vivant = false; };
-  }, [jours]);
+    const { debut, jours } = periodeAutour(granularite, ancreInitiale, bornes);
+    cibleRef.current = debut;
+    charger(decalerJours(debut, -6), decalerJours(debut, jours.length + 17));
+  }, []);
 
   useEffect(() => {
     if (!zoneRef.current) return;
@@ -11199,82 +11211,113 @@ function BatteriePeriodePopup({ granularite, ancreInitiale, bornes, params, onCl
     return () => ro.disconnect();
   }, []);
 
-  // Échelles communes à la période
-  const echelles = useMemo(() => {
-    if (!data) return null;
-    let pMin = 0, pMax = 1, eMax = params?.puissance || 1;
-    jours.forEach(d => { const r = data.parJour[d]; if (!r) return; r.plan.p.forEach(v => { pMin = Math.min(pMin, v * 100); pMax = Math.max(pMax, v * 100); }); r.plan.e.forEach(x => { eMax = Math.max(eMax, Math.abs(x)); }); });
-    return { pMin, pMax, eMax };
-  }, [data, jours, params]);
+  const jours = useMemo(() => {
+    if (!range) return [];
+    const out = []; let d = range.min;
+    while (d <= range.max) { out.push(d); d = decalerJours(d, 1); }
+    return out;
+  }, [range]);
 
-  // Totaux de la période
+  const cols = dims.w >= 820 ? 3 : 2;
+  const tw = Math.floor((dims.w - GAP * (cols - 1)) / cols);
+  const th = Math.max(110, Math.min(240, Math.round(tw * 0.6)));
+  const HDR = 16;
+  const rowH = th + GAP;
+  const idxDe = d => jours.indexOf(d);
+
+  // Échelles communes à tout ce qui est chargé
+  const echelles = useMemo(() => {
+    let pMin = 0, pMax = 1, eMax = params?.puissance || 1;
+    Object.values(parJour).forEach(r => { r.plan.p.forEach(v => { pMin = Math.min(pMin, v * 100); pMax = Math.max(pMax, v * 100); }); r.plan.e.forEach(x => { eMax = Math.max(eMax, Math.abs(x)); }); });
+    return { pMin, pMax, eMax };
+  }, [parJour, params]);
+
+  // Après un ajout en tête, on compense pour que l'écran ne bouge pas (Chrome le
+  // ferait aussi par scroll anchoring, Safari non : overflow-anchor:none + compensation manuelle) ;
+  // après un chargement ciblé (ouverture, flèches, retour du détail), on se place.
+  useLayoutEffect(() => {
+    const el = listeRef.current; if (!el) return;
+    if (prependRef.current !== null) { el.scrollTop += el.scrollHeight - prependRef.current; prependRef.current = null; }
+    if (cibleRef.current !== null) {
+      const i = idxDe(cibleRef.current);
+      if (i >= 0) { el.scrollTop = Math.floor(i / cols) * rowH; setHaut(cibleRef.current); cibleRef.current = null; }
+    }
+  }, [jours, cols, rowH, detail]);
+
+  // Si l'écran n'est pas rempli, on prolonge
+  useEffect(() => {
+    const el = listeRef.current;
+    if (!el || !range || detail) return;
+    if (el.scrollHeight <= el.clientHeight + 10 && range.max < (bornes[1] || '9999')) charger(decalerJours(range.max, 1), decalerJours(range.max, PAS));
+  }, [jours, dims, detail]);
+
+  const onScroll = () => {
+    const el = listeRef.current; if (!el || !range) return;
+    // Le titre suit la tuile du milieu de la première ligne visible
+    const i = Math.min(jours.length - 1, Math.round(el.scrollTop / rowH) * cols + Math.floor(cols / 2));
+    if (jours[i] && jours[i] !== haut) setHaut(jours[i]);
+    if (el.scrollTop < 200 && (!bornes[0] || range.min > bornes[0])) { prependRef.current = el.scrollHeight; charger(decalerJours(range.min, -PAS), decalerJours(range.min, -1)); }
+    if (el.scrollHeight - el.scrollTop - el.clientHeight < 200 && (!bornes[1] || range.max < bornes[1])) charger(decalerJours(range.max, 1), decalerJours(range.max, PAS));
+  };
+
+  // Se rendre à un jour (flèches, retour du détail) : charger autour si besoin, puis s'y placer
+  const allerA = (d) => {
+    d = clip(d);
+    cibleRef.current = d;
+    if (!range || d < range.min) { prependRef.current = null; charger(decalerJours(d, -6), range ? decalerJours(range.min, -1) : decalerJours(d, 20)); }
+    else if (d > range.max) charger(decalerJours(range.max, 1), decalerJours(d, 20));
+    else { const el = listeRef.current; const i = idxDe(d); if (el && i >= 0) { el.scrollTop = Math.floor(i / cols) * rowH; setHaut(d); } cibleRef.current = null; }
+  };
+  const ouvrirDetail = (d) => { d = clip(d); setDetail(d); if (!range || d < range.min || d > range.max) charger(decalerJours(d, -7), decalerJours(d, 7)); };
+
+  // Période de référence pour le titre et les totaux
+  const refJour = detail || haut;
+  const periode = useMemo(() => periodeAutour(granTitre, refJour, bornes), [granTitre, refJour, bornes]);
   const totaux = useMemo(() => {
-    if (!data) return null;
+    const liste = detail ? [detail] : periode.jours;
     let achat = 0, vente = 0, cout = 0, recette = 0, gain = 0, nCalc = 0, s0 = null, sFin = null;
-    jours.forEach(d => {
-      const r = data.parJour[d]; if (!r) return;
+    liste.forEach(d => {
+      const r = parJour[d]; if (!r) return;
       nCalc++; if (s0 === null) s0 = r.plan.s0 ?? 0; if (r.plan.s) sFin = r.plan.s[23];
       r.plan.e.forEach((x, h) => { if (x > 0) { achat += x; cout += x * r.plan.p[h]; } else if (x < 0) { vente -= x; recette -= x * r.plan.p[h]; } });
       gain += Number(r.gain);
     });
-    return { achat, vente, cout, recette, gain, nCalc, s0: s0 ?? 0, sFin: sFin ?? 0 };
-  }, [data, jours]);
+    return { achat, vente, cout, recette, gain, nCalc, s0: s0 ?? 0, sFin: sFin ?? 0, n: liste.length };
+  }, [detail, periode, parJour]);
 
-  // Navigation : en détail, jour par jour (en changeant de période si besoin) ; sinon période par période
-  const voisinPeriode = (sens) => granularite === 'jour' ? decalerJours(debut, sens) : granularite === 'semaine' ? decalerJours(debut, 7 * sens) : decalerMois(debut, sens);
-  const okPeriode = (sens) => periodeAutour(granularite, voisinPeriode(sens), bornes).jours.length > 0;
-  const dansBornes = d => (!bornes[0] || d >= bornes[0]) && (!bornes[1] || d <= bornes[1]);
-  const allerJour = (d) => { setDetail(d); if (!jours.includes(d)) setAncre(d); };
-  const enDetail = detail !== null;
-  const okNav = sens => enDetail ? dansBornes(decalerJours(detail, sens)) : okPeriode(sens);
-  const nav = sens => enDetail ? allerJour(decalerJours(detail, sens)) : setAncre(voisinPeriode(sens));
+  const nav = (sens) => {
+    if (detail) { const d = decalerJours(detail, sens); if (dansBornes(d)) ouvrirDetail(d); return; }
+    const deb = granTitre === 'semaine' ? decalerJours(periode.debut, 7 * sens) : decalerMois(periode.debut, sens);
+    if (periodeAutour(granTitre, deb, bornes).jours.length) allerA(periodeAutour(granTitre, deb, bornes).jours[0]);
+  };
+  const okNav = (sens) => detail ? dansBornes(decalerJours(detail, sens)) : periodeAutour(granTitre, granTitre === 'semaine' ? decalerJours(periode.debut, 7 * sens) : decalerMois(periode.debut, sens), bornes).jours.length > 0;
 
   // ── Contenu ──
-  let contenu = null;
-  if (data === null || !echelles) {
+  let contenu;
+  if (!range) {
     contenu = <div style={{position:'absolute',inset:0,display:'flex',alignItems:'center',justifyContent:'center'}}><StarSpinner size={30}/></div>;
-  } else if (enDetail) {
-    const r = data.parJour[detail];
+  } else if (detail) {
+    const r = parJour[detail];
     contenu = r
       ? <GraphiqueJour plan={r.plan} w={dims.w} h={dims.h} pMin={echelles.pMin} pMax={echelles.pMax} eMax={echelles.eMax} axes/>
-      : <div style={{position:'absolute',inset:0,display:'flex',alignItems:'center',justifyContent:'center',fontSize:12,color:'rgba(255,255,255,.6)',textAlign:'center',padding:20}}>Pas de calcul pour ce jour — relancez « Calculer ».</div>;
+      : <div style={{position:'absolute',inset:0,display:'flex',alignItems:'center',justifyContent:'center',fontSize:12,color:'rgba(255,255,255,.6)',textAlign:'center',padding:20}}>{detail < range.min || detail > range.max ? <StarSpinner size={26}/> : 'Pas de calcul pour ce jour — relancez « Calculer ».'}</div>;
   } else {
-    // Grille de tuiles : calendrier à 7 colonnes si chaque tuile garde ≥ 96 px,
-    // sinon autant de colonnes que la largeur en accepte à ~150 px. Les tuiles
-    // remplissent la hauteur si tout tient, sinon la grille défile.
-    const n = jours.length, GAP = 6, HDR = 14;
-    const cols = dims.w >= 7 * 96 + 6 * GAP ? 7 : Math.max(2, Math.min(n, Math.floor((dims.w + GAP) / (150 + GAP))));
-    const calendrier = cols === 7;
-    const offset = calendrier ? dowIso(jours[0]) - 1 : 0;
-    const rows = Math.ceil((n + offset) / cols);
-    const tw = Math.floor((dims.w - GAP * (cols - 1)) / cols);
-    const hDispo = dims.h - (calendrier ? 14 : 0) - GAP * (rows - 1);
-    const th = Math.max(72, Math.min(Math.round(tw * 0.9), Math.floor(hDispo / rows)));
-    const cases = [];
-    for (let i = 0; i < offset; i++) cases.push(null);
-    jours.forEach(d => cases.push(d));
     contenu = (
-      <div style={{position:'absolute',inset:0,overflowY:'auto'}}>
-        {calendrier && (
-          <div style={{display:'grid',gridTemplateColumns:`repeat(7, ${tw}px)`,gap:GAP,marginBottom:2}}>
-            {['lun.','mar.','mer.','jeu.','ven.','sam.','dim.'].map(l => <div key={l} style={{fontSize:9,fontWeight:700,color:'rgba(255,255,255,.45)',textAlign:'center'}}>{l}</div>)}
-          </div>
-        )}
+      <div ref={listeRef} onScroll={onScroll} style={{position:'absolute',inset:0,overflowY:'auto',overscrollBehavior:'contain',overflowAnchor:'none'}}>
         <div style={{display:'grid',gridTemplateColumns:`repeat(${cols}, ${tw}px)`,gap:GAP}}>
-          {cases.map((d, i) => {
-            if (!d) return <div key={'v'+i}/>;
-            const r = data.parJour[d];
-            const [, , j] = partsIso(d);
-            const lbl = calendrier ? String(j) : `${JOURS_FR[dowIso(d) % 7]} ${j}`;
+          {jours.map(d => {
+            const r = parJour[d];
+            const [a, m, j] = partsIso(d), dow = dowIso(d);
+            const lundi = dow === 1;
             return (
-              <div key={d} onClick={() => r && setDetail(d)} style={{width:tw,height:th,background:'rgba(255,255,255,.05)',border:'1px solid rgba(255,255,255,.1)',borderRadius:6,overflow:'hidden',cursor:r?'pointer':'default',boxSizing:'border-box'}}>
-                <div style={{display:'flex',justifyContent:'space-between',alignItems:'baseline',padding:'1px 4px',height:HDR,fontSize:9,fontWeight:700,lineHeight:'12px'}}>
-                  <span style={{color:'rgba(255,255,255,.7)'}}>{lbl}</span>
+              <div key={d} onClick={() => r && ouvrirDetail(d)} style={{width:tw,height:th,background:lundi?'rgba(125,217,64,.07)':'rgba(255,255,255,.05)',border:'1px solid',borderColor:lundi?'rgba(125,217,64,.3)':'rgba(255,255,255,.1)',borderRadius:6,overflow:'hidden',cursor:r?'pointer':'default',boxSizing:'border-box'}}>
+                <div style={{display:'flex',justifyContent:'space-between',alignItems:'baseline',padding:'2px 5px 0',height:HDR,fontSize:9.5,fontWeight:700,lineHeight:'12px'}}>
+                  <span style={{color:'rgba(255,255,255,.75)'}}>{JOURS_FR[dow % 7]} {j} {MOIS_FR[m-1].slice(0,4)}{MOIS_FR[m-1].length > 4 ? '.' : ''} {String(a).slice(2)}{lundi ? <span style={{color:'#7dd940',marginLeft:4}}>S{isoAnneeSemaine(a, m, j)[1]}</span> : null}</span>
                   {r && <span style={{color:Number(r.gain) >= 0 ? '#7dd940' : '#ff9090'}}>{fmtGain(Number(r.gain))}</span>}
                 </div>
                 {r
-                  ? <GraphiqueJour plan={r.plan} w={tw - 2} h={th - HDR - 2} pMin={echelles.pMin} pMax={echelles.pMax} eMax={echelles.eMax} axes={false}/>
-                  : <div style={{fontSize:8,color:'rgba(255,255,255,.3)',textAlign:'center',paddingTop:th/3}}>non calculé</div>}
+                  ? <GraphiqueJour plan={r.plan} w={tw - 2} h={th - HDR - 4} pMin={echelles.pMin} pMax={echelles.pMax} eMax={echelles.eMax} axes={false}/>
+                  : <div style={{fontSize:8.5,color:'rgba(255,255,255,.3)',textAlign:'center',paddingTop:th/3}}>non calculé</div>}
               </div>
             );
           })}
@@ -11286,13 +11329,15 @@ function BatteriePeriodePopup({ granularite, ancreInitiale, bornes, params, onCl
   const fleche = (ok, onClick, car) => (
     <button onClick={onClick} disabled={!ok} style={{background:'none',border:'none',color:ok?'white':'rgba(255,255,255,.2)',fontSize:26,cursor:ok?'pointer':'default',padding:'0 10px',lineHeight:1,flexShrink:0}}>{car}</button>
   );
-  const titre = enDetail ? fmtJourLong(detail) : titrePeriode(granularite, debut, jours);
+  const titre = detail ? fmtJourLong(detail) : titrePeriode(granTitre, periode.debut, periode.jours);
   const sousTitre = params ? `${params.capacite} kWh · ${params.puissance} kW · ${params.cycles} cycle${params.cycles > 1 ? 's' : ''}/j · η ${Math.round(params.rendement * 100)} %` : '';
-  const r1 = enDetail && data ? data.parJour[detail] : null;
+  const btn = (lbl, onClick, primaire) => (
+    <button onClick={onClick} style={{flex:1,background:primaire?'rgba(125,217,64,.22)':'rgba(255,255,255,.1)',border:'1px solid',borderColor:primaire?'rgba(125,217,64,.6)':'rgba(255,255,255,.2)',color:primaire?'#7dd940':'white',borderRadius:8,padding:'9px',fontFamily:'var(--font)',fontSize:13,fontWeight:700,cursor:'pointer'}}>{lbl}</button>
+  );
   return (
     <div className="lightbox-overlay" style={{cursor:'default',padding:0,alignItems:'stretch'}} onClick={onClose}>
       <div onClick={e => e.stopPropagation()} style={{background:'#05414e',width:'100%',height:'100%',display:'flex',flexDirection:'column',padding:'max(10px, env(safe-area-inset-top)) 10px 10px',color:'white',fontFamily:'var(--font)',boxSizing:'border-box'}}>
-        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:8,marginBottom:4}}>
+        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:8,marginBottom:6}}>
           {fleche(okNav(-1), () => nav(-1), '‹')}
           <div style={{textAlign:'center',minWidth:0}}>
             <div style={{fontSize:14,fontWeight:800,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{titre}</div>
@@ -11300,35 +11345,18 @@ function BatteriePeriodePopup({ granularite, ancreInitiale, bornes, params, onCl
           </div>
           {fleche(okNav(1), () => nav(1), '›')}
         </div>
-        {enDetail && granularite !== 'jour' && (
-          <button onClick={() => setDetail(null)} style={{alignSelf:'flex-start',background:'none',border:'none',color:'#7dd940',fontFamily:'var(--font)',fontSize:11,fontWeight:700,cursor:'pointer',padding:'0 0 4px'}}>
-            ‹ Retour {granularite === 'semaine' ? 'à la semaine' : 'au mois'}
-          </button>
-        )}
         <div ref={zoneRef} style={{flex:1,minHeight:120,position:'relative'}}>{contenu}</div>
-        {totaux && totaux.nCalc > 0 && (
-          <>
-            {enDetail && r1 ? (() => {
-              const e = r1.plan.e, pp = r1.plan.p;
-              const achat = e.filter(x => x > 0).reduce((a, x) => a + x, 0), vente = -e.filter(x => x < 0).reduce((a, x) => a + x, 0);
-              const cout = e.reduce((a, x, h) => a + (x > 0 ? x * pp[h] : 0), 0), recette = e.reduce((a, x, h) => a + (x < 0 ? -x * pp[h] : 0), 0);
-              return (
-                <div style={{display:'flex',justifyContent:'space-between',gap:8,fontSize:11,fontWeight:700,marginTop:6,flexWrap:'wrap'}}>
-                  <span style={{color:'#5de0f5'}}>Achat {achat.toFixed(1)} kWh · {f2(cout)} €</span>
-                  <span style={{color:'#7dd940'}}>Vente {vente.toFixed(1)} kWh · {f2(recette)} €</span>
-                  <span>Gain {f2(Number(r1.gain))} € HT · charge {Math.round(r1.plan.s0 ?? 0)} % → {Math.round(r1.plan.s ? r1.plan.s[23] : 0)} %</span>
-                </div>
-              );
-            })() : (
-              <div style={{display:'flex',justifyContent:'space-between',gap:8,fontSize:11,fontWeight:700,marginTop:6,flexWrap:'wrap'}}>
-                <span style={{color:'#5de0f5'}}>Achat {totaux.achat.toFixed(1)} kWh · {f2(totaux.cout)} €</span>
-                <span style={{color:'#7dd940'}}>Vente {totaux.vente.toFixed(1)} kWh · {f2(totaux.recette)} €</span>
-                <span>Gain {f2(totaux.gain)} € HT · charge {Math.round(totaux.s0)} % → {Math.round(totaux.sFin)} %{totaux.nCalc < jours.length ? ` · ${jours.length - totaux.nCalc} j sans calcul` : ''}</span>
-              </div>
-            )}
-          </>
+        {totaux.nCalc > 0 && (
+          <div style={{display:'flex',justifyContent:'space-between',gap:8,fontSize:11,fontWeight:700,marginTop:6,flexWrap:'wrap'}}>
+            <span style={{color:'#5de0f5'}}>Achat {totaux.achat.toFixed(1)} kWh · {f2(totaux.cout)} €</span>
+            <span style={{color:'#7dd940'}}>Vente {totaux.vente.toFixed(1)} kWh · {f2(totaux.recette)} €</span>
+            <span>Gain {f2(totaux.gain)} € HT · charge {Math.round(totaux.s0)} % → {Math.round(totaux.sFin)} %{totaux.nCalc < totaux.n ? ` · ${totaux.n - totaux.nCalc} j sans calcul` : ''}</span>
+          </div>
         )}
-        <button onClick={onClose} style={{marginTop:8,width:'100%',background:'rgba(255,255,255,.1)',border:'1px solid rgba(255,255,255,.2)',color:'white',borderRadius:8,padding:'9px',fontFamily:'var(--font)',fontSize:13,fontWeight:700,cursor:'pointer',flexShrink:0}}>Fermer</button>
+        <div style={{display:'flex',gap:8,marginTop:8,flexShrink:0}}>
+          {detail && btn('Vue sur plusieurs jours', () => { const d = detail; setDetail(null); cibleRef.current = d; }, true)}
+          {btn('Fermer', onClose, false)}
+        </div>
       </div>
     </div>
   );
