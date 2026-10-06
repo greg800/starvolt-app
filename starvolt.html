@@ -11150,7 +11150,7 @@ const fmtGain = g => (g >= 0 ? '+' : '−') + f2(Math.abs(g)) + ' €';
 
 // Graphique d'une journée. Échelles passées par le parent pour que les tuiles
 // d'une même période soient comparables. axes=false pour une tuile.
-function GraphiqueJour({ plan, w, h, pMin, pMax, eMax, axes }) {
+function GraphiqueJour({ plan, gain, w, h, pMin, pMax, eMax, axes }) {
   const ML = axes ? 46 : 2, MR = axes ? 46 : 2, MT = axes ? 14 : 12, MB = axes ? 26 : 2;
   const F = axes ? 12 : 9, FU = axes ? 10 : 7;   // taille des libellés d'axe et des unités
   const HS = axes ? 56 : Math.max(10, Math.round(h * 0.18));
@@ -11172,6 +11172,8 @@ function GraphiqueJour({ plan, w, h, pMin, pMax, eMax, axes }) {
   // Spread du jour (max − min) dans une pastille en bas à gauche de la zone des prix
   const spread = p[hMax] - p[hMin];
   const RS = axes ? 24 : 13, cxS = ML + RS + 4, cyS = MT + ih - RS - 4;
+  // Gain du jour (€ entiers) dans une pastille verte en haut à gauche
+  const cxG = ML + RS + 4, cyG = MT + RS + 2;
   return (
     <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`} style={{display:'block'}}>
       {axes && [6, 12, 18].map(hh => <line key={hh} x1={ML + hh * pxH} x2={ML + hh * pxH} y1={MT} y2={ysTop + HS - 8} stroke="rgba(255,255,255,.1)"/>)}
@@ -11188,6 +11190,13 @@ function GraphiqueJour({ plan, w, h, pMin, pMax, eMax, axes }) {
       <circle cx={cxS} cy={cyS} r={RS} fill="#ffd84d" stroke="#05414e" strokeWidth="2"/>
       <text x={cxS} y={cyS + (axes ? 2 : 4.5)} fontSize={axes ? 18 : 12} fontWeight="800" fill="#0a2a10" textAnchor="middle">{fmt0(spread)}</text>
       {axes && <text x={cxS} y={cyS + 15} fontSize="8" fontWeight="700" fill="#0a2a10" textAnchor="middle">spread</text>}
+      {gain !== undefined && gain !== null && (
+        <>
+          <circle cx={cxG} cy={cyG} r={RS} fill="#7dd940" stroke="#05414e" strokeWidth="2"/>
+          <text x={cxG} y={cyG + (axes ? 2 : 4.5)} fontSize={axes ? 17 : 11} fontWeight="800" fill="#0a2a10" textAnchor="middle">{Math.round(gain)} €</text>
+          {axes && <text x={cxG} y={cyG + 15} fontSize="8" fontWeight="700" fill="#0a2a10" textAnchor="middle">gain</text>}
+        </>
+      )}
       <text x={xTexte(hMax)} y={Math.max(yp(p[hMax]) - (axes ? 8 : 5), axes ? 16 : 12)} style={styleExtreme}>{fmt0(p[hMax])}</text>
       {hMin !== hMax && <text x={xTexte(hMin)} y={Math.min(yp(p[hMin]) + (axes ? 22 : 15), MT + ih - 1)} style={styleExtreme}>{fmt0(p[hMin])}</text>}
       {axes && (
@@ -11340,7 +11349,7 @@ function BatteriePeriodePopup({ granularite, ancreInitiale, bornes, params, onCl
   } else if (detail) {
     const r = parJour[detail];
     contenu = r
-      ? <GraphiqueJour plan={r.plan} w={dims.w} h={dims.h} pMin={echelles.pMin} pMax={echelles.pMax} eMax={echelles.eMax} axes/>
+      ? <GraphiqueJour plan={r.plan} gain={Number(r.gain)} w={dims.w} h={dims.h} pMin={echelles.pMin} pMax={echelles.pMax} eMax={echelles.eMax} axes/>
       : <div style={{position:'absolute',inset:0,display:'flex',alignItems:'center',justifyContent:'center',fontSize:12,color:'rgba(255,255,255,.6)',textAlign:'center',padding:20}}>{detail < range.min || detail > range.max ? <StarSpinner size={26}/> : 'Pas de calcul pour ce jour — relancez « Calculer ».'}</div>;
   } else {
     contenu = (
@@ -11357,7 +11366,7 @@ function BatteriePeriodePopup({ granularite, ancreInitiale, bornes, params, onCl
                   {r && <span style={{color:Number(r.gain) >= 0 ? '#7dd940' : '#ff9090'}}>{fmtGain(Number(r.gain))}</span>}
                 </div>
                 {r
-                  ? <GraphiqueJour plan={r.plan} w={tw - 2} h={th - HDR - 4} pMin={echelles.pMin} pMax={echelles.pMax} eMax={echelles.eMax} axes={false}/>
+                  ? <GraphiqueJour plan={r.plan} gain={Number(r.gain)} w={tw - 2} h={th - HDR - 4} pMin={echelles.pMin} pMax={echelles.pMax} eMax={echelles.eMax} axes={false}/>
                   : <div style={{fontSize:8.5,color:'rgba(255,255,255,.3)',textAlign:'center',paddingTop:th/3}}>non calculé</div>}
               </div>
             );
