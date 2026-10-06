@@ -11256,6 +11256,21 @@ function SpotPricesScreen({ onBack }) {
     const ok = await Promise.all(cibles.map(chargerComp));
     setCompSel(cibles.filter((_, i) => ok[i]));
   };
+  // Sélection par défaut à l'ouverture de la vue : les 12 derniers mois et
+  // toutes les fenêtres antérieures jusqu'à celle qui commence en 2019, dans la
+  // limite de ce que la largeur accepte (les plus récentes d'abord). On attend
+  // que la largeur réelle soit mesurée pour ne pas figer la limite du téléphone.
+  const defautRef = useRef(false);
+  useEffect(() => {
+    if (vue !== 'horaire') { defautRef.current = false; return; }
+    if (defautRef.current || !meta?.fenetre_debut || !horaireRef.current || largeurH !== horaireRef.current.clientWidth) return;
+    defautRef.current = true;
+    const anneeDebut = parseInt(meta.fenetre_debut.slice(0, 4));
+    const cibles = decalsDispo.filter(k => anneeDebut - k >= 2019).slice(0, maxComp);
+    if (!cibles.length) return;
+    Promise.all(cibles.map(chargerComp)).then(ok => setCompSel(cibles.filter((_, i) => ok[i])));
+  }, [vue, meta, largeurH, decalsDispo, maxComp]);
+
   // Si la fenêtre rétrécit, on n'affiche que ce qui tient
   const comparaisons = useMemo(() => compSel.filter(k => compData[k]).slice(0, maxComp).map(k => ({ decal: k, map: compData[k] })), [compSel, compData, maxComp]);
 
