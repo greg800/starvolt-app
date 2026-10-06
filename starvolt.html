@@ -11166,7 +11166,9 @@ function GraphiqueJour({ plan, w, h, pMin, pMax, eMax, axes }) {
   // Min et max du jour : le max au-dessus de son point, le min sous le creux (au-dessus, il chevauchait les deux branches du V)
   let hMin = 0, hMax = 0;
   p.forEach((v, hh) => { if (v < p[hMin]) hMin = hh; if (v > p[hMax]) hMax = hh; });
-  const xTexte = hh => Math.max(ML + 8, Math.min(w - MR - 8, xh(hh)));
+  const xTexte = hh => Math.max(ML + 14, Math.min(w - MR - 14, xh(hh)));
+  // Gras, grand, et un halo couleur fond pour rester lisible sur les barres
+  const styleExtreme = { fontSize: axes ? 18 : 13, fontWeight: 800, fill: '#ffd84d', stroke: '#05414e', strokeWidth: 3, paintOrder: 'stroke', textAnchor: 'middle' };
   return (
     <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`} style={{display:'block'}}>
       {axes && [6, 12, 18].map(hh => <line key={hh} x1={ML + hh * pxH} x2={ML + hh * pxH} y1={MT} y2={ysTop + HS - 8} stroke="rgba(255,255,255,.1)"/>)}
@@ -11180,8 +11182,8 @@ function GraphiqueJour({ plan, w, h, pMin, pMax, eMax, axes }) {
       <rect x={ML} y={ys(100)} width={iw} height={ys(0) - ys(100)} fill="rgba(255,255,255,.04)"/>
       {s.length > 0 && <polygon points={`${ML},${ys(0)} ${ptsSoc.map(q => q.join(',')).join(' ')} ${w - MR},${ys(0)}`} fill="rgba(125,217,64,.22)"/>}
       {s.length > 0 && <polyline points={ptsSoc.map(q => q.join(',')).join(' ')} fill="none" stroke="#7dd940" strokeWidth={axes ? 1.4 : 1}/>}
-      <text x={xTexte(hMax)} y={yp(p[hMax]) - (axes ? 6 : 3)} fontSize={axes ? 13 : 9} fontWeight="700" fill="#ffd84d" textAnchor="middle">{fmt0(p[hMax])}</text>
-      {hMin !== hMax && <text x={xTexte(hMin)} y={Math.min(yp(p[hMin]) + (axes ? 16 : 10), MT + ih - 1)} fontSize={axes ? 13 : 9} fontWeight="700" fill="#ffd84d" textAnchor="middle">{fmt0(p[hMin])}</text>}
+      <text x={xTexte(hMax)} y={Math.max(yp(p[hMax]) - (axes ? 8 : 5), axes ? 16 : 12)} style={styleExtreme}>{fmt0(p[hMax])}</text>
+      {hMin !== hMax && <text x={xTexte(hMin)} y={Math.min(yp(p[hMin]) + (axes ? 22 : 15), MT + ih - 1)} style={styleExtreme}>{fmt0(p[hMin])}</text>}
       {axes && (
         <>
           {[0, 6, 12, 18, 23].map(hh => <text key={hh} x={xh(hh)} y={MT + ih + 15} fontSize={F} fill="rgba(255,255,255,.6)" textAnchor="middle">{hh}h</text>)}
