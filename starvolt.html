@@ -11084,100 +11084,235 @@ function SpotJoursCanvas({ rows, indicateur, seuils, onCell }) {
   );
 }
 
-// ─── BatterieJourPopup ────────────────────────
-// Contrôle visuel de l'optimiseur : prix horaire (ligne) et kWh échangés avec
-// le réseau (barres : achat en cyan, vente en vert), puis l'état de charge en %
-// heure par heure. Les flèches parcourent le calendrier jour par jour.
+// ─── BatteriePeriodePopup ─────────────────────
+// Contrôle visuel de l'optimiseur, en plein écran, sur la période de la cellule
+// cliquée : un jour, une semaine ISO ou un mois civil. Prix horaire (ligne) et
+// kWh échangés avec le réseau (barres : achat en cyan, vente en vert), puis
+// l'état de charge en %. L'échelle des abscisses s'adapte à la période et à la
+// largeur : heures, jours de la semaine, ou quantièmes du mois.
 const JOURS_FR = ['dim.', 'lun.', 'mar.', 'mer.', 'jeu.', 'ven.', 'sam.'];
 const MOIS_FR  = ['janvier','février','mars','avril','mai','juin','juillet','août','septembre','octobre','novembre','décembre'];
 function fmtJourLong(iso) { const [a, m, j] = partsIso(iso); const d = new Date(a, m - 1, j); return `${JOURS_FR[d.getDay()]} ${j} ${MOIS_FR[m-1]} ${a}`; }
 function decalerJours(iso, n) { const [a, m, j] = partsIso(iso); const d = new Date(Date.UTC(a, m - 1, j + n)); return d.toISOString().slice(0, 10); }
+function decalerMois(iso, n) { const [a, m] = partsIso(iso); const d = new Date(Date.UTC(a, m - 1 + n, 1)); return d.toISOString().slice(0, 10); }
+const dowIso = iso => { const [a, m, j] = partsIso(iso); return new Date(Date.UTC(a, m - 1, j)).getUTCDay() || 7; };   // 1 = lundi
 
-function BatterieJourPopup({ jourInitial, bornes, params, onClose }) {
-  const [jour, setJour] = useState(jourInitial);
-  const [data, setData] = useState(null);
+// Période (début théorique, jours effectivement couverts par l'historique) autour d'un jour
+function periodeAutour(gran, ancre, bornes) {
+  const [a, m] = partsIso(ancre);
+  let debut, n;
+  if (gran === 'jour')         { debut = ancre; n = 1; }
+  else if (gran === 'semaine') { debut = decalerJours(ancre, 1 - dowIso(ancre)); n = 7; }
+  else                         { debut = `${ancre.slice(0, 8)}01`; n = new Date(a, m, 0).getDate(); }
+  const jours = [];
+  for (let i = 0; i < n; i++) {
+    const d = decalerJours(debut, i);
+    if ((!bornes[0] || d >= bornes[0]) && (!bornes[1] || d <= bornes[1])) jours.push(d);
+  }
+  return { debut, jours };
+}
+function titrePeriode(gran, debut, jours) {
+  if (gran === 'jour') return fmtJourLong(debut);
+  const [a, m, j] = partsIso(debut);
+  if (gran === 'mois') return `${MOIS_FR[m-1]} ${a}`;
+  const fin = jours[jours.length - 1] || debut;
+  const [, mf, jf] = partsIso(fin);
+  return `Semaine ${isoAnneeSemaine(a, m, j)[1]} · ${j}${m !== mf ? ' ' + MOIS_FR[m-1] : ''} → ${jf} ${MOIS_FR[mf-1]} ${a}`;
+}
+
+function BatteriePeriodePopup({ granularite, ancreInitiale, bornes, params, onClose }) {
+  const [ancre, setAncre] = useState(ancreInitiale);
+  const [data,  setData]  = useState(null);          // { parJour: {iso: {gain, plan}} }
+  const zoneRef = useRef(null);
+  const [dims, setDims]   = useState({ w: 340, h: 200 });
+  const { debut, jours } = useMemo(() => periodeAutour(granularite, ancre, bornes), [granularite, ancre, bornes]);
+
   useEffect(() => {
     let vivant = true;
     setData(null);
-    sb.from('spot_batterie_jours').select('gain,plan').eq('jour', jour).maybeSingle()
-      .then(({ data: d }) => { if (vivant) setData(d || { absent: true }); });
+    if (!jours.length) { setData({ parJour: {} }); return; }
+    sb.from('spot_batterie_jours').select('jour,gain,plan').in('jour', jours).order('jour')
+      .then(({ data: rows }) => {
+        if (!vivant) return;
+        const parJour = {};
+        (rows || []).forEach(r => { parJour[r.jour] = r; });
+        setData({ parJour });
+      });
     return () => { vivant = false; };
-  }, [jour]);
-  const [deb, fin] = bornes || [null, null];
-  const precOk = !deb || jour > deb, suivOk = !fin || jour < fin;
+  }, [jours]);
 
-  const W = 340, H = 170, ML = 30, MR = 30, MT = 8, MB = 16, HS = 52;
-  const iw = W - ML - MR, ih = H - MT - MB;
-  let corps = null;
-  if (data && !data.absent) {
-    const p = data.plan.p.map(x => x * 100), e = data.plan.e, s = data.plan.s || new Array(24).fill(0), s0 = data.plan.s0 ?? 0;
-    const pMin = Math.min(0, ...p), pMax = Math.max(...p, pMin + 1);
-    const eMax = Math.max(params?.puissance || 1, ...e.map(Math.abs));
-    const xh = h => ML + (h + 0.5) * iw / 24;
+  useEffect(() => {
+    if (!zoneRef.current) return;
+    const ro = new ResizeObserver(entries => {
+      const r = entries[0].contentRect;
+      if (r.width > 10 && r.height > 10) setDims({ w: Math.floor(r.width), h: Math.floor(r.height) });
+    });
+    ro.observe(zoneRef.current);
+    return () => ro.disconnect();
+  }, []);
+
+  // Navigation : jour, semaine ou mois précédent / suivant, tant qu'il reste des jours connus
+  const voisin = (sens) => granularite === 'jour' ? decalerJours(debut, sens) : granularite === 'semaine' ? decalerJours(debut, 7 * sens) : decalerMois(debut, sens);
+  const okVoisin = (sens) => periodeAutour(granularite, voisin(sens), bornes).jours.length > 0;
+
+  // Séries horaires concaténées sur la période (null quand le jour n'est pas calculé)
+  const serie = useMemo(() => {
+    if (!data) return null;
+    const p = [], e = [], s = [];
+    let s0 = null, achat = 0, vente = 0, cout = 0, recette = 0, gain = 0, nCalc = 0;
+    jours.forEach(d => {
+      const r = data.parJour[d];
+      if (!r) { for (let h = 0; h < 24; h++) { p.push(null); e.push(0); s.push(null); } return; }
+      nCalc++;
+      if (s0 === null) s0 = r.plan.s0 ?? 0;
+      r.plan.p.forEach((v, h) => { p.push(v * 100); e.push(r.plan.e[h]); s.push(r.plan.s ? r.plan.s[h] : null); });
+      r.plan.e.forEach((x, h) => { if (x > 0) { achat += x; cout += x * r.plan.p[h]; } else if (x < 0) { vente -= x; recette -= x * r.plan.p[h]; } });
+      gain += Number(r.gain);
+    });
+    return { p, e, s, s0: s0 ?? 0, achat, vente, cout, recette, gain, nCalc };
+  }, [data, jours]);
+
+  // ── Tracé ──
+  // À l'échelle du mois, 744 barres horaires sur la largeur d'un téléphone ne
+  // se lisent plus : on agrège par jour (kWh achetés / vendus, bande min-max du
+  // prix et de l'état de charge). Jour et semaine restent heure par heure.
+  const W = dims.w, H = dims.h, HS = 56, ML = 34, MR = 34, MT = 10, MB = 18;
+  const iw = Math.max(10, W - ML - MR), ih = Math.max(10, H - HS - MT - MB - 6);
+  let svg = null;
+  if (serie && serie.nCalc > 0) {
+    const agrege = granularite === 'mois';
+    const nH = serie.p.length, pxH = iw / nH, pxJ = pxH * 24;
+    const pVal = serie.p.filter(v => v !== null);
+    const pMin = Math.min(0, ...pVal), pMax = Math.max(...pVal, pMin + 1);
     const yp = v => MT + ih - (v - pMin) / (pMax - pMin) * ih;
-    const y0 = MT + ih / 2, ye = v => y0 - v / eMax * (ih / 2);
-    const achat = e.filter(x => x > 0).reduce((a, x) => a + x, 0), vente = -e.filter(x => x < 0).reduce((a, x) => a + x, 0);
-    const cout = e.reduce((a, x, h) => a + (x > 0 ? x * data.plan.p[h] : 0), 0), recette = e.reduce((a, x, h) => a + (x < 0 ? -x * data.plan.p[h] : 0), 0);
-    const bw = iw / 24 * 0.7;
-    // Bande état de charge : point à 0 h (s0) puis fin de chaque heure
-    const ys = v => 6 + (100 - v) / 100 * (HS - 14);
-    const ptsSoc = [[ML, ys(s0)], ...s.map((v, h) => [ML + (h + 1) * iw / 24, ys(v)])];
-    corps = (
+    const y0 = MT + ih / 2;
+    const ysTop = MT + ih + MB, ys = v => ysTop + 6 + (100 - v) / 100 * (HS - 16);
+    const fmt0 = v => (Math.abs(v) < 0.5 ? '0' : v.toFixed(0));
+    // Repères d'abscisse selon la période et la place disponible
+    const reperes = [];   // { x, label, xSep, sep }
+    if (granularite === 'jour') {
+      const xh = h => ML + (h + 0.5) * pxH;
+      const pas = pxH >= 22 ? 2 : pxH >= 12 ? 3 : 6;
+      for (let h = 0; h < 24; h += pas) reperes.push({ x: xh(h), label: `${h}h` });
+      reperes.push({ x: xh(23), label: '23h' });
+    } else {
+      const pasJ = granularite === 'semaine' ? 1 : pxJ >= 26 ? 1 : pxJ >= 14 ? 2 : 5;
+      jours.forEach((d, i) => {
+        const [, , j] = partsIso(d);
+        const label = granularite === 'semaine' ? `${JOURS_FR[dowIso(d) % 7]} ${j}` : ((i % pasJ === 0) ? String(j) : null);
+        reperes.push({ x: ML + (i + 0.5) * pxJ, xSep: ML + i * pxJ, label, sep: i > 0 });
+      });
+    }
+    const axes = (eMax, uniteE) => (
       <>
-        <svg viewBox={`0 0 ${W} ${H}`} style={{width:'100%',display:'block'}}>
-          <line x1={ML} x2={W-MR} y1={y0} y2={y0} stroke="rgba(255,255,255,.2)"/>
-          {e.map((x, h) => x !== 0 && (
-            <rect key={h} x={xh(h) - bw/2} width={bw} y={Math.min(y0, ye(x))} height={Math.abs(ye(x) - y0)} fill={x > 0 ? 'rgba(93,224,245,.75)' : 'rgba(125,217,64,.8)'}/>
-          ))}
-          <polyline points={p.map((v, h) => `${xh(h)},${yp(v)}`).join(' ')} fill="none" stroke="#ffd84d" strokeWidth="1.6"/>
-          {p.map((v, h) => <circle key={h} cx={xh(h)} cy={yp(v)} r="1.6" fill="#ffd84d"/>)}
-          {[0, 6, 12, 18, 23].map(h => <text key={h} x={xh(h)} y={H - 4} fontSize="8" fill="rgba(255,255,255,.5)" textAnchor="middle">{h}h</text>)}
-          <text x={ML - 3} y={yp(pMax) + 3} fontSize="8" fill="#ffd84d" textAnchor="end">{pMax.toFixed(0)}</text>
-          <text x={ML - 3} y={yp(pMin) + 3} fontSize="8" fill="#ffd84d" textAnchor="end">{pMin.toFixed(0)}</text>
-          <text x={ML - 3} y={H - 4} fontSize="7" fill="#ffd84d" textAnchor="end">c€/kWh</text>
-          <text x={W - MR + 3} y={ye(eMax) + 3} fontSize="8" fill="rgba(255,255,255,.6)">+{eMax.toFixed(1)}</text>
-          <text x={W - MR + 3} y={ye(-eMax) + 3} fontSize="8" fill="rgba(255,255,255,.6)">−{eMax.toFixed(1)}</text>
-          <text x={W - MR + 3} y={H - 4} fontSize="7" fill="rgba(255,255,255,.4)">kWh</text>
-        </svg>
-        <svg viewBox={`0 0 ${W} ${HS}`} style={{width:'100%',display:'block',marginTop:2}}>
-          <rect x={ML} y={ys(100)} width={iw} height={ys(0) - ys(100)} fill="rgba(255,255,255,.04)"/>
-          <polygon points={`${ML},${ys(0)} ${ptsSoc.map(q => q.join(',')).join(' ')} ${W - MR},${ys(0)}`} fill="rgba(125,217,64,.22)"/>
-          <polyline points={ptsSoc.map(q => q.join(',')).join(' ')} fill="none" stroke="#7dd940" strokeWidth="1.6"/>
-          <text x={ML - 3} y={ys(100) + 3} fontSize="8" fill="rgba(255,255,255,.6)" textAnchor="end">100 %</text>
-          <text x={ML - 3} y={ys(0) + 3} fontSize="8" fill="rgba(255,255,255,.6)" textAnchor="end">0 %</text>
-          <text x={W - MR + 3} y={ys(50) + 3} fontSize="7" fill="rgba(255,255,255,.4)">charge</text>
-        </svg>
-        <div style={{display:'flex',justifyContent:'space-between',gap:8,fontSize:10,fontWeight:700,marginTop:4,flexWrap:'wrap'}}>
-          <span style={{color:'#5de0f5'}}>Achat {achat.toFixed(1)} kWh · {cout.toFixed(2).replace('.',',')} €</span>
-          <span style={{color:'#7dd940'}}>Vente {vente.toFixed(1)} kWh · {recette.toFixed(2).replace('.',',')} €</span>
-          <span style={{color:'white'}}>Gain {Number(data.gain).toFixed(2).replace('.',',')} € HT</span>
-        </div>
-        <div style={{fontSize:9.5,fontWeight:600,color:'rgba(255,255,255,.5)',marginTop:2}}>
-          Charge {Math.round(s0)} % à 0 h → {Math.round(s[23])} % à minuit · l'énergie restante est revendue les jours suivants
-        </div>
+        <text x={ML - 4} y={yp(pMax) + 3} fontSize="9" fill="#ffd84d" textAnchor="end">{fmt0(pMax)}</text>
+        <text x={ML - 4} y={yp(pMin) + 3} fontSize="9" fill="#ffd84d" textAnchor="end">{fmt0(pMin)}</text>
+        <text x={ML - 4} y={MT + ih / 2 + 3} fontSize="7.5" fill="#ffd84d" textAnchor="end">c€/kWh</text>
+        <text x={W - MR + 4} y={MT + 8} fontSize="9" fill="rgba(255,255,255,.6)">+{eMax.toFixed(agrege ? 0 : 1)}</text>
+        <text x={W - MR + 4} y={MT + ih} fontSize="9" fill="rgba(255,255,255,.6)">−{eMax.toFixed(agrege ? 0 : 1)}</text>
+        <text x={W - MR + 4} y={y0 + 3} fontSize="7.5" fill="rgba(255,255,255,.4)">{uniteE}</text>
+        <text x={ML - 4} y={ys(100) + 3} fontSize="9" fill="rgba(255,255,255,.6)" textAnchor="end">100 %</text>
+        <text x={ML - 4} y={ys(0) + 3} fontSize="9" fill="rgba(255,255,255,.6)" textAnchor="end">0 %</text>
+        <text x={W - MR + 4} y={ys(50) + 3} fontSize="7.5" fill="rgba(255,255,255,.4)">charge</text>
+        {reperes.filter(r => r.sep).map((r, i) => <line key={'s'+i} x1={r.xSep} x2={r.xSep} y1={MT} y2={ysTop + HS - 8} stroke="rgba(255,255,255,.12)"/>)}
+        {reperes.filter(r => r.label).map((r, i) => <text key={'l'+i} x={r.x} y={MT + ih + 12} fontSize="9" fill="rgba(255,255,255,.55)" textAnchor="middle">{r.label}</text>)}
+        <line x1={ML} x2={W-MR} y1={y0} y2={y0} stroke="rgba(255,255,255,.2)"/>
+        <rect x={ML} y={ys(100)} width={iw} height={ys(0) - ys(100)} fill="rgba(255,255,255,.04)"/>
       </>
     );
+    if (!agrege) {
+      const eMax = Math.max(params?.puissance || 1, ...serie.e.map(Math.abs));
+      const xh = h => ML + (h + 0.5) * pxH, ye = v => y0 - v / eMax * (ih / 2);
+      const bw = Math.max(1, pxH * 0.7);
+      const segments = []; let cur = [];
+      serie.p.forEach((v, h) => { if (v === null) { if (cur.length) segments.push(cur); cur = []; } else cur.push(`${xh(h)},${yp(v)}`); });
+      if (cur.length) segments.push(cur);
+      const ptsSoc = [[ML, ys(serie.s0)]];
+      serie.s.forEach((v, h) => { if (v !== null) ptsSoc.push([ML + (h + 1) * pxH, ys(v)]); });
+      svg = (
+        <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} style={{display:'block'}}>
+          {axes(eMax, 'kWh')}
+          {serie.e.map((x, h) => x !== 0 && (
+            <rect key={h} x={xh(h) - bw/2} width={bw} y={Math.min(y0, ye(x))} height={Math.abs(ye(x) - y0)} fill={x > 0 ? 'rgba(93,224,245,.75)' : 'rgba(125,217,64,.8)'}/>
+          ))}
+          {segments.map((seg, i) => <polyline key={i} points={seg.join(' ')} fill="none" stroke="#ffd84d" strokeWidth={nH > 100 ? 1.2 : 1.6}/>)}
+          {nH <= 48 && serie.p.map((v, h) => v !== null && <circle key={'c'+h} cx={xh(h)} cy={yp(v)} r="1.6" fill="#ffd84d"/>)}
+          <polygon points={`${ML},${ys(0)} ${ptsSoc.map(q => q.join(',')).join(' ')} ${ptsSoc[ptsSoc.length-1][0]},${ys(0)}`} fill="rgba(125,217,64,.22)"/>
+          <polyline points={ptsSoc.map(q => q.join(',')).join(' ')} fill="none" stroke="#7dd940" strokeWidth="1.4"/>
+        </svg>
+      );
+    } else {
+      // Agrégats journaliers
+      const J = jours.map((d, i) => {
+        const p = serie.p.slice(i * 24, i * 24 + 24).filter(v => v !== null);
+        const e = serie.e.slice(i * 24, i * 24 + 24);
+        const sv = serie.s.slice(i * 24, i * 24 + 24).filter(v => v !== null);
+        if (!p.length) return null;
+        return { achat: e.filter(x => x > 0).reduce((a, x) => a + x, 0), vente: -e.filter(x => x < 0).reduce((a, x) => a + x, 0),
+                 pMin: Math.min(...p), pMax: Math.max(...p), pMoy: p.reduce((a, b) => a + b, 0) / p.length,
+                 sMin: sv.length ? Math.min(...sv) : null, sMax: sv.length ? Math.max(...sv) : null };
+      });
+      const eMaxJ = Math.max(1, ...J.filter(Boolean).map(j => Math.max(j.achat, j.vente)));
+      const ye = v => y0 - v / eMaxJ * (ih / 2);
+      const bw = Math.max(1, pxJ * 0.6), xc = i => ML + (i + 0.5) * pxJ;
+      const bande = [], moy = [], socHaut = [], socBas = [];
+      J.forEach((j, i) => { if (!j) return; bande.push([xc(i), yp(j.pMax), yp(j.pMin)]); moy.push(`${xc(i)},${yp(j.pMoy)}`); if (j.sMin !== null) { socHaut.push(`${xc(i)},${ys(j.sMax)}`); socBas.push(`${xc(i)},${ys(j.sMin)}`); } });
+      const polyBande = bande.length ? [...bande.map(b => `${b[0]},${b[1]}`), ...bande.slice().reverse().map(b => `${b[0]},${b[2]}`)].join(' ') : '';
+      const polySoc = socHaut.length ? [...socHaut, ...socBas.slice().reverse()].join(' ') : '';
+      svg = (
+        <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} style={{display:'block'}}>
+          {axes(eMaxJ, 'kWh/j')}
+          {J.map((j, i) => j && (
+            <g key={i}>
+              {j.achat > 0 && <rect x={xc(i) - bw/2} width={bw} y={ye(j.achat)} height={y0 - ye(j.achat)} fill="rgba(93,224,245,.7)"/>}
+              {j.vente > 0 && <rect x={xc(i) - bw/2} width={bw} y={y0} height={y0 - ye(j.vente)} fill="rgba(125,217,64,.75)"/>}
+            </g>
+          ))}
+          {polyBande && <polygon points={polyBande} fill="rgba(255,216,77,.22)"/>}
+          <polyline points={moy.join(' ')} fill="none" stroke="#ffd84d" strokeWidth="1.6"/>
+          {polySoc && <polygon points={polySoc} fill="rgba(125,217,64,.3)" stroke="#7dd940" strokeWidth="1"/>}
+          <text x={W - MR + 4} y={yp(pMax) + 12} fontSize="7" fill="rgba(255,216,77,.7)">min-max</text>
+        </svg>
+      );
+    }
   }
   const fleche = (ok, onClick, car) => (
-    <button onClick={onClick} disabled={!ok} style={{background:'none',border:'none',color:ok?'white':'rgba(255,255,255,.2)',fontSize:22,cursor:ok?'pointer':'default',padding:'0 8px',lineHeight:1}}>{car}</button>
+    <button onClick={onClick} disabled={!ok} style={{background:'none',border:'none',color:ok?'white':'rgba(255,255,255,.2)',fontSize:26,cursor:ok?'pointer':'default',padding:'0 10px',lineHeight:1}}>{car}</button>
   );
+  const f2 = v => v.toFixed(2).replace('.', ',');
   return (
-    <div className="lightbox-overlay" style={{cursor:'default',padding:12}} onClick={onClose}>
-      <div onClick={e => e.stopPropagation()} style={{background:'#05414e',border:'1px solid rgba(255,255,255,.15)',borderRadius:14,padding:'12px 14px',width:'100%',maxWidth:420,color:'white',fontFamily:'var(--font)'}}>
-        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:8,marginBottom:6}}>
-          {fleche(precOk, () => setJour(j => decalerJours(j, -1)), '‹')}
-          <div style={{textAlign:'center'}}>
-            <div style={{fontSize:13,fontWeight:800}}>{fmtJourLong(jour)}</div>
-            <div style={{fontSize:9.5,color:'rgba(255,255,255,.5)',fontWeight:600}}>
+    <div className="lightbox-overlay" style={{cursor:'default',padding:0,alignItems:'stretch'}} onClick={onClose}>
+      <div onClick={e => e.stopPropagation()} style={{background:'#05414e',width:'100%',height:'100%',display:'flex',flexDirection:'column',padding:'max(10px, env(safe-area-inset-top)) 10px 10px',color:'white',fontFamily:'var(--font)',boxSizing:'border-box'}}>
+        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:8,marginBottom:4}}>
+          {fleche(okVoisin(-1), () => setAncre(voisin(-1)), '‹')}
+          <div style={{textAlign:'center',minWidth:0}}>
+            <div style={{fontSize:14,fontWeight:800,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{titrePeriode(granularite, debut, jours)}</div>
+            <div style={{fontSize:10,color:'rgba(255,255,255,.5)',fontWeight:600}}>
               {params ? `${params.capacite} kWh · ${params.puissance} kW · ${params.cycles} cycle${params.cycles > 1 ? 's' : ''}/j · η ${Math.round(params.rendement * 100)} %` : ''}
             </div>
           </div>
-          {fleche(suivOk, () => setJour(j => decalerJours(j, 1)), '›')}
+          {fleche(okVoisin(1), () => setAncre(voisin(1)), '›')}
         </div>
-        {data === null ? <div style={{textAlign:'center',padding:30}}><StarSpinner size={26}/></div>
-         : data.absent ? <div style={{textAlign:'center',padding:20,fontSize:12,color:'rgba(255,255,255,.6)'}}>Pas de calcul pour ce jour — relancez « Calculer ».</div>
-         : corps}
-        <button onClick={onClose} style={{marginTop:10,width:'100%',background:'rgba(255,255,255,.1)',border:'1px solid rgba(255,255,255,.2)',color:'white',borderRadius:8,padding:'7px',fontFamily:'var(--font)',fontSize:12,fontWeight:700,cursor:'pointer'}}>Fermer</button>
+        <div ref={zoneRef} style={{flex:1,minHeight:120,position:'relative'}}>
+          {data === null ? <div style={{position:'absolute',inset:0,display:'flex',alignItems:'center',justifyContent:'center'}}><StarSpinner size={30}/></div>
+           : !serie || serie.nCalc === 0 ? <div style={{position:'absolute',inset:0,display:'flex',alignItems:'center',justifyContent:'center',fontSize:12,color:'rgba(255,255,255,.6)',textAlign:'center',padding:20}}>Pas de calcul pour cette période — relancez « Calculer ».</div>
+           : svg}
+        </div>
+        {serie && serie.nCalc > 0 && (
+          <>
+            <div style={{display:'flex',justifyContent:'space-between',gap:8,fontSize:11,fontWeight:700,marginTop:6,flexWrap:'wrap'}}>
+              <span style={{color:'#5de0f5'}}>Achat {serie.achat.toFixed(1)} kWh · {f2(serie.cout)} €</span>
+              <span style={{color:'#7dd940'}}>Vente {serie.vente.toFixed(1)} kWh · {f2(serie.recette)} €</span>
+              <span style={{color:'white'}}>Gain {f2(serie.gain)} € HT</span>
+            </div>
+            <div style={{fontSize:10,fontWeight:600,color:'rgba(255,255,255,.5)',marginTop:2}}>
+              {granularite === 'mois' ? 'Par jour : kWh achetés (haut) et vendus (bas), prix moyen et plage min-max, plage de l\'état de charge · ' : ''}
+              Charge {Math.round(serie.s0)} % au début → {Math.round(serie.s.filter(v => v !== null).slice(-1)[0] ?? 0)} % à la fin
+              {serie.nCalc < jours.length ? ` · ${jours.length - serie.nCalc} jour(s) sans calcul` : ''}
+            </div>
+          </>
+        )}
+        <button onClick={onClose} style={{marginTop:8,width:'100%',background:'rgba(255,255,255,.1)',border:'1px solid rgba(255,255,255,.2)',color:'white',borderRadius:8,padding:'9px',fontFamily:'var(--font)',fontSize:13,fontWeight:700,cursor:'pointer',flexShrink:0}}>Fermer</button>
       </div>
     </div>
   );
@@ -11195,7 +11330,7 @@ function SpotPricesScreen({ onBack }) {
   const [batSaisie,  setBatSaisie]  = useState(BAT_DEFAUT);
   const [batMsg,     setBatMsg]     = useState(null);
   const [batCalc,    setBatCalc]    = useState(false);
-  const [popup,      setPopup]      = useState(null);      // jour iso ouvert dans le graphique batterie
+  const [popup,      setPopup]      = useState(null);      // { gran, ancre } : période ouverte dans le graphique batterie
   const [infoJour,   setInfoJour]   = useState(null);
   const [loading,    setLoading]    = useState(true);
   const [importing,  setImporting]  = useState(false);
@@ -11353,7 +11488,7 @@ function SpotPricesScreen({ onBack }) {
       const v = valeurAffichee(indicateur, r);
       setInfoJour(`${fmtJourLong(r.jours[0])} · ${fmtValeur(indicateur, v, 1)} ${indDef.unite}${r.n < 24 * 0.9 ? ' · journée incomplète' : ''}`);
     }
-    if (indicateur === 'gain' && r.jours?.length) setPopup(r.jours.slice().sort()[0]);
+    if (indicateur === 'gain' && r.jours?.length) setPopup({ gran: granularite, ancre: r.jours.slice().sort()[0] });
   };
 
   const fmtDate = (ts) => ts ? new Date(ts).toLocaleString('fr-FR',{day:'2-digit',month:'2-digit',year:'2-digit',hour:'2-digit',minute:'2-digit'}) : '—';
@@ -11515,7 +11650,7 @@ function SpotPricesScreen({ onBack }) {
         </>
       )}
     </div>
-    {popup && <BatterieJourPopup jourInitial={popup} bornes={[meta?.periode_debut, meta?.periode_fin]} params={batParams || batSaisie} onClose={() => setPopup(null)}/>}
+    {popup && <BatteriePeriodePopup granularite={popup.gran} ancreInitiale={popup.ancre} bornes={[meta?.periode_debut, meta?.periode_fin]} params={batParams || batSaisie} onClose={() => setPopup(null)}/>}
     <StickyFooter onBack={vue === 'menu' ? onBack : () => setVue('menu')}/>
     </>
   );
