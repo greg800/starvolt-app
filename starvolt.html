@@ -11151,7 +11151,8 @@ const fmtGain = g => (g >= 0 ? '+' : '−') + f2(Math.abs(g)) + ' €';
 // Graphique d'une journée. Échelles passées par le parent pour que les tuiles
 // d'une même période soient comparables. axes=false pour une tuile.
 function GraphiqueJour({ plan, w, h, pMin, pMax, eMax, axes }) {
-  const ML = axes ? 34 : 2, MR = axes ? 34 : 2, MT = axes ? 10 : 2, MB = axes ? 18 : 2;
+  const ML = axes ? 46 : 2, MR = axes ? 46 : 2, MT = axes ? 14 : 12, MB = axes ? 22 : 2;
+  const F = axes ? 12 : 9, FU = axes ? 10 : 7;   // taille des libellés d'axe et des unités
   const HS = axes ? 56 : Math.max(10, Math.round(h * 0.18));
   const iw = Math.max(10, w - ML - MR), ih = Math.max(10, h - HS - MT - MB - (axes ? 6 : 2));
   const p = plan.p.map(x => x * 100), e = plan.e, s = plan.s || [], s0 = plan.s0 ?? 0;
@@ -11162,6 +11163,10 @@ function GraphiqueJour({ plan, w, h, pMin, pMax, eMax, axes }) {
   const bw = Math.max(1, pxH * 0.7);
   const ptsSoc = [[ML, ys(s0)], ...s.map((v, hh) => [ML + (hh + 1) * pxH, ys(v)])];
   const fmt0 = v => (Math.abs(v) < 0.5 ? '0' : v.toFixed(0));
+  // Min et max du jour : le max au-dessus de son point, le min sous le creux (au-dessus, il chevauchait les deux branches du V)
+  let hMin = 0, hMax = 0;
+  p.forEach((v, hh) => { if (v < p[hMin]) hMin = hh; if (v > p[hMax]) hMax = hh; });
+  const xTexte = hh => Math.max(ML + 8, Math.min(w - MR - 8, xh(hh)));
   return (
     <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`} style={{display:'block'}}>
       {axes && [6, 12, 18].map(hh => <line key={hh} x1={ML + hh * pxH} x2={ML + hh * pxH} y1={MT} y2={ysTop + HS - 8} stroke="rgba(255,255,255,.1)"/>)}
@@ -11175,18 +11180,20 @@ function GraphiqueJour({ plan, w, h, pMin, pMax, eMax, axes }) {
       <rect x={ML} y={ys(100)} width={iw} height={ys(0) - ys(100)} fill="rgba(255,255,255,.04)"/>
       {s.length > 0 && <polygon points={`${ML},${ys(0)} ${ptsSoc.map(q => q.join(',')).join(' ')} ${w - MR},${ys(0)}`} fill="rgba(125,217,64,.22)"/>}
       {s.length > 0 && <polyline points={ptsSoc.map(q => q.join(',')).join(' ')} fill="none" stroke="#7dd940" strokeWidth={axes ? 1.4 : 1}/>}
+      <text x={xTexte(hMax)} y={yp(p[hMax]) - (axes ? 6 : 3)} fontSize={axes ? 13 : 9} fontWeight="700" fill="#ffd84d" textAnchor="middle">{fmt0(p[hMax])}</text>
+      {hMin !== hMax && <text x={xTexte(hMin)} y={Math.min(yp(p[hMin]) + (axes ? 16 : 10), MT + ih - 1)} fontSize={axes ? 13 : 9} fontWeight="700" fill="#ffd84d" textAnchor="middle">{fmt0(p[hMin])}</text>}
       {axes && (
         <>
-          {[0, 6, 12, 18, 23].map(hh => <text key={hh} x={xh(hh)} y={MT + ih + 12} fontSize="9" fill="rgba(255,255,255,.55)" textAnchor="middle">{hh}h</text>)}
-          <text x={ML - 4} y={yp(pMax) + 3} fontSize="9" fill="#ffd84d" textAnchor="end">{fmt0(pMax)}</text>
-          <text x={ML - 4} y={yp(pMin) + 3} fontSize="9" fill="#ffd84d" textAnchor="end">{fmt0(pMin)}</text>
-          <text x={ML - 4} y={MT + ih / 2 + 3} fontSize="7.5" fill="#ffd84d" textAnchor="end">c€/kWh</text>
-          <text x={w - MR + 4} y={MT + 8} fontSize="9" fill="rgba(255,255,255,.6)">+{eMax.toFixed(1)}</text>
-          <text x={w - MR + 4} y={MT + ih} fontSize="9" fill="rgba(255,255,255,.6)">−{eMax.toFixed(1)}</text>
-          <text x={w - MR + 4} y={y0 + 3} fontSize="7.5" fill="rgba(255,255,255,.4)">kWh</text>
-          <text x={ML - 4} y={ys(100) + 3} fontSize="9" fill="rgba(255,255,255,.6)" textAnchor="end">100 %</text>
-          <text x={ML - 4} y={ys(0) + 3} fontSize="9" fill="rgba(255,255,255,.6)" textAnchor="end">0 %</text>
-          <text x={w - MR + 4} y={ys(50) + 3} fontSize="7.5" fill="rgba(255,255,255,.4)">charge</text>
+          {[0, 6, 12, 18, 23].map(hh => <text key={hh} x={xh(hh)} y={MT + ih + 15} fontSize={F} fill="rgba(255,255,255,.6)" textAnchor="middle">{hh}h</text>)}
+          <text x={ML - 5} y={yp(pMax) + 4} fontSize={F} fill="#ffd84d" textAnchor="end">{fmt0(pMax)}</text>
+          <text x={ML - 5} y={yp(pMin) + 4} fontSize={F} fill="#ffd84d" textAnchor="end">{fmt0(pMin)}</text>
+          <text x={ML - 5} y={MT + ih / 2 + 4} fontSize={FU} fill="#ffd84d" textAnchor="end">c€/kWh</text>
+          <text x={w - MR + 5} y={MT + 10} fontSize={F} fill="rgba(255,255,255,.65)">+{eMax.toFixed(1)}</text>
+          <text x={w - MR + 5} y={MT + ih} fontSize={F} fill="rgba(255,255,255,.65)">−{eMax.toFixed(1)}</text>
+          <text x={w - MR + 5} y={y0 + 4} fontSize={FU} fill="rgba(255,255,255,.45)">kWh</text>
+          <text x={ML - 5} y={ys(100) + 4} fontSize={F} fill="rgba(255,255,255,.65)" textAnchor="end">100 %</text>
+          <text x={ML - 5} y={ys(0) + 4} fontSize={F} fill="rgba(255,255,255,.65)" textAnchor="end">0 %</text>
+          <text x={w - MR + 5} y={ys(50) + 4} fontSize={FU} fill="rgba(255,255,255,.45)">charge</text>
         </>
       )}
     </svg>
