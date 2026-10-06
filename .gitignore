@@ -16,3 +16,6 @@ dist
 
 # état local de la CLI Supabase (version téléchargée, projet lié)
 supabase/.temp/
+
+# Clé API Brevo (jamais committée)
+.claude/.brevo-key
