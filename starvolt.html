@@ -10963,7 +10963,7 @@ let TURPE_STOCKAGE = {
       injection: 0,
       puissance: 10.42, puissanceUnite: '€/kVA/an',
       gestion: 26.95, comptage: 22.67,  // gestion « autoproducteur avec injection »
-      accise: 3.062, acciseNote: 'Taxée au taux « ménages et assimilés ». Derrière un compteur ≤ 36 kVA, l\'énergie de charge n\'est pas distinguée de la consommation : l\'exonération stockage ne s\'applique pas en pratique.',
+      accise: 3.062, acciseTaxee: 3.062, acciseNote: 'Taxée au taux « ménages et assimilés ». Derrière un compteur ≤ 36 kVA, l\'énergie de charge n\'est pas distinguée de la consommation : l\'exonération stockage ne s\'applique pas en pratique.',
     },
     bt250: {
       label: 'BT > 36 kVA (C4)', pMax: 250,
@@ -10972,7 +10972,7 @@ let TURPE_STOCKAGE = {
       injection: 0,
       puissance: 18.15, puissanceUnite: '€/kVA/an (même puissance sur les 4 plages → b₁ × P)',
       gestion: 366.14, comptage: 291.88,
-      accise: 0, acciseNote: 'Exonérée (CIBS L.312-32, rescrit BOI-RES-EAT-000164) : l\'électricité qui charge une batterie est assimilée à une consommation de production, sur attestation 2040-TIC-ATT-E au fournisseur. À défaut, taux « PME ».',
+      accise: 0, acciseTaxee: 2.635, acciseNote: 'Exonérée (CIBS L.312-32, rescrit BOI-RES-EAT-000164) : l\'électricité qui charge une batterie est assimilée à une consommation de production, sur attestation 2040-TIC-ATT-E au fournisseur. À défaut, taux « PME ».',
     },
     hta: {
       label: 'HTA', pMax: Infinity,
@@ -10981,12 +10981,12 @@ let TURPE_STOCKAGE = {
       injection: 0,
       puissance: 14.85, puissanceUnite: '€/kW/an (même puissance sur les 5 plages → b₁ × P)',
       gestion: 732.28, comptage: 387.84,
-      accise: 0, acciseNote: 'Exonérée (CIBS L.312-32, rescrit BOI-RES-EAT-000164), cas normal d\'un stockage seul. À défaut, taux « haute puissance ».',
+      accise: 0, acciseTaxee: 2.635, acciseNote: 'Exonérée (CIBS L.312-32, rescrit BOI-RES-EAT-000164), cas normal d\'un stockage seul. À défaut, taux « haute puissance ».',
     },
   },
 };
 // Champs numériques de la grille stockés en base (le reste — libellés, notes — vient du code).
-const TURPE_CHAMPS_DOMAINE = ['injection', 'puissance', 'gestion', 'comptage', 'accise'];
+const TURPE_CHAMPS_DOMAINE = ['injection', 'puissance', 'gestion', 'comptage', 'accise', 'acciseTaxee'];
 function appliquerGrilleTurpe(g) {
   if (!g || !g.domaines) return;
   const num = (v, def) => (typeof v === 'number' && isFinite(v)) ? v : def;
@@ -11031,25 +11031,45 @@ function fixeAnnuelTurpe(dom, puissanceKw) {
   const tarif = dom.puissance * puissanceKw + dom.gestion + dom.comptage;
   return { tarif, cta: tarif * TURPE_STOCKAGE.cta / 100, total: tarif * (1 + TURPE_STOCKAGE.cta / 100) };
 }
-// Prix horaires réels d'un jour (€/kWh HT) : achat = spot + TURPE soutirage de
-// la plage + accise ; vente = spot − composante d'injection (nulle en TURPE 7).
-function prixReelsJour(dom, jour) {
-  const pa = new Array(24), pv = new Array(24);
-  for (let h = 0; h < 24; h++) {
-    pa[h] = jour.p[h] + (dom.soutirage[plageTurpe(dom.key, jour.d, h)] + dom.accise) / 100;
-    pv[h] = jour.p[h] - dom.injection / 100;
-  }
-  return { ...jour, pa, pv };
+// Contexte du gain réel selon le raccordement de la batterie :
+//  - 'seule' : raccordement propre. Domaine = puissance batterie ; achat = spot
+//    + TURPE soutirage de la plage + accise de la grille (exonération stockage) ;
+//    décharge injectée = spot − composante d'injection (nulle en TURPE 7) ;
+//    frais fixes complets (puissance batterie, gestion, comptage, CTA).
+//  - 'site'  : derrière le compteur d'un site déjà raccordé. Domaine = puissance
+//    du site ; la décharge alimente le site et évite un achat au prix complet
+//    (spot + TURPE de la plage + accise) ; accise au taux normal (charge non
+//    distinguée de la consommation) ; frais fixes = puissance souscrite ajoutée
+//    seule (+ CTA), gestion et comptage étant déjà payés par le site.
+function contexteReel(params) {
+  const site = params.integration === 'site';
+  const dom = domaineTurpe(site ? (+params.siteKva || 0) : params.puissance);
+  const fixe = site
+    ? (() => { const tarif = dom.puissance * (+params.puissanceAjoutee || 0); return { tarif, cta: tarif * TURPE_STOCKAGE.cta / 100, total: tarif * (1 + TURPE_STOCKAGE.cta / 100) }; })()
+    : fixeAnnuelTurpe(dom, params.puissance);
+  const accise = site ? dom.acciseTaxee : dom.accise;
+  const prix = (jour) => {
+    const pa = new Array(24), pv = new Array(24);
+    for (let h = 0; h < 24; h++) {
+      const plein = jour.p[h] + (dom.soutirage[plageTurpe(dom.key, jour.d, h)] + accise) / 100;
+      pa[h] = plein;
+      pv[h] = site ? plein : jour.p[h] - dom.injection / 100;
+    }
+    return { ...jour, pa, pv };
+  };
+  return { site, dom, fixe, fixeJour: fixe.total / 365, accise, prix };
 }
 
 // ─── Page « Hypothèses de calcul TURPE et taxes » (gain batterie réel) ───────
 // Tout est lu dans TURPE_STOCKAGE : le tableau affiché est celui du calcul.
-function HypothesesTurpeStockage({ puissance, editable = false, maj = null, calcMsg = null, onSaved }) {
+function HypothesesTurpeStockage({ params, editable = false, maj = null, calcMsg = null, onSaved }) {
   const [edit, setEdit]     = useState(null);   // brouillon de la grille (format base) en cours d'édition
   const [busy, setBusy]     = useState(false);
   const [msg,  setMsg]      = useState(null);
   const [, setV]            = useState(0);      // re-rendu après application de la grille enregistrée
-  const dom = domaineTurpe(puissance || 0);
+  const puissance = params?.puissance || 0;
+  const ctx = contexteReel(params || { puissance: 0 });
+  const dom = ctx.dom, site = ctx.site;
   const D = TURPE_STOCKAGE.domaines;
   // Saisie : champ numérique d'une cellule (virgule acceptée), chemin dans le brouillon.
   const setNum = (k, champ, pl, val) => setEdit(e => {
@@ -11084,7 +11104,7 @@ function HypothesesTurpeStockage({ puissance, editable = false, maj = null, calc
     onSaved?.({ at, par });
   };
   const cles = ['bt36', 'bt250', 'hta'];
-  const fx = fixeAnnuelTurpe(dom, puissance || 0);
+  const fx = ctx.fixe;
   const n2 = v => v.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const eur = v => Math.round(v).toLocaleString('fr-FR') + ' €';
   const sec = { fontSize:12, fontWeight:800, letterSpacing:.5, textTransform:'uppercase', color:'rgba(255,255,255,.5)', margin:'14px 0 6px' };
@@ -11106,18 +11126,31 @@ function HypothesesTurpeStockage({ puissance, editable = false, maj = null, calc
   return (
     <div style={{paddingBottom:90}}>
       <div style={{background:'rgba(125,217,64,.1)',border:'1px solid rgba(125,217,64,.3)',borderRadius:10,padding:'10px 12px',marginBottom:6}}>
-        <div style={{fontSize:13,fontWeight:800,color:'#7dd940'}}>Votre batterie : {puissance} kW → {dom.label}</div>
+        <div style={{fontSize:13,fontWeight:800,color:'#7dd940'}}>
+          {site ? <>Batterie {puissance} kW intégrée à un site de {params.siteKva} kVA → {dom.label}</> : <>Batterie seule : {puissance} kW → {dom.label}</>}
+        </div>
         <div style={{fontSize:11.5,color:'rgba(255,255,255,.75)',marginTop:2,lineHeight:1.5}}>
-          La puissance de charge et de décharge sert de puissance souscrite et détermine le domaine de tension, donc la grille TURPE et le taux d'accise. Grilles en vigueur au {TURPE_STOCKAGE.dateEffet}.
+          {site
+            ? <>La batterie est derrière le compteur du site : c'est la puissance souscrite du site qui fixe le domaine de tension, donc la grille TURPE et le taux d'accise.</>
+            : <>La batterie a son propre raccordement : sa puissance de charge et de décharge sert de puissance souscrite et fixe le domaine de tension, donc la grille TURPE et le taux d'accise.</>}
+          {' '}Grilles en vigueur au {TURPE_STOCKAGE.dateEffet}. Le raccordement se choisit dans la vue gains batterie réels.
         </div>
       </div>
 
       <div style={sec}>Le calcul</div>
       <p style={txt}>Le « gain spot » valorise chaque kWh au seul prix spot. Le <strong>gain réel</strong> refait l'optimisation de la batterie avec les vrais prix vus du compteur :</p>
+      <div style={{fontSize:12,fontWeight:800,color: site ? 'rgba(255,255,255,.55)' : '#7dd940',margin:'4px 0 2px'}}>Batterie seule (raccordement propre){!site && ' — votre cas'}</div>
       <ul style={{...txt, paddingLeft:18}}>
-        <li><strong>Prix d'achat</strong> (charge) = spot + TURPE soutirage de la plage horaire + accise (si due).</li>
-        <li><strong>Prix de vente</strong> (décharge) = spot − composante d'injection, <strong>nulle en TURPE 7</strong> : injecter ne coûte rien.</li>
-        <li><strong>Frais fixes</strong> = part puissance + gestion + comptage, majorés de la CTA ({TURPE_STOCKAGE.cta} %), répartis à parts égales sur les 365 jours.</li>
+        <li><strong>Prix d'achat</strong> (charge) = spot + TURPE soutirage de la plage horaire + accise (exonérée au-delà de 36 kVA).</li>
+        <li><strong>Prix de vente</strong> (décharge injectée) = spot − composante d'injection, <strong>nulle en TURPE 7</strong> : injecter ne coûte rien.</li>
+        <li><strong>Frais fixes</strong> = part puissance (puissance de la batterie) + gestion + comptage, majorés de la CTA ({TURPE_STOCKAGE.cta} %), répartis à parts égales sur les 365 jours.</li>
+      </ul>
+      <div style={{fontSize:12,fontWeight:800,color: site ? '#7dd940' : 'rgba(255,255,255,.55)',margin:'4px 0 2px'}}>Intégrée à un site existant (derrière son compteur){site && ' — votre cas'}</div>
+      <ul style={{...txt, paddingLeft:18}}>
+        <li><strong>Prix d'achat</strong> (charge) = spot + TURPE soutirage de la plage + accise <strong>au taux normal</strong> : l'énergie de charge n'est pas comptée à part de la consommation du site, l'exonération stockage ne s'applique pas.</li>
+        <li><strong>Valeur de la décharge</strong> = le même prix complet de l'heure : chaque kWh déchargé alimente le site et lui évite un achat (spot + TURPE + accise). La batterie gagne donc aussi l'écart de TURPE entre heures pleines et creuses.</li>
+        <li><strong>Frais fixes</strong> = seulement la puissance souscrite <strong>ajoutée</strong> pour la batterie (0 si le site a la marge), + CTA. Gestion et comptage sont déjà payés par le site.</li>
+        <li><strong>Hypothèse</strong> : pendant la décharge, le site consomme au moins la puissance de la batterie (aucune injection). Si ce n'est pas le cas, la part injectée ne vaut que le prix spot.</li>
       </ul>
       <p style={txt}>Le plan de charge change : un cycle n'est lancé que si l'écart de prix couvre le TURPE de la plage de charge et les pertes. Les jours sans cycle rentable affichent donc un gain négatif (les frais fixes). Montants <strong>hors TVA</strong>.</p>
 
@@ -11150,7 +11183,8 @@ function HypothesesTurpeStockage({ puissance, editable = false, maj = null, calc
             {lig('Gestion (avec injection)', d => val(d, 'gestion'), '€/an')}
             {lig('Comptage', d => val(d, 'comptage'), '€/an')}
             {lig('CTA', d => edit && kOf(d) === 'bt36' ? <input value={String(edit.cta).replace('.', ',')} inputMode="decimal" onChange={e => setEdit(x => ({ ...x, cta: e.target.value.replace(',', '.') }))} style={{width:50,padding:'3px 4px',borderRadius:5,border:'1px solid rgba(255,255,255,.25)',background:'rgba(255,255,255,.08)',color:'white',fontSize:11,textAlign:'right'}}/> : TURPE_STOCKAGE.cta + ' %', 'de la part fixe')}
-            {lig('Accise sur la charge', d => edit ? val(d, 'accise') : d.accise ? n2(d.accise) : 'exonérée', edit ? 'c€/kWh · 0 = exonérée' : 'c€/kWh')}
+            {lig('Accise — batterie seule', d => edit ? val(d, 'accise') : d.accise ? n2(d.accise) : 'exonérée', edit ? 'c€/kWh · 0 = exonérée' : 'c€/kWh')}
+            {lig('Accise — site existant', d => edit ? val(d, 'acciseTaxee') : n2(d.acciseTaxee), 'c€/kWh · taux normal')}
             {lig('TVA', () => TURPE_STOCKAGE.tva + ' %', 'non comptée (HT)')}
           </tbody>
         </table>
@@ -11163,9 +11197,11 @@ function HypothesesTurpeStockage({ puissance, editable = false, maj = null, calc
       )}
       <div style={{fontSize:10,color:'rgba(255,255,255,.45)',marginTop:4,lineHeight:1.45}}>Unités de la part puissance : BT ≤ 36 kVA en €/kVA/an ; BT &gt; 36 kVA en €/kVA/an (b₁, puissance identique sur les 4 plages) ; HTA en €/kW/an (b₁).</div>
 
-      <div style={sec}>Frais fixes de votre batterie ({puissance} kW)</div>
+      <div style={sec}>Frais fixes de votre batterie</div>
       <div style={{...txt, background:'rgba(255,255,255,.05)', borderRadius:8, padding:'8px 10px'}}>
-        Part puissance {n2(dom.puissance)} × {puissance} = {eur(dom.puissance * puissance)} · gestion {eur(dom.gestion)} · comptage {eur(dom.comptage)}<br/>
+        {site
+          ? <>Part puissance {n2(dom.puissance)} × {+params.puissanceAjoutee || 0} kVA ajoutés = {eur(fx.tarif)} · gestion et comptage déjà payés par le site</>
+          : <>Part puissance {n2(dom.puissance)} × {puissance} = {eur(dom.puissance * puissance)} · gestion {eur(dom.gestion)} · comptage {eur(dom.comptage)}</>}<br/>
         = {eur(fx.tarif)} + CTA {eur(fx.cta)} = <strong style={{color:'#ffb340'}}>{eur(fx.total)} HT par an</strong>, soit {n2(fx.total / 365)} € par jour.
       </div>
 
@@ -11210,16 +11246,15 @@ async function calculerGainsBatterie(params, onProgress) {
   // Gain réel : même batterie ré-optimisée sur les prix TURPE et taxes compris
   // (le plan change : un cycle n'est rentable que si le spread couvre le TURPE),
   // puis la part fixe annuelle (+ CTA) est répartie sur chaque jour.
-  const dom = domaineTurpe(params.puissance);
-  const fixeJour = fixeAnnuelTurpe(dom, params.puissance).total / 365;
+  const ctx = contexteReel(params), dom = ctx.dom, fixeJour = ctx.fixeJour;
   let soc = 0, socR = 0;
   for (let i = 0; i < cles.length; i++) {
     const r = optimiserBatteriePeriode(parMois[cles[i]], params, soc);
     soc = r.socFinalPct;
-    const rr = optimiserBatteriePeriode(parMois[cles[i]].map(j => prixReelsJour(dom, j)), params, socR);
+    const rr = optimiserBatteriePeriode(parMois[cles[i]].map(ctx.prix), params, socR);
     socR = rr.socFinalPct;
     r.jours.forEach((j, k) => {
-      const jr = rr.jours[k], pr = prixReelsJour(dom, j);
+      const jr = rr.jours[k], pr = ctx.prix(j);
       rows.push({ jour: j.d, gain: +j.gain.toFixed(4), plan: { p: j.p, e: j.e.map(x => +x.toFixed(3)), s: j.s.map(x => Math.round(x)), s0: Math.round(j.s0) },
         gain_reel: +(jr.gain - fixeJour).toFixed(4),
         plan_reel: { p: j.p, pa: pr.pa.map(x => +x.toFixed(5)), pv: pr.pv.map(x => +x.toFixed(5)), e: jr.e.map(x => +x.toFixed(3)), s: jr.s.map(x => Math.round(x)), s0: Math.round(jr.s0), fixe: +fixeJour.toFixed(4) } });
@@ -11232,7 +11267,7 @@ async function calculerGainsBatterie(params, onProgress) {
     const { error: e2 } = await sb.from('spot_batterie_jours').upsert(rows.slice(i, i + CHUNK), { onConflict: 'jour' });
     if (e2) throw e2;
   }
-  const { error: e3 } = await sb.from('spot_batterie_params').upsert({ id: 1, capacite_kwh: params.capacite, puissance_kw: params.puissance, cycles_jour: params.cycles, rendement_ar: params.rendement, domaine: dom.key, calcule_le: new Date().toISOString() }, { onConflict: 'id' });
+  const { error: e3 } = await sb.from('spot_batterie_params').upsert({ id: 1, capacite_kwh: params.capacite, puissance_kw: params.puissance, cycles_jour: params.cycles, rendement_ar: params.rendement, domaine: dom.key, integration: ctx.site ? 'site' : 'seule', site_kva: ctx.site ? +params.siteKva : null, puissance_ajoutee_kva: ctx.site ? +params.puissanceAjoutee || 0 : null, calcule_le: new Date().toISOString() }, { onConflict: 'id' });
   if (e3) throw e3;
   return rows.length;
 }
@@ -11734,7 +11769,7 @@ function BatteriePeriodePopup({ granularite, ancreInitiale, bornes, params, onCl
         {totaux.nCalc > 0 && (
           <div style={{display:'flex',justifyContent:'space-between',gap:8,fontSize:11,fontWeight:700,marginTop:6,flexWrap:'wrap'}}>
             <span style={{color:'#5de0f5'}}>Achat {totaux.achat.toFixed(1)} kWh · {f2(totaux.cout)} €</span>
-            <span style={{color:'#7dd940'}}>Vente {totaux.vente.toFixed(1)} kWh · {f2(totaux.recette)} €</span>
+            <span style={{color:'#7dd940'}}>{reel ? 'Décharge' : 'Vente'} {totaux.vente.toFixed(1)} kWh · {f2(totaux.recette)} €</span>
             {reel && totaux.fixe > 0 && <span style={{color:'#ffb340'}}>Frais fixes {f2(totaux.fixe)} €</span>}
             <span>Gain {f2(totaux.gain)} € HT · charge {Math.round(totaux.s0)} % → {Math.round(totaux.sFin)} %{totaux.nCalc < totaux.n ? ` · ${totaux.n - totaux.nCalc} j sans calcul` : ''}</span>
           </div>
@@ -11749,7 +11784,7 @@ function BatteriePeriodePopup({ granularite, ancreInitiale, bornes, params, onCl
 }
 
 // ─── SpotPricesScreen ─────────────────────────
-const BAT_DEFAUT = { capacite: 10, puissance: 5, cycles: 1, rendement: 0.81 };
+const BAT_DEFAUT = { capacite: 10, puissance: 5, cycles: 1, rendement: 0.81, integration: 'seule', siteKva: 100, puissanceAjoutee: 0 };
 function SpotPricesScreen({ onBack, readOnly = false, vueInitiale = 'menu' }) {
   const [meta,       setMeta]       = useState(null);
   const [spotAll,    setSpotAll]    = useState(null);
@@ -11858,7 +11893,8 @@ function SpotPricesScreen({ onBack, readOnly = false, vueInitiale = 'menu' }) {
     setSpotAll(jsonRows && jsonRows.length > 0 ? jsonRows : null);
     setJours(jj && jj.length > 0 ? jj : null);
     if (bp) {
-      const p = { capacite: +bp.capacite_kwh, puissance: +bp.puissance_kw, cycles: +bp.cycles_jour, rendement: +bp.rendement_ar };
+      const p = { capacite: +bp.capacite_kwh, puissance: +bp.puissance_kw, cycles: +bp.cycles_jour, rendement: +bp.rendement_ar,
+        integration: bp.integration || 'seule', siteKva: bp.site_kva != null ? +bp.site_kva : BAT_DEFAUT.siteKva, puissanceAjoutee: bp.puissance_ajoutee_kva != null ? +bp.puissance_ajoutee_kva : 0 };
       setBatParams({ ...p, calcule_le: bp.calcule_le }); setBatSaisie(p);
     }
     setNatParams(nat || null);
@@ -11892,8 +11928,7 @@ function SpotPricesScreen({ onBack, readOnly = false, vueInitiale = 'menu' }) {
     if (readOnly || autoReelRef.current || !batParams || !jours) return;
     if (!jours.some(x => x.g !== null && x.g !== undefined) || jours.some(x => x.gr !== null && x.gr !== undefined)) return;
     autoReelRef.current = true;
-    const { capacite, puissance, cycles, rendement } = batParams;
-    lancerCalcul({ capacite, puissance, cycles, rendement });
+    lancerCalcul(batParams);
   }, [readOnly, batParams, jours]);
 
   // Import : l'historique horaire est complété (upsert sur l'heure UTC ; une
@@ -11945,15 +11980,16 @@ function SpotPricesScreen({ onBack, readOnly = false, vueInitiale = 'menu' }) {
     <button key={key} onClick={onClick} disabled={off} style={{fontSize:11,fontWeight:700,border:'none',borderRadius:5,padding:'4px 10px',cursor:off?'default':'pointer',fontFamily:'var(--font)',background:actif?'rgba(125,217,64,.25)':'transparent',color:actif?'#7dd940':off?'rgba(255,255,255,.2)':'rgba(255,255,255,.45)'}}>{lbl}</button>
   );
   const inpBat = (champ, lbl, step, min, max, fmtIn = v => v, fmtOut = v => v) => (
-    <label style={{display:'flex',flexDirection:'column',gap:1,fontSize:8.5,color:'rgba(255,255,255,.5)',fontWeight:700,minWidth:0,flex:1}}>
+    <label style={{display:'flex',flexDirection:'column',gap:1,fontSize:8.5,color:'rgba(255,255,255,.5)',fontWeight:700,minWidth:52,flex:1}}>
       {lbl}
       <input type="number" inputMode="decimal" step={step} min={min} max={max} value={fmtIn(batSaisie[champ])}
         onChange={e => setBatSaisie(s => ({ ...s, [champ]: fmtOut(parseFloat(e.target.value)) }))}
         style={{width:'100%',padding:'4px 6px',borderRadius:6,border:'1px solid rgba(255,255,255,.2)',background:'rgba(255,255,255,.08)',color:'white',fontFamily:'var(--font)',fontSize:12,fontWeight:700,outline:'none'}}/>
     </label>
   );
-  const saisieValide = [batSaisie.capacite, batSaisie.puissance, batSaisie.cycles, batSaisie.rendement].every(v => v > 0) && batSaisie.rendement <= 1;
-  const saisieChangee = !batParams || ['capacite','puissance','cycles','rendement'].some(k => batParams[k] !== batSaisie[k]);
+  const saisieValide = [batSaisie.capacite, batSaisie.puissance, batSaisie.cycles, batSaisie.rendement].every(v => v > 0) && batSaisie.rendement <= 1
+    && (batSaisie.integration !== 'site' || (batSaisie.siteKva > 0 && batSaisie.puissanceAjoutee >= 0));
+  const saisieChangee = !batParams || ['capacite','puissance','cycles','rendement','integration','siteKva','puissanceAjoutee'].some(k => batParams[k] !== batSaisie[k]);
 
   return (
     <>
@@ -12020,7 +12056,7 @@ function SpotPricesScreen({ onBack, readOnly = false, vueInitiale = 'menu' }) {
                 <span className="sim-icon">🧾</span>
                 <div className="sim-text">
                   <div className="sim-title">Vue gains batterie réels</div>
-                  <div className="sim-sub">{batParams ? `Même batterie, TURPE soutirage / injection et taxes déduits · ${domaineTurpe(batParams.puissance).label}` : 'Paramétrez et calculez une batterie dans la vue gains'}</div>
+                  <div className="sim-sub">{batParams ? `Même batterie, TURPE et taxes déduits · ${batParams.integration === 'site' ? `intégrée à un site ${batParams.siteKva} kVA` : 'batterie seule'} · ${contexteReel(batParams).dom.label}` : 'Paramétrez et calculez une batterie dans la vue gains'}</div>
                 </div>
                 <span className="sim-arrow">→</span>
               </button>
@@ -12053,18 +12089,30 @@ function SpotPricesScreen({ onBack, readOnly = false, vueInitiale = 'menu' }) {
           </div>
           {estGain && (
             <div style={{background:'rgba(255,255,255,.06)',border:'1px solid rgba(255,255,255,.1)',borderRadius:8,padding:'6px 8px',marginBottom:6}}>
-              {!readOnly && <div style={{display:'flex',gap:6,alignItems:'flex-end'}}>
+              {!readOnly && indicateur === 'gain_reel' && (
+                <div style={{display:'flex',alignItems:'center',gap:6,marginBottom:5}}>
+                  <span style={{fontSize:9.5,fontWeight:700,color:'rgba(255,255,255,.5)'}}>Raccordement</span>
+                  <div style={{display:'flex',background:'rgba(255,255,255,.06)',borderRadius:7,padding:2,gap:2}}>
+                    {[['seule','Batterie seule'],['site','Intégrée à un site existant']].map(([v,lbl]) => segBtn(batSaisie.integration === v, () => setBatSaisie(s => ({ ...s, integration: v })), lbl, v, false))}
+                  </div>
+                </div>
+              )}
+              {!readOnly && <div style={{display:'flex',gap:6,alignItems:'flex-end',flexWrap:'wrap'}}>
                 {inpBat('capacite', 'Capacité kWh', 0.5, 0.5, 1000)}
                 {inpBat('puissance', 'Puissance kW', 0.5, 0.1, 1000)}
                 {inpBat('cycles', 'Cycles / jour', 0.5, 0.5, 10)}
                 {inpBat('rendement', 'Rendement A/R %', 1, 50, 100, v => Math.round(v * 100), v => v / 100)}
+                {indicateur === 'gain_reel' && batSaisie.integration === 'site' && inpBat('siteKva', 'Site kVA', 1, 1, 100000)}
+                {indicateur === 'gain_reel' && batSaisie.integration === 'site' && inpBat('puissanceAjoutee', 'kVA ajoutés', 1, 0, 100000)}
                 <button onClick={() => lancerCalcul(batSaisie)} disabled={batCalc || !saisieValide} style={{flexShrink:0,background:saisieChangee?'rgba(125,217,64,.25)':'rgba(255,255,255,.08)',border:'1px solid',borderColor:saisieChangee?'rgba(125,217,64,.6)':'rgba(255,255,255,.2)',color:saisieChangee?'#7dd940':'rgba(255,255,255,.6)',fontFamily:'var(--font)',fontSize:11,fontWeight:700,borderRadius:7,padding:'6px 10px',cursor:'pointer',alignSelf:'flex-end'}}>
                   {batCalc ? '…' : 'Calculer'}
                 </button>
               </div>}
               <div style={{fontSize:9,fontWeight:700,marginTop:4,color:batMsg?(batMsg.startsWith('✓')?'var(--green)':batMsg.startsWith('Erreur')?'#ff9090':'#5de0f5'):'rgba(255,255,255,.4)'}}>
                 {batMsg || (batParams ? (indicateur === 'gain_reel'
-                  ? `Calculé le ${fmtDate(batParams.calcule_le)} · ${domaineTurpe(batParams.puissance).label} · spot + TURPE soutirage + taxes à l'achat, spot − TURPE injection à la vente, frais fixes répartis par jour · HT`
+                  ? (batParams.integration === 'site'
+                    ? `Calculé le ${fmtDate(batParams.calcule_le)} · intégrée à un site ${batParams.siteKva} kVA (${contexteReel(batParams).dom.label}) · charge et décharge au prix complet (spot + TURPE + accise), seule la puissance ajoutée est facturée · HT`
+                    : `Calculé le ${fmtDate(batParams.calcule_le)} · batterie seule · ${contexteReel(batParams).dom.label} · spot + TURPE soutirage + taxes à l'achat, spot − TURPE injection à la vente, frais fixes répartis par jour · HT`)
                   : `Calculé le ${fmtDate(batParams.calcule_le)} · prix spot HT sans taxes · le gain d'un jour = l'énergie achetée ce jour, même revendue le lendemain`) : 'Aucun calcul enregistré : renseignez la batterie puis Calculer')}
               </div>
             </div>
@@ -12092,8 +12140,8 @@ function SpotPricesScreen({ onBack, readOnly = false, vueInitiale = 'menu' }) {
         </>
       )}
 
-      {vue === 'hypotheses' && <HypothesesTurpeStockage puissance={(batParams || batSaisie).puissance} editable={!readOnly} maj={grilleMaj} calcMsg={batMsg}
-        onSaved={(maj) => { setGrilleMaj(maj); if (batParams) { const { capacite, puissance, cycles, rendement } = batParams; lancerCalcul({ capacite, puissance, cycles, rendement }); } }}/>}
+      {vue === 'hypotheses' && <HypothesesTurpeStockage params={batParams || batSaisie} editable={!readOnly} maj={grilleMaj} calcMsg={batMsg}
+        onSaved={(maj) => { setGrilleMaj(maj); if (batParams) lancerCalcul(batParams); }}/>}
 
       {vue === 'horaire' && spotAll && (
         <>
