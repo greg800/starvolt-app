@@ -10946,7 +10946,10 @@ function completerPrix24(p) {
 // Énergie en c€/kWh, parts fixes en €/an. Sources : CRE délibération 2026-105
 // (TURPE 7 HTA-BT au 01/08/2026), arrêté accise du 08/06/2026, arrêté CTA du
 // 28/01/2026, CIBS L.312-32 + rescrit BOI-RES-EAT-000164 (stockage).
-const TURPE_STOCKAGE = {
+// Valeurs de repli : la grille en vigueur vit en base (table turpe_stockage,
+// éditable par les admins depuis la page Hypothèses) et écrase ces chiffres
+// au chargement de Prix spot (appliquerGrilleTurpe). Libellés et notes restent ici.
+let TURPE_STOCKAGE = {
   dateEffet: '1er août 2026',
   cta: 15,                        // % de la part fixe du TURPE (réseau de distribution, depuis le 01/02/2026)
   tva: 20,
@@ -10960,7 +10963,7 @@ const TURPE_STOCKAGE = {
       injection: 0,
       puissance: 10.42, puissanceUnite: '€/kVA/an',
       gestion: 26.95, comptage: 22.67,  // gestion « autoproducteur avec injection »
-      accise: 3.062, acciseNote: 'Taxée : 30,62 €/MWh (ménages et assimilés). Derrière un compteur ≤ 36 kVA, l\'énergie de charge n\'est pas distinguée de la consommation : l\'exonération stockage ne s\'applique pas en pratique.',
+      accise: 3.062, acciseNote: 'Taxée au taux « ménages et assimilés ». Derrière un compteur ≤ 36 kVA, l\'énergie de charge n\'est pas distinguée de la consommation : l\'exonération stockage ne s\'applique pas en pratique.',
     },
     bt250: {
       label: 'BT > 36 kVA (C4)', pMax: 250,
@@ -10969,7 +10972,7 @@ const TURPE_STOCKAGE = {
       injection: 0,
       puissance: 18.15, puissanceUnite: '€/kVA/an (même puissance sur les 4 plages → b₁ × P)',
       gestion: 366.14, comptage: 291.88,
-      accise: 0, acciseNote: 'Exonérée (CIBS L.312-32, rescrit BOI-RES-EAT-000164) : l\'électricité qui charge une batterie est assimilée à une consommation de production, sur attestation 2040-TIC-ATT-E au fournisseur. Sinon 26,35 €/MWh.',
+      accise: 0, acciseNote: 'Exonérée (CIBS L.312-32, rescrit BOI-RES-EAT-000164) : l\'électricité qui charge une batterie est assimilée à une consommation de production, sur attestation 2040-TIC-ATT-E au fournisseur. À défaut, taux « PME ».',
     },
     hta: {
       label: 'HTA', pMax: Infinity,
@@ -10978,10 +10981,35 @@ const TURPE_STOCKAGE = {
       injection: 0,
       puissance: 14.85, puissanceUnite: '€/kW/an (même puissance sur les 5 plages → b₁ × P)',
       gestion: 732.28, comptage: 387.84,
-      accise: 0, acciseNote: 'Exonérée (CIBS L.312-32, rescrit BOI-RES-EAT-000164), cas normal d\'un stockage seul. Sinon 26,35 €/MWh.',
+      accise: 0, acciseNote: 'Exonérée (CIBS L.312-32, rescrit BOI-RES-EAT-000164), cas normal d\'un stockage seul. À défaut, taux « haute puissance ».',
     },
   },
 };
+// Champs numériques de la grille stockés en base (le reste — libellés, notes — vient du code).
+const TURPE_CHAMPS_DOMAINE = ['injection', 'puissance', 'gestion', 'comptage', 'accise'];
+function appliquerGrilleTurpe(g) {
+  if (!g || !g.domaines) return;
+  const num = (v, def) => (typeof v === 'number' && isFinite(v)) ? v : def;
+  const d = {};
+  Object.keys(TURPE_STOCKAGE.domaines).forEach(k => {
+    const cur = TURPE_STOCKAGE.domaines[k], src = g.domaines[k] || {};
+    const sout = {};
+    Object.keys(cur.soutirage).forEach(pl => { sout[pl] = num(src.soutirage?.[pl], cur.soutirage[pl]); });
+    d[k] = { ...cur, soutirage: sout, option: src.option || cur.option };
+    TURPE_CHAMPS_DOMAINE.forEach(c => { d[k][c] = num(src[c], cur[c]); });
+  });
+  TURPE_STOCKAGE = { ...TURPE_STOCKAGE, dateEffet: g.dateEffet || TURPE_STOCKAGE.dateEffet,
+    cta: num(g.cta, TURPE_STOCKAGE.cta), tva: num(g.tva, TURPE_STOCKAGE.tva), domaines: d };
+}
+// Grille au format base (sans libellés ni notes), pour l'édition admin.
+function grilleTurpeEditable() {
+  const d = {};
+  Object.entries(TURPE_STOCKAGE.domaines).forEach(([k, v]) => {
+    d[k] = { option: v.option, soutirage: { ...v.soutirage } };
+    TURPE_CHAMPS_DOMAINE.forEach(c => { d[k][c] = v[c]; });
+  });
+  return { dateEffet: TURPE_STOCKAGE.dateEffet, cta: TURPE_STOCKAGE.cta, tva: TURPE_STOCKAGE.tva, domaines: d };
+}
 const domaineTurpe = (puissanceKw) => {
   const k = puissanceKw <= 36 ? 'bt36' : puissanceKw <= 250 ? 'bt250' : 'hta';
   return { key: k, ...TURPE_STOCKAGE.domaines[k] };
@@ -11016,9 +11044,45 @@ function prixReelsJour(dom, jour) {
 
 // ─── Page « Hypothèses de calcul TURPE et taxes » (gain batterie réel) ───────
 // Tout est lu dans TURPE_STOCKAGE : le tableau affiché est celui du calcul.
-function HypothesesTurpeStockage({ puissance }) {
+function HypothesesTurpeStockage({ puissance, editable = false, maj = null, calcMsg = null, onSaved }) {
+  const [edit, setEdit]     = useState(null);   // brouillon de la grille (format base) en cours d'édition
+  const [busy, setBusy]     = useState(false);
+  const [msg,  setMsg]      = useState(null);
+  const [, setV]            = useState(0);      // re-rendu après application de la grille enregistrée
   const dom = domaineTurpe(puissance || 0);
   const D = TURPE_STOCKAGE.domaines;
+  // Saisie : champ numérique d'une cellule (virgule acceptée), chemin dans le brouillon.
+  const setNum = (k, champ, pl, val) => setEdit(e => {
+    const n = JSON.parse(JSON.stringify(e)); const v = val === '' ? '' : val.replace(',', '.');
+    if (pl) n.domaines[k].soutirage[pl] = v; else n.domaines[k][champ] = v;
+    return n;
+  });
+  const champ = (k, nom, pl) => {
+    const v = pl ? edit.domaines[k].soutirage[pl] : edit.domaines[k][nom];
+    return <input value={String(v).replace('.', ',')} inputMode="decimal" onChange={e => setNum(k, nom, pl, e.target.value)}
+      style={{width:58,padding:'3px 4px',borderRadius:5,border:'1px solid rgba(255,255,255,.25)',background:'rgba(255,255,255,.08)',color:'white',fontSize:11,textAlign:'right',fontFamily:'var(--font)'}}/>;
+  };
+  const enregistrer = async () => {
+    const g = JSON.parse(JSON.stringify(edit));
+    const num = v => typeof v === 'number' ? v : parseFloat(String(v).replace(',', '.'));
+    let bad = null;
+    Object.entries(g.domaines).forEach(([k, d]) => {
+      Object.keys(d.soutirage).forEach(pl => { d.soutirage[pl] = num(d.soutirage[pl]); if (!isFinite(d.soutirage[pl])) bad = bad || `${D[k].label} · ${pl}`; });
+      TURPE_CHAMPS_DOMAINE.forEach(c => { d[c] = num(d[c]); if (!isFinite(d[c]) || d[c] < 0 && c !== 'injection') bad = bad || `${D[k].label} · ${c}`; });
+    });
+    g.cta = num(g.cta); g.tva = num(g.tva);
+    if (!isFinite(g.cta) || !isFinite(g.tva)) bad = bad || 'CTA / TVA';
+    if (bad) { setMsg('Valeur invalide : ' + bad); return; }
+    setBusy(true); setMsg(null);
+    const { data: u } = await sb.auth.getUser();
+    const par = u?.user?.email || null, at = new Date().toISOString();
+    const { error } = await sb.from('turpe_stockage').upsert({ id: 1, grille: g, updated_at: at, updated_by: par }, { onConflict: 'id' });
+    setBusy(false);
+    if (error) { setMsg('Erreur : ' + error.message); window.logAppError?.('turpe_stockage', error); return; }
+    appliquerGrilleTurpe(g); setEdit(null); setV(v => v + 1);
+    setMsg('✓ Grille enregistrée — recalcul des gains réels lancé');
+    onSaved?.({ at, par });
+  };
   const cles = ['bt36', 'bt250', 'hta'];
   const fx = fixeAnnuelTurpe(dom, puissance || 0);
   const n2 = v => v.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -11035,7 +11099,9 @@ function HypothesesTurpeStockage({ puissance }) {
       {cles.map(k => <td key={k} style={td(k)}>{f(D[k])}</td>)}
     </tr>
   );
-  const plage = (d, k) => d.soutirage[k] !== undefined ? n2(d.soutirage[k]) : '—';
+  const kOf = d => cles.find(k => D[k] === d);
+  const plage = (d, k) => d.soutirage[k] === undefined ? '—' : edit ? champ(kOf(d), null, k) : n2(d.soutirage[k]);
+  const val = (d, c) => edit ? champ(kOf(d), c) : n2(d[c]);
   const lien = (href, label) => <a href={href} target="_blank" rel="noopener noreferrer" style={{color:'#5de0f5'}}>{label}</a>;
   return (
     <div style={{paddingBottom:90}}>
@@ -11055,7 +11121,17 @@ function HypothesesTurpeStockage({ puissance }) {
       </ul>
       <p style={txt}>Le plan de charge change : un cycle n'est lancé que si l'écart de prix couvre le TURPE de la plage de charge et les pertes. Les jours sans cycle rentable affichent donc un gain négatif (les frais fixes). Montants <strong>hors TVA</strong>.</p>
 
-      <div style={sec}>Tableau de synthèse utilisé dans le calcul</div>
+      <div style={{...sec, display:'flex', alignItems:'center', justifyContent:'space-between', gap:8}}>
+        <span>Tableau de synthèse utilisé dans le calcul</span>
+        {editable && !edit && <button onClick={() => { setEdit(grilleTurpeEditable()); setMsg(null); }} style={{fontSize:11,fontWeight:700,border:'1px solid rgba(93,224,245,.5)',background:'rgba(8,145,178,.2)',color:'#5de0f5',borderRadius:7,padding:'4px 10px',cursor:'pointer',fontFamily:'var(--font)',textTransform:'none',letterSpacing:0}}>✏️ Modifier la grille</button>}
+      </div>
+      <div style={{fontSize:10.5,color:'rgba(255,255,255,.5)',marginBottom:6}}>
+        {edit
+          ? <>En vigueur au <input value={edit.dateEffet} onChange={e => setEdit(x => ({ ...x, dateEffet: e.target.value }))} style={{width:120,padding:'2px 4px',borderRadius:5,border:'1px solid rgba(255,255,255,.25)',background:'rgba(255,255,255,.08)',color:'white',fontSize:11}}/></>
+          : <>Grille en vigueur au {TURPE_STOCKAGE.dateEffet}{maj?.at ? ` · modifiée le ${new Date(maj.at).toLocaleDateString('fr-FR')}${maj.par ? ' par ' + maj.par : ''}` : ''}</>}
+      </div>
+      {msg && <div style={{fontSize:11.5,fontWeight:700,marginBottom:6,color:msg.startsWith('✓') ? '#7dd940' : '#ff9090'}}>{msg}</div>}
+      {msg && msg.startsWith('✓') && calcMsg && <div style={{fontSize:11,fontWeight:700,marginBottom:6,color:calcMsg.startsWith('✓') ? '#7dd940' : calcMsg.startsWith('Erreur') ? '#ff9090' : '#5de0f5'}}>Gains réels : {calcMsg}</div>}
       <div style={{overflowX:'auto',margin:'0 -4px'}}>
         <table style={{borderCollapse:'collapse',width:'100%',minWidth:330}}>
           <thead><tr>
@@ -11069,16 +11145,22 @@ function HypothesesTurpeStockage({ puissance }) {
             {lig('Soutirage — HC saison haute', d => plage(d, 'HCH'), 'c€/kWh')}
             {lig('Soutirage — HP saison basse', d => plage(d, 'HPB'), 'c€/kWh')}
             {lig('Soutirage — HC saison basse', d => plage(d, 'HCB'), 'c€/kWh')}
-            {lig('Injection — énergie', d => n2(d.injection), 'c€/kWh')}
-            {lig('Part puissance', d => n2(d.puissance), 'voir unités sous le tableau')}
-            {lig('Gestion (avec injection)', d => n2(d.gestion), '€/an')}
-            {lig('Comptage', d => n2(d.comptage), '€/an')}
-            {lig('CTA', () => TURPE_STOCKAGE.cta + ' %', 'de la part fixe')}
-            {lig('Accise sur la charge', d => d.accise ? n2(d.accise) : 'exonérée', 'c€/kWh')}
+            {lig('Injection — énergie', d => val(d, 'injection'), 'c€/kWh')}
+            {lig('Part puissance', d => val(d, 'puissance'), 'voir unités sous le tableau')}
+            {lig('Gestion (avec injection)', d => val(d, 'gestion'), '€/an')}
+            {lig('Comptage', d => val(d, 'comptage'), '€/an')}
+            {lig('CTA', d => edit && kOf(d) === 'bt36' ? <input value={String(edit.cta).replace('.', ',')} inputMode="decimal" onChange={e => setEdit(x => ({ ...x, cta: e.target.value.replace(',', '.') }))} style={{width:50,padding:'3px 4px',borderRadius:5,border:'1px solid rgba(255,255,255,.25)',background:'rgba(255,255,255,.08)',color:'white',fontSize:11,textAlign:'right'}}/> : TURPE_STOCKAGE.cta + ' %', 'de la part fixe')}
+            {lig('Accise sur la charge', d => edit ? val(d, 'accise') : d.accise ? n2(d.accise) : 'exonérée', edit ? 'c€/kWh · 0 = exonérée' : 'c€/kWh')}
             {lig('TVA', () => TURPE_STOCKAGE.tva + ' %', 'non comptée (HT)')}
           </tbody>
         </table>
       </div>
+      {edit && (
+        <div style={{display:'flex',gap:8,marginTop:8}}>
+          <button onClick={enregistrer} disabled={busy} style={{flex:1,fontSize:12.5,fontWeight:800,border:'1px solid rgba(125,217,64,.6)',background:'rgba(125,217,64,.22)',color:'#7dd940',borderRadius:8,padding:'8px',cursor:'pointer',fontFamily:'var(--font)'}}>{busy ? 'Enregistrement…' : '✓ Enregistrer et recalculer'}</button>
+          <button onClick={() => { setEdit(null); setMsg(null); }} disabled={busy} style={{fontSize:12.5,fontWeight:700,border:'1px solid rgba(255,255,255,.2)',background:'rgba(255,255,255,.08)',color:'white',borderRadius:8,padding:'8px 14px',cursor:'pointer',fontFamily:'var(--font)'}}>Annuler</button>
+        </div>
+      )}
       <div style={{fontSize:10,color:'rgba(255,255,255,.45)',marginTop:4,lineHeight:1.45}}>Unités de la part puissance : BT ≤ 36 kVA en €/kVA/an ; BT &gt; 36 kVA en €/kVA/an (b₁, puissance identique sur les 4 plages) ; HTA en €/kW/an (b₁).</div>
 
       <div style={sec}>Frais fixes de votre batterie ({puissance} kW)</div>
@@ -11091,7 +11173,7 @@ function HypothesesTurpeStockage({ puissance }) {
       <p style={txt}>Saison haute : novembre → mars ; saison basse : avril → octobre. {TURPE_STOCKAGE.hc}. En HTA, le dimanche est entièrement en heures creuses et la pointe fixe tombe de décembre à février.</p>
 
       <div style={sec}>Accise</div>
-      {cles.map(k => <p key={k} style={txt}><strong style={{color: k === dom.key ? '#7dd940' : 'white'}}>{D[k].label}</strong> — {D[k].acciseNote}</p>)}
+      {cles.map(k => <p key={k} style={txt}><strong style={{color: k === dom.key ? '#7dd940' : 'white'}}>{D[k].label}</strong> — {D[k].accise ? `${n2(D[k].accise * 10)} €/MWh retenus. ` : 'Retenue exonérée. '}{D[k].acciseNote}</p>)}
 
       <div style={sec}>Ce qui n'est pas compté</div>
       <ul style={{...txt, paddingLeft:18}}>
@@ -11668,7 +11750,7 @@ function BatteriePeriodePopup({ granularite, ancreInitiale, bornes, params, onCl
 
 // ─── SpotPricesScreen ─────────────────────────
 const BAT_DEFAUT = { capacite: 10, puissance: 5, cycles: 1, rendement: 0.81 };
-function SpotPricesScreen({ onBack, readOnly = false }) {
+function SpotPricesScreen({ onBack, readOnly = false, vueInitiale = 'menu' }) {
   const [meta,       setMeta]       = useState(null);
   const [spotAll,    setSpotAll]    = useState(null);
   const [jours,      setJours]      = useState(null);     // série journalière (get_spot_journalier)
@@ -11686,8 +11768,9 @@ function SpotPricesScreen({ onBack, readOnly = false }) {
   const [importMsg,  setImportMsg]  = useState(null);
   const [natParams,  setNatParams]  = useState(null);
   const [heatmapMode,setHeatmapMode]= useState('spot'); // 'spot' | 'ttc'
-  const [vuePrec,    setVuePrec]    = useState('menu');   // vue à retrouver en quittant les hypothèses
-  const [vue,        setVue]        = useState('menu'); // 'menu' | 'histo' | 'horaire' | 'hypotheses'
+  const [vuePrec,    setVuePrec]    = useState(vueInitiale === 'hypotheses' ? null : 'menu');   // vue à retrouver en quittant les hypothèses (null : ouverte depuis le menu admin)
+  const [vue,        setVue]        = useState(vueInitiale);
+  const [grilleMaj,  setGrilleMaj]  = useState(null);     // { at, par } : dernière édition de la grille TURPE // 'menu' | 'histo' | 'horaire' | 'hypotheses'
   const [compSel,    setCompSel]    = useState([]);     // décalages (années) comparés
   const [compData,   setCompData]   = useState({});     // decal → { m_j_h: prix }
   const [largeurH,   setLargeurH]   = useState(340);    // largeur utile de la vue horaire
@@ -11760,13 +11843,17 @@ function SpotPricesScreen({ onBack, readOnly = false }) {
   const comparaisons = useMemo(() => compSel.filter(k => compData[k]).slice(0, maxComp).map(k => ({ decal: k, map: compData[k] })), [compSel, compData, maxComp]);
 
   const loadData = useCallback(async () => {
-    const [{data:m}, {data:jsonRows}, {data:jj}, {data:bp}, {data:nat}] = await Promise.all([
+    const [{data:m}, {data:jsonRows}, {data:jj}, {data:bp}, {data:nat}, {data:tg}] = await Promise.all([
       sb.from('spot_metadata').select('*').eq('id',1).maybeSingle(),
       sb.rpc('get_spot_json'),
       sb.rpc('get_spot_journalier'),
       sb.from('spot_batterie_params').select('*').eq('id',1).maybeSingle(),
       sb.from('parametres_nationaux').select('*').eq('id',1).maybeSingle(),
+      sb.from('turpe_stockage').select('grille,updated_at,updated_by').eq('id',1).maybeSingle(),
     ]);
+    // Grille TURPE en base appliquée AVANT de poser les jours (le recalcul auto en dépend).
+    if (tg?.grille) appliquerGrilleTurpe(tg.grille);
+    setGrilleMaj(tg ? { at: tg.updated_at, par: tg.updated_by } : null);
     setMeta(m);
     setSpotAll(jsonRows && jsonRows.length > 0 ? jsonRows : null);
     setJours(jj && jj.length > 0 ? jj : null);
@@ -12005,7 +12092,8 @@ function SpotPricesScreen({ onBack, readOnly = false }) {
         </>
       )}
 
-      {vue === 'hypotheses' && <HypothesesTurpeStockage puissance={(batParams || batSaisie).puissance} natParams={natParams}/>}
+      {vue === 'hypotheses' && <HypothesesTurpeStockage puissance={(batParams || batSaisie).puissance} editable={!readOnly} maj={grilleMaj} calcMsg={batMsg}
+        onSaved={(maj) => { setGrilleMaj(maj); if (batParams) { const { capacite, puissance, cycles, rendement } = batParams; lancerCalcul({ capacite, puissance, cycles, rendement }); } }}/>}
 
       {vue === 'horaire' && spotAll && (
         <>
@@ -12047,7 +12135,7 @@ function SpotPricesScreen({ onBack, readOnly = false }) {
       )}
     </div>
     {popup && <BatteriePeriodePopup reel={popup.reel} granularite={popup.gran} ancreInitiale={popup.ancre} bornes={[meta?.periode_debut, meta?.periode_fin]} params={batParams || batSaisie} onClose={() => setPopup(null)}/>}
-    <StickyFooter onBack={vue === 'menu' ? onBack : () => setVue(vue === 'hypotheses' ? vuePrec : 'menu')}/>
+    <StickyFooter onBack={vue === 'menu' || (vue === 'hypotheses' && !vuePrec) ? onBack : () => setVue(vue === 'hypotheses' ? vuePrec : 'menu')}/>
     </>
   );
 }
@@ -15178,7 +15266,7 @@ function AdminQuizFailsScreen({ user, onBack }) {
   );
 }
 
-function AdminScreen({ staffPages, onTariffs, onUsers, onRoles, onSites, onSpot, onAcc, onProduction, onGlobalVars, onFactureVars, onPrix, onOffres, onLearn, onFeedback, onFactures, onProofread, onAICosts, onAIPrompts, onCyberSecurity, onViewLogs, onViewFails, onImpersonate, onBack }) {
+function AdminScreen({ staffPages, onTariffs, onTurpe, onUsers, onRoles, onSites, onSpot, onAcc, onProduction, onGlobalVars, onFactureVars, onPrix, onOffres, onLearn, onFeedback, onFactures, onProofread, onAICosts, onAIPrompts, onCyberSecurity, onViewLogs, onViewFails, onImpersonate, onBack }) {
   // Rôle staff : seulement les pages cochées pour son rôle, en consultation.
   if (staffPages) return (
     <>
@@ -15255,6 +15343,14 @@ function AdminScreen({ staffPages, onTariffs, onUsers, onRoles, onSites, onSpot,
             <div className="sim-text">
               <div className="sim-title">Prix spot</div>
               <div className="sim-sub">Importer et visualiser les prix horaires</div>
+            </div>
+            <span className="sim-arrow">→</span>
+          </button>
+          <button className="sim-btn" onClick={onTurpe}>
+            <span className="sim-icon">🧾</span>
+            <div className="sim-text">
+              <div className="sim-title">Grille TURPE et taxes (stockage)</div>
+              <div className="sim-sub">TURPE soutirage / injection, accise, CTA du gain batterie réel</div>
             </div>
             <span className="sim-arrow">→</span>
           </button>
@@ -22722,12 +22818,13 @@ function App() {
       case 'ADMIN':
         if (isStaff) return <AdminScreen staffPages={staffPages}
           onTariffs={()=>goTo('ADMIN_TARIFFS')}
-          onSpot={()=>goTo('SPOT_PRICES')}
+          onSpot={()=>goTo('SPOT_PRICES', { spotVue: 'menu' })}
           onBack={goBack}/>;
         if (!isAdmin) return null;
         return <AdminScreen
           onTariffs={()=>goTo('ADMIN_TARIFFS')}
-          onSpot={()=>goTo('SPOT_PRICES')}
+          onSpot={()=>goTo('SPOT_PRICES', { spotVue: 'menu' })}
+          onTurpe={()=>goTo('SPOT_PRICES', { spotVue: 'hypotheses' })}
           onUsers={()=>goTo('ADMIN_USERS')}
           onRoles={()=>goTo('ADMIN_ROLES_MGMT')}
           onSites={()=>goTo('ADMIN_SITES')}
@@ -22837,7 +22934,7 @@ function App() {
 
       case 'SPOT_PRICES':
         if (!isAdmin && !staffPages.prix_spot) return null;
-        return <SpotPricesScreen readOnly={!isAdmin} onBack={goBack}/>;
+        return <SpotPricesScreen readOnly={!isAdmin} vueInitiale={state.spotVue || 'menu'} onBack={goBack}/>;
 
       case 'ADMIN_TARIFFS':
         if (!isAdmin && !staffPages.tarifs_elec) return null;
