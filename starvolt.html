@@ -3116,14 +3116,17 @@ function AuthSignupScreen({ onGoToLogin, onSignedUp, onSuccessDone }) {
   const turnstile = useTurnstile();
 
   const isEntreprise = accountType === 'entreprise';
+  // Compte staff (catégorie Management) : identité + identifiants seulement,
+  // ni adresse ni collecte ENEDIS ; le serveur lui copie le site « Greg Site 5 ».
+  const isStaff      = accountType === 'staff';
 
   // Le bouton est gris tant que tout n'est pas rempli
-  const baseFilled = prenom.trim() && nom.trim() && email.trim() &&
-                     pwd.length >= 6 && adresse.trim() &&
+  const idFilled   = prenom.trim() && nom.trim() && email.trim() && pwd.length >= 6;
+  const baseFilled = idFilled && adresse.trim() &&
                      codePostal.trim() && ville.trim() && enedisConsent;
   const gerantFilled = userIsGerant || (signerPrenom.trim() && signerNom.trim() && signerEmail.trim());
   const entFilled  = !isEntreprise || (raisonSociale.trim() && gerantFilled);
-  const allFilled  = baseFilled && entFilled;
+  const allFilled  = isStaff ? idFilled : (baseFilled && entFilled);
 
   // Premier champ manquant → message sympa
   const firstMissingMessage = () => {
@@ -3131,6 +3134,7 @@ function AuthSignupScreen({ onGoToLogin, onSignedUp, onSuccessDone }) {
     if (!nom.trim())        return 'Et votre nom de famille ?';
     if (!email.trim())      return 'Votre email, pour qu\'on puisse vous écrire ✉️';
     if (pwd.length < 10)    return 'Un mot de passe d\'au moins 10 caractères 🔒';
+    if (isStaff)            return null;
     if (isEntreprise && !raisonSociale.trim()) return 'Le nom de l\'entreprise 🏢';
     if (!adresse.trim())    return 'L\'adresse du compteur 🏠';
     if (!codePostal.trim()) return 'Le code postal 📮';
@@ -3179,6 +3183,24 @@ function AuthSignupScreen({ onGoToLogin, onSignedUp, onSuccessDone }) {
     let consentUrl = null;
     let requestId  = null;
     let siteId     = null;
+
+    if (isStaff) {
+      if (data.user) {
+        const { error: pe } = await sb.from('profiles').insert({
+          id: data.user.id, prenom: prenom.trim(), nom: nom.trim(), role: 'staff',
+        });
+        if (pe) window.logAppError?.({ severity: 'majeur', module: 'signup · staff', message: 'Profil staff non créé', detail: { error: pe.message } });
+        // Site de démonstration (copie de « Greg Site 5 ») ; rejoué au login s'il manque.
+        if (!pe && data.session) {
+          const { data: sid, error: se } = await sb.rpc('staff_demo_site');
+          if (se) window.logAppError?.({ severity: 'majeur', module: 'signup · staff', message: 'Site démo staff non créé', detail: { error: se.message } });
+          else if (sid) localStorage.setItem('starvolt_active_site_id', sid);
+        }
+      }
+      setLoading(false);
+      onSuccessDone?.(data.user?.id, 'HOME_CHOICE');
+      return;
+    }
 
     if (data.user) {
       // Rôle par défaut configuré en admin (Gestion des rôles) ; fallback codé en dur si indispo.
@@ -3330,9 +3352,14 @@ function AuthSignupScreen({ onGoToLogin, onSignedUp, onSuccessDone }) {
           <div style={{fontSize:16,fontWeight:700,color:'rgba(255,255,255,.9)',textAlign:'center',marginBottom:18}}>
             Créer un compte pour…
           </div>
+          {[['Analyse de la conso', [['particulier','👤','Un particulier','Pour votre logement'],
+                                     ['entreprise','🏢','Un professionnel','Pour votre entreprise / local']]],
+            ['Management', [['staff','🧑‍💼','Staff','Équipe Starvolt — compte de test, sans collecte ENEDIS']]],
+          ].map(([cat, items], ci)=>(
+          <React.Fragment key={cat}>
+          <div style={{fontSize:12,fontWeight:800,letterSpacing:.5,textTransform:'uppercase',color:'rgba(255,255,255,.45)',margin:ci?'20px 0 10px':'0 0 10px'}}>{cat}</div>
           <div style={{display:'flex',flexDirection:'column',gap:12}}>
-            {[['particulier','👤','Un particulier','Pour votre logement'],
-              ['entreprise','🏢','Un professionnel','Pour votre entreprise / local']].map(([val,emoji,title,sub])=>(
+            {items.map(([val,emoji,title,sub])=>(
               <button key={val} type="button"
                 onClick={()=>{ setAccountType(val); setStep('form'); }}
                 style={{display:'flex',alignItems:'center',gap:14,width:'100%',textAlign:'left',
@@ -3347,6 +3374,8 @@ function AuthSignupScreen({ onGoToLogin, onSignedUp, onSuccessDone }) {
               </button>
             ))}
           </div>
+          </React.Fragment>
+          ))}
         </div>
         <button className="btn-link" onClick={onGoToLogin}>Déjà membre ? Se connecter</button>
       </div>
@@ -3359,17 +3388,17 @@ function AuthSignupScreen({ onGoToLogin, onSignedUp, onSuccessDone }) {
         <div className="auth-header">
           <button type="button" onClick={()=>setStep('choice')}
             style={{background:'none',border:'none',color:'rgba(255,255,255,.55)',fontSize:13,fontWeight:600,cursor:'pointer',padding:'0 0 8px'}}>← Changer de type de compte</button>
-          <div className="welcome-tag">{isEntreprise?'🏢 Compte professionnel':'👤 Compte particulier'}</div>
+          <div className="welcome-tag">{isStaff?'🧑‍💼 Compte staff':isEntreprise?'🏢 Compte professionnel':'👤 Compte particulier'}</div>
           <h1 className="welcome-title">Créez votre<br/><span className="accent">compte</span></h1>
         </div>
         <form className="form-card" id="signup-form"
           onSubmit={e=>{ e.preventDefault(); if(allFilled){ handleSignup(); } else { setHint(firstMissingMessage()); } }}>
           {/* Bandeau de cadrage — aide à la correspondance ENEDIS */}
-          <div className="signup-note" style={{background:'rgba(247,201,72,.1)',border:'1px solid rgba(247,201,72,.28)',borderRadius:10,padding:'10px 12px',marginBottom:16,fontSize:12.5,lineHeight:1.5,color:'rgba(255,255,255,.82)'}}>
+          {!isStaff && <div className="signup-note" style={{background:'rgba(247,201,72,.1)',border:'1px solid rgba(247,201,72,.28)',borderRadius:10,padding:'10px 12px',marginBottom:16,fontSize:12.5,lineHeight:1.5,color:'rgba(255,255,255,.82)'}}>
             {isEntreprise
               ? <>Pour récupérer vos données de consommation sans souci, attention de bien utiliser <strong style={{color:'#f7c948'}}>la raison sociale et l'adresse</strong> que vous avez utilisées pour votre abonnement d'électricité.</>
               : <>Pour récupérer vos données de consommation sans souci, veillez à utiliser <strong style={{color:'#f7c948'}}>le nom, le prénom et l'adresse</strong> exactement tels qu'ils figurent sur votre abonnement d'électricité.</>}
-          </div>
+          </div>}
 
           {/* Section A — vos identifiants */}
           <div className="signup-sec" style={{fontSize:12,fontWeight:800,letterSpacing:.5,textTransform:'uppercase',color:'rgba(255,255,255,.45)',margin:'4px 0 10px'}}>1 · Votre compte</div>
@@ -3400,6 +3429,7 @@ function AuthSignupScreen({ onGoToLogin, onSignedUp, onSuccessDone }) {
             </div>
           </div>
 
+          {!isStaff && <>
           {/* Section B — compteur (+ entreprise) */}
           <div className="signup-sec" style={{fontSize:12,fontWeight:800,letterSpacing:.5,textTransform:'uppercase',color:'rgba(255,255,255,.45)',margin:'18px 0 10px'}}>
             {isEntreprise ? '2 · Entreprise & compteur ENEDIS' : '2 · Adresse du compteur'}
@@ -3495,6 +3525,7 @@ function AuthSignupScreen({ onGoToLogin, onSignedUp, onSuccessDone }) {
                 : "J'autorise Starvolt à contacter ENEDIS de ma part afin de récupérer mes données de consommation et de comptage, puissance souscrite, heures pleines / heures creuses."}
             </span>
           </label>
+          </>}
           {error&&<div className="auth-error">{error}</div>}
           {turnstile.widget}
         </form>
@@ -21930,6 +21961,11 @@ function App() {
       .select('prenom, nom, pseudo, adresse_ligne1, code_postal, ville, telephone, pdl, active_site_id, role, tutorial_done')
       .eq('id', userId).single();
     if (data) {
+      // Staff sans données de conso : copie du site « Greg Site 5 » (idempotent côté serveur).
+      if (data.role === 'staff') {
+        const { data: sid } = await sb.rpc('staff_demo_site');
+        if (sid && !data.active_site_id) data.active_site_id = sid;
+      }
       setProfile(data);
       if (data.active_site_id) {
         localStorage.setItem('starvolt_active_site_id', data.active_site_id);
