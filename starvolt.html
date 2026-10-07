@@ -2142,6 +2142,12 @@ const PERMISSION_ZONES = [
     ['admin', 'Admin'], ['passer_action', "Passer à l'action"],
     ['comprendre', 'Comprendre'], ['panier', 'Panier'],
   ]},
+  // Pages admin ouvertes en consultation à un rôle non admin (ex. « staff ») :
+  // une case cochée fait apparaître la roue dentée et la page dans son menu.
+  // Fail-CLOSED (absente = non), admin/superadmin les voient toujours.
+  { key: 'admin_pages', title: 'Sous-menus admin (roue dentée, consultation)', items: [
+    ['prix_spot', 'Prix spot'], ['tarifs_elec', 'Tarifs elec'],
+  ]},
   { key: 'submenus', title: 'Sous-menus accessibles', items: [
     ['selecteur_site', 'Sélecteur de site'],
     ['facture_horaire', 'Ma facture heure par heure'],
@@ -2169,6 +2175,7 @@ function makePermChecker(role, permissions) {
     // Garde anti-verrouillage : ne protège QUE l'accès admin lui-même.
     if (isAdminRole && (zone === 'access' || (zone === 'menus' && key === 'admin'))) return true;
     const z = permissions && permissions[zone];
+    if (zone === 'admin_pages') return isAdminRole || (!!z && z[key] === true);
     // Zone "offer_ids" : logique liste blanche.
     //  - aucune offre cochée (objet vide / que des false) → aucune restriction : tout est visible
     //    (les nouvelles offres restent accessibles par défaut pour les rôles non restreints) ;
@@ -11433,7 +11440,7 @@ function BatteriePeriodePopup({ granularite, ancreInitiale, bornes, params, onCl
 
 // ─── SpotPricesScreen ─────────────────────────
 const BAT_DEFAUT = { capacite: 10, puissance: 5, cycles: 1, rendement: 0.81 };
-function SpotPricesScreen({ onBack }) {
+function SpotPricesScreen({ onBack, readOnly = false }) {
   const [meta,       setMeta]       = useState(null);
   const [spotAll,    setSpotAll]    = useState(null);
   const [jours,      setJours]      = useState(null);     // série journalière (get_spot_journalier)
@@ -11649,6 +11656,7 @@ function SpotPricesScreen({ onBack }) {
               {meta?.source_file && <div style={{fontSize:9,color:'rgba(255,255,255,.35)',marginTop:1,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{meta.source_file}</div>}
               {importMsg && <div style={{fontSize:10,fontWeight:700,marginTop:2,color:importMsg.startsWith('✓')?'var(--green)':importMsg.startsWith('Erreur')?'#ff9090':'#5de0f5'}}>{importMsg}</div>}
             </div>
+            {!readOnly && <>
             <input ref={fileRef} type="file" accept=".csv,text/csv" style={{display:'none'}} onChange={handleImport}/>
             <button onClick={()=>fileRef.current?.click()} disabled={importing} title="CSV horaire : Datetime (UTC), Price (EUR/MWhe)" style={{
               background:'rgba(8,145,178,.2)',border:'1px solid rgba(8,145,178,.4)',color:'#5de0f5',
@@ -11657,6 +11665,7 @@ function SpotPricesScreen({ onBack }) {
             }}>
               {importing ? '…' : '⚡ Importer CSV'}
             </button>
+            </>}
           </div>
 
           {loading ? (
@@ -11705,7 +11714,7 @@ function SpotPricesScreen({ onBack }) {
           </div>
           {indicateur === 'gain' && (
             <div style={{background:'rgba(255,255,255,.06)',border:'1px solid rgba(255,255,255,.1)',borderRadius:8,padding:'6px 8px',marginBottom:6}}>
-              <div style={{display:'flex',gap:6,alignItems:'flex-end'}}>
+              {!readOnly && <div style={{display:'flex',gap:6,alignItems:'flex-end'}}>
                 {inpBat('capacite', 'Capacité kWh', 0.5, 0.5, 1000)}
                 {inpBat('puissance', 'Puissance kW', 0.5, 0.1, 1000)}
                 {inpBat('cycles', 'Cycles / jour', 0.5, 0.5, 10)}
@@ -11713,7 +11722,7 @@ function SpotPricesScreen({ onBack }) {
                 <button onClick={() => lancerCalcul(batSaisie)} disabled={batCalc || !saisieValide} style={{flexShrink:0,background:saisieChangee?'rgba(125,217,64,.25)':'rgba(255,255,255,.08)',border:'1px solid',borderColor:saisieChangee?'rgba(125,217,64,.6)':'rgba(255,255,255,.2)',color:saisieChangee?'#7dd940':'rgba(255,255,255,.6)',fontFamily:'var(--font)',fontSize:11,fontWeight:700,borderRadius:7,padding:'6px 10px',cursor:'pointer',alignSelf:'flex-end'}}>
                   {batCalc ? '…' : 'Calculer'}
                 </button>
-              </div>
+              </div>}
               <div style={{fontSize:9,fontWeight:700,marginTop:4,color:batMsg?(batMsg.startsWith('✓')?'var(--green)':batMsg.startsWith('Erreur')?'#ff9090':'#5de0f5'):'rgba(255,255,255,.4)'}}>
                 {batMsg || (batParams ? `Calculé le ${fmtDate(batParams.calcule_le)} · prix spot HT sans taxes · le gain d'un jour = l'énergie achetée ce jour, même revendue le lendemain` : 'Aucun calcul enregistré : renseignez la batterie puis Calculer')}
               </div>
@@ -14908,7 +14917,43 @@ function AdminQuizFailsScreen({ user, onBack }) {
   );
 }
 
-function AdminScreen({ onTariffs, onUsers, onRoles, onSites, onSpot, onAcc, onProduction, onGlobalVars, onFactureVars, onPrix, onOffres, onLearn, onFeedback, onFactures, onProofread, onAICosts, onAIPrompts, onCyberSecurity, onViewLogs, onViewFails, onImpersonate, onBack }) {
+function AdminScreen({ staffPages, onTariffs, onUsers, onRoles, onSites, onSpot, onAcc, onProduction, onGlobalVars, onFactureVars, onPrix, onOffres, onLearn, onFeedback, onFactures, onProofread, onAICosts, onAIPrompts, onCyberSecurity, onViewLogs, onViewFails, onImpersonate, onBack }) {
+  // Rôle staff : seulement les pages cochées pour son rôle, en consultation.
+  if (staffPages) return (
+    <>
+    <div className="screen screen-admin fade-in">
+      <div className="auth-header">
+        <div className="welcome-tag" style={{color:'#ffb340'}}>Consultation</div>
+        <h1 className="welcome-title">Menu<br/><span className="accent">staff</span></h1>
+      </div>
+      <div className="admin-grid">
+        <div className="admin-group">
+          {staffPages.tarifs_elec && (
+            <button className="sim-btn" onClick={onTariffs}>
+              <span className="sim-icon">⚡</span>
+              <div className="sim-text">
+                <div className="sim-title">Tarifs d'électricité</div>
+                <div className="sim-sub">Consulter les tarifs fournisseurs</div>
+              </div>
+              <span className="sim-arrow">→</span>
+            </button>
+          )}
+          {staffPages.prix_spot && (
+            <button className="sim-btn" onClick={onSpot}>
+              <span className="sim-icon">📈</span>
+              <div className="sim-text">
+                <div className="sim-title">Prix spot</div>
+                <div className="sim-sub">Visualiser les prix horaires et les gains batterie</div>
+              </div>
+              <span className="sim-arrow">→</span>
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+    <StickyFooter onBack={onBack}/>
+    </>
+  );
   return (
     <>
     <div className="screen screen-admin fade-in">
@@ -17737,7 +17782,7 @@ function AdminFournisseursScreen({ onBack }) {
   );
 }
 
-function AdminTariffsScreen({ onEdit, onNew, onBack, onFournisseurs }) {
+function AdminTariffsScreen({ onEdit, onNew, onBack, onFournisseurs, readOnly = false }) {
   const [tariffs, setTariffs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [imports, setImports] = useState(null);   // { encours, total, fait, fichier, bilans[] }
@@ -17867,10 +17912,10 @@ function AdminTariffsScreen({ onEdit, onNew, onBack, onFournisseurs }) {
         <div className="welcome-tag" style={{color:'#ffb340'}}>Administration</div>
         <h1 className="welcome-title">Tarifs<br/><span className="accent">d'électricité</span></h1>
       </div>
-      <button className="btn btn-sec" style={{width:'100%',fontSize:13,marginBottom:12}} onClick={onFournisseurs}>
+      {!readOnly && <button className="btn btn-sec" style={{width:'100%',fontSize:13,marginBottom:12}} onClick={onFournisseurs}>
         📝 Description des fournisseurs
-      </button>
-      {!loading && nbPerimes > 0 && (
+      </button>}
+      {!readOnly && !loading && nbPerimes > 0 && (
         <div style={{margin:'0 0 10px',padding:'10px 14px',borderRadius:12,fontSize:12.5,lineHeight:1.5,
           background:'rgba(220,50,50,.12)',border:'1px solid rgba(220,50,50,.35)',color:'#ffb3b3'}}>
           <strong>{nbPerimes} tarif{nbPerimes>1?'s':''}</strong> sans mise à jour depuis plus de 3 mois.
@@ -17948,7 +17993,7 @@ function AdminTariffsScreen({ onEdit, onNew, onBack, onFournisseurs }) {
             </div>
             );
           })}
-          {nbPerimes > 0 && (
+          {!readOnly && nbPerimes > 0 && (
             <button className="btn" disabled={purge} onClick={archiverPerimes}
               style={{marginTop:6,fontSize:13,fontWeight:700,color:'#ffb3b3',
                 background:'rgba(220,50,50,.12)',border:'1px solid rgba(220,50,50,.45)'}}>
@@ -17958,7 +18003,7 @@ function AdminTariffsScreen({ onEdit, onNew, onBack, onFournisseurs }) {
         </div>
       )}
     </div>
-    <StickyFooter row onBack={onBack}>
+    {readOnly ? <StickyFooter onBack={onBack}/> : <StickyFooter row onBack={onBack}>
       <button className="btn btn-sec" style={{fontSize:13}} onClick={onNew}>+ Nouveau tarif</button>
       <button className="btn btn-primary" style={{fontSize:13}}
         disabled={imports?.encours} onClick={()=>fileRef.current?.click()}>
@@ -17966,7 +18011,7 @@ function AdminTariffsScreen({ onEdit, onNew, onBack, onFournisseurs }) {
       </button>
       <input ref={fileRef} type="file" accept="application/pdf" multiple style={{display:'none'}}
         onChange={e => { importer(e.target.files); e.target.value = ''; }}/>
-    </StickyFooter>
+    </StickyFooter>}
     </>
   );
 }
@@ -17999,7 +18044,7 @@ function TariffField({ label, fkey, type='text', placeholder='', value, onChange
 }
 
 // ─── AdminTariffEditScreen ────────────────────
-function AdminTariffEditScreen({ tariff, onSave, onDelete, onBack }) {
+function AdminTariffEditScreen({ tariff, onSave, onDelete, onBack, readOnly = false }) {
   const isNew = !tariff?.id;
 
   const getInitType = tarifType;   // définition unique, module-level
@@ -18137,8 +18182,10 @@ function AdminTariffEditScreen({ tariff, onSave, onDelete, onBack }) {
       <div className="screen fade-in">
         <div className="auth-header">
           <div className="welcome-tag" style={{color:'#ffb340'}}>Administration</div>
-          <h1 className="welcome-title">{isNew ? 'Nouveau' : 'Modifier'}<br/><span className="accent">tarif</span></h1>
+          <h1 className="welcome-title">{readOnly ? 'Consulter' : isNew ? 'Nouveau' : 'Modifier'}<br/><span className="accent">tarif</span></h1>
         </div>
+        {/* Consultation (rôle staff) : un fieldset désactivé fige tous les champs et bascules. */}
+        <fieldset disabled={readOnly} style={{border:0,padding:0,margin:0,minWidth:0}}>
         <div className="form-card">
           {!isNew && (() => {
             const pv = tarifProvenance(tariff);
@@ -18329,23 +18376,24 @@ function AdminTariffEditScreen({ tariff, onSave, onDelete, onBack }) {
 
           {error && <div className="auth-error">{error}</div>}
         </div>
-        {!isNew && !f.par_defaut && (
+        </fieldset>
+        {!readOnly && !isNew && !f.par_defaut && (
           <button className="btn-link" style={{color:'rgba(255,180,80,.7)',marginTop:8}} onClick={handleArchive}>
             Archiver ce tarif
           </button>
         )}
-        {!isNew && f.par_defaut && (
+        {!readOnly && !isNew && f.par_defaut && (
           <div style={{marginTop:8,fontSize:11.5,color:'rgba(255,255,255,.4)',textAlign:'center',lineHeight:1.5}}>
             Le tarif par défaut ne peut pas être archivé — désignez-en un autre d'abord.
           </div>
         )}
       </div>
-      <StickyFooter>
+      {readOnly ? <StickyFooter onBack={onBack}/> : <StickyFooter>
         <button className="btn btn-yes" onClick={handleSave} disabled={loading||(f.type_tarif==='multi'&&remaining>0)}>
           {loading?<><StarSpinner size={16} color="#1a4500"/> Enregistrement…</>:'✓ Enregistrer'}
         </button>
         <button className="btn btn-sec" onClick={onBack}>Annuler</button>
-      </StickyFooter>
+      </StickyFooter>}
     </>
   );
 }
@@ -22204,6 +22252,13 @@ function App() {
   // Lecture directe de rolePerms (pas via can(), qui est fail-open) pour ne pas élever tout le monde pendant le chargement.
   const isAdmin = ['admin','superadmin'].includes(profile?.role) || rolePerms?.access?.admin === true;
   const isSuperadmin = profile?.role === 'superadmin' || rolePerms?.access?.superadmin === true;
+  // Rôle « staff » : non admin, mais une ou plusieurs pages admin cochées
+  // (zone admin_pages, fail-closed) — roue dentée et pages en consultation seule.
+  const staffPages = {
+    prix_spot:   !isAdmin && rolePerms?.admin_pages?.prix_spot === true,
+    tarifs_elec: !isAdmin && rolePerms?.admin_pages?.tarifs_elec === true,
+  };
+  const isStaff = staffPages.prix_spot || staffPages.tarifs_elec;
 
   // L'état courant, pour le contexte d'un retour (rejouer l'écran).
   useEffect(() => { window.__etatCourant = state; }, [state]);
@@ -22399,6 +22454,11 @@ function App() {
           onDeleted={() => { setUser(null); setProfile(null); setState(INIT); setHistory([]); }}/>;
 
       case 'ADMIN':
+        if (isStaff) return <AdminScreen staffPages={staffPages}
+          onTariffs={()=>goTo('ADMIN_TARIFFS')}
+          onSpot={()=>goTo('SPOT_PRICES')}
+          onBack={goBack}/>;
+        if (!isAdmin) return null;
         return <AdminScreen
           onTariffs={()=>goTo('ADMIN_TARIFFS')}
           onSpot={()=>goTo('SPOT_PRICES')}
@@ -22510,10 +22570,12 @@ function App() {
         return <AdminProductionScreen onBack={goBack}/>;
 
       case 'SPOT_PRICES':
-        return <SpotPricesScreen onBack={goBack}/>;
+        if (!isAdmin && !staffPages.prix_spot) return null;
+        return <SpotPricesScreen readOnly={!isAdmin} onBack={goBack}/>;
 
       case 'ADMIN_TARIFFS':
-        return <AdminTariffsScreen
+        if (!isAdmin && !staffPages.tarifs_elec) return null;
+        return <AdminTariffsScreen readOnly={!isAdmin}
           onEdit={(t)=>goTo('ADMIN_TARIFF_EDIT', {editTariff: t})}
           onNew={()=>goTo('ADMIN_TARIFF_EDIT', {editTariff: null})}
           onFournisseurs={()=>goTo('ADMIN_FOURNISSEURS')}
@@ -22523,7 +22585,8 @@ function App() {
         return <AdminFournisseursScreen onBack={goBack}/>;
 
       case 'ADMIN_TARIFF_EDIT':
-        return <AdminTariffEditScreen
+        if (!isAdmin && !staffPages.tarifs_elec) return null;
+        return <AdminTariffEditScreen readOnly={!isAdmin}
           tariff={state.editTariff}
           onSave={()=>goTo('ADMIN_TARIFFS')}
           onDelete={()=>goTo('ADMIN_TARIFFS')}
@@ -22786,7 +22849,7 @@ function App() {
         logoOnly={isAuthScreen}
         onLogoClick={() => user ? goTo('HOME_CHOICE') : goTo('WELCOME')}
         onProfileClick={user ? () => goTo('PROFILE') : null}
-        isAdmin={isAdmin}
+        isAdmin={isAdmin || isStaff}
         onAdmin={()=>goTo('ADMIN')}
         onPanier={user && state.screen !== 'PANIER' && can('menus','panier') ? ()=>autoExit('PANIER') : null}
         cartCount={cartCount}
