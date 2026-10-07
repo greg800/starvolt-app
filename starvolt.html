@@ -10741,10 +10741,11 @@ const INDICATEURS = [
   { id:'prix',   label:'Prix moyen HT',              unite:'c€/kWh' },
   { id:'spread', label:'Spread journalier HT',       unite:'c€/kWh' },
   { id:'gain',   label:'Gains batterie (arbitrage)', unite:'€' },
+  { id:'gain_reel', label:'Gains batterie réels (TURPE + taxes)', unite:'€' },
   { id:'negatif',label:'Heures à prix négatif',      unite:'h' },
 ];
 // Indicateurs en unité brute (pas de conversion €/kWh → c€/kWh) et sommés sur la période
-const indicateurBrut = ind => ind === 'gain' || ind === 'negatif';
+const indicateurBrut = ind => ind === 'gain' || ind === 'gain_reel' || ind === 'negatif';
 // Valeur à passer à l'échelle de couleur depuis la valeur affichée
 const valeurEchelle = (ind, v) => (v === null || v === undefined) ? null : (indicateurBrut(ind) ? v : v / 100);
 
@@ -10765,12 +10766,12 @@ function seuilsAuto(valeurs) {
 function seuilsIndicateur(ind, rows) {
   if (ind === 'prix')   return SEUILS_PRIX;
   if (ind === 'spread') return SEUILS_SPREAD;
-  return seuilsAuto(rows.map(r => ind === 'gain' ? r.gain : r.neg));
+  return seuilsAuto(rows.map(r => ind === 'gain' ? r.gain : ind === 'gain_reel' ? r.gainReel : r.neg));
 }
 // Valeur d'une cellule en unité d'affichage (c€/kWh ou €)
 function valeurAffichee(ind, r) {
   if (!r) return null;
-  const v = ind === 'prix' ? r.prix : ind === 'spread' ? r.spread : ind === 'gain' ? r.gain : r.neg;
+  const v = ind === 'prix' ? r.prix : ind === 'spread' ? r.spread : ind === 'gain' ? r.gain : ind === 'gain_reel' ? r.gainReel : r.neg;
   if (v === null || v === undefined) return null;
   return indicateurBrut(ind) ? v : v * 100;
 }
@@ -10808,13 +10809,14 @@ function agregerSpotJours(jours, gran) {
     const [a, m, j] = partsIso(x.d);
     const [annee, periode] = clePeriode(gran, a, m, j);
     const k = `${annee}_${periode}`;
-    const r = acc[k] || (acc[k] = { annee, periode, mois: m, jour: j, sp: 0, n: 0, ss: 0, nj: 0, neg: 0, gain: null, jours: [] });
+    const r = acc[k] || (acc[k] = { annee, periode, mois: m, jour: j, sp: 0, n: 0, ss: 0, nj: 0, neg: 0, gain: null, gainReel: null, jours: [] });
     r.sp += x.p * x.n; r.n += x.n; r.ss += x.s; r.nj += 1; r.neg += x.z || 0; r.jours.push(x.d);
     if (x.g !== null && x.g !== undefined) r.gain = (r.gain || 0) + x.g;
+    if (x.gr !== null && x.gr !== undefined) r.gainReel = (r.gainReel || 0) + x.gr;
   });
   return Object.values(acc).map(r => ({
     annee: r.annee, periode: r.periode, mois: r.mois, jour: r.jour, jours: r.jours,
-    prix: r.n ? r.sp / r.n : null, spread: r.nj ? r.ss / r.nj : null, gain: r.gain, neg: r.neg, n: r.n, nj: r.nj,
+    prix: r.n ? r.sp / r.n : null, spread: r.nj ? r.ss / r.nj : null, gain: r.gain, gainReel: r.gainReel, neg: r.neg, n: r.n, nj: r.nj,
   }));
 }
 function heuresAttendues(gran, annee, periode) {
@@ -10860,7 +10862,9 @@ function optimiserBatteriePeriode(jours, { capacite, puissance, cycles, rendemen
     }
     const chJ = new Array(24);
     for (let h = 0; h < 24; h++) {
-      const p = jour.p[h];
+      // Prix d'achat (soutirage) et de vente (injection) : le spot seul, ou
+      // spot ± TURPE et taxes pour le gain réel (jour.pa / jour.pv).
+      const pa = jour.pa ? jour.pa[h] : jour.p[h], pv = jour.pv ? jour.pv[h] : jour.p[h];
       const nd = new Float64Array(S).fill(-Infinity), ch = new Int8Array(S);
       for (let soc = 0; soc <= N; soc++) for (let dis = 0; dis <= D; dis++) {
         const v = dp[soc * L + dis];
@@ -10869,12 +10873,12 @@ function optimiserBatteriePeriode(jours, { capacite, puissance, cycles, rendemen
         if (v > nd[idx]) { nd[idx] = v; ch[idx] = 0; }
         const cMax = Math.min(maxC, N - soc);
         for (let c = 1; c <= cMax; c++) {
-          const val = v - c * step / r * p; idx = (soc + c) * L + dis;
+          const val = v - c * step / r * pa; idx = (soc + c) * L + dis;
           if (val > nd[idx]) { nd[idx] = val; ch[idx] = c; }
         }
         const dMax = Math.min(maxD, soc, D - dis);
         for (let d = 1; d <= dMax; d++) {
-          const val = v + d * step * r * p; idx = (soc - d) * L + dis + d;
+          const val = v + d * step * r * pv; idx = (soc - d) * L + dis + d;
           if (val > nd[idx]) { nd[idx] = val; ch[idx] = -d; }
         }
       }
@@ -10910,12 +10914,12 @@ function optimiserBatteriePeriode(jours, { capacite, puissance, cycles, rendemen
   for (let j = 0; j < jours.length; j++) {
     for (let h = 0; h < 24; h++) {
       const a = pas[j][h];
-      if (a > 0) { res[j].gain -= a * step / r * jours[j].p[h]; lots.push({ j, n: a }); }
+      if (a > 0) { res[j].gain -= a * step / r * (jours[j].pa || jours[j].p)[h]; lots.push({ j, n: a }); }
       else if (a < 0) {
         let reste = -a;
         while (reste > 0 && lots.length) {
           const lot = lots[0], n = Math.min(reste, lot.n);
-          res[lot.j].gain += n * step * r * jours[j].p[h];
+          res[lot.j].gain += n * step * r * (jours[j].pv || jours[j].p)[h];
           lot.n -= n; reste -= n;
           if (lot.n === 0) lots.shift();
         }
@@ -10935,6 +10939,181 @@ function completerPrix24(p) {
   return out;
 }
 
+// ─── Gain batterie réel : TURPE 7 et taxes au 1er août 2026 ──────────────────
+// Source unique du calcul ET du tableau de la page « Hypothèses ». Le domaine
+// de tension se déduit de la puissance de la batterie (kW ≈ kVA, injection =
+// soutirage) : ≤ 36 kVA → BT ≤ 36 (C5), ≤ 250 kVA → BT > 36 (C4), au-delà → HTA.
+// Énergie en c€/kWh, parts fixes en €/an. Sources : CRE délibération 2026-105
+// (TURPE 7 HTA-BT au 01/08/2026), arrêté accise du 08/06/2026, arrêté CTA du
+// 28/01/2026, CIBS L.312-32 + rescrit BOI-RES-EAT-000164 (stockage).
+const TURPE_STOCKAGE = {
+  dateEffet: '1er août 2026',
+  cta: 15,                        // % de la part fixe du TURPE (réseau de distribution, depuis le 01/02/2026)
+  tva: 20,
+  hc: 'Heures creuses : 22 h → 6 h (8 h/jour ; les HC réelles sont fixées localement par Enedis)',
+  saisonHaute: [11, 12, 1, 2, 3], // novembre → mars
+  domaines: {
+    bt36: {
+      label: 'BT ≤ 36 kVA (C5)', pMax: 36,
+      option: 'Courte utilisation 4 plages',
+      soutirage: { HPH: 7.72, HCH: 4.09, HPB: 1.71, HCB: 1.20 },
+      injection: 0,
+      puissance: 10.42, puissanceUnite: '€/kVA/an',
+      gestion: 26.95, comptage: 22.67,  // gestion « autoproducteur avec injection »
+      accise: 3.062, acciseNote: 'Taxée : 30,62 €/MWh (ménages et assimilés). Derrière un compteur ≤ 36 kVA, l\'énergie de charge n\'est pas distinguée de la consommation : l\'exonération stockage ne s\'applique pas en pratique.',
+    },
+    bt250: {
+      label: 'BT > 36 kVA (C4)', pMax: 250,
+      option: 'Courte utilisation 4 plages',
+      soutirage: { HPH: 7.12, HCH: 4.34, HPB: 2.19, HCB: 1.57 },
+      injection: 0,
+      puissance: 18.15, puissanceUnite: '€/kVA/an (même puissance sur les 4 plages → b₁ × P)',
+      gestion: 366.14, comptage: 291.88,
+      accise: 0, acciseNote: 'Exonérée (CIBS L.312-32, rescrit BOI-RES-EAT-000164) : l\'électricité qui charge une batterie est assimilée à une consommation de production, sur attestation 2040-TIC-ATT-E au fournisseur. Sinon 26,35 €/MWh.',
+    },
+    hta: {
+      label: 'HTA', pMax: Infinity,
+      option: 'Courte utilisation 5 plages, pointe fixe',
+      soutirage: { P: 5.91, HPH: 4.36, HCH: 2.05, HPB: 1.04, HCB: 0.71 },
+      injection: 0,
+      puissance: 14.85, puissanceUnite: '€/kW/an (même puissance sur les 5 plages → b₁ × P)',
+      gestion: 732.28, comptage: 387.84,
+      accise: 0, acciseNote: 'Exonérée (CIBS L.312-32, rescrit BOI-RES-EAT-000164), cas normal d\'un stockage seul. Sinon 26,35 €/MWh.',
+    },
+  },
+};
+const domaineTurpe = (puissanceKw) => {
+  const k = puissanceKw <= 36 ? 'bt36' : puissanceKw <= 250 ? 'bt250' : 'hta';
+  return { key: k, ...TURPE_STOCKAGE.domaines[k] };
+};
+// Plage temporelle TURPE d'une heure locale : HPH/HCH/HPB/HCB, + P (pointe) en HTA.
+// HTA : dimanche entièrement en heures creuses ; pointe fixe décembre → février,
+// lundi → samedi, 9 h-11 h et 18 h-20 h (2 h dans 8-12 h et 2 h dans 17-21 h).
+function plageTurpe(domKey, dIso, h) {
+  const m = +dIso.slice(5, 7);
+  const haute = TURPE_STOCKAGE.saisonHaute.includes(m);
+  const dow = new Date(dIso + 'T12:00:00Z').getUTCDay();   // 0 = dimanche
+  if (domKey === 'hta' && dow !== 0 && (m === 12 || m <= 2) && (h === 9 || h === 10 || h === 18 || h === 19)) return 'P';
+  const creuse = h >= 22 || h < 6 || (domKey === 'hta' && dow === 0);
+  return (creuse ? 'HC' : 'HP') + (haute ? 'H' : 'B');
+}
+// Part fixe annuelle (€ HT) : puissance souscrite = puissance batterie, + gestion
+// + comptage, + CTA sur cette part fixe.
+function fixeAnnuelTurpe(dom, puissanceKw) {
+  const tarif = dom.puissance * puissanceKw + dom.gestion + dom.comptage;
+  return { tarif, cta: tarif * TURPE_STOCKAGE.cta / 100, total: tarif * (1 + TURPE_STOCKAGE.cta / 100) };
+}
+// Prix horaires réels d'un jour (€/kWh HT) : achat = spot + TURPE soutirage de
+// la plage + accise ; vente = spot − composante d'injection (nulle en TURPE 7).
+function prixReelsJour(dom, jour) {
+  const pa = new Array(24), pv = new Array(24);
+  for (let h = 0; h < 24; h++) {
+    pa[h] = jour.p[h] + (dom.soutirage[plageTurpe(dom.key, jour.d, h)] + dom.accise) / 100;
+    pv[h] = jour.p[h] - dom.injection / 100;
+  }
+  return { ...jour, pa, pv };
+}
+
+// ─── Page « Hypothèses de calcul TURPE et taxes » (gain batterie réel) ───────
+// Tout est lu dans TURPE_STOCKAGE : le tableau affiché est celui du calcul.
+function HypothesesTurpeStockage({ puissance }) {
+  const dom = domaineTurpe(puissance || 0);
+  const D = TURPE_STOCKAGE.domaines;
+  const cles = ['bt36', 'bt250', 'hta'];
+  const fx = fixeAnnuelTurpe(dom, puissance || 0);
+  const n2 = v => v.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const eur = v => Math.round(v).toLocaleString('fr-FR') + ' €';
+  const sec = { fontSize:12, fontWeight:800, letterSpacing:.5, textTransform:'uppercase', color:'rgba(255,255,255,.5)', margin:'14px 0 6px' };
+  const txt = { fontSize:12.5, lineHeight:1.55, color:'rgba(255,255,255,.82)', margin:'0 0 8px' };
+  const th = k => ({ padding:'6px 6px', fontSize:10.5, fontWeight:800, textAlign:'right', whiteSpace:'nowrap',
+    color: k === dom.key ? '#7dd940' : 'rgba(255,255,255,.7)', background: k === dom.key ? 'rgba(125,217,64,.12)' : 'transparent' });
+  const td = k => ({ padding:'5px 6px', fontSize:11, textAlign:'right', verticalAlign:'top',
+    background: k === dom.key ? 'rgba(125,217,64,.08)' : 'transparent', color:'white' });
+  const lig = (label, f, unite) => (
+    <tr style={{borderTop:'1px solid rgba(255,255,255,.08)'}}>
+      <td style={{padding:'5px 6px',fontSize:11,color:'rgba(255,255,255,.65)',verticalAlign:'top'}}>{label}{unite && <div style={{fontSize:9.5,color:'rgba(255,255,255,.4)'}}>{unite}</div>}</td>
+      {cles.map(k => <td key={k} style={td(k)}>{f(D[k])}</td>)}
+    </tr>
+  );
+  const plage = (d, k) => d.soutirage[k] !== undefined ? n2(d.soutirage[k]) : '—';
+  const lien = (href, label) => <a href={href} target="_blank" rel="noopener noreferrer" style={{color:'#5de0f5'}}>{label}</a>;
+  return (
+    <div style={{paddingBottom:90}}>
+      <div style={{background:'rgba(125,217,64,.1)',border:'1px solid rgba(125,217,64,.3)',borderRadius:10,padding:'10px 12px',marginBottom:6}}>
+        <div style={{fontSize:13,fontWeight:800,color:'#7dd940'}}>Votre batterie : {puissance} kW → {dom.label}</div>
+        <div style={{fontSize:11.5,color:'rgba(255,255,255,.75)',marginTop:2,lineHeight:1.5}}>
+          La puissance de charge et de décharge sert de puissance souscrite et détermine le domaine de tension, donc la grille TURPE et le taux d'accise. Grilles en vigueur au {TURPE_STOCKAGE.dateEffet}.
+        </div>
+      </div>
+
+      <div style={sec}>Le calcul</div>
+      <p style={txt}>Le « gain spot » valorise chaque kWh au seul prix spot. Le <strong>gain réel</strong> refait l'optimisation de la batterie avec les vrais prix vus du compteur :</p>
+      <ul style={{...txt, paddingLeft:18}}>
+        <li><strong>Prix d'achat</strong> (charge) = spot + TURPE soutirage de la plage horaire + accise (si due).</li>
+        <li><strong>Prix de vente</strong> (décharge) = spot − composante d'injection, <strong>nulle en TURPE 7</strong> : injecter ne coûte rien.</li>
+        <li><strong>Frais fixes</strong> = part puissance + gestion + comptage, majorés de la CTA ({TURPE_STOCKAGE.cta} %), répartis à parts égales sur les 365 jours.</li>
+      </ul>
+      <p style={txt}>Le plan de charge change : un cycle n'est lancé que si l'écart de prix couvre le TURPE de la plage de charge et les pertes. Les jours sans cycle rentable affichent donc un gain négatif (les frais fixes). Montants <strong>hors TVA</strong>.</p>
+
+      <div style={sec}>Tableau de synthèse utilisé dans le calcul</div>
+      <div style={{overflowX:'auto',margin:'0 -4px'}}>
+        <table style={{borderCollapse:'collapse',width:'100%',minWidth:330}}>
+          <thead><tr>
+            <th style={{...th(''), textAlign:'left'}}></th>
+            {cles.map(k => <th key={k} style={th(k)}>{D[k].label}</th>)}
+          </tr></thead>
+          <tbody>
+            {lig('Option retenue', d => <span style={{fontSize:10}}>{d.option}</span>)}
+            {lig('Soutirage — pointe', d => plage(d, 'P'), 'c€/kWh · déc.→fév., lun.→sam., 9-11 h et 18-20 h')}
+            {lig('Soutirage — HP saison haute', d => plage(d, 'HPH'), 'c€/kWh')}
+            {lig('Soutirage — HC saison haute', d => plage(d, 'HCH'), 'c€/kWh')}
+            {lig('Soutirage — HP saison basse', d => plage(d, 'HPB'), 'c€/kWh')}
+            {lig('Soutirage — HC saison basse', d => plage(d, 'HCB'), 'c€/kWh')}
+            {lig('Injection — énergie', d => n2(d.injection), 'c€/kWh')}
+            {lig('Part puissance', d => n2(d.puissance), 'voir unités sous le tableau')}
+            {lig('Gestion (avec injection)', d => n2(d.gestion), '€/an')}
+            {lig('Comptage', d => n2(d.comptage), '€/an')}
+            {lig('CTA', () => TURPE_STOCKAGE.cta + ' %', 'de la part fixe')}
+            {lig('Accise sur la charge', d => d.accise ? n2(d.accise) : 'exonérée', 'c€/kWh')}
+            {lig('TVA', () => TURPE_STOCKAGE.tva + ' %', 'non comptée (HT)')}
+          </tbody>
+        </table>
+      </div>
+      <div style={{fontSize:10,color:'rgba(255,255,255,.45)',marginTop:4,lineHeight:1.45}}>Unités de la part puissance : BT ≤ 36 kVA en €/kVA/an ; BT &gt; 36 kVA en €/kVA/an (b₁, puissance identique sur les 4 plages) ; HTA en €/kW/an (b₁).</div>
+
+      <div style={sec}>Frais fixes de votre batterie ({puissance} kW)</div>
+      <div style={{...txt, background:'rgba(255,255,255,.05)', borderRadius:8, padding:'8px 10px'}}>
+        Part puissance {n2(dom.puissance)} × {puissance} = {eur(dom.puissance * puissance)} · gestion {eur(dom.gestion)} · comptage {eur(dom.comptage)}<br/>
+        = {eur(fx.tarif)} + CTA {eur(fx.cta)} = <strong style={{color:'#ffb340'}}>{eur(fx.total)} HT par an</strong>, soit {n2(fx.total / 365)} € par jour.
+      </div>
+
+      <div style={sec}>Plages horaires</div>
+      <p style={txt}>Saison haute : novembre → mars ; saison basse : avril → octobre. {TURPE_STOCKAGE.hc}. En HTA, le dimanche est entièrement en heures creuses et la pointe fixe tombe de décembre à février.</p>
+
+      <div style={sec}>Accise</div>
+      {cles.map(k => <p key={k} style={txt}><strong style={{color: k === dom.key ? '#7dd940' : 'white'}}>{D[k].label}</strong> — {D[k].acciseNote}</p>)}
+
+      <div style={sec}>Ce qui n'est pas compté</div>
+      <ul style={{...txt, paddingLeft:18}}>
+        <li><strong>Option « injection-soutirage » (HTA)</strong> : réservée au stockage seul dans une zone éligible (délibérations CRE 2025-227 et 2026-33), depuis le 1er août 2026. Elle rémunère la charge pendant la pointe solaire ou la décharge pendant la pointe hivernale et peut réduire la facture TURPE d'environ 45 %. Non retenue car liée à la localisation.</li>
+        <li><strong>TVA</strong> : neutre pour une entreprise. Pour un particulier, les 20 % sur l'achat sont un coût définitif (achat TTC contre vente sans TVA), ce qui réduit encore le gain.</li>
+        <li><strong>Marge du fournisseur / de l'agrégateur</strong>, coût des écarts, mécanisme de capacité (coût côté fournisseur, revenu possible pour la batterie à partir de novembre 2026), garanties d'origine.</li>
+        <li><strong>Consommation des auxiliaires</strong> de la batterie (refroidissement, électronique) : seules les pertes du rendement aller-retour sont comptées.</li>
+        <li><strong>Double gestion</strong> : si l'injection et le soutirage font l'objet de deux contrats d'accès, une seconde composante de gestion peut s'ajouter.</li>
+      </ul>
+
+      <div style={sec}>Sources</div>
+      <ul style={{...txt, paddingLeft:18, fontSize:11.5}}>
+        <li>{lien('https://www.cre.fr/fileadmin/Documents/Deliberations/2026/260521_2026-105_Evolution_TURPE_7_HTA-BT.pdf', 'CRE, délibération 2026-105 du 21 mai 2026')} — grilles TURPE 7 HTA-BT au 01/08/2026 (CI = 0).</li>
+        <li>{lien('https://www.cre.fr/fileadmin/Documents/Deliberations/2026/260204_2026-33_Modif_TURPE_7_HTB_HTA_BT.pdf', 'CRE, délibération 2026-33 du 4 février 2026')} — option injection-soutirage, zones éligibles.</li>
+        <li>{lien('https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000054393060', 'Arrêté du 8 juin 2026')} — accise : 30,62 €/MWh (≤ 36 kVA), 26,35 €/MWh (au-delà), du 01/08/2026 au 31/01/2027.</li>
+        <li>{lien('https://www.legifrance.gouv.fr/codes/article_lc/LEGIARTI000051200600', 'CIBS, article L.312-32')} et {lien('https://bofip.impots.gouv.fr/bofip/14357-PGP.html/identifiant=BOI-RES-EAT-000164-20240918', 'rescrit BOI-RES-EAT-000164')} — exonération de l'électricité de charge.</li>
+        <li>{lien('https://www.cre.fr/fileadmin/Documents/Deliberations/2026/260115_2026-14_Arrete_CTA.pdf', 'Arrêté CTA du 28 janvier 2026')} — CTA à 15 % (distribution) depuis le 01/02/2026.</li>
+      </ul>
+    </div>
+  );
+}
+
 // Calcule et stocke les gains de tous les jours de l'historique, mois par mois
 // en reportant l'état de charge d'un mois au suivant (quelques secondes pour
 // 4 300 jours ; cède la main au navigateur entre deux mois).
@@ -10946,11 +11125,23 @@ async function calculerGainsBatterie(params, onProgress) {
   data.forEach(x => { (parMois[x.d.slice(0, 7)] = parMois[x.d.slice(0, 7)] || []).push({ d: x.d, p: completerPrix24(x.p) }); });
   const cles = Object.keys(parMois).sort();
   const rows = [];
-  let soc = 0;
+  // Gain réel : même batterie ré-optimisée sur les prix TURPE et taxes compris
+  // (le plan change : un cycle n'est rentable que si le spread couvre le TURPE),
+  // puis la part fixe annuelle (+ CTA) est répartie sur chaque jour.
+  const dom = domaineTurpe(params.puissance);
+  const fixeJour = fixeAnnuelTurpe(dom, params.puissance).total / 365;
+  let soc = 0, socR = 0;
   for (let i = 0; i < cles.length; i++) {
     const r = optimiserBatteriePeriode(parMois[cles[i]], params, soc);
     soc = r.socFinalPct;
-    r.jours.forEach(j => rows.push({ jour: j.d, gain: +j.gain.toFixed(4), plan: { p: j.p, e: j.e.map(x => +x.toFixed(3)), s: j.s.map(x => Math.round(x)), s0: Math.round(j.s0) } }));
+    const rr = optimiserBatteriePeriode(parMois[cles[i]].map(j => prixReelsJour(dom, j)), params, socR);
+    socR = rr.socFinalPct;
+    r.jours.forEach((j, k) => {
+      const jr = rr.jours[k], pr = prixReelsJour(dom, j);
+      rows.push({ jour: j.d, gain: +j.gain.toFixed(4), plan: { p: j.p, e: j.e.map(x => +x.toFixed(3)), s: j.s.map(x => Math.round(x)), s0: Math.round(j.s0) },
+        gain_reel: +(jr.gain - fixeJour).toFixed(4),
+        plan_reel: { p: j.p, pa: pr.pa.map(x => +x.toFixed(5)), pv: pr.pv.map(x => +x.toFixed(5)), e: jr.e.map(x => +x.toFixed(3)), s: jr.s.map(x => Math.round(x)), s0: Math.round(jr.s0), fixe: +fixeJour.toFixed(4) } });
+    });
     if (i % 6 === 0) { onProgress?.(`Optimisation ${cles[i]} (${rows.length.toLocaleString('fr-FR')} / ${data.length.toLocaleString('fr-FR')} jours)…`); await new Promise(res => setTimeout(res, 0)); }
   }
   const CHUNK = 400;
@@ -10959,7 +11150,7 @@ async function calculerGainsBatterie(params, onProgress) {
     const { error: e2 } = await sb.from('spot_batterie_jours').upsert(rows.slice(i, i + CHUNK), { onConflict: 'jour' });
     if (e2) throw e2;
   }
-  const { error: e3 } = await sb.from('spot_batterie_params').upsert({ id: 1, capacite_kwh: params.capacite, puissance_kw: params.puissance, cycles_jour: params.cycles, rendement_ar: params.rendement, calcule_le: new Date().toISOString() }, { onConflict: 'id' });
+  const { error: e3 } = await sb.from('spot_batterie_params').upsert({ id: 1, capacite_kwh: params.capacite, puissance_kw: params.puissance, cycles_jour: params.cycles, rendement_ar: params.rendement, domaine: dom.key, calcule_le: new Date().toISOString() }, { onConflict: 'id' });
   if (e3) throw e3;
   return rows.length;
 }
@@ -11023,9 +11214,9 @@ function SpotHistoTable({ rows, granularite, indicateur, seuils, onCell, reserve
   // Ligne Année : prix pondéré par les heures, spread par les jours, gain sommé
   const annuel = {};
   annees.forEach(a => {
-    let sp = 0, n = 0, ss = 0, nj = 0, g = null, z = 0;
-    periodes.forEach(p => { const r = cell[`${a}_${p}`]; if (!r) return; sp += (r.prix || 0) * r.n; n += r.n; ss += (r.spread || 0) * r.nj; nj += r.nj; z += r.neg || 0; if (r.gain !== null) g = (g || 0) + r.gain; });
-    annuel[a] = n ? { prix: sp / n, spread: nj ? ss / nj : null, gain: g, neg: z, n, nj, partiel: n < 8760 * 0.9 } : null;
+    let sp = 0, n = 0, ss = 0, nj = 0, g = null, gr = null, z = 0;
+    periodes.forEach(p => { const r = cell[`${a}_${p}`]; if (!r) return; sp += (r.prix || 0) * r.n; n += r.n; ss += (r.spread || 0) * r.nj; nj += r.nj; z += r.neg || 0; if (r.gain !== null) g = (g || 0) + r.gain; if (r.gainReel !== null && r.gainReel !== undefined) gr = (gr || 0) + r.gainReel; });
+    annuel[a] = n ? { prix: sp / n, spread: nj ? ss / nj : null, gain: g, gainReel: gr, neg: z, n, nj, partiel: n < 8760 * 0.9 } : null;
   });
   const nLignes = periodes.length + 2;
   const espace  = hebdo ? 1 : 2;
@@ -11274,7 +11465,7 @@ function GraphiqueJour({ plan, gain, w, h, pMin, pMax, eMax, axes }) {
   );
 }
 
-function BatteriePeriodePopup({ granularite, ancreInitiale, bornes, params, onClose }) {
+function BatteriePeriodePopup({ granularite, ancreInitiale, bornes, params, onClose, reel = false }) {
   // Flux continu de tuiles journalières (3 par ligne sur ordinateur, 2 sur
   // téléphone), centré sur la période cliquée et prolongé sans fin vers les
   // jours précédents et suivants au défilement. Le titre et les totaux suivent
@@ -11295,7 +11486,10 @@ function BatteriePeriodePopup({ granularite, ancreInitiale, bornes, params, onCl
     min = clip(min); max = clip(max);
     if (min > max || chargementRef.current) return;
     chargementRef.current = true;
-    const { data: rows } = await sb.from('spot_batterie_jours').select('jour,gain,plan').gte('jour', min).lte('jour', max);
+    // Gain réel : plan optimisé sur les prix d'achat / vente TURPE et taxes compris (plan_reel.pa / .pv).
+    const { data: rows } = reel
+      ? await sb.from('spot_batterie_jours').select('jour,gain:gain_reel,plan:plan_reel').gte('jour', min).lte('jour', max).not('plan_reel', 'is', null)
+      : await sb.from('spot_batterie_jours').select('jour,gain,plan').gte('jour', min).lte('jour', max);
     setParJour(prev => { const n = { ...prev }; (rows || []).forEach(r => { n[r.jour] = r; }); return n; });
     setRange(prev => prev ? { min: min < prev.min ? min : prev.min, max: max > prev.max ? max : prev.max } : { min, max });
     chargementRef.current = false;
@@ -11382,14 +11576,16 @@ function BatteriePeriodePopup({ granularite, ancreInitiale, bornes, params, onCl
   const periode = useMemo(() => periodeAutour(granTitre, refJour, bornes), [granTitre, refJour, bornes]);
   const totaux = useMemo(() => {
     const liste = detail ? [detail] : periode.jours;
-    let achat = 0, vente = 0, cout = 0, recette = 0, gain = 0, nCalc = 0, s0 = null, sFin = null;
+    let achat = 0, vente = 0, cout = 0, recette = 0, fixe = 0, gain = 0, nCalc = 0, s0 = null, sFin = null;
     liste.forEach(d => {
       const r = parJour[d]; if (!r) return;
       nCalc++; if (s0 === null) s0 = r.plan.s0 ?? 0; if (r.plan.s) sFin = r.plan.s[23];
-      r.plan.e.forEach((x, h) => { if (x > 0) { achat += x; cout += x * r.plan.p[h]; } else if (x < 0) { vente -= x; recette -= x * r.plan.p[h]; } });
+      const pa = r.plan.pa || r.plan.p, pv = r.plan.pv || r.plan.p;
+      r.plan.e.forEach((x, h) => { if (x > 0) { achat += x; cout += x * pa[h]; } else if (x < 0) { vente -= x; recette -= x * pv[h]; } });
+      if (r.plan.fixe) fixe += r.plan.fixe;
       gain += Number(r.gain);
     });
-    return { achat, vente, cout, recette, gain, nCalc, s0: s0 ?? 0, sFin: sFin ?? 0, n: liste.length };
+    return { achat, vente, cout, recette, fixe, gain, nCalc, s0: s0 ?? 0, sFin: sFin ?? 0, n: liste.length };
   }, [detail, periode, parJour]);
 
   const nav = (sens) => {
@@ -11437,7 +11633,7 @@ function BatteriePeriodePopup({ granularite, ancreInitiale, bornes, params, onCl
     <button onClick={onClick} disabled={!ok} style={{background:'none',border:'none',color:ok?'white':'rgba(255,255,255,.2)',fontSize:26,cursor:ok?'pointer':'default',padding:'0 10px',lineHeight:1,flexShrink:0}}>{car}</button>
   );
   const titre = detail ? fmtJourLong(detail) : titrePeriode(granTitre, periode.debut, periode.jours);
-  const sousTitre = params ? `${params.capacite} kWh · ${params.puissance} kW · ${params.cycles} cycle${params.cycles > 1 ? 's' : ''}/j · η ${Math.round(params.rendement * 100)} %` : '';
+  const sousTitre = (reel ? 'Gain réel (TURPE + taxes) · ' : '') + (params ? `${params.capacite} kWh · ${params.puissance} kW · ${params.cycles} cycle${params.cycles > 1 ? 's' : ''}/j · η ${Math.round(params.rendement * 100)} %` : '');
   const btn = (lbl, onClick, primaire) => (
     <button onClick={onClick} style={{flex:1,background:primaire?'rgba(125,217,64,.22)':'rgba(255,255,255,.1)',border:'1px solid',borderColor:primaire?'rgba(125,217,64,.6)':'rgba(255,255,255,.2)',color:primaire?'#7dd940':'white',borderRadius:8,padding:'9px',fontFamily:'var(--font)',fontSize:13,fontWeight:700,cursor:'pointer'}}>{lbl}</button>
   );
@@ -11457,6 +11653,7 @@ function BatteriePeriodePopup({ granularite, ancreInitiale, bornes, params, onCl
           <div style={{display:'flex',justifyContent:'space-between',gap:8,fontSize:11,fontWeight:700,marginTop:6,flexWrap:'wrap'}}>
             <span style={{color:'#5de0f5'}}>Achat {totaux.achat.toFixed(1)} kWh · {f2(totaux.cout)} €</span>
             <span style={{color:'#7dd940'}}>Vente {totaux.vente.toFixed(1)} kWh · {f2(totaux.recette)} €</span>
+            {reel && totaux.fixe > 0 && <span style={{color:'#ffb340'}}>Frais fixes {f2(totaux.fixe)} €</span>}
             <span>Gain {f2(totaux.gain)} € HT · charge {Math.round(totaux.s0)} % → {Math.round(totaux.sFin)} %{totaux.nCalc < totaux.n ? ` · ${totaux.n - totaux.nCalc} j sans calcul` : ''}</span>
           </div>
         )}
@@ -11476,7 +11673,8 @@ function SpotPricesScreen({ onBack, readOnly = false }) {
   const [spotAll,    setSpotAll]    = useState(null);
   const [jours,      setJours]      = useState(null);     // série journalière (get_spot_journalier)
   const [granularite,setGranularite]= useState('semaine'); // 'mois' | 'semaine' | 'jour'
-  const [indicateur, setIndicateur] = useState('prix');    // 'prix' | 'spread' | 'gain'
+  const [indicateur, setIndicateur] = useState('prix');    // 'prix' | 'spread' | 'gain' | 'gain_reel' | 'negatif'
+  const estGain = indicateur === 'gain' || indicateur === 'gain_reel';   // gains batterie : spot pur ou réel (TURPE + taxes)
   const [batParams,  setBatParams]  = useState(null);      // paramètres enregistrés en base
   const [batSaisie,  setBatSaisie]  = useState(BAT_DEFAUT);
   const [batMsg,     setBatMsg]     = useState(null);
@@ -11488,7 +11686,8 @@ function SpotPricesScreen({ onBack, readOnly = false }) {
   const [importMsg,  setImportMsg]  = useState(null);
   const [natParams,  setNatParams]  = useState(null);
   const [heatmapMode,setHeatmapMode]= useState('spot'); // 'spot' | 'ttc'
-  const [vue,        setVue]        = useState('menu'); // 'menu' | 'histo' | 'horaire'
+  const [vuePrec,    setVuePrec]    = useState('menu');   // vue à retrouver en quittant les hypothèses
+  const [vue,        setVue]        = useState('menu'); // 'menu' | 'histo' | 'horaire' | 'hypotheses'
   const [compSel,    setCompSel]    = useState([]);     // décalages (années) comparés
   const [compData,   setCompData]   = useState({});     // decal → { m_j_h: prix }
   const [largeurH,   setLargeurH]   = useState(340);    // largeur utile de la vue horaire
@@ -11599,6 +11798,17 @@ function SpotPricesScreen({ onBack, readOnly = false }) {
     setBatCalc(false);
   };
 
+  // Gains réels absents (calcul fait avant leur introduction) : un admin les
+  // recalcule une fois automatiquement avec la batterie enregistrée.
+  const autoReelRef = useRef(false);
+  useEffect(() => {
+    if (readOnly || autoReelRef.current || !batParams || !jours) return;
+    if (!jours.some(x => x.g !== null && x.g !== undefined) || jours.some(x => x.gr !== null && x.gr !== undefined)) return;
+    autoReelRef.current = true;
+    const { capacite, puissance, cycles, rendement } = batParams;
+    lancerCalcul({ capacite, puissance, cycles, rendement });
+  }, [readOnly, batParams, jours]);
+
   // Import : l'historique horaire est complété (upsert sur l'heure UTC ; une
   // vraie valeur écrase une heure interpolée), puis le serveur comble les trous
   // restants par interpolation linéaire et reconstruit les 12 mois glissants.
@@ -11639,11 +11849,11 @@ function SpotPricesScreen({ onBack, readOnly = false }) {
       const v = valeurAffichee(indicateur, r);
       setInfoJour(`${fmtJourLong(r.jours[0])} · ${fmtValeur(indicateur, v, 1)} ${indDef.unite}${r.n < 24 * 0.9 ? ' · journée incomplète' : ''}`);
     }
-    if (indicateur === 'gain' && r.jours?.length) setPopup({ gran: granularite, ancre: r.jours.slice().sort()[0] });
+    if (estGain && r.jours?.length) setPopup({ gran: granularite, ancre: r.jours.slice().sort()[0], reel: indicateur === 'gain_reel' });
   };
 
   const fmtDate = (ts) => ts ? new Date(ts).toLocaleString('fr-FR',{day:'2-digit',month:'2-digit',year:'2-digit',hour:'2-digit',minute:'2-digit'}) : '—';
-  const titre = vue === 'histo' ? 'Historique' : vue === 'horaire' ? '12 derniers mois heure par heure' : null;
+  const titre = vue === 'histo' ? 'Historique' : vue === 'horaire' ? '12 derniers mois heure par heure' : vue === 'hypotheses' ? 'Hypothèses TURPE et taxes' : null;
   const segBtn = (actif, onClick, lbl, key, off) => (
     <button key={key} onClick={onClick} disabled={off} style={{fontSize:11,fontWeight:700,border:'none',borderRadius:5,padding:'4px 10px',cursor:off?'default':'pointer',fontFamily:'var(--font)',background:actif?'rgba(125,217,64,.25)':'transparent',color:actif?'#7dd940':off?'rgba(255,255,255,.2)':'rgba(255,255,255,.45)'}}>{lbl}</button>
   );
@@ -11719,6 +11929,17 @@ function SpotPricesScreen({ onBack, readOnly = false }) {
                 </div>
                 <span className="sim-arrow">→</span>
               </button>
+              <button className="sim-btn" onClick={()=>{ setIndicateur('gain_reel'); setInfoJour(null); setVue('histo'); }} disabled={!jours} style={{opacity:jours?1:.5}}>
+                <span className="sim-icon">🧾</span>
+                <div className="sim-text">
+                  <div className="sim-title">Vue gains batterie réels</div>
+                  <div className="sim-sub">{batParams ? `Même batterie, TURPE soutirage / injection et taxes déduits · ${domaineTurpe(batParams.puissance).label}` : 'Paramétrez et calculez une batterie dans la vue gains'}</div>
+                </div>
+                <span className="sim-arrow">→</span>
+              </button>
+              <button className="btn-link" onClick={()=>{ setVuePrec(vue); setVue('hypotheses'); }} style={{fontSize:12,color:'#5de0f5',textAlign:'center',padding:'2px 0'}}>
+                En savoir plus sur les hypothèses de calcul TURPE et taxes →
+              </button>
               <button className="sim-btn" onClick={()=>setVue('horaire')} disabled={!spotAll} style={{opacity:spotAll?1:.5}}>
                 <span className="sim-icon">🕐</span>
                 <div className="sim-text">
@@ -11743,7 +11964,7 @@ function SpotPricesScreen({ onBack, readOnly = false }) {
               {[['mois','Mois'],['semaine','Semaine'],['jour','Jour']].map(([g,lbl]) => segBtn(granularite===g, () => { setGranularite(g); setInfoJour(null); }, lbl, g, false))}
             </div>
           </div>
-          {indicateur === 'gain' && (
+          {estGain && (
             <div style={{background:'rgba(255,255,255,.06)',border:'1px solid rgba(255,255,255,.1)',borderRadius:8,padding:'6px 8px',marginBottom:6}}>
               {!readOnly && <div style={{display:'flex',gap:6,alignItems:'flex-end'}}>
                 {inpBat('capacite', 'Capacité kWh', 0.5, 0.5, 1000)}
@@ -11755,27 +11976,36 @@ function SpotPricesScreen({ onBack, readOnly = false }) {
                 </button>
               </div>}
               <div style={{fontSize:9,fontWeight:700,marginTop:4,color:batMsg?(batMsg.startsWith('✓')?'var(--green)':batMsg.startsWith('Erreur')?'#ff9090':'#5de0f5'):'rgba(255,255,255,.4)'}}>
-                {batMsg || (batParams ? `Calculé le ${fmtDate(batParams.calcule_le)} · prix spot HT sans taxes · le gain d'un jour = l'énergie achetée ce jour, même revendue le lendemain` : 'Aucun calcul enregistré : renseignez la batterie puis Calculer')}
+                {batMsg || (batParams ? (indicateur === 'gain_reel'
+                  ? `Calculé le ${fmtDate(batParams.calcule_le)} · ${domaineTurpe(batParams.puissance).label} · spot + TURPE soutirage + taxes à l'achat, spot − TURPE injection à la vente, frais fixes répartis par jour · HT`
+                  : `Calculé le ${fmtDate(batParams.calcule_le)} · prix spot HT sans taxes · le gain d'un jour = l'énergie achetée ce jour, même revendue le lendemain`) : 'Aucun calcul enregistré : renseignez la batterie puis Calculer')}
               </div>
             </div>
           )}
           <EchelleLegende seuils={seuils} unite={indDef.unite} facteur={indicateurBrut(indicateur) ? 1 : 100}
-            decimales={indicateur === 'gain' ? (seuils[8] < 5 ? 2 : seuils[8] < 20 ? 1 : 0) : indicateur === 'negatif' ? (seuils[8] < 5 ? 1 : 0) : (granularite === 'semaine' ? 0 : 1)}/>
+            decimales={estGain ? (seuils[8] < 5 ? 2 : seuils[8] < 20 ? 1 : 0) : indicateur === 'negatif' ? (seuils[8] < 5 ? 1 : 0) : (granularite === 'semaine' ? 0 : 1)}/>
           {granularite === 'jour'
-            ? <SpotJoursCanvas rows={rows} indicateur={indicateur} seuils={seuils} onCell={onCell} reserveBas={indicateur === 'gain' ? 22 : 0}/>
-            : <SpotHistoTable rows={rows} granularite={granularite} indicateur={indicateur} seuils={seuils} onCell={indicateur === 'gain' ? onCell : null} reserveBas={indicateur === 'gain' ? 22 : 0}/>}
-          {granularite === 'jour' && indicateur !== 'gain' && (
+            ? <SpotJoursCanvas rows={rows} indicateur={indicateur} seuils={seuils} onCell={onCell} reserveBas={estGain ? 22 : 0}/>
+            : <SpotHistoTable rows={rows} granularite={granularite} indicateur={indicateur} seuils={seuils} onCell={estGain ? onCell : null} reserveBas={estGain ? 22 : 0}/>}
+          {granularite === 'jour' && !estGain && (
             <div style={{fontSize:9.5,fontWeight:700,marginTop:4,color:infoJour?'white':'rgba(255,255,255,.35)',minHeight:12}}>
               {infoJour || 'Touchez un jour pour lire sa valeur'}
             </div>
           )}
-          {indicateur === 'gain' && (
+          {indicateur === 'gain_reel' && (
+            <button className="btn-link" onClick={()=>{ setVuePrec(vue); setVue('hypotheses'); }} style={{fontSize:10.5,color:'#5de0f5',marginTop:4,padding:0}}>
+              En savoir plus sur les hypothèses de calcul TURPE et taxes →
+            </button>
+          )}
+          {estGain && (
             <div style={{fontSize:11,fontWeight:700,marginTop:5,color:'#7dd940',textAlign:'center',lineHeight:1.2}}>
               👆 Touchez {granularite === 'jour' ? 'un jour' : granularite === 'semaine' ? 'une semaine' : 'un mois'} pour voir le détail en graphique
             </div>
           )}
         </>
       )}
+
+      {vue === 'hypotheses' && <HypothesesTurpeStockage puissance={(batParams || batSaisie).puissance} natParams={natParams}/>}
 
       {vue === 'horaire' && spotAll && (
         <>
@@ -11816,8 +12046,8 @@ function SpotPricesScreen({ onBack, readOnly = false }) {
         </>
       )}
     </div>
-    {popup && <BatteriePeriodePopup granularite={popup.gran} ancreInitiale={popup.ancre} bornes={[meta?.periode_debut, meta?.periode_fin]} params={batParams || batSaisie} onClose={() => setPopup(null)}/>}
-    <StickyFooter onBack={vue === 'menu' ? onBack : () => setVue('menu')}/>
+    {popup && <BatteriePeriodePopup reel={popup.reel} granularite={popup.gran} ancreInitiale={popup.ancre} bornes={[meta?.periode_debut, meta?.periode_fin]} params={batParams || batSaisie} onClose={() => setPopup(null)}/>}
+    <StickyFooter onBack={vue === 'menu' ? onBack : () => setVue(vue === 'hypotheses' ? vuePrec : 'menu')}/>
     </>
   );
 }
