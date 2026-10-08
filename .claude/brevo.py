@@ -8,6 +8,7 @@ de type Cloudflare sur l'agent par défaut de Python.
   python3 .claude/brevo.py account
   python3 .claude/brevo.py senders
   python3 .claude/brevo.py send <expediteur> <destinataire> "<sujet>" "<texte>"
+  python3 .claude/brevo.py sms <expediteur 11 car.> <33612345678> "<texte>"
 """
 import sys, json, os, urllib.request, urllib.error
 
@@ -54,6 +55,16 @@ def main():
             'to': [{'email': dest}],
             'subject': sujet,
             'textContent': texte,
+        })
+    elif cmd == 'sms' and len(sys.argv) == 5:
+        # Expéditeur : 11 caractères alphanumériques max (contrainte opérateurs).
+        # Destinataire au format international sans « + » : 33612345678.
+        _, _, exp, dest, texte = sys.argv
+        appel('POST', '/transactionalSMS/sms', {
+            'sender': exp,
+            'recipient': dest.lstrip('+').replace(' ', ''),
+            'content': texte,
+            'type': 'transactional',
         })
     else:
         sys.exit(__doc__)
